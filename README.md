@@ -1,8 +1,8 @@
 # BROray
 
-BROray — менеджер Xray с WebUI для маршрутизаторов Keenetic.
+BROray — менеджер Xray для Keenetic с WebUI, подписками, выбором серверов и интеграцией со штатным прокси-интерфейсом KeeneticOS.
 
-Проект работает в среде Entware и использует штатные механизмы KeeneticOS: OPKG, CLI/`ndmc`, HTTP Proxy и интерфейс Proxy. Скрипты рассчитаны на BusyBox `ash`.
+Решение упрощает установку и управление Xray на роутерах Keenetic. Проект работает в среде Entware и использует штатные механизмы KeeneticOS: OPKG, CLI/`ndmc`, HTTP Proxy и интерфейс Proxy. Скрипты рассчитаны на BusyBox `ash`.
 
 ## Возможности
 
