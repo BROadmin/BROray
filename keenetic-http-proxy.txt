@@ -1,0 +1,5 @@
+ip http proxy broray
+    upstream http <LAN-IP> 8080
+    domain ndns
+    ssl redirect
+    security-level public

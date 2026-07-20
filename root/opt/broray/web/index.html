@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+>
+<title>BROray</title>
+<link rel="stylesheet" href="app.css?v=20260719-menu4">
+<link rel="stylesheet" href="theme.css?v=20260718-3">
+<link rel="stylesheet" href="subscriptions.css">
+<link rel="stylesheet" href="xray.css?v=20260719-menu5">
+</head>
+<body>
+<header>BROray</header>
+
+<div class="wrap">
+
+<section id="page-home" class="page active">
+<div class="card">
+<div id="status"></div>
+<div class="name" id="cname">Загрузка…</div>
+<div class="addr" id="caddr"></div>
+<div>
+<span class="tag" id="cnet"></span>
+<span class="tag" id="csec"></span>
+</div>
+<div class="connection-metrics">
+<div class="connection-metric">
+<div class="connection-metric-value" id="metric-ping">—</div>
+<div class="connection-metric-label">Пинг</div>
+</div>
+<div class="connection-metric">
+<div class="connection-metric-value" id="metric-jitter">—</div>
+<div class="connection-metric-label">Джиттер</div>
+</div>
+<div class="connection-metric">
+<div class="connection-metric-value" id="metric-breaks">—</div>
+<div class="connection-metric-label">Разрывы</div>
+</div>
+<div class="connection-metric">
+<div class="connection-metric-value" id="metric-check">—</div>
+<div class="connection-metric-label">Проверка</div>
+</div>
+<div class="connection-metric">
+<div class="connection-metric-value" id="metric-quality">—</div>
+<div class="connection-metric-label">Качество</div>
+</div>
+</div>
+<div class="connection-metrics-legacy" aria-hidden="true">
+<span id="version"></span>
+<span id="uptime"></span>
+</div>
+</div>
+
+<div class="card">
+<h2>Серверы</h2>
+<div id="servers">
+<div class="loading">Загрузка серверов…</div>
+</div>
+</div>
+
+<div class="card">
+<button type="button" onclick="BROray.servers.add()">
+➕ Добавить конфигурацию
+</button>
+</div>
+</section>
+
+<section id="page-subscriptions" class="page">
+<div class="card">
+<h2>Добавить подписку</h2>
+
+<div class="info-text">
+Укажите название и ссылку подписки.
+</div>
+
+<form
+    id="subscription-add-form"
+    onsubmit="addSubscription(event)"
+>
+<label class="form-label" for="subscription-name">
+Название
+</label>
+
+<input
+    id="subscription-name"
+    class="form-input"
+    type="text"
+    maxlength="100"
+    autocomplete="off"
+    placeholder="Например: BROvibe"
+    required
+>
+
+<label class="form-label" for="subscription-url">
+Ссылка
+</label>
+
+<input
+    id="subscription-url"
+    class="form-input"
+    type="url"
+    autocomplete="off"
+    placeholder="https://example.com/subscription"
+    required
+>
+
+<button
+    id="subscription-add-button"
+    type="submit"
+>
+Добавить подписку
+</button>
+</form>
+
+<div
+    id="subscription-action-message"
+    class="action-message"
+></div>
+</div>
+
+<div class="card">
+<div class="section-header">
+<h2>Подписки</h2>
+
+<button
+    type="button"
+    class="small-button"
+    onclick="updateAllSubscriptions(this)"
+>
+Обновить список
+</button>
+</div>
+
+<div
+    id="subscriptions-output"
+    class="subscriptions-list"
+>
+<div class="loading">Загрузка подписок…</div>
+</div>
+</div>
+
+<div
+    id="subscription-nodes-card"
+    class="card hidden"
+>
+<div class="section-header">
+<h2 id="subscription-nodes-title">
+Узлы подписки
+</h2>
+
+<button
+    type="button"
+    class="small-button secondary-small-button"
+    onclick="closeSubscriptionNodes()"
+>
+Закрыть
+</button>
+</div>
+
+<div
+    id="subscription-nodes-output"
+    class="subscription-output"
+></div>
+</div>
+</section>
+
+<section id="page-interface" class="page">
+<div class="card">
+<div class="interface-panel">
+<div class="section-header">
+<h2>Интерфейс Keenetic</h2>
+<button
+    type="button"
+    class="small-button"
+    onclick="BROray.interfaceControl.load(true)"
+>
+Обновить состояние
+</button>
+</div>
+<div id="interface-status-block">
+<div class="loading">Загрузка состояния интерфейса…</div>
+</div>
+<div class="interface-control-grid">
+<button
+    id="interface-create-button"
+    type="button"
+    data-interface-action="create"
+    onclick="BROray.interfaceControl.action('create', this)"
+>
+Создать
+</button>
+<button
+    id="interface-repair-button"
+    type="button"
+    class="secondary-action"
+    data-interface-action="repair"
+    onclick="BROray.interfaceControl.action('repair', this)"
+>
+Восстановить
+</button>
+<button
+    id="interface-delete-button"
+    type="button"
+    class="xray-stop-button"
+    data-interface-action="delete"
+    onclick="BROray.interfaceControl.action('delete', this)"
+>
+Удалить
+</button>
+</div>
+<div
+    id="interface-action-message"
+    class="action-message"
+></div>
+<pre
+    id="interface-operation-output"
+    class="interface-operation-output"
+>Проверка интерфейса ещё не выполнялась.</pre>
+</div>
+</div>
+</section>
+<section id="page-xray" class="page">
+<div class="card">
+<div class="section-header">
+<h2>Состояние Xray</h2>
+
+<button
+    type="button"
+    class="small-button"
+    onclick="BROray.xray.load(true)"
+>
+Обновить состояние
+</button>
+</div>
+
+<div id="xray-status-block">
+<div class="loading">Загрузка состояния Xray…</div>
+</div>
+</div>
+
+<div class="card">
+<h2>Обновление Xray</h2>
+<div class="xray-update-check-section">
+<button
+    id="xray-update-check-button"
+    type="button"
+    class="secondary-action"
+    onclick="BROray.xray.checkUpdate(this)"
+>
+Проверить наличие новой версии
+</button>
+<div
+    class="xray-control-grid"
+    style="display:flex;flex-wrap:nowrap;justify-content:space-between;align-items:stretch;margin-top:12px;width:100%;"
+>
+<button
+    id="xray-update-install-button"
+    style="width:calc(50% - 7px);min-width:0;margin:0;"
+    type="button"
+    disabled
+    onclick="BROray.xray.installUpdate('update', this)"
+>
+Установить новую версию
+</button>
+<button
+    id="xray-reinstall-button"
+    style="width:calc(50% - 7px);min-width:0;margin:0;"
+    type="button"
+    class="secondary-action"
+    onclick="BROray.xray.installUpdate('reinstall', this)"
+>
+Переустановить текущую версию
+</button>
+</div>
+<div
+    id="xray-update-check-message"
+    class="action-message"
+></div>
+<div
+    id="xray-update-check-result"
+    class="xray-update-check-result"
+></div>
+</div>
+
+</div>
+<div class="card">
+<h2>Управление службой</h2>
+<div class="xray-control-grid">
+<button
+    id="xray-start-button"
+    type="button"
+    onclick="BROray.xray.action('start', this)"
+>
+Запустить Xray
+</button>
+
+<button
+    id="xray-stop-button"
+    type="button"
+    class="xray-stop-button"
+    onclick="BROray.xray.action('stop', this)"
+>
+Остановить Xray
+</button>
+
+<button
+    id="xray-restart-button"
+    type="button"
+    class="secondary-action"
+    onclick="BROray.xray.action('restart', this)"
+>
+Перезапустить Xray
+</button>
+</div>
+
+</div>
+<div class="card">
+<h2>Диагностика</h2>
+<div class="xray-check-grid">
+<button
+    type="button"
+    class="secondary-action"
+    onclick="BROray.xray.action('validate', this)"
+>
+Проверить конфигурацию
+</button>
+
+<button
+    type="button"
+    class="secondary-action"
+    onclick="BROray.xray.action('test', this)"
+>
+Выполнить тест Xray
+</button>
+</div>
+
+<div
+    id="xray-action-message"
+    class="action-message"
+></div>
+</div>
+
+<div class="card">
+<h2>Результат последней операции</h2>
+
+<pre
+    id="xray-operation-output"
+    class="xray-operation-output"
+>Операции ещё не выполнялись.</pre>
+</div>
+</section>
+
+<section id="page-about" class="page">
+
+<div class="card about-clean-header">
+<div class="about-clean-title">BROray</div>
+<div class="about-clean-subtitle">
+Клиент Xray для роутеров Keenetic
+</div>
+</div>
+
+<div class="card about-clean-card">
+<h2>Версии</h2>
+
+<div class="about-clean-version-grid">
+<div class="about-clean-version">
+<div class="about-clean-label">BROray</div>
+<div class="about-clean-value">2.0.0</div>
+</div>
+
+<div class="about-clean-version">
+<div class="about-clean-label">Xray</div>
+<div class="about-clean-value">26.7.11</div>
+</div>
+
+<div class="about-clean-version">
+<div class="about-clean-label">Дата сборки</div>
+<div class="about-clean-value">19.07.2026</div>
+</div>
+</div>
+</div>
+
+<div class="card about-clean-card">
+<h2>Поддерживаемые протоколы</h2>
+
+<div class="about-clean-tags">
+<span>VLESS</span>
+<span>VMess</span>
+<span>Trojan</span>
+<span>Hysteria2</span>
+</div>
+</div>
+
+<div class="card about-clean-card">
+<h2>Возможности</h2>
+
+<div class="about-clean-list">
+<div>Импорт ссылок</div>
+<div>Импорт подписок</div>
+<div>Управление серверами</div>
+<div>Встроенный веб-интерфейс</div>
+</div>
+</div>
+
+</section>
+<div class="bottom-space"></div>
+</div>
+
+<nav class="bottom-nav">
+<div class="bottom-nav-inner">
+
+<button
+    id="nav-home"
+    class="nav-button active"
+    type="button"
+    onclick="showPage('home')"
+>
+<span class="nav-icon">🏠</span>
+Главная
+</button>
+
+<button
+    id="nav-subscriptions"
+    class="nav-button"
+    type="button"
+    onclick="showPage('subscriptions')"
+>
+<span class="nav-icon">📥</span>
+Подписки
+</button>
+
+<button
+    id="nav-interface"
+    class="nav-button"
+    type="button"
+    onclick="showPage('interface')"
+>
+<span class="nav-icon">🌐</span>
+Интерфейс
+</button>
+<button
+    id="nav-xray"
+    class="nav-button"
+    type="button"
+    onclick="showPage('xray')"
+>
+<span class="nav-icon">⚙️</span>
+Xray
+</button>
+
+<button id="nav-about" class="nav-button" type="button" onclick="showPage('about')">
+<span class="nav-icon">ⓘ</span>
+BROray
+</button>
+</div>
+</nav>
+
+<script src="js/api.js"></script>
+<script src="js/ui.js?v=20260719-1"></script>
+<script src="js/dashboard.js?v=20260719-proxy-status1"></script>
+<script src="js/servers.js?v=20260718-2"></script>
+<script src="js/subscriptions.js"></script>
+<script src="js/interface.js?v=20260719-1"></script>
+<script src="js/xray.js?v=20260719-3"></script>
+<script src="js/xray-home.js?v=20260719-compact2"></script>
+<script src="js/app.js"></script>
+<script src="theme.js"></script>
+<script src="js/metrics.js"></script>
+</body>
+</html>

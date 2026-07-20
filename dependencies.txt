@@ -1,0 +1,39 @@
+BROray 2.0.0
+
+Поддерживаемая среда:
+- KeeneticOS
+- Entware
+- Linux aarch64
+- BusyBox 1.37.0 / ash
+
+Прямые зависимости Entware:
+- ca-bundle
+- ca-certificates
+- curl
+- jq
+- lighttpd
+- lighttpd-mod-cgi
+
+Зависимости, устанавливаемые OPKG автоматически:
+- libc
+- libcurl
+- libgcc
+- libgmp
+- libnettle
+- libnghttp2
+- libopenssl
+- libpcre2
+- libpthread
+- librt
+- libssp
+- libstdcpp
+- zlib
+
+Встроенные компоненты:
+- Xray 26.7.11 linux/arm64
+- BROray WebUI
+- BROray Connection Monitor
+
+Команды KeeneticOS, необходимые установщику:
+- ndmc
+- ip http proxy

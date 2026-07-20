@@ -1,0 +1,298 @@
+#!/bin/sh
+
+BRORAY_BASE="/opt/broray"
+BRORAY_VERSION="2.0.0"
+
+. "$BRORAY_BASE/lib/util.sh"
+. "$BRORAY_BASE/lib/parser-vless.sh"
+. "$BRORAY_BASE/lib/server.sh"
+. "$BRORAY_BASE/lib/server-command.sh"
+. "$BRORAY_BASE/lib/server-config-generator.sh"
+. "$BRORAY_BASE/lib/server-xray-manager.sh"
+. "$BRORAY_BASE/lib/xray-control.sh"
+. "$BRORAY_BASE/lib/xray-command.sh"
+. "$BRORAY_BASE/lib/server-import.sh"
+. "$BRORAY_BASE/lib/subscription.sh"
+. "$BRORAY_BASE/lib/keenetic.sh"
+
+broray_usage() {
+    cat <<'HELP'
+BROray — менеджер Xray для Keenetic
+
+Использование:
+
+  broray list
+      Показать сохранённые серверы.
+
+  broray use <SERVER_ID>
+      Активировать сервер.
+
+  broray current
+      Показать активный сервер.
+
+  broray current-id
+      Показать внутренний ID активного сервера.
+
+  broray current-name
+      Показать название активного сервера.
+
+  broray current-uuid
+      Показать UUID клиента активного сервера.
+
+  broray current-address
+      Показать адрес активного сервера.
+
+  broray current-port
+      Показать порт активного сервера.
+
+  broray xray status
+      Показать состояние Xray в формате JSON.
+  broray status
+      Показать состояние Xray и активный сервер.
+
+  broray test
+      Проверить текущий config.json средствами Xray.
+
+  broray restart
+      Перезапустить BROray.
+
+  broray title
+      Обновить название интерфейса.
+
+  broray import 'vless://...'
+      Временно: импортировать VLESS через старый
+      совместимый механизм серверов.
+
+  broray subscription-add <ИМЯ> <URL>
+      Добавить подписку.
+
+  broray subscription-update <ИМЯ>
+      Обновить подписку.
+
+  broray subscriptions
+      Показать сохранённые подписки.
+
+  broray subscription-nodes <ИМЯ>
+      Показать ссылки из подписки.
+
+Совместимость:
+
+      Показать серверы.
+
+      Активировать сервер.
+
+      Показать активный сервер.
+
+  broray version
+      Показать версию BROray.
+HELP
+}
+
+broray_status_cmd() {
+    echo "=== BROray ==="
+    pidof xray
+
+    echo
+    echo "=== АКТИВНЫЙ СЕРВЕР ==="
+    broray_server_current
+
+    echo
+    echo "=== ИНТЕРФЕЙС ==="
+    broray_keenetic_update_title >/dev/null
+    cat "$BRORAY_INTERFACE_STATUS"
+}
+
+broray_current_server_field() {
+    field_name="$1"
+
+    current_json="$(
+        broray_server_current 2>/dev/null
+    )" ||
+        broray_die \
+            "не удалось получить активный сервер"
+
+    printf '%s\n' "$current_json" |
+        jq -er \
+            --arg field "$field_name" '
+                .[$field] // empty
+            ' ||
+        broray_die \
+            "поле $field_name отсутствует у активного сервера"
+}
+
+command_name="${1:-help}"
+
+case "$command_name" in
+    import)
+        shift
+
+        [ -n "${1:-}" ] ||
+            broray_die \
+                "не указана ссылка VLESS"
+
+        broray_server_import "$1"
+        ;;
+
+    import-subscription-node)
+        shift
+        subscription_id="${1:-}"; [ -n "$subscription_id" ] || broray_die "не указан идентификатор подписки"
+        shift
+        node_index="${1:-}"; [ -n "$node_index" ] || broray_die "не указан номер узла"
+        shift
+        uri="${1:-}"; [ -n "$uri" ] || broray_die "не указана ссылка узла"; broray_server_import "$uri" subscription "$subscription_id" "$node_index"
+        ;;
+
+    rename)
+        shift
+        [ -n "${1:-}" ] ||
+            broray_die "не указан идентификатор сервера"
+        server_id="$1"
+        shift
+        [ -n "${1:-}" ] ||
+            broray_die "не указано новое имя"
+        broray_server_rename "$server_id" "$*"
+        ;;
+    delete)
+        shift
+        [ -n "${1:-}" ] ||
+            broray_die "не указан идентификатор сервера"
+        broray_server_delete "$1"
+        ;;
+    list|servers)
+        broray_server_list
+        ;;
+
+    use)
+        shift
+
+        [ -n "${1:-}" ] ||
+            broray_die \
+                "не указан идентификатор сервера"
+
+        broray_xray_apply_server "$1"
+        broray_keenetic_update_title >/dev/null
+
+        echo
+        cat "$BRORAY_INTERFACE_STATUS"
+        ;;
+
+    current)
+        broray_server_current
+        ;;
+
+    current-id)
+        broray_server_get_active_id
+        ;;
+
+    current-name)
+        broray_current_server_field name
+        ;;
+
+    current-uuid)
+        broray_current_server_field uuid
+        ;;
+
+    current-address)
+        broray_current_server_field address
+        ;;
+
+    current-port)
+        broray_current_server_field port
+        ;;
+
+    server)
+        shift
+        broray_server_command "$@"
+        ;;
+    xray)
+        shift
+        broray_xray_command "$@"
+        ;;
+    status)
+        broray_status_cmd
+        ;;
+
+    test)
+        XRAY_LOCATION_ASSET=/opt/broray/bin \
+            /opt/broray/bin/xray \
+            run -test \
+            -c "$BRORAY_BASE/config/config.json"
+        ;;
+
+    restart)
+        /opt/etc/init.d/S24broray restart
+        broray_keenetic_update_title >/dev/null
+
+        echo
+        cat "$BRORAY_INTERFACE_STATUS"
+        ;;
+
+    title)
+        broray_keenetic_update_title >/dev/null
+        cat "$BRORAY_INTERFACE_STATUS"
+        ;;
+
+
+
+
+    subscription-add)
+        shift
+
+        [ -n "${1:-}" ] ||
+            broray_die \
+                "не указано имя подписки"
+
+        subscription_id="${1:-}"; [ -n "$subscription_id" ] || broray_die "не указан идентификатор подписки"
+        shift
+
+        [ -n "${1:-}" ] ||
+            broray_die \
+                "не указана ссылка подписки"
+
+        broray_subscription_add \
+            "$subscription_id" \
+            "$1"
+        ;;
+
+    subscription-update)
+        shift
+
+        [ -n "${1:-}" ] ||
+            broray_die \
+                "не указано имя подписки"
+
+        broray_subscription_update "$1"
+        ;;
+
+    subscriptions)
+        broray_subscription_list
+        ;;
+
+    subscription-nodes)
+        shift
+
+        [ -n "${1:-}" ] ||
+            broray_die \
+                "не указано имя подписки"
+
+        broray_subscription_nodes "$1"
+        ;;
+
+    version|--version|-v)
+        echo "BROray $BRORAY_VERSION"
+        ;;
+
+    help|--help|-h)
+        broray_usage
+        ;;
+
+    *)
+        echo \
+            "Неизвестная команда: $command_name" \
+            >&2
+        echo >&2
+        broray_usage >&2
+        exit 1
+        ;;
+esac
+

@@ -1,0 +1,2 @@
+/opt/bin/broray -> /opt/broray/bin/broray
+/opt/bin/broray-server -> /opt/broray/bin/broray-server
