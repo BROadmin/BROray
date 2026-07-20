@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "listenAddress": "",
+  "socksPort": 2080,
+  "logLevel": "warning",
+  "autoRestart": true,
+  "testBeforeApply": true,
+  "backupBeforeApply": true,
+  "routing": {
+    "wanInterface": "ppp0"
+  }
+}

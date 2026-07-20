@@ -1,0 +1,307 @@
+#!/bin/sh
+
+export PATH="/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+
+BASE="/opt/broray"
+BRORAY="$BASE/bin/broray"
+RUN="$BASE/run"
+
+STATUS_FILE="$RUN/connection-status.json"
+TEMP_FILE="$RUN/connection-status.json.tmp"
+INTERVAL=10
+
+write_empty_status() {
+    NOW="$(date +%s)"
+
+    jq -n \
+        --argjson checked_at "$NOW" \
+        '
+        {
+          available:false,
+          up:false,
+          address:"",
+          ping_ms:null,
+          jitter_ms:null,
+          packet_loss_percent:null,
+          quality_score:0,
+          quality:"Нет сервера",
+          checked_at:$checked_at,
+          breaks:0
+        }
+        ' > "$TEMP_FILE"
+
+    mv "$TEMP_FILE" "$STATUS_FILE"
+}
+
+read_previous_breaks() {
+    if [ -s "$STATUS_FILE" ] &&
+       jq -e . "$STATUS_FILE" >/dev/null 2>&1; then
+        jq -r '.breaks // 0' "$STATUS_FILE" 2>/dev/null
+    else
+        printf '%s\n' "0"
+    fi
+}
+
+read_previous_up() {
+    if [ -s "$STATUS_FILE" ] &&
+       jq -e . "$STATUS_FILE" >/dev/null 2>&1; then
+        jq -r '.up // null' "$STATUS_FILE" 2>/dev/null
+    else
+        printf '%s\n' "null"
+    fi
+}
+
+read_previous_address() {
+    if [ -s "$STATUS_FILE" ] &&
+       jq -e . "$STATUS_FILE" >/dev/null 2>&1; then
+        jq -r '.address // ""' "$STATUS_FILE" 2>/dev/null
+    else
+        printf '\n'
+    fi
+}
+
+calculate_quality() {
+    AVG="$1"
+    JITTER="$2"
+    LOSS="$3"
+
+    awk \
+        -v avg="$AVG" \
+        -v jitter="$JITTER" \
+        -v loss="$LOSS" \
+        '
+        BEGIN {
+            score = 100 - loss
+
+            if (avg > 300) {
+                score -= 45
+            } else if (avg > 200) {
+                score -= 30
+            } else if (avg > 120) {
+                score -= 15
+            } else if (avg > 80) {
+                score -= 5
+            }
+
+            if (jitter > 50) {
+                score -= 30
+            } else if (jitter > 30) {
+                score -= 20
+            } else if (jitter > 15) {
+                score -= 10
+            } else if (jitter > 8) {
+                score -= 5
+            }
+
+            if (score < 0) {
+                score = 0
+            }
+
+            if (score > 100) {
+                score = 100
+            }
+
+            printf "%.0f\n", score
+        }
+        '
+}
+
+quality_label() {
+    SCORE="$1"
+
+    if [ "$SCORE" -ge 90 ]; then
+        printf '%s\n' "Отлично"
+    elif [ "$SCORE" -ge 75 ]; then
+        printf '%s\n' "Хорошо"
+    elif [ "$SCORE" -ge 50 ]; then
+        printf '%s\n' "Средне"
+    else
+        printf '%s\n' "Плохо"
+    fi
+}
+
+mkdir -p "$RUN"
+
+if [ ! -s "$STATUS_FILE" ]; then
+    write_empty_status
+fi
+
+trap '
+    rm -f "$TEMP_FILE"
+    exit 0
+' INT TERM HUP
+
+while :; do
+    NOW="$(date +%s)"
+
+    ADDRESS="$(
+        "$BRORAY" current-address 2>/dev/null || true
+    )"
+
+    BREAKS="$(read_previous_breaks)"
+    PREVIOUS_UP="$(read_previous_up)"
+    PREVIOUS_ADDRESS="$(read_previous_address)"
+
+    case "$BREAKS" in
+        ''|*[!0-9]*)
+            BREAKS=0
+            ;;
+    esac
+
+    if [ -z "$ADDRESS" ]; then
+        jq -n \
+            --argjson checked_at "$NOW" \
+            --argjson breaks "$BREAKS" \
+            '
+            {
+              available:false,
+              up:false,
+              address:"",
+              ping_ms:null,
+              jitter_ms:null,
+              packet_loss_percent:null,
+              quality_score:0,
+              quality:"Нет сервера",
+              checked_at:$checked_at,
+              breaks:$breaks
+            }
+            ' > "$TEMP_FILE"
+
+        mv "$TEMP_FILE" "$STATUS_FILE"
+        sleep "$INTERVAL"
+        continue
+    fi
+
+    if [ "$ADDRESS" != "$PREVIOUS_ADDRESS" ]; then
+        PREVIOUS_UP="null"
+    fi
+
+    PING_OUTPUT="$(
+        ping -c 5 -W 2 "$ADDRESS" 2>&1 || true
+    )"
+
+    LOSS="$(
+        printf '%s\n' "$PING_OUTPUT" |
+            sed -n \
+                's/.* \([0-9][0-9]*\)% packet loss.*/\1/p' |
+            tail -n 1
+    )"
+
+    case "$LOSS" in
+        ''|*[!0-9]*)
+            LOSS=100
+            ;;
+    esac
+
+    AVG="$(
+        printf '%s\n' "$PING_OUTPUT" |
+            sed -n \
+                's|.*= [^/]*/\([^/]*\)/.*|\1|p' |
+            tail -n 1
+    )"
+
+    TIMES="$(
+        printf '%s\n' "$PING_OUTPUT" |
+            sed -n \
+                's/.*time=\([0-9.][0-9.]*\) ms.*/\1/p'
+    )"
+
+    if [ -n "$AVG" ] && [ "$LOSS" -lt 100 ]; then
+        UP=true
+
+        PING_MS="$(
+            awk -v value="$AVG" \
+                'BEGIN { printf "%.0f\n", value }'
+        )"
+
+        JITTER_MS="$(
+            printf '%s\n' "$TIMES" |
+                awk '
+                NF {
+                    if (count > 0) {
+                        difference = $1 - previous
+
+                        if (difference < 0) {
+                            difference = -difference
+                        }
+
+                        total += difference
+                    }
+
+                    previous = $1
+                    count++
+                }
+
+                END {
+                    if (count > 1) {
+                        printf "%.1f\n", total / (count - 1)
+                    } else {
+                        printf "0.0\n"
+                    }
+                }
+                '
+        )"
+
+        SCORE="$(
+            calculate_quality \
+                "$AVG" \
+                "$JITTER_MS" \
+                "$LOSS"
+        )"
+
+        QUALITY="$(quality_label "$SCORE")"
+
+        jq -n \
+            --arg address "$ADDRESS" \
+            --argjson ping_ms "$PING_MS" \
+            --argjson jitter_ms "$JITTER_MS" \
+            --argjson packet_loss "$LOSS" \
+            --argjson quality_score "$SCORE" \
+            --arg quality "$QUALITY" \
+            --argjson checked_at "$NOW" \
+            --argjson breaks "$BREAKS" \
+            '
+            {
+              available:true,
+              up:true,
+              address:$address,
+              ping_ms:$ping_ms,
+              jitter_ms:$jitter_ms,
+              packet_loss_percent:$packet_loss,
+              quality_score:$quality_score,
+              quality:$quality,
+              checked_at:$checked_at,
+              breaks:$breaks
+            }
+            ' > "$TEMP_FILE"
+    else
+        UP=false
+
+        if [ "$PREVIOUS_UP" = "true" ]; then
+            BREAKS=$((BREAKS + 1))
+        fi
+
+        jq -n \
+            --arg address "$ADDRESS" \
+            --argjson packet_loss "$LOSS" \
+            --argjson checked_at "$NOW" \
+            --argjson breaks "$BREAKS" \
+            '
+            {
+              available:true,
+              up:false,
+              address:$address,
+              ping_ms:null,
+              jitter_ms:null,
+              packet_loss_percent:$packet_loss,
+              quality_score:0,
+              quality:"Нет связи",
+              checked_at:$checked_at,
+              breaks:$breaks
+            }
+            ' > "$TEMP_FILE"
+    fi
+
+    mv "$TEMP_FILE" "$STATUS_FILE"
+    sleep "$INTERVAL"
+done

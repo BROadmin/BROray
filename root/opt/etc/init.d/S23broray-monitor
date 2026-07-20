@@ -1,0 +1,113 @@
+#!/bin/sh
+
+ENABLED=yes
+
+BASE="/opt/broray"
+MONITOR="$BASE/bin/broray-connection-monitor"
+PIDFILE="$BASE/run/connection-monitor.pid"
+LOGFILE="$BASE/logs/connection-monitor.log"
+
+start() {
+    [ "$ENABLED" = "yes" ] || return 0
+
+    if [ -f "$PIDFILE" ]; then
+        PID="$(cat "$PIDFILE" 2>/dev/null)"
+
+        if [ -n "$PID" ] &&
+           kill -0 "$PID" 2>/dev/null; then
+            echo "BROray Monitor уже запущен, PID $PID"
+            return 0
+        fi
+
+        rm -f "$PIDFILE"
+    fi
+
+    [ -x "$MONITOR" ] || {
+        echo "Не найден монитор: $MONITOR"
+        return 1
+    }
+
+    "$MONITOR" >> "$LOGFILE" 2>&1 &
+    PID="$!"
+    echo "$PID" > "$PIDFILE"
+
+    sleep 1
+
+    if kill -0 "$PID" 2>/dev/null; then
+        echo "BROray Monitor запущен, PID $PID"
+        return 0
+    fi
+
+    rm -f "$PIDFILE"
+    echo "Ошибка запуска BROray Monitor"
+    return 1
+}
+
+stop() {
+    if [ ! -f "$PIDFILE" ]; then
+        echo "BROray Monitor не запущен"
+        return 0
+    fi
+
+    PID="$(cat "$PIDFILE" 2>/dev/null)"
+
+    if [ -n "$PID" ] &&
+       kill -0 "$PID" 2>/dev/null; then
+        kill "$PID" 2>/dev/null || true
+
+        COUNTER=0
+
+        while kill -0 "$PID" 2>/dev/null &&
+              [ "$COUNTER" -lt 10 ]; do
+            sleep 1
+            COUNTER=$((COUNTER + 1))
+        done
+
+        if kill -0 "$PID" 2>/dev/null; then
+            kill -9 "$PID" 2>/dev/null || true
+        fi
+    fi
+
+    rm -f "$PIDFILE"
+    echo "BROray Monitor остановлен"
+}
+
+status() {
+    if [ -f "$PIDFILE" ]; then
+        PID="$(cat "$PIDFILE" 2>/dev/null)"
+
+        if [ -n "$PID" ] &&
+           kill -0 "$PID" 2>/dev/null; then
+            echo "BROray Monitor работает"
+            echo "PID: $PID"
+            return 0
+        fi
+    fi
+
+    echo "BROray Monitor не запущен"
+    return 1
+}
+
+restart() {
+    stop
+    start
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    status|check)
+        status
+        ;;
+    *)
+        echo "Использование: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac

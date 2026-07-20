@@ -1,0 +1,79 @@
+#!/bin/sh
+
+CONFIG="/opt/broray/config/config.json"
+SETTINGS="/opt/broray/config/system/settings.json"
+
+server_host="$(
+    jq -r '
+        first(
+            .outbounds[]?
+            | select(
+                .protocol == "hysteria"
+                or
+                .protocol == "hysteria2"
+            )
+            | .settings.address
+        ) // empty
+    ' "$CONFIG"
+)"
+
+wan_if="$(
+    jq -r '
+        .routing.wanInterface // empty
+    ' "$SETTINGS"
+)"
+
+[ -n "$server_host" ] || {
+    echo "ERROR: server address not found"
+    exit 1
+}
+
+[ -n "$wan_if" ] || {
+    echo "ERROR: WAN interface not configured"
+    exit 1
+}
+
+server_ip="$(
+    nslookup "$server_host" 2>/dev/null |
+    awk '
+        /^Address [0-9]+: / {
+            ip=$3
+            sub(/#.*/, "", ip)
+            if (ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+                result=ip
+            }
+        }
+
+        /^Address: / {
+            ip=$2
+            sub(/#.*/, "", ip)
+            if (ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+                result=ip
+            }
+        }
+
+        END {
+            print result
+        }
+    '
+)"
+
+[ -n "$server_ip" ] || {
+    echo "ERROR: cannot resolve $server_host"
+    exit 1
+}
+
+ip link show "$wan_if" >/dev/null 2>&1 || {
+    echo "ERROR: interface $wan_if not found"
+    exit 1
+}
+
+ip route replace "$server_ip/32" dev "$wan_if" metric 1 || {
+    echo "ERROR: route installation failed"
+    exit 1
+}
+
+echo "SERVER_HOST=$server_host"
+echo "SERVER_IP=$server_ip"
+echo "WAN_INTERFACE=$wan_if"
+ip route get "$server_ip"

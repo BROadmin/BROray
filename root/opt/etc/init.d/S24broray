@@ -1,0 +1,11 @@
+#!/bin/sh
+
+ENABLED=yes
+PROCS=xray
+ARGS="run -c /opt/broray/config/config.json"
+PREARGS="env XRAY_LOCATION_ASSET=/opt/broray/bin"
+PRECMD=""
+DESC="BROray"
+PATH=/opt/broray/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+. /opt/etc/init.d/rc.func

@@ -1,0 +1,116 @@
+#!/bin/sh
+
+ENABLED=yes
+PROCS=lighttpd
+DESC="BROray WebUI"
+
+BASE="/opt/broray"
+CONF="$BASE/config/lighttpd.conf"
+PIDFILE="$BASE/run/lighttpd.pid"
+LOG="$BASE/logs/lighttpd-error.log"
+NETWORK="$BASE/lib/network.sh"
+
+start() {
+    [ -f "$NETWORK" ] || {
+        echo "Не найден $NETWORK"
+        return 1
+    }
+
+    . "$NETWORK"
+
+    LAN_IP="$(broray_save_lan_ip)" || return 1
+
+    if grep -q '^server\.bind[[:space:]]*=' "$CONF"; then
+        sed -i \
+            "s|^server\.bind[[:space:]]*=.*|server.bind = \"$LAN_IP\"|" \
+            "$CONF"
+    else
+        sed -i \
+            "/^server\.port/i server.bind = \"$LAN_IP\"" \
+            "$CONF"
+    fi
+
+    /opt/sbin/lighttpd -tt -f "$CONF" || return 1
+
+    if [ -f "$PIDFILE" ]; then
+        OLD_PID="$(cat "$PIDFILE" 2>/dev/null)"
+
+        if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+            echo "BROray WebUI уже запущен, PID $OLD_PID"
+            return 0
+        fi
+
+        rm -f "$PIDFILE"
+    fi
+
+    /opt/sbin/lighttpd -f "$CONF"
+
+    sleep 1
+
+    [ -f "$PIDFILE" ] || {
+        echo "Ошибка запуска BROray WebUI"
+        cat "$LOG" 2>/dev/null
+        return 1
+    }
+
+    echo "BROray WebUI запущен: http://$LAN_IP:8080/"
+}
+
+stop() {
+    if [ ! -f "$PIDFILE" ]; then
+        echo "BROray WebUI не запущен"
+        return 0
+    fi
+
+    PID="$(cat "$PIDFILE" 2>/dev/null)"
+
+    if [ -n "$PID" ]; then
+        kill "$PID" 2>/dev/null || true
+        sleep 1
+    fi
+
+    rm -f "$PIDFILE"
+
+    echo "BROray WebUI остановлен"
+}
+
+restart() {
+    stop
+    start
+}
+
+status() {
+    if [ -f "$PIDFILE" ]; then
+        PID="$(cat "$PIDFILE" 2>/dev/null)"
+
+        if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+            LAN_IP="$(cat "$BASE/run/lan-ip" 2>/dev/null)"
+            echo "BROray WebUI работает"
+            echo "PID: $PID"
+            echo "Адрес: http://$LAN_IP:8080/"
+            return 0
+        fi
+    fi
+
+    echo "BROray WebUI не запущен"
+    return 1
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    status)
+        status
+        ;;
+    *)
+        echo "Использование: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,106 @@
+#!/bin/sh
+
+BASE="/opt/broray"
+
+. "$BASE/lib/util.sh"
+. "$BASE/lib/server.sh"
+. "$BASE/lib/server-config-generator.sh"
+. "$BASE/lib/server-xray-manager.sh"
+
+usage() {
+    cat <<'HELP'
+BROray Server Model v2
+
+Использование:
+
+  broray-server list
+      Показать сохранённые серверы.
+
+  broray-server current
+      Показать активный сервер.
+
+  broray-server current-id
+      Показать ID активного сервера.
+
+  broray-server generate [SERVER_ID]
+      Создать тестовую Xray-конфигурацию.
+
+  broray-server test [SERVER_ID]
+      Проверить конфигурацию средствами Xray.
+
+  broray-server use <SERVER_ID>
+      Активировать сервер и перезапустить Xray.
+
+Команды generate и test ничего не применяют.
+HELP
+}
+
+command_name="${1:-help}"
+
+case "$command_name" in
+    list)
+        broray_server_list
+        ;;
+
+    current)
+        broray_server_current
+        ;;
+
+    current-id)
+        broray_server_get_active_id
+        ;;
+
+    generate)
+        server_id="${2:-}"
+
+        if [ -z "$server_id" ]; then
+            server_id="$(
+                broray_server_get_active_id
+            )"
+        fi
+
+        broray_generate_server_config \
+            "$server_id"
+        ;;
+
+    test)
+        server_id="${2:-}"
+
+        if [ -z "$server_id" ]; then
+            server_id="$(
+                broray_server_get_active_id
+            )"
+        fi
+
+        generated_file="$(
+            broray_generate_server_config \
+                "$server_id"
+        )"
+
+        XRAY_LOCATION_ASSET=/opt/broray/bin /opt/broray/bin//opt/broray/bin/xray run -test -c "$generated_file"
+        ;;
+
+    use)
+        server_id="${2:-}"
+
+        [ -n "$server_id" ] ||
+            broray_die \
+                "не указан идентификатор сервера"
+
+        broray_xray_apply_server \
+            "$server_id"
+        ;;
+
+    help|--help|-h)
+        usage
+        ;;
+
+    *)
+        echo \
+            "Неизвестная команда: $command_name" \
+            >&2
+        echo >&2
+        usage >&2
+        exit 1
+        ;;
+esac

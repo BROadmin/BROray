@@ -1,0 +1,18 @@
+# Runtime and user data
+root/opt/broray/servers/*
+root/opt/broray/subscriptions/*
+root/opt/broray/deleted-subscriptions/*
+root/opt/broray/run/*
+root/opt/broray/logs/*
+root/opt/broray/tmp/*
+root/opt/broray/backup/*
+root/opt/broray/backups/*
+root/opt/broray/data/*
+root/opt/broray/update/*
+
+# Third-party release binaries
+root/opt/broray/bin/xray
+
+# OPKG-generated configuration variants
+*-opkg
+
