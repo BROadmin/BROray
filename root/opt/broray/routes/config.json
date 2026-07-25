@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "managedInterface": "Proxy0",
+  "routeComment": "BROray",
+  "routeIdentity": [
+    "family",
+    "network",
+    "prefix",
+    "interface",
+    "gateway",
+    "metric",
+    "automatic",
+    "exclusive"
+  ],
+  "ownershipPolicy": {
+    "adoptExistingRoutes": false,
+    "modifyExternalRoutes": false,
+    "deleteExternalRoutes": false,
+    "touchOtherInterfaces": false,
+    "deleteOnlyExactManagedMatch": true,
+    "restoreMissingRoutesAutomatically": false
+  },
+  "managedMetric": 1200
+}

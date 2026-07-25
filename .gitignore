@@ -9,6 +9,19 @@ root/opt/broray/backup/*
 root/opt/broray/backups/*
 root/opt/broray/data/*
 root/opt/broray/update/*
+root/opt/broray/config/config.json
+root/opt/broray/config/active-server
+root/opt/broray/config/interface.json
+root/opt/broray/config/subscriptions/*
+root/opt/broray/config/disabled-subscription-servers/*
+root/opt/broray/routes/backup/*
+root/opt/broray/routes/catalog/*
+root/opt/broray/routes/installed/*
+root/opt/broray/routes/locks/*
+root/opt/broray/routes/manifests/*
+root/opt/broray/routes/state/*
+root/opt/broray/routes/tmp/*
+root/opt/broray/routes/transactions/*
 
 # Third-party release binaries
 root/opt/broray/bin/xray
@@ -16,3 +29,7 @@ root/opt/broray/bin/xray
 # OPKG-generated configuration variants
 *-opkg
 
+# Local release output
+dist/
+.build/
+root/opt/broray/web-new.previous/

@@ -1,0 +1,23 @@
+#!/opt/bin/ash
+
+PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+
+. /opt/broray/lib/subscription-service.sh
+
+PID_FILE="/opt/broray/run/subscription-scheduler.pid"
+LOG_FILE="/opt/broray/logs/subscription-scheduler.log"
+INTERVAL_SECONDS="${BRORAY_SUB_SCHEDULER_INTERVAL:-60}"
+
+mkdir -p /opt/broray/run /opt/broray/logs
+printf '%s\n' "$$" > "$PID_FILE"
+trap 'rm -f "$PID_FILE"; exit 0' INT TERM EXIT
+
+while :; do
+    if ! broray_subscription_scheduler_once \
+        >> "$LOG_FILE" 2>&1; then
+        printf '%s scheduler cycle failed\n' \
+            "$(broray_subscription_now_iso)" >> "$LOG_FILE"
+    fi
+    sleep "$INTERVAL_SECONDS"
+done

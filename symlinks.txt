@@ -1,2 +1,6 @@
 /opt/bin/broray -> /opt/broray/bin/broray
+/opt/bin/broray-routes -> /opt/broray/bin/broray-routes
 /opt/bin/broray-server -> /opt/broray/bin/broray-server
+/opt/bin/broray-servers -> /opt/broray/bin/broray-servers
+/opt/bin/broray-subscriptions -> /opt/broray/bin/broray-subscriptions
+/opt/bin/broray-system -> /opt/broray/bin/broray-system

@@ -1,0 +1,882 @@
+#!/opt/bin/ash
+
+PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+
+set +e
+set +u
+
+ROOT="/opt/broray"
+CONFIG="$ROOT/config/system/server-auto-switch.json"
+STATE="$ROOT/run/server-auto-switch-state.json"
+LOG="$ROOT/logs/server-auto-switch.log"
+LOCK="$ROOT/run/server-auto-switch-cycle.lock"
+
+SERVERS_BIN="$ROOT/bin/broray-servers"
+BRORAY_BIN="$ROOT/bin/broray"
+MONITOR_STATUS="$ROOT/run/connection-status.json"
+MONITOR_PIDFILE="$ROOT/run/connection-monitor.pid"
+UPDATE_LOCK="$ROOT/run/xray-update/xray.lock"
+
+MODE="daemon"
+DRY_RUN=false
+INTERVAL_SECONDS=15
+ATTEMPT_GUARD_SECONDS=60
+
+case "${1:-}" in
+    --once)
+        MODE="once"
+        ;;
+
+    --dry-run)
+        MODE="once"
+        DRY_RUN=true
+        ;;
+
+    --once-dry-run)
+        MODE="once"
+        DRY_RUN=true
+        ;;
+esac
+
+mkdir -p \
+    "$ROOT/run" \
+    "$ROOT/logs" \
+    "$ROOT/tmp" \
+    "$ROOT/config/system"
+
+now_iso()
+{
+    date '+%Y-%m-%dT%H:%M:%S%z'
+}
+
+log_message()
+{
+    MESSAGE="$*"
+
+    if [ -f "$LOG" ]; then
+        SIZE="$(wc -c < "$LOG" 2>/dev/null | tr -d ' ')"
+
+        case "$SIZE" in
+            ''|*[!0-9]*)
+                SIZE=0
+                ;;
+        esac
+
+        if [ "$SIZE" -gt 262144 ]; then
+            tail -n 600 "$LOG" > "$LOG.new" 2>/dev/null &&
+                mv "$LOG.new" "$LOG"
+        fi
+    fi
+
+    printf '%s %s\n' "$(now_iso)" "$MESSAGE" >> "$LOG"
+}
+
+rating_rank()
+{
+    case "$1" in
+        excellent)
+            echo 4
+            ;;
+
+        good)
+            echo 3
+            ;;
+
+        acceptable)
+            echo 2
+            ;;
+
+        poor)
+            echo 1
+            ;;
+
+        *)
+            echo 0
+            ;;
+    esac
+}
+
+acquire_lock()
+{
+    if mkdir "$LOCK" 2>/dev/null; then
+        echo "$$" > "$LOCK/pid"
+        return 0
+    fi
+
+    OLD_PID="$(cat "$LOCK/pid" 2>/dev/null || true)"
+
+    if [ -n "$OLD_PID" ] &&
+       kill -0 "$OLD_PID" 2>/dev/null
+    then
+        return 1
+    fi
+
+    rm -rf "$LOCK"
+
+    if mkdir "$LOCK" 2>/dev/null; then
+        echo "$$" > "$LOCK/pid"
+        return 0
+    fi
+
+    return 1
+}
+
+release_lock()
+{
+    rm -rf "$LOCK"
+}
+
+load_config()
+{
+    CFG_ENABLED=false
+    CFG_THRESHOLD=3
+    CFG_COOLDOWN=10
+    CFG_MINIMUM="acceptable"
+    CFG_RULE="best-quality"
+    CFG_PREFERRED=""
+
+    if ! jq -e 'type == "object"' "$CONFIG" >/dev/null 2>&1; then
+        return
+    fi
+
+    CFG_ENABLED="$(jq -r '.enabled // false' "$CONFIG")"
+    CFG_THRESHOLD="$(jq -r '.failureThreshold // 3' "$CONFIG")"
+    CFG_COOLDOWN="$(jq -r '.cooldownMinutes // 10' "$CONFIG")"
+    CFG_MINIMUM="$(jq -r '.minimumRating // "acceptable"' "$CONFIG")"
+    CFG_RULE="$(jq -r '.selectionRule // "best-quality"' "$CONFIG")"
+    CFG_PREFERRED="$(jq -r '.preferredServerId // empty' "$CONFIG")"
+
+    case "$CFG_ENABLED" in
+        true|false)
+            ;;
+
+        *)
+            CFG_ENABLED=false
+            ;;
+    esac
+
+    case "$CFG_THRESHOLD" in
+        ''|*[!0-9]*)
+            CFG_THRESHOLD=3
+            ;;
+    esac
+
+    if [ "$CFG_THRESHOLD" -lt 1 ] ||
+       [ "$CFG_THRESHOLD" -gt 10 ]
+    then
+        CFG_THRESHOLD=3
+    fi
+
+    case "$CFG_COOLDOWN" in
+        ''|*[!0-9]*)
+            CFG_COOLDOWN=10
+            ;;
+    esac
+
+    if [ "$CFG_COOLDOWN" -lt 1 ] ||
+       [ "$CFG_COOLDOWN" -gt 120 ]
+    then
+        CFG_COOLDOWN=10
+    fi
+
+    case "$CFG_MINIMUM" in
+        excellent|good|acceptable|poor)
+            ;;
+
+        *)
+            CFG_MINIMUM="acceptable"
+            ;;
+    esac
+
+    case "$CFG_RULE" in
+        best-quality|lowest-ping|preferred)
+            ;;
+
+        *)
+            CFG_RULE="best-quality"
+            ;;
+    esac
+}
+
+load_state()
+{
+    S_ENABLED=false
+    S_STATUS="initializing"
+    S_ACTIVE_ID=""
+    S_FAILURES=0
+    S_MONITOR_FINGERPRINT=""
+    S_LAST_EVALUATION_AT=""
+    S_LAST_ATTEMPT_EPOCH=0
+    S_LAST_ATTEMPT_AT=""
+    S_LAST_SWITCH_EPOCH=0
+    S_LAST_SWITCH_AT=""
+    S_LAST_SWITCH_FROM=""
+    S_LAST_SWITCH_TO=""
+    S_LAST_SWITCH_NAME=""
+    S_LAST_REASON=""
+    S_LAST_ERROR=""
+    S_CANDIDATE_COUNT=0
+
+    if ! jq -e 'type == "object"' "$STATE" >/dev/null 2>&1; then
+        return
+    fi
+
+    S_ENABLED="$(jq -r '.enabled // false' "$STATE")"
+    S_STATUS="$(jq -r '.status // "initializing"' "$STATE")"
+    S_ACTIVE_ID="$(jq -r '.activeServerId // empty' "$STATE")"
+    S_FAILURES="$(jq -r '.consecutiveFailures // 0' "$STATE")"
+    S_MONITOR_FINGERPRINT="$(jq -r '.lastMonitorFingerprint // empty' "$STATE")"
+    S_LAST_EVALUATION_AT="$(jq -r '.lastEvaluationAt // empty' "$STATE")"
+    S_LAST_ATTEMPT_EPOCH="$(jq -r '.lastAttemptEpoch // 0' "$STATE")"
+    S_LAST_ATTEMPT_AT="$(jq -r '.lastAttemptAt // empty' "$STATE")"
+    S_LAST_SWITCH_EPOCH="$(jq -r '.lastSwitchEpoch // 0' "$STATE")"
+    S_LAST_SWITCH_AT="$(jq -r '.lastSwitchAt // empty' "$STATE")"
+    S_LAST_SWITCH_FROM="$(jq -r '.lastSwitchFrom // empty' "$STATE")"
+    S_LAST_SWITCH_TO="$(jq -r '.lastSwitchTo // empty' "$STATE")"
+    S_LAST_SWITCH_NAME="$(jq -r '.lastSwitchName // empty' "$STATE")"
+    S_LAST_REASON="$(jq -r '.lastReason // empty' "$STATE")"
+    S_LAST_ERROR="$(jq -r '.lastError // empty' "$STATE")"
+    S_CANDIDATE_COUNT="$(jq -r '.candidateCount // 0' "$STATE")"
+
+    case "$S_FAILURES" in
+        ''|*[!0-9]*) S_FAILURES=0 ;;
+    esac
+
+    case "$S_LAST_ATTEMPT_EPOCH" in
+        ''|*[!0-9]*) S_LAST_ATTEMPT_EPOCH=0 ;;
+    esac
+
+    case "$S_LAST_SWITCH_EPOCH" in
+        ''|*[!0-9]*) S_LAST_SWITCH_EPOCH=0 ;;
+    esac
+
+    case "$S_CANDIDATE_COUNT" in
+        ''|*[!0-9]*) S_CANDIDATE_COUNT=0 ;;
+    esac
+}
+
+save_state()
+{
+    TMP="$STATE.new.$$"
+    S_LAST_EVALUATION_AT="$(now_iso)"
+
+    jq -n \
+        --argjson enabled "$S_ENABLED" \
+        --arg status "$S_STATUS" \
+        --arg activeServerId "$S_ACTIVE_ID" \
+        --argjson consecutiveFailures "$S_FAILURES" \
+        --arg lastMonitorFingerprint "$S_MONITOR_FINGERPRINT" \
+        --arg lastEvaluationAt "$S_LAST_EVALUATION_AT" \
+        --argjson lastAttemptEpoch "$S_LAST_ATTEMPT_EPOCH" \
+        --arg lastAttemptAt "$S_LAST_ATTEMPT_AT" \
+        --argjson lastSwitchEpoch "$S_LAST_SWITCH_EPOCH" \
+        --arg lastSwitchAt "$S_LAST_SWITCH_AT" \
+        --arg lastSwitchFrom "$S_LAST_SWITCH_FROM" \
+        --arg lastSwitchTo "$S_LAST_SWITCH_TO" \
+        --arg lastSwitchName "$S_LAST_SWITCH_NAME" \
+        --arg lastReason "$S_LAST_REASON" \
+        --arg lastError "$S_LAST_ERROR" \
+        --argjson candidateCount "$S_CANDIDATE_COUNT" '
+        {
+            schemaVersion: 2,
+            enabled: $enabled,
+            status: $status,
+
+            activeServerId: (
+                if $activeServerId == ""
+                then null
+                else $activeServerId
+                end
+            ),
+
+            consecutiveFailures: $consecutiveFailures,
+
+            lastMonitorFingerprint: (
+                if $lastMonitorFingerprint == ""
+                then null
+                else $lastMonitorFingerprint
+                end
+            ),
+
+            lastEvaluationAt: $lastEvaluationAt,
+            lastAttemptEpoch: $lastAttemptEpoch,
+
+            lastAttemptAt: (
+                if $lastAttemptAt == ""
+                then null
+                else $lastAttemptAt
+                end
+            ),
+
+            lastSwitchEpoch: $lastSwitchEpoch,
+
+            lastSwitchAt: (
+                if $lastSwitchAt == ""
+                then null
+                else $lastSwitchAt
+                end
+            ),
+
+            lastSwitchFrom: (
+                if $lastSwitchFrom == ""
+                then null
+                else $lastSwitchFrom
+                end
+            ),
+
+            lastSwitchTo: (
+                if $lastSwitchTo == ""
+                then null
+                else $lastSwitchTo
+                end
+            ),
+
+            lastSwitchName: (
+                if $lastSwitchName == ""
+                then null
+                else $lastSwitchName
+                end
+            ),
+
+            lastReason: (
+                if $lastReason == ""
+                then null
+                else $lastReason
+                end
+            ),
+
+            lastError: (
+                if $lastError == ""
+                then null
+                else $lastError
+                end
+            ),
+
+            candidateCount: $candidateCount
+        }
+    ' > "$TMP" || {
+        rm -f "$TMP"
+        return 1
+    }
+
+    chmod 0600 "$TMP"
+    mv "$TMP" "$STATE"
+}
+
+monitor_state()
+{
+    MONITOR_HEALTH="unknown"
+    MONITOR_FINGERPRINT=""
+
+    MONITOR_PID="$(cat "$MONITOR_PIDFILE" 2>/dev/null || true)"
+
+    if [ -z "$MONITOR_PID" ] ||
+       ! kill -0 "$MONITOR_PID" 2>/dev/null
+    then
+        return
+    fi
+
+    if ! jq -e 'type == "object"' "$MONITOR_STATUS" >/dev/null 2>&1; then
+        return
+    fi
+
+    MONITOR_HEALTH="$(
+        jq -r '
+            if ((.available | type) == "boolean")
+            then (.available | tostring)
+            elif ((.connected | type) == "boolean")
+            then (.connected | tostring)
+            elif ((.healthy | type) == "boolean")
+            then (.healthy | tostring)
+            else "unknown"
+            end
+        ' "$MONITOR_STATUS"
+    )"
+
+    MONITOR_FINGERPRINT="$(
+        sha256sum "$MONITOR_STATUS" 2>/dev/null |
+            awk '{print $1}'
+    )"
+}
+
+build_candidates()
+{
+    SUMMARY_FILE="$1"
+    CURRENT_ID="$2"
+    OUT_ARRAY="$3"
+    OUT_JSONL="$ROOT/tmp/auto-switch-candidates.$$.jsonl"
+
+    rm -f "$OUT_JSONL" "$OUT_ARRAY"
+    : > "$OUT_JSONL"
+
+    MIN_RANK="$(rating_rank "$CFG_MINIMUM")"
+
+    jq -r '.servers[]?.id // empty' "$SUMMARY_FILE" |
+    while IFS= read -r SERVER_ID
+    do
+        [ -n "$SERVER_ID" ] || continue
+        [ "$SERVER_ID" != "$CURRENT_ID" ] || continue
+
+        RESULT_FILE="$ROOT/tmp/auto-switch-check-$SERVER_ID.$$.json"
+        ERROR_FILE="$ROOT/tmp/auto-switch-check-$SERVER_ID.$$.err"
+
+        rm -f "$RESULT_FILE" "$ERROR_FILE"
+
+        "$SERVERS_BIN" check "$SERVER_ID" \
+            > "$RESULT_FILE" \
+            2> "$ERROR_FILE"
+
+        if ! jq -e '.success == true' "$RESULT_FILE" >/dev/null 2>&1; then
+            rm -f "$RESULT_FILE" "$ERROR_FILE"
+            continue
+        fi
+
+        RATING="$(jq -r '.quality.rating // "unavailable"' "$RESULT_FILE")"
+        RANK="$(rating_rank "$RATING")"
+
+        if [ "$RANK" -lt "$MIN_RANK" ]; then
+            rm -f "$RESULT_FILE" "$ERROR_FILE"
+            continue
+        fi
+
+        PING="$(jq -r '.quality.ping // 999999' "$RESULT_FILE")"
+        JITTER="$(jq -r '.quality.jitter // 999999' "$RESULT_FILE")"
+
+        case "$PING" in
+            ''|*[!0-9]*) PING=999999 ;;
+        esac
+
+        case "$JITTER" in
+            ''|*[!0-9]*) JITTER=999999 ;;
+        esac
+
+        NAME="$(
+            jq -r \
+                --arg id "$SERVER_ID" '
+                first(.servers[] | select(.id == $id) | .name) // $id
+                ' "$SUMMARY_FILE"
+        )"
+
+        jq -n -c \
+            --arg id "$SERVER_ID" \
+            --arg name "$NAME" \
+            --arg rating "$RATING" \
+            --argjson ratingRank "$RANK" \
+            --argjson ping "$PING" \
+            --argjson jitter "$JITTER" '
+            {
+                id: $id,
+                name: $name,
+                rating: $rating,
+                ratingRank: $ratingRank,
+                ping: $ping,
+                jitter: $jitter
+            }
+        ' >> "$OUT_JSONL"
+
+        rm -f "$RESULT_FILE" "$ERROR_FILE"
+    done
+
+    if [ ! -s "$OUT_JSONL" ]; then
+        printf '%s\n' '[]' > "$OUT_ARRAY"
+        rm -f "$OUT_JSONL"
+        return 1
+    fi
+
+    jq -s '.' "$OUT_JSONL" > "$OUT_ARRAY" || {
+        rm -f "$OUT_JSONL" "$OUT_ARRAY"
+        return 1
+    }
+
+    rm -f "$OUT_JSONL"
+    return 0
+}
+
+select_candidate()
+{
+    CANDIDATE_FILE="$1"
+    SELECTED_JSON="null"
+
+    if [ "$CFG_RULE" = "preferred" ] &&
+       [ -n "$CFG_PREFERRED" ]
+    then
+        SELECTED_JSON="$(
+            jq -c \
+                --arg id "$CFG_PREFERRED" '
+                first(.[] | select(.id == $id)) // null
+                ' "$CANDIDATE_FILE"
+        )"
+    fi
+
+    if [ "$SELECTED_JSON" = "null" ]; then
+        if [ "$CFG_RULE" = "lowest-ping" ]; then
+            SELECTED_JSON="$(
+                jq -c '
+                    sort_by([.ping, (-.ratingRank), .jitter, .id])
+                    | .[0] // null
+                ' "$CANDIDATE_FILE"
+            )"
+        else
+            SELECTED_JSON="$(
+                jq -c '
+                    sort_by([(-.ratingRank), .ping, .jitter, .id])
+                    | .[0] // null
+                ' "$CANDIDATE_FILE"
+            )"
+        fi
+    fi
+
+    [ "$SELECTED_JSON" != "null" ]
+}
+
+activate_candidate()
+{
+    CURRENT_ID="$1"
+    SELECTED_ID="$2"
+    SELECTED_NAME="$3"
+
+    ACTIVATE_OUT="$ROOT/tmp/auto-switch-activate.$$.json"
+    ACTIVATE_ERR="$ROOT/tmp/auto-switch-activate.$$.err"
+    VERIFY_OUT="$ROOT/tmp/auto-switch-verify.$$.json"
+
+    rm -f "$ACTIVATE_OUT" "$ACTIVATE_ERR" "$VERIFY_OUT"
+
+    "$SERVERS_BIN" activate "$SELECTED_ID" \
+        > "$ACTIVATE_OUT" \
+        2> "$ACTIVATE_ERR"
+
+    ACTIVATE_RC="$?"
+
+    sleep 3
+
+    "$SERVERS_BIN" summary > "$VERIFY_OUT" 2>/dev/null
+
+    VERIFY_ID="$(jq -r '.activeServer.id // empty' "$VERIFY_OUT" 2>/dev/null)"
+    VERIFY_XRAY="$(jq -r '.xrayRunning // false' "$VERIFY_OUT" 2>/dev/null)"
+    VERIFY_SOCKS="$(
+        "$BRORAY_BIN" xray status 2>/dev/null |
+            jq -r '.socks.active // false' 2>/dev/null
+    )"
+
+    if [ "$ACTIVATE_RC" -eq 0 ] &&
+       [ "$VERIFY_ID" = "$SELECTED_ID" ] &&
+       [ "$VERIFY_XRAY" = "true" ] &&
+       [ "$VERIFY_SOCKS" = "true" ]
+    then
+        rm -f "$ACTIVATE_OUT" "$ACTIVATE_ERR" "$VERIFY_OUT"
+        return 0
+    fi
+
+    ERROR_TEXT="$(
+        {
+            cat "$ACTIVATE_ERR" 2>/dev/null
+            cat "$ACTIVATE_OUT" 2>/dev/null
+        } |
+            tail -c 700
+    )"
+
+    [ -n "$ERROR_TEXT" ] ||
+        ERROR_TEXT="Новый сервер не прошёл проверку после активации."
+
+    if [ -n "$CURRENT_ID" ]; then
+        log_message "Откат на предыдущий сервер $CURRENT_ID"
+        "$SERVERS_BIN" activate "$CURRENT_ID" >/dev/null 2>&1 || true
+    fi
+
+    S_LAST_ERROR="$ERROR_TEXT"
+
+    rm -f "$ACTIVATE_OUT" "$ACTIVATE_ERR" "$VERIFY_OUT"
+    return 1
+}
+
+run_cycle_inner()
+{
+    load_config
+    load_state
+
+    S_ENABLED="$CFG_ENABLED"
+    NOW_EPOCH="$(date '+%s')"
+
+    if [ "$CFG_ENABLED" != "true" ]; then
+        S_STATUS="disabled"
+        S_FAILURES=0
+        S_CANDIDATE_COUNT=0
+        S_LAST_REASON="Автовыбор выключен"
+        S_LAST_ERROR=""
+        save_state
+        return 0
+    fi
+
+    if [ -d "$UPDATE_LOCK" ]; then
+        S_STATUS="paused"
+        S_LAST_REASON="Ожидание завершения операции Xray"
+        S_LAST_ERROR=""
+        save_state
+        return 0
+    fi
+
+    SUMMARY_FILE="$ROOT/tmp/auto-switch-summary.$$.json"
+    SUMMARY_ERR="$ROOT/tmp/auto-switch-summary.$$.err"
+
+    rm -f "$SUMMARY_FILE" "$SUMMARY_ERR"
+
+    "$SERVERS_BIN" summary > "$SUMMARY_FILE" 2> "$SUMMARY_ERR"
+
+    if ! jq -e 'type == "object"' "$SUMMARY_FILE" >/dev/null 2>&1; then
+        S_STATUS="error"
+        S_LAST_REASON="Не удалось получить состояние серверов"
+        S_LAST_ERROR="$(tail -c 700 "$SUMMARY_ERR" 2>/dev/null)"
+        [ -n "$S_LAST_ERROR" ] || S_LAST_ERROR="Summary не вернул корректный JSON."
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR"
+        return 1
+    fi
+
+    ACTIVE_ID="$(jq -r '.activeServer.id // empty' "$SUMMARY_FILE")"
+    XRAY_RUNNING="$(jq -r '.xrayRunning // false' "$SUMMARY_FILE")"
+
+    if [ "$S_ACTIVE_ID" != "$ACTIVE_ID" ]; then
+        S_FAILURES=0
+        S_MONITOR_FINGERPRINT=""
+    fi
+
+    S_ACTIVE_ID="$ACTIVE_ID"
+
+    if [ -z "$ACTIVE_ID" ]; then
+        S_STATUS="manual-off"
+        S_FAILURES=0
+        S_CANDIDATE_COUNT=0
+        S_LAST_REASON="VPN отключён вручную"
+        S_LAST_ERROR=""
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR"
+        return 0
+    fi
+
+    if [ "$XRAY_RUNNING" != "true" ]; then
+        S_STATUS="paused"
+        S_FAILURES=0
+        S_CANDIDATE_COUNT=0
+        S_LAST_REASON="Xray остановлен; автоматический запуск запрещён"
+        S_LAST_ERROR=""
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR"
+        return 0
+    fi
+
+    monitor_state
+
+    if [ "$MONITOR_HEALTH" = "unknown" ]; then
+        S_STATUS="paused"
+        S_LAST_REASON="Монитор соединения не подтвердил состояние"
+        S_LAST_ERROR=""
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR"
+        return 0
+    fi
+
+    if [ "$MONITOR_HEALTH" = "true" ]; then
+        S_STATUS="healthy"
+        S_FAILURES=0
+        S_MONITOR_FINGERPRINT="$MONITOR_FINGERPRINT"
+        S_CANDIDATE_COUNT=0
+        S_LAST_REASON="Активное соединение работает"
+        S_LAST_ERROR=""
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR"
+        return 0
+    fi
+
+    if [ -n "$MONITOR_FINGERPRINT" ] &&
+       [ "$MONITOR_FINGERPRINT" != "$S_MONITOR_FINGERPRINT" ]
+    then
+        S_FAILURES=$((S_FAILURES + 1))
+        S_MONITOR_FINGERPRINT="$MONITOR_FINGERPRINT"
+    fi
+
+    if [ "$S_FAILURES" -lt "$CFG_THRESHOLD" ]; then
+        S_STATUS="waiting-threshold"
+        S_LAST_REASON="Ожидание порога ошибок: $S_FAILURES из $CFG_THRESHOLD"
+        S_LAST_ERROR=""
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR"
+        return 0
+    fi
+
+    SINCE_ATTEMPT=$((NOW_EPOCH - S_LAST_ATTEMPT_EPOCH))
+
+    if [ "$S_LAST_ATTEMPT_EPOCH" -gt 0 ] &&
+       [ "$SINCE_ATTEMPT" -lt "$ATTEMPT_GUARD_SECONDS" ]
+    then
+        S_STATUS="attempt-guard"
+        S_LAST_REASON="Ожидание перед повторной проверкой кандидатов"
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR"
+        return 0
+    fi
+
+    COOLDOWN_SECONDS=$((CFG_COOLDOWN * 60))
+    SINCE_SWITCH=$((NOW_EPOCH - S_LAST_SWITCH_EPOCH))
+
+    if [ "$S_LAST_SWITCH_EPOCH" -gt 0 ] &&
+       [ "$SINCE_SWITCH" -lt "$COOLDOWN_SECONDS" ]
+    then
+        S_STATUS="cooldown"
+        S_LAST_REASON="Защита от частых переключений"
+        S_LAST_ERROR=""
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR"
+        return 0
+    fi
+
+    S_STATUS="checking-candidates"
+    S_LAST_ATTEMPT_EPOCH="$NOW_EPOCH"
+    S_LAST_ATTEMPT_AT="$(now_iso)"
+    S_LAST_REASON="Реальная проверка резервных серверов"
+    S_LAST_ERROR=""
+    save_state
+
+    CANDIDATE_FILE="$ROOT/tmp/auto-switch-candidates.$$.json"
+
+    build_candidates "$SUMMARY_FILE" "$ACTIVE_ID" "$CANDIDATE_FILE"
+    BUILD_RC="$?"
+
+    S_CANDIDATE_COUNT="$(jq 'length' "$CANDIDATE_FILE" 2>/dev/null)"
+    case "$S_CANDIDATE_COUNT" in
+        ''|*[!0-9]*) S_CANDIDATE_COUNT=0 ;;
+    esac
+
+    if [ "$BUILD_RC" -ne 0 ] ||
+       [ "$S_CANDIDATE_COUNT" -eq 0 ]
+    then
+        S_STATUS="no-candidate"
+        S_LAST_REASON="Подходящий сервер не найден"
+        S_LAST_ERROR="Нет сервера с подтверждённым HTTPS-трафиком и требуемым качеством."
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR" "$CANDIDATE_FILE"
+        log_message "$S_LAST_ERROR"
+        return 0
+    fi
+
+    if ! select_candidate "$CANDIDATE_FILE"; then
+        S_STATUS="no-candidate"
+        S_LAST_REASON="Правило выбора не определило сервер"
+        S_LAST_ERROR=""
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR" "$CANDIDATE_FILE"
+        return 0
+    fi
+
+    SELECTED_ID="$(printf '%s\n' "$SELECTED_JSON" | jq -r '.id // empty')"
+    SELECTED_NAME="$(printf '%s\n' "$SELECTED_JSON" | jq -r '.name // .id // empty')"
+
+    load_config
+
+    if [ "$CFG_ENABLED" != "true" ]; then
+        S_ENABLED=false
+        S_STATUS="disabled"
+        S_LAST_REASON="Автовыбор выключен во время проверки"
+        S_LAST_ERROR=""
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR" "$CANDIDATE_FILE"
+        return 0
+    fi
+
+    monitor_state
+
+    if [ "$MONITOR_HEALTH" = "true" ]; then
+        S_STATUS="recovered"
+        S_FAILURES=0
+        S_LAST_REASON="Соединение восстановилось до переключения"
+        S_LAST_ERROR=""
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR" "$CANDIDATE_FILE"
+        return 0
+    fi
+
+    FRESH_SUMMARY="$ROOT/tmp/auto-switch-fresh.$$.json"
+    "$SERVERS_BIN" summary > "$FRESH_SUMMARY" 2>/dev/null
+    FRESH_ACTIVE="$(jq -r '.activeServer.id // empty' "$FRESH_SUMMARY" 2>/dev/null)"
+
+    if [ "$FRESH_ACTIVE" != "$ACTIVE_ID" ]; then
+        S_STATUS="cancelled"
+        S_FAILURES=0
+        S_ACTIVE_ID="$FRESH_ACTIVE"
+        S_LAST_REASON="Активный сервер изменён вручную"
+        S_LAST_ERROR=""
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR" "$CANDIDATE_FILE" "$FRESH_SUMMARY"
+        return 0
+    fi
+
+    rm -f "$FRESH_SUMMARY"
+
+    if [ "$DRY_RUN" = "true" ]; then
+        S_STATUS="dry-run"
+        S_LAST_REASON="Dry-run: выбран кандидат $SELECTED_NAME"
+        S_LAST_ERROR=""
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR" "$CANDIDATE_FILE"
+        log_message "Dry-run: $ACTIVE_ID -> $SELECTED_ID ($SELECTED_NAME)"
+        return 0
+    fi
+
+    S_STATUS="switching"
+    S_LAST_REASON="Переключение на $SELECTED_NAME"
+    S_LAST_ERROR=""
+    save_state
+
+    if activate_candidate "$ACTIVE_ID" "$SELECTED_ID" "$SELECTED_NAME"; then
+        S_STATUS="switched"
+        S_ACTIVE_ID="$SELECTED_ID"
+        S_FAILURES=0
+        S_LAST_SWITCH_EPOCH="$(date '+%s')"
+        S_LAST_SWITCH_AT="$(now_iso)"
+        S_LAST_SWITCH_FROM="$ACTIVE_ID"
+        S_LAST_SWITCH_TO="$SELECTED_ID"
+        S_LAST_SWITCH_NAME="$SELECTED_NAME"
+        S_LAST_REASON="Автоматически выбран сервер: $SELECTED_NAME"
+        S_LAST_ERROR=""
+        save_state
+        log_message "Переключение $ACTIVE_ID -> $SELECTED_ID ($SELECTED_NAME)"
+    else
+        S_STATUS="error"
+        S_LAST_REASON="Ошибка переключения; выполнен откат"
+        save_state
+        log_message "$S_LAST_REASON: $S_LAST_ERROR"
+    fi
+
+    rm -f "$SUMMARY_FILE" "$SUMMARY_ERR" "$CANDIDATE_FILE"
+    return 0
+}
+
+run_cycle()
+{
+    if ! acquire_lock; then
+        return 0
+    fi
+
+    run_cycle_inner
+    RC="$?"
+
+    release_lock
+    return "$RC"
+}
+
+trap 'release_lock; exit 0' HUP INT TERM
+
+if [ "$MODE" = "once" ]; then
+    run_cycle
+    exit "$?"
+fi
+
+log_message "Сервис автоматического выбора запущен"
+
+while :
+do
+    run_cycle ||
+        log_message "Цикл завершился ошибкой"
+
+    sleep "$INTERVAL_SECONDS"
+done

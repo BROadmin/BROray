@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "instagram",
+  "name": "Instagram",
+  "source": {
+    "provider": "github",
+    "repository": "RockBlack-VPN/ip-address",
+    "branch": "main",
+    "directory": "Global/Instagram",
+    "files": [
+      {
+        "name": "instagram_1.0.bat",
+        "type": "windows-route-bat",
+        "enabled": true
+      }
+    ],
+    "discovery": {
+      "mode": "all-bat",
+      "recursive": false
+    }
+  },
+  "targetInterface": "Proxy0",
+  "exportComment": "BROray",
+  "limits": {
+    "maxSourceBytes": 4194304,
+    "maxRoutes": 10000
+  }
+}

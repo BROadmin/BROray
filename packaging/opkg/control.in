@@ -1,0 +1,9 @@
+Package: broray
+Version: @PACKAGE_VERSION@
+Depends: ca-bundle, ca-certificates, curl, jq, lighttpd, lighttpd-mod-cgi
+Section: net
+URL: https://github.com/BROadmin/BROray
+Maintainer: BROadmin <307129396+BROadmin@users.noreply.github.com>
+Architecture: aarch64-3.10
+Installed-Size: @INSTALLED_SIZE@
+Description: Xray manager with WebUI and KeeneticOS proxy integration

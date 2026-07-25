@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="ru" data-build-id="20260725-webui-desktop-layout-11">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#0b1117">
+    <meta name="robots" content="noindex,nofollow">
+    <title>BROray — Главная</title>
+    <link rel="icon" href="/assets/images/branding/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png">
+    <link rel="manifest" href="/manifest.json?v=20260725-webui-desktop-layout-11">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=20260725-webui-desktop-layout-11">
+    <script src="/assets/js/theme-init.js?v=20260725-webui-desktop-layout-11"></script>
+</head>
+<body class="app-body page-home" data-page="home" data-webui-build="20260725-webui-desktop-layout-11">
+    <div id="app" class="app-layout" hidden>
+        <aside id="sidebar" class="sidebar" aria-label="Основная навигация">
+            <div class="sidebar-header">
+                <a class="sidebar-brand" href="/home.html" aria-label="BROray — Главная">
+                    <span class="sidebar-brand-mark" aria-hidden="true">
+                        <img class="sidebar-brand-image" src="/assets/images/branding/broray-logo-64.png" alt="" width="40" height="40">
+                    </span>
+                    <span class="sidebar-brand-copy">
+                        <strong>BROray</strong>
+                        <small>Менеджер Xray</small>
+                    </span>
+                </a>
+                <button id="sidebar-collapse" class="sidebar-icon-button sidebar-collapse-button" type="button" aria-label="Свернуть боковое меню" aria-expanded="true">
+                    <span id="sidebar-collapse-symbol" class="sidebar-collapse-symbol" data-icon="chevron" aria-hidden="true"></span>
+                </button>
+            </div>
+            <nav class="sidebar-navigation" aria-label="Разделы BROray">
+                <a class="sidebar-link sidebar-link-active" href="/home.html" title="Главная" data-page="home" aria-current="page">
+                    <span class="sidebar-link-icon" data-icon="home" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Главная</span>
+                </a>
+                <a class="sidebar-link" href="/servers.html" title="Серверы" data-page="servers">
+                    <span class="sidebar-link-icon" data-icon="servers" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Серверы</span>
+                </a>
+                <a class="sidebar-link" href="/subscriptions.html" title="Подписки" data-page="subscriptions">
+                    <span class="sidebar-link-icon" data-icon="subscriptions" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Подписки</span>
+                </a>
+                <a class="sidebar-link" href="/routes.html" title="Маршруты" data-page="routes">
+                    <span class="sidebar-link-icon" data-icon="routes" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Маршруты</span>
+                </a>
+                <a class="sidebar-link" href="/keenetic.html" title="Keenetic" data-page="keenetic">
+                    <span class="sidebar-link-icon" data-icon="keenetic" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Keenetic</span>
+                </a>
+                <a class="sidebar-link" href="/xray.html" title="Xray" data-page="xray">
+                    <span class="sidebar-link-icon" data-icon="xray" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Xray</span>
+                </a>
+                <a class="sidebar-link" href="/broray.html" title="BROray" data-page="broray">
+                    <span class="sidebar-link-icon" data-icon="security" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">BROray</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sidebar-user">
+                    <span class="sidebar-user-avatar" data-icon="user" aria-hidden="true"></span>
+                    <span class="sidebar-user-copy">
+                        <strong id="current-user"></strong>
+                        <small>KeeneticOS</small>
+                    </span>
+                </div>
+                <button id="logout-button" class="sidebar-logout" type="button">
+                    <span class="sidebar-link-icon" data-icon="exit" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Выйти</span>
+                </button>
+            </div>
+        </aside>
+        <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Закрыть меню" hidden></button>
+        <div class="app-workspace">
+            <header class="workspace-header">
+                <div class="workspace-header-primary">
+                    <button id="mobile-menu-button" class="sidebar-icon-button mobile-menu-button" data-icon="menu" type="button" aria-label="Открыть меню" aria-controls="sidebar" aria-expanded="false"></button>
+                    <div class="workspace-title">
+                        <span class="workspace-section">Обзор</span>
+                        <strong>Главная</strong>
+                    </div>
+                </div>
+                <div class="workspace-header-actions">
+                    <div id="theme-control-mount" class="theme-control-mount"></div>
+                    <button id="refresh-status" class="button button-secondary button-compact" data-icon="update" type="button" hidden aria-hidden="true" tabindex="-1">Обновить</button>
+                </div>
+            </header>
+<main class="workspace-content home-page">
+ <section aria-labelledby="home-title" class="page-heading home-heading">
+  <div>
+   <span class="eyebrow">
+    BROray
+   </span>
+   <h1 id="home-title">
+    Главная
+   </h1>
+   <p>
+    Общее состояние Xray, серверов, подписок, ProxyN, маршрутов и самой установки.
+   </p>
+  </div>
+  <span class="status-badge status-loading" id="home-health">
+   Загрузка…
+  </span>
+ </section>
+ <div class="home-warning" hidden="" id="home-warning" role="status">
+ </div>
+ <section aria-label="Модули BROray" class="home-grid">
+  <a class="home-module-card ui-card" data-module="servers" href="/servers.html">
+   <div class="home-card-heading">
+    <div class="home-card-title">
+     <span aria-hidden="true" class="home-card-icon" data-icon="servers">
+     </span>
+     <h2>
+      Серверы
+     </h2>
+    </div>
+    <span class="home-card-status status-loading" id="home-servers-status">
+     Загрузка…
+    </span>
+   </div>
+   <p id="home-server-name">
+    Загрузка активного сервера…
+   </p>
+   <dl class="home-card-data">
+    <div class="home-card-data-row">
+     <dt>
+      Всего
+     </dt>
+     <dd id="home-servers-total">
+      —
+     </dd>
+    </div>
+    <div class="home-card-data-row">
+     <dt>
+      Качество
+     </dt>
+     <dd id="home-server-quality">
+      —
+     </dd>
+    </div>
+   </dl>
+  </a>
+  <a class="home-module-card ui-card" data-module="subscriptions" href="/subscriptions.html">
+   <div class="home-card-heading">
+    <div class="home-card-title">
+     <span aria-hidden="true" class="home-card-icon" data-icon="subscriptions">
+     </span>
+     <h2>
+      Подписки
+     </h2>
+    </div>
+    <span class="home-card-status status-loading" id="home-subscriptions-status">
+     Загрузка…
+    </span>
+   </div>
+   <p id="home-subscriptions-main">
+    Загрузка состояния подписок…
+   </p>
+   <dl class="home-card-data">
+    <div class="home-card-data-row">
+     <dt>
+      Включено
+     </dt>
+     <dd id="home-subscriptions-enabled">
+      —
+     </dd>
+    </div>
+    <div class="home-card-data-row">
+     <dt>
+      Серверов
+     </dt>
+     <dd id="home-subscriptions-servers">
+      —
+     </dd>
+    </div>
+   </dl>
+  </a>
+  <a class="home-module-card ui-card" data-module="routes" href="/routes.html">
+   <div class="home-card-heading">
+    <div class="home-card-title">
+     <span aria-hidden="true" class="home-card-icon" data-icon="routes">
+     </span>
+     <h2>
+      Маршруты
+     </h2>
+    </div>
+    <span class="home-card-status status-loading" id="home-routes-status">
+     Загрузка…
+    </span>
+   </div>
+   <p id="home-routes-main">
+    Загрузка установленных наборов…
+   </p>
+   <dl class="home-card-data">
+    <div class="home-card-data-row">
+     <dt>
+      Установлено
+     </dt>
+     <dd id="home-routes-count">
+      —
+     </dd>
+    </div>
+    <div class="home-card-data-row">
+     <dt>
+      Обновление
+     </dt>
+     <dd id="home-routes-update">
+      —
+     </dd>
+    </div>
+   </dl>
+  </a>
+  <a class="home-module-card ui-card" data-module="keenetic" href="/keenetic.html">
+   <div class="home-card-heading">
+    <div class="home-card-title">
+     <span aria-hidden="true" class="home-card-icon" data-icon="keenetic">
+     </span>
+     <h2>
+      Keenetic
+     </h2>
+    </div>
+    <span class="home-card-status status-loading" id="home-keenetic-status">
+     Загрузка…
+    </span>
+   </div>
+   <p id="home-keenetic-main">
+    Загрузка состояния ProxyN…
+   </p>
+   <dl class="home-card-data">
+    <div class="home-card-data-row">
+     <dt>
+      Связь
+     </dt>
+     <dd id="home-keenetic-link">
+      —
+     </dd>
+    </div>
+    <div class="home-card-data-row">
+     <dt>
+      Состояние
+     </dt>
+     <dd id="home-keenetic-state">
+      —
+     </dd>
+    </div>
+   </dl>
+  </a>
+  <a class="home-module-card ui-card" data-module="xray" href="/xray.html">
+   <div class="home-card-heading">
+    <div class="home-card-title">
+     <span aria-hidden="true" class="home-card-icon" data-icon="xray">
+     </span>
+     <h2>
+      Xray
+     </h2>
+    </div>
+    <span class="home-card-status status-loading" id="home-xray-status">
+     Загрузка…
+    </span>
+   </div>
+   <p id="home-xray-main">
+    Загрузка состояния процесса…
+   </p>
+   <dl class="home-card-data">
+    <div class="home-card-data-row">
+     <dt>
+      Версия
+     </dt>
+     <dd id="home-xray-version">
+      —
+     </dd>
+    </div>
+    <div class="home-card-data-row">
+     <dt>
+      Конфигурация
+     </dt>
+     <dd id="home-xray-config">
+      —
+     </dd>
+    </div>
+   </dl>
+  </a>
+  <a class="home-module-card ui-card" data-module="broray" href="/broray.html">
+   <div class="home-card-heading">
+    <div class="home-card-title">
+     <span aria-hidden="true" class="home-card-icon" data-icon="security">
+     </span>
+     <h2>
+      BROray
+     </h2>
+    </div>
+    <span class="home-card-status status-loading" id="home-broray-status">
+     Загрузка…
+    </span>
+   </div>
+   <p id="home-broray-main">
+    Загрузка сведений об установке…
+   </p>
+   <dl class="home-card-data">
+    <div class="home-card-data-row">
+     <dt>
+      Версия
+     </dt>
+     <dd id="home-broray-version">
+      —
+     </dd>
+    </div>
+    <div class="home-card-data-row">
+     <dt>
+      Обновление
+     </dt>
+     <dd id="home-broray-update">
+      —
+     </dd>
+    </div>
+   </dl>
+  </a>
+ </section>
+ <p class="home-updated">
+  Обновлено:
+  <span id="home-updated-at">
+   —
+  </span>
+ </p>
+</main>
+            <footer class="workspace-footer">
+                <span>BROray · Менеджер Xray для Keenetic</span>
+                <a href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Поддержать проект</a>
+            </footer>
+        </div>
+    </div>
+    <div id="page-loader" class="page-loader">
+        <span class="loader-spinner" aria-hidden="true"></span>
+        <span>Загрузка BROray…</span>
+    </div>
+    <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+    <div id="confirm-root" class="modal-root" hidden>
+        <button id="confirm-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть"></button>
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+            <span id="confirm-eyebrow" class="eyebrow">Подтверждение</span>
+            <h2 id="confirm-title">Подтвердите действие</h2>
+            <p id="confirm-message"></p>
+            <div id="confirm-input-group" class="modal-input-group" hidden>
+                <label id="confirm-input-label" for="confirm-input">Введите значение</label>
+                <input id="confirm-input" type="text" autocomplete="off" spellcheck="false">
+                <p id="confirm-input-hint" class="modal-input-hint" hidden></p>
+                <p id="confirm-input-error" class="modal-input-error" role="alert" hidden></p>
+            </div>
+            <div class="modal-actions">
+                <button id="confirm-cancel" class="button button-secondary" type="button">Отмена</button>
+                <button id="confirm-accept" class="button button-danger" type="button">Продолжить</button>
+            </div>
+        </section>
+    </div>
+
+    <script src="/assets/js/common.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/icons.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/app-shell.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/theme.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/home.js?v=20260725-webui-desktop-layout-11"></script>
+</body>
+</html>

@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="ru" data-build-id="20260725-webui-desktop-layout-11">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#0b1117">
+    <meta name="robots" content="noindex,nofollow">
+    <title>BROray — Keenetic</title>
+    <link rel="icon" href="/assets/images/branding/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png">
+    <link rel="manifest" href="/manifest.json?v=20260725-webui-desktop-layout-11">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=20260725-webui-desktop-layout-11">
+    <script src="/assets/js/theme-init.js?v=20260725-webui-desktop-layout-11"></script>
+</head>
+<body class="app-body page-keenetic" data-page="keenetic" data-webui-build="20260725-webui-desktop-layout-11">
+    <div id="app" class="app-layout" hidden>
+        <aside id="sidebar" class="sidebar" aria-label="Основная навигация">
+            <div class="sidebar-header">
+                <a class="sidebar-brand" href="/home.html" aria-label="BROray — Главная">
+                    <span class="sidebar-brand-mark" aria-hidden="true">
+                        <img class="sidebar-brand-image" src="/assets/images/branding/broray-logo-64.png" alt="" width="40" height="40">
+                    </span>
+                    <span class="sidebar-brand-copy">
+                        <strong>BROray</strong>
+                        <small>Менеджер Xray</small>
+                    </span>
+                </a>
+                <button id="sidebar-collapse" class="sidebar-icon-button sidebar-collapse-button" type="button" aria-label="Свернуть боковое меню" aria-expanded="true">
+                    <span id="sidebar-collapse-symbol" class="sidebar-collapse-symbol" data-icon="chevron" aria-hidden="true"></span>
+                </button>
+            </div>
+            <nav class="sidebar-navigation" aria-label="Разделы BROray">
+                <a class="sidebar-link" href="/home.html" title="Главная" data-page="home">
+                    <span class="sidebar-link-icon" data-icon="home" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Главная</span>
+                </a>
+                <a class="sidebar-link" href="/servers.html" title="Серверы" data-page="servers">
+                    <span class="sidebar-link-icon" data-icon="servers" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Серверы</span>
+                </a>
+                <a class="sidebar-link" href="/subscriptions.html" title="Подписки" data-page="subscriptions">
+                    <span class="sidebar-link-icon" data-icon="subscriptions" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Подписки</span>
+                </a>
+                <a class="sidebar-link" href="/routes.html" title="Маршруты" data-page="routes">
+                    <span class="sidebar-link-icon" data-icon="routes" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Маршруты</span>
+                </a>
+                <a class="sidebar-link sidebar-link-active" href="/keenetic.html" title="Keenetic" data-page="keenetic" aria-current="page">
+                    <span class="sidebar-link-icon" data-icon="keenetic" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Keenetic</span>
+                </a>
+                <a class="sidebar-link" href="/xray.html" title="Xray" data-page="xray">
+                    <span class="sidebar-link-icon" data-icon="xray" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Xray</span>
+                </a>
+                <a class="sidebar-link" href="/broray.html" title="BROray" data-page="broray">
+                    <span class="sidebar-link-icon" data-icon="security" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">BROray</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sidebar-user">
+                    <span class="sidebar-user-avatar" data-icon="user" aria-hidden="true"></span>
+                    <span class="sidebar-user-copy">
+                        <strong id="current-user"></strong>
+                        <small>KeeneticOS</small>
+                    </span>
+                </div>
+                <button id="logout-button" class="sidebar-logout" type="button">
+                    <span class="sidebar-link-icon" data-icon="exit" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Выйти</span>
+                </button>
+            </div>
+        </aside>
+        <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Закрыть меню" hidden></button>
+        <div class="app-workspace">
+            <header class="workspace-header">
+                <div class="workspace-header-primary">
+                    <button id="mobile-menu-button" class="sidebar-icon-button mobile-menu-button" data-icon="menu" type="button" aria-label="Открыть меню" aria-controls="sidebar" aria-expanded="false"></button>
+                    <div class="workspace-title">
+                        <span class="workspace-section">Интеграция</span>
+                        <strong>Keenetic</strong>
+                    </div>
+                </div>
+                <div class="workspace-header-actions">
+                    <div id="theme-control-mount" class="theme-control-mount"></div>
+                    <button id="refresh-status" class="button button-secondary button-compact" data-icon="update" type="button" hidden aria-hidden="true" tabindex="-1">Обновить</button>
+                </div>
+            </header>
+<main class="workspace-content keenetic-page" aria-labelledby="keenetic-page-title">
+    <section class="keenetic-page-heading page-heading">
+        <div>
+            <span class="eyebrow">Интеграция</span>
+            <h1 id="keenetic-page-title">Keenetic</h1>
+            <p>Управление штатным прокси-интерфейсом ProxyN и проверка его соответствия активному серверу BROray.</p>
+        </div>
+        <div class="keenetic-heading-actions">
+            <button id="keenetic-check-upstream" class="button button-secondary" data-icon="connection" type="button">
+                <span class="button-label">Проверить подключение к Xray</span>
+                <span class="button-spinner" aria-hidden="true"></span>
+            </button>
+            <button id="keenetic-refresh" class="button button-primary" data-icon="update" type="button">
+                <span class="button-label">Обновить</span>
+                <span class="button-spinner" aria-hidden="true"></span>
+            </button>
+        </div>
+    </section>
+
+    <section class="keenetic-overview" aria-label="Состояние ProxyN">
+        <article class="keenetic-status-card">
+            <div class="keenetic-status-copy">
+                <span id="keenetic-status-badge" class="keenetic-status-badge status-loading">Проверяется</span>
+                <h2 id="keenetic-status-title">ProxyN</h2>
+                <p id="keenetic-status-description">Чтение параметров интерфейса KeeneticOS…</p>
+                <div class="keenetic-status-tags">
+                    <span id="keenetic-expected-tag">Ожидаемая конфигурация: —</span>
+                    <span id="keenetic-upstream-tag">Прокси Xray: —</span>
+                </div>
+            </div>
+            <div class="keenetic-primary-actions">
+                <button id="keenetic-create" class="button button-primary" data-icon="add" type="button" hidden>
+                    <span class="button-label">Создать</span>
+                    <span class="button-spinner" aria-hidden="true"></span>
+                </button>
+                <button id="keenetic-repair" class="button button-primary" data-icon="restore" type="button" hidden>
+                    <span class="button-label">Восстановить</span>
+                    <span class="button-spinner" aria-hidden="true"></span>
+                </button>
+                <button id="keenetic-sync-description" class="button button-secondary" data-icon="edit" type="button" hidden>
+                    <span class="button-label">Синхронизировать описание</span>
+                    <span class="button-spinner" aria-hidden="true"></span>
+                </button>
+                <button id="keenetic-delete" class="button button-danger-outline" data-icon="delete" type="button" hidden>
+                    <span class="button-label">Удалить</span>
+                    <span class="button-spinner" aria-hidden="true"></span>
+                </button>
+            </div>
+        </article>
+
+        <div class="keenetic-metrics-grid">
+            <article class="keenetic-metric-card"><span>Интерфейс</span><strong id="keenetic-interface-name">ProxyN</strong></article>
+            <article class="keenetic-metric-card"><span>Протокол</span><strong id="keenetic-protocol">—</strong></article>
+            <article class="keenetic-metric-card"><span>Адрес Xray</span><strong id="keenetic-upstream">—</strong></article>
+            <article class="keenetic-metric-card"><span>Связь</span><strong id="keenetic-link">—</strong></article>
+            <article class="keenetic-metric-card"><span>Подключение</span><strong id="keenetic-connected">—</strong></article>
+            <article class="keenetic-metric-card"><span>Состояние</span><strong id="keenetic-state">—</strong></article>
+        </div>
+    </section>
+
+    <section class="keenetic-details-grid">
+        <article class="keenetic-panel">
+            <div class="keenetic-panel-heading">
+                <div><span class="eyebrow">Сравнение</span><h2>Ожидаемое и фактическое состояние</h2></div>
+            </div>
+            <div class="keenetic-comparison" role="table" aria-label="Сравнение параметров ProxyN">
+                <div class="keenetic-comparison-row keenetic-comparison-header" role="row">
+                    <span role="columnheader">Параметр</span>
+                    <span role="columnheader">Ожидается</span>
+                    <span role="columnheader">Фактически</span>
+                    <span role="columnheader">Проверка</span>
+                </div>
+                <div class="keenetic-comparison-row" role="row">
+                    <span class="keenetic-comparison-parameter" role="cell">Описание</span>
+                    <span id="keenetic-expected-description" data-label="Ожидается" role="cell">—</span>
+                    <span id="keenetic-actual-description" data-label="Фактически" role="cell">—</span>
+                    <span id="keenetic-description-check" data-label="Проверка" role="cell">—</span>
+                </div>
+                <div class="keenetic-comparison-row" role="row">
+                    <span class="keenetic-comparison-parameter" role="cell">Протокол</span>
+                    <span id="keenetic-expected-protocol" data-label="Ожидается" role="cell">—</span>
+                    <span id="keenetic-actual-protocol" data-label="Фактически" role="cell">—</span>
+                    <span id="keenetic-protocol-check" data-label="Проверка" role="cell">—</span>
+                </div>
+                <div class="keenetic-comparison-row" role="row">
+                    <span class="keenetic-comparison-parameter" role="cell">Адрес Xray</span>
+                    <span id="keenetic-expected-upstream" data-label="Ожидается" role="cell">—</span>
+                    <span id="keenetic-actual-upstream" data-label="Фактически" role="cell">—</span>
+                    <span id="keenetic-upstream-check" data-label="Проверка" role="cell">—</span>
+                </div>
+            </div>
+        </article>
+
+        <article class="keenetic-panel">
+            <div class="keenetic-panel-heading">
+                <div><span class="eyebrow">Диагностика</span><h2>Проверки ProxyN</h2></div>
+            </div>
+            <div id="keenetic-checks" class="keenetic-check-list" aria-live="polite">
+                <div class="keenetic-check-row status-loading">
+                    <span class="keenetic-check-indicator" aria-hidden="true"></span>
+                    <span>Получение результатов…</span>
+                </div>
+            </div>
+        </article>
+    </section>
+
+    <section class="keenetic-details-grid">
+        <article class="keenetic-panel">
+            <div class="keenetic-panel-heading">
+                <div><span class="eyebrow">Технические данные</span><h2>Параметры интерфейса</h2></div>
+            </div>
+            <dl class="keenetic-technical-grid">
+                <div><dt>Тип</dt><dd id="keenetic-type">—</dd></div>
+                <div><dt>MTU</dt><dd id="keenetic-mtu">—</dd></div>
+                <div><dt>Подключение через</dt><dd id="keenetic-via">—</dd></div>
+                <div><dt>Локальный адрес</dt><dd id="keenetic-local-address">—</dd></div>
+                <div><dt>Удалённый адрес</dt><dd id="keenetic-remote-address">—</dd></div>
+                <div><dt>Обновлено</dt><dd id="keenetic-updated-at">—</dd></div>
+            </dl>
+        </article>
+
+        <article id="keenetic-problems-panel" class="keenetic-panel keenetic-problems-panel" hidden>
+            <div class="keenetic-panel-heading">
+                <div><span class="eyebrow">Требуется исправление</span><h2>Обнаруженные проблемы</h2></div>
+            </div>
+            <ul id="keenetic-problems" class="keenetic-problems"></ul>
+        </article>
+    </section>
+</main>
+            <footer class="workspace-footer">
+                <span>BROray · Менеджер Xray для Keenetic</span>
+                <a href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Поддержать проект</a>
+            </footer>
+        </div>
+    </div>
+    <div id="page-loader" class="page-loader">
+        <span class="loader-spinner" aria-hidden="true"></span>
+        <span>Загрузка BROray…</span>
+    </div>
+    <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+    <div id="confirm-root" class="modal-root" hidden>
+        <button id="confirm-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть"></button>
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+            <span id="confirm-eyebrow" class="eyebrow">Подтверждение</span>
+            <h2 id="confirm-title">Подтвердите действие</h2>
+            <p id="confirm-message"></p>
+            <div id="confirm-input-group" class="modal-input-group" hidden>
+                <label id="confirm-input-label" for="confirm-input">Введите значение</label>
+                <input id="confirm-input" type="text" autocomplete="off" spellcheck="false">
+                <p id="confirm-input-hint" class="modal-input-hint" hidden></p>
+                <p id="confirm-input-error" class="modal-input-error" role="alert" hidden></p>
+            </div>
+            <div class="modal-actions">
+                <button id="confirm-cancel" class="button button-secondary" type="button">Отмена</button>
+                <button id="confirm-accept" class="button button-danger" type="button">Продолжить</button>
+            </div>
+        </section>
+    </div>
+
+    <script src="/assets/js/common.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/icons.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/app-shell.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/theme.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/dialogs.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/keenetic.js?v=20260725-webui-desktop-layout-11"></script>
+</body>
+</html>

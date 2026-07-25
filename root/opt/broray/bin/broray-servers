@@ -1,0 +1,48 @@
+#!/opt/bin/ash
+
+. /opt/broray/lib/server-service.sh
+. /opt/broray/lib/server-import.sh
+
+command_name="${1:-summary}"
+
+case "$command_name" in
+    summary|list)
+        broray_server_summary
+        ;;
+    show)
+        shift
+        broray_server_details "${1:-}"
+        ;;
+    import)
+        shift
+        broray_server_import "${1:-}" manual "" 0
+        ;;
+    check)
+        shift
+        broray_server_check "${1:-}"
+        ;;
+    activate|use)
+        shift
+        broray_server_activate "${1:-}"
+        ;;
+    deactivate|disable)
+        broray_server_deactivate
+        ;;
+    delete)
+        shift
+        broray_server_delete_safe "${1:-}"
+        ;;
+    *)
+        cat >&2 <<'USAGE'
+Использование:
+  broray-servers summary
+  broray-servers show <SERVER_ID>
+  broray-servers import <URI>
+  broray-servers check <SERVER_ID>
+  broray-servers activate <SERVER_ID>
+  broray-servers deactivate
+  broray-servers delete <SERVER_ID>
+USAGE
+        exit 1
+        ;;
+esac

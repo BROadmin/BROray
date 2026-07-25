@@ -1,0 +1,248 @@
+<main class="workspace-content xray-page">
+ <section aria-labelledby="xray-page-title" class="page-heading xray-page-heading">
+  <div>
+   <span class="eyebrow">
+    Системный модуль
+   </span>
+   <h1 id="xray-page-title">
+    Xray
+   </h1>
+   <p>
+    Состояние процесса, конфигурация, диагностика, обновление и обслуживание.
+   </p>
+  </div>
+  <div class="xray-live-status status-loading" id="xray-live-status" role="status">
+   <span aria-hidden="true" class="xray-live-dot" id="xray-live-dot">
+   </span>
+   <span id="xray-live-text">
+    Загрузка…
+   </span>
+  </div>
+ </section>
+ <section aria-label="Состояние Xray" class="xray-overview">
+  <article class="xray-primary-card ui-card">
+   <div class="xray-primary-top">
+    <div>
+     <span class="status-badge status-loading" id="xray-state-badge">
+      Проверяется
+     </span>
+     <h2 id="xray-version">
+      Xray
+     </h2>
+     <p id="xray-runtime-description">
+      Загрузка сведений о процессе…
+     </p>
+    </div>
+    <div aria-hidden="true" class="xray-mark">
+     <span data-icon="xray">
+     </span>
+    </div>
+   </div>
+   <div class="xray-primary-actions">
+    <button class="button button-primary" data-icon="connection" id="xray-start" type="button">
+     Запустить
+    </button>
+    <button class="button button-secondary" data-icon="update" id="xray-restart" type="button">
+     Перезапустить
+    </button>
+    <button class="button button-danger-outline" data-icon="exit" id="xray-stop" type="button">
+     Остановить
+    </button>
+   </div>
+  </article>
+  <div class="xray-metrics-grid">
+   <article class="xray-metric-card ui-card">
+    <span class="xray-metric-label">
+     Процесс
+    </span>
+    <strong id="metric-pid">
+     —
+    </strong>
+    <small id="metric-process">
+     Нет данных
+    </small>
+   </article>
+   <article class="xray-metric-card ui-card">
+    <span class="xray-metric-label">
+     SOCKS
+    </span>
+    <strong id="metric-socks">
+     —
+    </strong>
+    <small id="metric-socks-status">
+     Нет данных
+    </small>
+   </article>
+   <article class="xray-metric-card ui-card">
+    <span class="xray-metric-label">
+     Архитектура
+    </span>
+    <strong id="metric-architecture">
+     —
+    </strong>
+    <small id="metric-device-architecture">
+     Устройство
+    </small>
+   </article>
+   <article class="xray-metric-card ui-card">
+    <span class="xray-metric-label">
+     Свободно /opt
+    </span>
+    <strong id="metric-storage">
+     —
+    </strong>
+    <small>
+     Для обновлений и данных
+    </small>
+   </article>
+  </div>
+ </section>
+ <section aria-labelledby="xray-config-title" class="xray-section">
+  <div class="xray-section-heading">
+   <div>
+    <span class="eyebrow">
+     Конфигурация
+    </span>
+    <h2 id="xray-config-title">
+     Рабочий файл
+    </h2>
+   </div>
+   <button class="button button-secondary" data-icon="security" id="xray-check-config" type="button">
+    Проверить
+   </button>
+  </div>
+  <article class="xray-detail-card ui-card">
+   <div class="xray-detail-row">
+    <span>
+     Путь
+    </span>
+    <code id="config-path">
+     —
+    </code>
+   </div>
+   <div class="xray-detail-row">
+    <span>
+     Размер
+    </span>
+    <strong id="config-size">
+     —
+    </strong>
+   </div>
+   <div class="xray-detail-row">
+    <span>
+     SHA-256
+    </span>
+    <code id="config-sha">
+     —
+    </code>
+   </div>
+   <div class="xray-detail-row">
+    <span>
+     Состояние
+    </span>
+    <strong class="state-text state-loading" id="config-validity">
+     Проверяется
+    </strong>
+   </div>
+   <pre class="xray-output" hidden="" id="config-check-output"></pre>
+  </article>
+ </section>
+ <section aria-labelledby="xray-update-title" class="xray-section">
+  <div class="xray-section-heading">
+   <div>
+    <span class="eyebrow">
+     Обновление
+    </span>
+    <h2 id="xray-update-title">
+     Версия Xray
+    </h2>
+   </div>
+   <button class="button button-secondary" data-icon="update" id="xray-update-check" type="button">
+    Проверить обновление
+   </button>
+  </div>
+  <article class="xray-update-card ui-card">
+   <div class="xray-update-summary">
+    <div>
+     <span>
+      Установлено
+     </span>
+     <strong id="installed-version">
+      —
+     </strong>
+    </div>
+    <div>
+     <span>
+      Доступно
+     </span>
+     <strong id="available-version">
+      Не проверено
+     </strong>
+    </div>
+    <div>
+     <span>
+      Канал
+     </span>
+     <strong id="release-channel">
+      —
+     </strong>
+    </div>
+   </div>
+   <p class="xray-card-message" id="update-message">
+    Выполните проверку официального релиза.
+   </p>
+   <button class="button button-secondary" data-icon="restore" id="xray-reinstall" type="button">
+    Переустановить текущую версию
+   </button>
+  </article>
+ </section>
+ <section aria-labelledby="xray-diagnostics-title" class="xray-section">
+  <div class="xray-section-heading">
+   <div>
+    <span class="eyebrow">
+     Диагностика
+    </span>
+    <h2 id="xray-diagnostics-title">
+     Проверка системы
+    </h2>
+   </div>
+   <button class="button button-secondary" data-icon="status" id="xray-diagnostics" type="button">
+    Запустить диагностику
+   </button>
+  </div>
+  <article class="xray-diagnostics-card ui-card">
+   <div class="diagnostics-summary" id="diagnostics-summary">
+    Диагностика ещё не запускалась.
+   </div>
+   <div class="diagnostics-list" id="diagnostics-list">
+   </div>
+  </article>
+ </section>
+ <section aria-labelledby="xray-operation-title" class="xray-section" hidden="" id="operation-section">
+  <div class="xray-section-heading">
+   <div>
+    <span class="eyebrow">
+     Фоновая операция
+    </span>
+    <h2 id="xray-operation-title">
+     Обслуживание Xray
+    </h2>
+   </div>
+  </div>
+  <article class="xray-operation-card ui-card">
+   <div class="operation-progress">
+    <span aria-hidden="true" class="large-spinner">
+    </span>
+    <div>
+     <strong id="operation-title">
+      Переустановка…
+     </strong>
+     <p id="operation-message">
+      Не отключайте питание роутера.
+     </p>
+    </div>
+   </div>
+   <pre class="xray-output" hidden="" id="operation-log"></pre>
+  </article>
+</section>
+</main>

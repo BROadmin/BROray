@@ -1,6 +1,8 @@
 #!/bin/sh
 
-. /opt/broray/lib/util.sh
+BRORAY_BASE="${BRORAY_BASE:-${BRORAY_ROOT:-/opt/broray}}"
+
+. "$BRORAY_BASE/lib/util.sh"
 
 broray_parse_vless() {
 

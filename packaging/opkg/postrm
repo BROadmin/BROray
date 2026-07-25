@@ -1,0 +1,21 @@
+#!/bin/sh
+
+[ -z "${IPKG_INSTROOT:-}" ] || exit 0
+
+if [ ! -x /opt/broray/bin/broray ]; then
+    for command_name in \
+        broray \
+        broray-routes \
+        broray-server \
+        broray-servers \
+        broray-subscriptions \
+        broray-system
+    do
+        rm -f "/opt/bin/$command_name"
+    done
+
+    ndmc -c "no ip http proxy broray" >/dev/null 2>&1 || true
+    ndmc -c "system configuration save" >/dev/null 2>&1 || true
+fi
+
+exit 0

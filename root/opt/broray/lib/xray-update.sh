@@ -64,7 +64,7 @@ broray_xray_update_fetch_releases()
         --connect-timeout 15 \
         --max-time 120 \
         -H 'Accept: application/vnd.github+json' \
-        -H 'User-Agent: BROray/2.0.0' \
+        -H 'User-Agent: BROray/2.1.0' \
         "$BRORAY_XRAY_RELEASES_API" \
         >"$broray_release_tmp" ||
         {

@@ -1,7 +1,17 @@
 #!/bin/sh
 
 BRORAY_BASE="${BRORAY_BASE:-/opt/broray}"
-BRORAY_INTERFACE="${BRORAY_INTERFACE:-Proxy0}"
+BRORAY_INTERFACE_OWNER_LIBRARY="${BRORAY_INTERFACE_OWNER_LIBRARY:-$BRORAY_BASE/lib/interface-owner.sh}"
+
+if [ -r "$BRORAY_INTERFACE_OWNER_LIBRARY" ]; then
+    . "$BRORAY_INTERFACE_OWNER_LIBRARY"
+fi
+
+if command -v broray_interface_selected_name >/dev/null 2>&1; then
+    BRORAY_INTERFACE="$(broray_interface_selected_name)"
+else
+    BRORAY_INTERFACE="${BRORAY_INTERFACE:-Proxy0}"
+fi
 
 broray_interface_ndmc()
 {
@@ -170,9 +180,9 @@ broray_interface_check()
     fi
 
     if printf '%s\n' "$running_config" |
-        grep -q 'proxy upstream 192.168.1.1 2080'
+        grep -Fq "proxy upstream $BRORAY_PROXY_HOST $BRORAY_PROXY_PORT"
     then
-        echo "Upstream: 192.168.1.1:2080"
+        echo "Upstream: $BRORAY_PROXY_HOST:$BRORAY_PROXY_PORT"
     else
         echo "Upstream: отличается"
         failed=1

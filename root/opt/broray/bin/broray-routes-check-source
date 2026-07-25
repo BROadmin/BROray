@@ -1,0 +1,20 @@
+#!/opt/bin/ash
+
+set -u
+
+PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+
+ROOT="${BRORAY_ROOT:-/opt/broray}"
+CLI="$ROOT/bin/broray-routes"
+
+case "${1:-check}" in
+    check)
+        bundle_id="${2:-telegram}"
+        exec "$CLI" check "$bundle_id"
+        ;;
+    *)
+        echo "Использование: broray-routes-check-source [check [bundleId]]" >&2
+        exit 2
+        ;;
+esac

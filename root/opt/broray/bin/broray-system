@@ -1,0 +1,12 @@
+#!/opt/bin/ash
+
+BRORAY_SYSTEM_BASE="${BRORAY_BASE:-/opt/broray}"
+BRORAY_SYSTEM_LIB="${BRORAY_SYSTEM_LIB:-$BRORAY_SYSTEM_BASE/lib/broray-page.sh}"
+
+[ -r "$BRORAY_SYSTEM_LIB" ] || {
+    printf 'Не найден backend BROray: %s\n' "$BRORAY_SYSTEM_LIB" >&2
+    exit 1
+}
+
+. "$BRORAY_SYSTEM_LIB"
+broray_system_main "$@"

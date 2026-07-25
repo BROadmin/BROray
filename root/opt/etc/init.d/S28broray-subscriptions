@@ -1,0 +1,63 @@
+#!/bin/sh
+
+PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+
+DAEMON="/opt/broray/bin/broray-subscription-scheduler"
+PID_FILE="/opt/broray/run/subscription-scheduler.pid"
+
+start()
+{
+    if [ -f "$PID_FILE" ]; then
+        pid="$(cat "$PID_FILE" 2>/dev/null)"
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        rm -f "$PID_FILE"
+    fi
+    if command -v nohup >/dev/null 2>&1; then
+        nohup "$DAEMON" </dev/null >/dev/null 2>&1 &
+    else
+        "$DAEMON" </dev/null >/dev/null 2>&1 &
+    fi
+    attempt=0
+    while [ ! -f "$PID_FILE" ]; do
+        attempt=$((attempt + 1))
+        [ "$attempt" -lt 10 ] || break
+        sleep 1
+    done
+}
+
+stop()
+{
+    pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+        attempt=0
+        while kill -0 "$pid" 2>/dev/null; do
+            attempt=$((attempt + 1))
+            [ "$attempt" -lt 10 ] || break
+            sleep 1
+        done
+    fi
+    rm -f "$PID_FILE"
+}
+
+status()
+{
+    pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        printf 'running pid=%s\n' "$pid"
+        return 0
+    fi
+    printf 'stopped\n'
+    return 1
+}
+
+case "${1:-start}" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop; start ;;
+    status) status ;;
+    *) printf 'Использование: %s {start|stop|restart|status}\n' "$0" >&2; exit 1 ;;
+esac

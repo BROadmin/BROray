@@ -102,6 +102,11 @@ broray_interface_sync_description()
         return 1
     fi
 
+
+    if command -v broray_interface_require_owned >/dev/null 2>&1; then
+        broray_interface_require_owned "$BRORAY_INTERFACE" || return 1
+    fi
+
     expected="$(
         broray_interface_expected_description
     )"

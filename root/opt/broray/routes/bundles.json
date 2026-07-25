@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "bundles": [
+    "telegram",
+    "whatsapp",
+    "youtube",
+    "chatgpt",
+    "facebook",
+    "instagram",
+    "meta",
+    "tiktok",
+    "speedtest"
+  ]
+}

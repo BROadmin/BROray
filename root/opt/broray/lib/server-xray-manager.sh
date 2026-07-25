@@ -1,15 +1,16 @@
 #!/bin/sh
 
-. /opt/broray/lib/util.sh
-. /opt/broray/lib/server.sh
-. /opt/broray/lib/server-config-generator.sh
-. /opt/broray/lib/interface-core.sh
-. /opt/broray/lib/interface-sync.sh
+BRORAY_BASE="${BRORAY_BASE:-${BRORAY_ROOT:-/opt/broray}}"
 
-BRORAY_BASE="/opt/broray"
+. "$BRORAY_BASE/lib/util.sh"
+. "$BRORAY_BASE/lib/server.sh"
+. "$BRORAY_BASE/lib/server-config-generator.sh"
+. "$BRORAY_BASE/lib/interface-core.sh"
+. "$BRORAY_BASE/lib/interface-sync.sh"
+
 BRORAY_CONFIG="$BRORAY_BASE/config/config.json"
 BRORAY_BACKUP="$BRORAY_BASE/backup"
-BRORAY_INIT="/opt/etc/init.d/S24broray"
+BRORAY_INIT="${BRORAY_INIT:-/opt/etc/init.d/S24broray}"
 BRORAY_XRAY="$BRORAY_BASE/bin/xray"
 
 broray_xray_test_file() {

@@ -1,10 +1,11 @@
 #!/bin/sh
 
-. /opt/broray/lib/util.sh
-. /opt/broray/lib/parser-vless.sh
-. /opt/broray/lib/server.sh
+BRORAY_BASE="${BRORAY_BASE:-${BRORAY_ROOT:-/opt/broray}}"
 
-BRORAY_BASE="/opt/broray"
+. "$BRORAY_BASE/lib/util.sh"
+. "$BRORAY_BASE/lib/parser-vless.sh"
+. "$BRORAY_BASE/lib/server.sh"
+
 BRORAY_SERVERS="$BRORAY_BASE/servers"
 BRORAY_TMP="$BRORAY_BASE/tmp"
 
@@ -494,7 +495,7 @@ broray_server_import_vmess() {
     source_id="${3:-}"
     source_index="${4:-0}"
 
-    . /opt/broray/lib/parser-vmess.sh
+    . "$BRORAY_BASE/lib/parser-vmess.sh"
 
     broray_parse_vmess "$original_uri"
 
@@ -661,7 +662,7 @@ broray_server_import_trojan()
     source_id="${3:-}"
     source_index="${4:-0}"
 
-    . /opt/broray/lib/parser-trojan.sh
+    . "$BRORAY_BASE/lib/parser-trojan.sh"
 
     broray_parse_trojan "$original_uri"
 
@@ -828,7 +829,7 @@ broray_server_import_hysteria2()
     source_id="${3:-}"
     source_index="${4:-0}"
 
-    . /opt/broray/lib/parser-hysteria2.sh
+    . "$BRORAY_BASE/lib/parser-hysteria2.sh"
 
     broray_parse_hysteria2 "$original_uri"
 
@@ -924,4 +925,175 @@ broray_server_import()
                 "для протокола $protocol отсутствует импортёр"
             ;;
     esac
+}
+
+# BROray active subscription server transaction v1
+
+broray_server_import_dispatch()
+{
+    transaction_uri="$1"
+    transaction_source_type="${2:-manual}"
+    transaction_source_id="${3:-}"
+    transaction_source_index="${4:-0}"
+
+    transaction_protocol="$(
+        broray_server_detect_protocol "$transaction_uri"
+    )"
+
+    case "$transaction_protocol" in
+        vless)
+            broray_server_import_vless \
+                "$transaction_uri" \
+                "$transaction_source_type" \
+                "$transaction_source_id" \
+                "$transaction_source_index"
+            ;;
+        vmess)
+            broray_server_import_vmess \
+                "$transaction_uri" \
+                "$transaction_source_type" \
+                "$transaction_source_id" \
+                "$transaction_source_index"
+            ;;
+        trojan)
+            broray_server_import_trojan \
+                "$transaction_uri" \
+                "$transaction_source_type" \
+                "$transaction_source_id" \
+                "$transaction_source_index"
+            ;;
+        hysteria2)
+            broray_server_import_hysteria2 \
+                "$transaction_uri" \
+                "$transaction_source_type" \
+                "$transaction_source_id" \
+                "$transaction_source_index"
+            ;;
+        shadowsocks)
+            broray_die \
+                "парсер Shadowsocks ещё не реализован"
+            ;;
+        tuic)
+            broray_die \
+                "парсер TUIC ещё не реализован"
+            ;;
+        socks)
+            broray_die \
+                "парсер SOCKS ещё не реализован"
+            ;;
+        http)
+            broray_die \
+                "парсер HTTP-прокси ещё не реализован"
+            ;;
+        *)
+            broray_die \
+                "для протокола $transaction_protocol отсутствует импортёр"
+            ;;
+    esac
+}
+
+broray_server_import()
+{
+    transaction_uri="$1"
+    transaction_source_type="${2:-manual}"
+    transaction_source_id="${3:-}"
+    transaction_source_index="${4:-0}"
+
+    [ -n "$transaction_uri" ] ||
+        broray_die \
+            "не указана ссылка конфигурации"
+
+    transaction_active_id=""
+
+    if [ -f /opt/broray/config/active-server ]; then
+        transaction_active_id="$(
+            sed -n '1p' /opt/broray/config/active-server
+        )"
+    fi
+
+    transaction_target_id=""
+
+    if [ "$transaction_source_type" = "subscription" ]; then
+        case "$transaction_source_index" in
+            ''|*[!0-9]*)
+                broray_die \
+                    "неправильный индекс узла подписки"
+                ;;
+        esac
+
+        transaction_target_id="$(
+            printf 'subscription-%s-%04d' \
+                "$transaction_source_id" \
+                "$transaction_source_index"
+        )"
+    fi
+
+    transaction_old_server=""
+    transaction_is_active=false
+
+    if [ -n "$transaction_target_id" ] &&
+       [ "$transaction_target_id" = "$transaction_active_id" ]; then
+
+        transaction_is_active=true
+        transaction_old_server="/opt/broray/tmp/active-subscription-server.$$.json"
+
+        if [ -f "/opt/broray/servers/$transaction_target_id.json" ]; then
+            cp \
+                "/opt/broray/servers/$transaction_target_id.json" \
+                "$transaction_old_server" ||
+                broray_die \
+                    "не удалось сохранить прежнюю версию активного сервера"
+        fi
+    fi
+
+    if ! broray_server_import_dispatch \
+        "$transaction_uri" \
+        "$transaction_source_type" \
+        "$transaction_source_id" \
+        "$transaction_source_index"; then
+
+        rm -f "$transaction_old_server"
+        broray_die \
+            "не удалось импортировать сервер"
+    fi
+
+    if [ "$transaction_is_active" = true ]; then
+        echo
+        echo "Обновлён активный сервер подписки."
+        echo "Проверка и применение новой конфигурации..."
+
+        if (
+            broray_xray_apply_server "$transaction_target_id"
+        ); then
+            echo \
+                "Новая версия активного сервера успешно применена."
+            rm -f "$transaction_old_server"
+        else
+            echo \
+                "Новая версия активного сервера не применена. Выполняется восстановление." \
+                >&2
+
+            if [ -f "$transaction_old_server" ]; then
+                cp \
+                    "$transaction_old_server" \
+                    "/opt/broray/servers/$transaction_target_id.json" ||
+                    broray_die \
+                        "не удалось восстановить прежний сервер"
+            fi
+
+            if ! (
+                broray_xray_apply_server "$transaction_target_id"
+            ); then
+                rm -f "$transaction_old_server"
+
+                broray_die \
+                    "не удалось восстановить прежнюю рабочую конфигурацию активного сервера"
+            fi
+
+            rm -f "$transaction_old_server"
+
+            broray_die \
+                "обновление активного сервера отменено: сохранена прежняя рабочая версия"
+        fi
+    fi
 }

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "youtube",
+  "name": "YouTube",
+  "source": {
+    "provider": "github",
+    "repository": "RockBlack-VPN/ip-address",
+    "branch": "main",
+    "directory": "Global/Youtube",
+    "files": [
+      {
+        "name": "Only_YouTube_0.2.5.bat",
+        "type": "windows-route-bat",
+        "enabled": true
+      }
+    ],
+    "discovery": {
+      "mode": "all-bat",
+      "recursive": false
+    }
+  },
+  "targetInterface": "Proxy0",
+  "exportComment": "BROray",
+  "limits": {
+    "maxSourceBytes": 4194304,
+    "maxRoutes": 10000
+  }
+}

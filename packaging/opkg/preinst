@@ -1,0 +1,42 @@
+#!/bin/sh
+
+set -u
+
+[ -z "${IPKG_INSTROOT:-}" ] || exit 0
+
+for service in \
+    /opt/etc/init.d/S28broray-subscriptions \
+    /opt/etc/init.d/S27broray-auto-switch \
+    /opt/etc/init.d/S26broray-web-new \
+    /opt/etc/init.d/S25broray-web \
+    /opt/etc/init.d/S24broray \
+    /opt/etc/init.d/S23broray-monitor
+do
+    [ -x "$service" ] || continue
+    "$service" stop >/dev/null 2>&1 || true
+done
+
+if [ -d /opt/broray ]; then
+    backup_dir="/opt/broray/backups"
+    backup_stamp="$(date '+%Y%m%d-%H%M%S')"
+    backup_file="$backup_dir/opkg-before-2.1.0-$backup_stamp.tar.gz"
+
+    mkdir -p "$backup_dir" || exit 1
+
+    tar \
+        --exclude='broray/backup' \
+        --exclude='broray/backups' \
+        --exclude='broray/cache' \
+        --exclude='broray/logs' \
+        --exclude='broray/run' \
+        --exclude='broray/tmp' \
+        -czf "$backup_file" \
+        -C /opt \
+        broray ||
+        exit 1
+
+    chmod 600 "$backup_file"
+    printf 'Резервная копия: %s\n' "$backup_file"
+fi
+
+exit 0
