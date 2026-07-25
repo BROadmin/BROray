@@ -1,0 +1,90 @@
+#!/opt/bin/ash
+
+BRORAY_ROOT="${BRORAY_ROOT:-/opt/broray}"
+
+. "$BRORAY_ROOT/lib/subscription-service.sh"
+
+usage()
+{
+    cat <<'HELP'
+BROray Subscriptions
+
+Использование:
+  broray-subscriptions list
+  broray-subscriptions get <ID>
+  broray-subscriptions create <JSON_FILE|->
+  broray-subscriptions update <ID> <JSON_FILE|->
+  broray-subscriptions refresh <ID>
+  broray-subscriptions servers <ID>
+  broray-subscriptions delete <ID>
+  broray-subscriptions summary
+  broray-subscriptions scheduler-once
+  broray-subscriptions recover
+HELP
+}
+
+read_json_input()
+{
+    input_source="$1"
+    input_temp="$BRORAY_ROOT/tmp/subscription-cli-body.$$.json"
+    mkdir -p "$BRORAY_ROOT/tmp"
+    if [ "$input_source" = "-" ]; then
+        cat > "$input_temp"
+    else
+        cp "$input_source" "$input_temp"
+    fi
+    printf '%s\n' "$input_temp"
+}
+
+command_name="${1:-list}"
+case "$command_name" in
+    list)
+        broray_subscription_list
+        ;;
+    get)
+        broray_subscription_get "${2:-}"
+        ;;
+    create)
+        body_file="$(read_json_input "${2:--}")" || exit 1
+        broray_subscription_create "$body_file"
+        result="$?"
+        rm -f "$body_file"
+        exit "$result"
+        ;;
+    update)
+        subscription_id="${2:-}"
+        body_file="$(read_json_input "${3:--}")" || exit 1
+        broray_subscription_update_settings "$subscription_id" "$body_file"
+        result="$?"
+        rm -f "$body_file"
+        exit "$result"
+        ;;
+    refresh|update-now)
+        broray_subscription_update "${2:-}" manual
+        ;;
+    servers)
+        broray_subscription_servers "${2:-}"
+        ;;
+    delete)
+        broray_subscription_delete "${2:-}"
+        ;;
+    summary)
+        broray_subscription_summary
+        ;;
+    scheduler-once)
+        broray_subscription_scheduler_once
+        broray_subscription_summary
+        ;;
+    recover)
+        broray_subscription_recover_stale
+        broray_subscription_list
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        printf 'Неизвестная команда: %s\n\n' "$command_name" >&2
+        usage >&2
+        exit 1
+        ;;
+esac

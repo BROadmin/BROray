@@ -62,7 +62,7 @@ broray_interface_connect_value()
         '
 }
 
-broray_interface_create()
+broray_interface_create_unchecked()
 {
     if broray_interface_exists; then
         echo "ОШИБКА: интерфейс $BRORAY_INTERFACE уже существует" >&2
@@ -138,7 +138,7 @@ broray_interface_create()
     echo "Интерфейс $BRORAY_INTERFACE создан"
 }
 
-broray_interface_delete()
+broray_interface_delete_unchecked()
 {
     if ! broray_interface_exists; then
         echo "Интерфейс $BRORAY_INTERFACE уже отсутствует"
@@ -167,7 +167,7 @@ broray_interface_delete()
 }
 
 
-broray_interface_repair()
+broray_interface_repair_unchecked()
 {
     if ! broray_interface_exists; then
         echo "Интерфейс $BRORAY_INTERFACE отсутствует"
@@ -293,7 +293,7 @@ broray_interface_repair()
 
 
 # BROray override: create begin
-broray_interface_create()
+broray_interface_create_unchecked()
 {
     if broray_interface_exists; then
         echo "ОШИБКА: интерфейс $BRORAY_INTERFACE уже существует" >&2
@@ -367,3 +367,98 @@ broray_interface_create()
     echo "Интерфейс $BRORAY_INTERFACE создан"
 }
 # BROray override: create end
+
+
+# BROray ownership guard: public interface actions.
+broray_interface_select_for_action()
+{
+    local selected
+
+    command -v broray_interface_select_and_sync >/dev/null 2>&1 || {
+        echo "ОШИБКА: модуль безопасного выбора ProxyN недоступен" >&2
+        return 1
+    }
+
+    selected="$(broray_interface_select_and_sync)" || {
+        echo "ОШИБКА: не удалось выбрать свободный интерфейс ProxyN" >&2
+        return 1
+    }
+
+    BRORAY_INTERFACE="$selected"
+    export BRORAY_INTERFACE
+}
+
+broray_interface_create()
+{
+    broray_interface_select_for_action || return 1
+
+    if broray_interface_exists; then
+        if broray_interface_owner_valid "$BRORAY_INTERFACE"; then
+            echo "ОШИБКА: интерфейс $BRORAY_INTERFACE уже существует" >&2
+            echo "Используйте repair" >&2
+        else
+            echo "ОШИБКА: интерфейс $BRORAY_INTERFACE занят и не принадлежит BROray" >&2
+            echo "Чужой прокси-интерфейс оставлен без изменений" >&2
+        fi
+        return 1
+    fi
+
+    broray_interface_create_unchecked
+    create_rc=$?
+    if [ "$create_rc" -ne 0 ]; then
+        if broray_interface_owner_record_valid "$BRORAY_INTERFACE" &&
+           broray_interface_exists
+        then
+            broray_interface_delete_unchecked >/dev/null 2>&1 || true
+        fi
+        return "$create_rc"
+    fi
+
+    broray_interface_owner_signature_matches "$BRORAY_INTERFACE" || {
+        broray_interface_delete_unchecked >/dev/null 2>&1 || true
+        echo "ОШИБКА: созданный интерфейс не прошёл проверку принадлежности" >&2
+        return 1
+    }
+
+    broray_interface_owner_write "$BRORAY_INTERFACE" created || return 1
+    broray_interface_sync_route_policy "$BRORAY_INTERFACE" || return 1
+}
+
+broray_interface_repair()
+{
+    broray_interface_select_for_action || return 1
+
+    if broray_interface_exists; then
+        broray_interface_require_owned "$BRORAY_INTERFACE" || return 1
+        broray_interface_repair_unchecked || return $?
+    else
+        broray_interface_create_unchecked
+        create_rc=$?
+        if [ "$create_rc" -ne 0 ]; then
+            if broray_interface_owner_record_valid "$BRORAY_INTERFACE" &&
+               broray_interface_exists
+            then
+                broray_interface_delete_unchecked >/dev/null 2>&1 || true
+            fi
+            return "$create_rc"
+        fi
+    fi
+
+    broray_interface_owner_signature_matches "$BRORAY_INTERFACE" || {
+        echo "ОШИБКА: интерфейс не прошёл проверку принадлежности после восстановления" >&2
+        return 1
+    }
+
+    broray_interface_owner_write "$BRORAY_INTERFACE" repaired || return 1
+    broray_interface_sync_route_policy "$BRORAY_INTERFACE" || return 1
+}
+
+broray_interface_delete()
+{
+    if broray_interface_exists; then
+        broray_interface_require_owned "$BRORAY_INTERFACE" || return 1
+    fi
+
+    broray_interface_delete_unchecked || return $?
+    rm -f "$BRORAY_BASE/run/routes-router-config-cache.json" 2>/dev/null || true
+}

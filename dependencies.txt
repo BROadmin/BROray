@@ -1,4 +1,4 @@
-BROray 2.0.0
+BROray 2.1.0
 
 Поддерживаемая среда:
 - KeeneticOS
@@ -13,6 +13,7 @@ BROray 2.0.0
 - jq
 - lighttpd
 - lighttpd-mod-cgi
+- wget-ssl (для первичного подключения HTTPS-репозитория)
 
 Зависимости, устанавливаемые OPKG автоматически:
 - libc
@@ -30,9 +31,11 @@ BROray 2.0.0
 - zlib
 
 Встроенные компоненты:
-- Xray 26.7.11 linux/arm64
-- BROray WebUI
+- Xray 26.7.11 linux/arm64 из официального релиза XTLS/Xray-core
+- авторизованный BROray WebUI
 - BROray Connection Monitor
+- BROray Server Auto Switch
+- BROray Subscription Scheduler
 
 Команды KeeneticOS, необходимые установщику:
 - ndmc

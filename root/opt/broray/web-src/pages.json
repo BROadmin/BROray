@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "navigation": [
+    {
+      "id": "home",
+      "label": "Главная",
+      "href": "/home.html",
+      "icon": "home"
+    },
+    {
+      "id": "servers",
+      "label": "Серверы",
+      "href": "/servers.html",
+      "icon": "servers"
+    },
+    {
+      "id": "subscriptions",
+      "label": "Подписки",
+      "href": "/subscriptions.html",
+      "icon": "subscriptions"
+    },
+    {
+      "id": "routes",
+      "label": "Маршруты",
+      "href": "/routes.html",
+      "icon": "routes"
+    },
+    {
+      "id": "keenetic",
+      "label": "Keenetic",
+      "href": "/keenetic.html",
+      "icon": "keenetic"
+    },
+    {
+      "id": "xray",
+      "label": "Xray",
+      "href": "/xray.html",
+      "icon": "xray"
+    },
+    {
+      "id": "broray",
+      "label": "BROray",
+      "href": "/broray.html",
+      "icon": "security"
+    }
+  ],
+  "pages": [
+    {
+      "id": "home",
+      "output": "home.html",
+      "content": "pages/home.html",
+      "extras": "page-extras/home.html",
+      "html_title": "BROray — Главная",
+      "section": "Обзор",
+      "title": "Главная",
+      "scripts": [
+        "home.js"
+      ],
+      "styles": []
+    },
+    {
+      "id": "servers",
+      "output": "servers.html",
+      "content": "pages/servers.html",
+      "extras": "page-extras/servers.html",
+      "html_title": "BROray — Серверы",
+      "section": "Подключения",
+      "title": "Серверы",
+      "scripts": [
+        "dialogs.js",
+        "servers-completion.js",
+        "servers.js",
+        "servers-import-preflight.js",
+        "servers-check-all.js",
+        "servers-auto-switch.js"
+      ],
+      "styles": []
+    },
+    {
+      "id": "subscriptions",
+      "output": "subscriptions.html",
+      "content": "pages/subscriptions.html",
+      "extras": "page-extras/subscriptions.html",
+      "html_title": "BROray — Подписки",
+      "section": "Источники серверов",
+      "title": "Подписки",
+      "scripts": [
+        "dialogs.js",
+        "subscriptions.js"
+      ],
+      "styles": []
+    },
+    {
+      "id": "routes",
+      "output": "routes.html",
+      "content": "pages/routes.html",
+      "extras": "page-extras/routes.html",
+      "html_title": "BROray — Маршруты",
+      "section": "Сеть",
+      "title": "Маршруты",
+      "scripts": [
+        "dialogs.js",
+        "routes.js"
+      ],
+      "styles": []
+    },
+    {
+      "id": "keenetic",
+      "output": "keenetic.html",
+      "content": "pages/keenetic.html",
+      "extras": "page-extras/keenetic.html",
+      "html_title": "BROray — Keenetic",
+      "section": "Интеграция",
+      "title": "Keenetic",
+      "scripts": [
+        "dialogs.js",
+        "keenetic.js"
+      ],
+      "styles": []
+    },
+    {
+      "id": "xray",
+      "output": "xray.html",
+      "content": "pages/xray.html",
+      "extras": "page-extras/xray.html",
+      "html_title": "BROray — Xray",
+      "section": "Система",
+      "title": "Xray",
+      "scripts": [
+        "dialogs.js",
+        "xray.js",
+        "operation-log.js"
+      ],
+      "styles": []
+    },
+    {
+      "id": "broray",
+      "output": "broray.html",
+      "content": "pages/broray.html",
+      "extras": "page-extras/broray.html",
+      "html_title": "BROray — О программе",
+      "section": "Система",
+      "title": "BROray",
+      "scripts": [
+        "dialogs.js",
+        "broray.js"
+      ],
+      "styles": []
+    }
+  ]
+}

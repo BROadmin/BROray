@@ -1,0 +1,122 @@
+<main class="workspace-content servers-page">
+    <section class="page-heading servers-page-heading" aria-labelledby="servers-page-title">
+        <div>
+            <span class="eyebrow">Подключения</span>
+            <h1 id="servers-page-title">Серверы</h1>
+            <p>
+                Управляйте сохранёнными подключениями Xray, проверяйте доступность
+                и выбирайте активный сервер.
+            </p>
+        </div>
+        <div id="servers-live-status" class="servers-live-status status-loading" role="status">
+            <span id="servers-live-dot" class="servers-live-dot" aria-hidden="true"></span>
+            <span id="servers-live-text">Загрузка…</span>
+        </div>
+    </section>
+
+    <section class="servers-overview" aria-label="Сводка серверов">
+        <article class="server-active-card ui-card">
+            <div class="server-active-top">
+                <div class="server-active-copy">
+                    <span id="connection-state-badge" class="status-badge status-badge-neutral" data-icon="connection">
+                        Проверяется
+                    </span>
+                    <span class="server-card-label">Активное подключение</span>
+                    <h2 id="active-server-name">Получение данных…</h2>
+                    <p id="active-server-description">Проверяется состояние подключения.</p>
+                    <div id="active-server-protocols" class="server-card-tags active-server-protocols"></div>
+                </div>
+                <span id="active-server-mark" class="server-mark" data-icon="servers" aria-hidden="true"></span>
+            </div>
+            <div id="active-server-meta" class="server-active-meta"></div>
+            <div class="server-active-actions">
+                <button id="check-active-server" class="button button-secondary" data-icon="speed" type="button" disabled>
+                    Проверить
+                </button>
+                <button id="deactivate-servers" class="button button-danger-outline" data-icon="exit" type="button" disabled>
+                    Отключить VPN
+                </button>
+            </div>
+            <p class="server-deactivate-note">
+                Отключение останавливает Xray, но не удаляет серверы и подписки.
+            </p>
+        </article>
+
+        <div class="servers-metrics-grid" role="list" aria-label="Показатели серверов">
+            <article class="server-metric-card ui-card" role="listitem">
+                <span>Всего</span>
+                <strong id="servers-total">—</strong>
+                <small>сохранённых серверов</small>
+            </article>
+            <article class="server-metric-card ui-card" role="listitem">
+                <span>Доступно</span>
+                <strong id="servers-available">—</strong>
+                <small>по последней проверке</small>
+            </article>
+            <article class="server-metric-card ui-card" role="listitem">
+                <span>Недоступно</span>
+                <strong id="servers-unavailable">—</strong>
+                <small>по последней проверке</small>
+            </article>
+            <article class="server-metric-card ui-card" role="listitem">
+                <span>Автовыбор</span>
+                <strong id="servers-auto-switch">—</strong>
+                <small id="servers-selection-rule">Ручной выбор</small>
+            </article>
+        </div>
+    </section>
+
+    <section class="servers-section servers-import-section ui-card" aria-labelledby="servers-import-title">
+        <div class="servers-section-heading">
+            <div>
+                <span class="eyebrow">Добавление</span>
+                <h2 id="servers-import-title">Импорт сервера</h2>
+                <p>Добавьте одну или несколько URI-конфигураций.</p>
+            </div>
+            <button id="toggle-import" class="button button-primary" data-icon="add" type="button" aria-expanded="false" aria-controls="server-import-card">
+                Добавить сервер
+            </button>
+        </div>
+        <article id="server-import-card" class="server-import-card" hidden>
+            <form id="server-import-form" novalidate>
+                <div class="field">
+                    <label class="field-label" for="server-import-uri">URI конфигурации</label>
+                    <textarea id="server-import-uri" name="server-uri" rows="5"
+                              placeholder="vless://, vmess://, trojan:// или hysteria2://"
+                              spellcheck="false" autocapitalize="none"></textarea>
+                </div>
+                <p class="server-form-note">
+                    Для изменения параметров удалите сервер и импортируйте его заново.
+                </p>
+                <div class="server-form-actions">
+                    <button id="cancel-import" class="button button-secondary" data-icon="close" type="button">Отмена</button>
+                    <button id="submit-import" class="button button-primary" data-icon="search" type="submit">Проверить конфигурацию</button>
+                </div>
+            </form>
+        </article>
+    </section>
+
+    <section class="servers-section servers-list-section ui-card" aria-labelledby="servers-list-title">
+        <div class="servers-section-heading">
+            <div>
+                <span class="eyebrow">Список</span>
+                <h2 id="servers-list-title">Сохранённые серверы</h2>
+                <p id="servers-list-description">Получение списка…</p>
+            </div>
+            <div class="servers-section-actions">
+                <button id="refresh-servers" class="button button-secondary" data-icon="update" type="button">
+                    Обновить данные
+                </button>
+                <button id="check-all-servers" class="button button-primary" data-icon="speed" type="button" aria-label="Проверить все сохранённые серверы">
+                    Проверить все
+                </button>
+            </div>
+        </div>
+        <div id="servers-list" class="servers-list" aria-live="polite">
+            <article class="servers-loading-card">
+                <span class="large-spinner" aria-hidden="true"></span>
+                <span>Загрузка серверов…</span>
+            </article>
+        </div>
+    </section>
+</main>

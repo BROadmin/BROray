@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru" data-build-id="{{BUILD_ID}}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#0b1117">
+    <meta name="robots" content="noindex,nofollow">
+    <title>{{HTML_TITLE}}</title>
+    <link rel="icon" href="/assets/images/branding/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png">
+    <link rel="manifest" href="/manifest.json?v={{BUILD_ID}}">
+{{STYLE_LINKS}}
+    <script src="/assets/js/theme-init.js?v={{BUILD_ID}}"></script>
+</head>
+<body class="app-body page-{{PAGE_ID}}" data-page="{{PAGE_ID}}" data-webui-build="{{BUILD_ID}}">
+    <div id="app" class="app-layout" hidden>
+        <aside id="sidebar" class="sidebar" aria-label="Основная навигация">
+            <div class="sidebar-header">
+                <a class="sidebar-brand" href="/home.html" aria-label="BROray — Главная">
+                    <span class="sidebar-brand-mark" aria-hidden="true">
+                        <img class="sidebar-brand-image" src="/assets/images/branding/broray-logo-64.png" alt="" width="40" height="40">
+                    </span>
+                    <span class="sidebar-brand-copy">
+                        <strong>BROray</strong>
+                        <small>Менеджер Xray</small>
+                    </span>
+                </a>
+                <button id="sidebar-collapse" class="sidebar-icon-button sidebar-collapse-button" type="button" aria-label="Свернуть боковое меню" aria-expanded="true">
+                    <span id="sidebar-collapse-symbol" class="sidebar-collapse-symbol" data-icon="chevron" aria-hidden="true"></span>
+                </button>
+            </div>
+            <nav class="sidebar-navigation" aria-label="Разделы BROray">
+{{NAVIGATION}}
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sidebar-user">
+                    <span class="sidebar-user-avatar" data-icon="user" aria-hidden="true"></span>
+                    <span class="sidebar-user-copy">
+                        <strong id="current-user"></strong>
+                        <small>KeeneticOS</small>
+                    </span>
+                </div>
+                <button id="logout-button" class="sidebar-logout" type="button">
+                    <span class="sidebar-link-icon" data-icon="exit" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Выйти</span>
+                </button>
+            </div>
+        </aside>
+        <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Закрыть меню" hidden></button>
+        <div class="app-workspace">
+            <header class="workspace-header">
+                <div class="workspace-header-primary">
+                    <button id="mobile-menu-button" class="sidebar-icon-button mobile-menu-button" data-icon="menu" type="button" aria-label="Открыть меню" aria-controls="sidebar" aria-expanded="false"></button>
+                    <div class="workspace-title">
+                        <span class="workspace-section">{{WORKSPACE_SECTION}}</span>
+                        <strong>{{WORKSPACE_TITLE}}</strong>
+                    </div>
+                </div>
+                <div class="workspace-header-actions">
+                    <div id="theme-control-mount" class="theme-control-mount"></div>
+                    <button id="refresh-status" class="button button-secondary button-compact" data-icon="update" type="button" hidden aria-hidden="true" tabindex="-1">Обновить</button>
+                </div>
+            </header>
+{{PAGE_CONTENT}}
+            <footer class="workspace-footer">
+                <span>BROray · Менеджер Xray для Keenetic</span>
+                <a href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Поддержать проект</a>
+            </footer>
+        </div>
+    </div>
+    <div id="page-loader" class="page-loader">
+        <span class="loader-spinner" aria-hidden="true"></span>
+        <span>Загрузка BROray…</span>
+    </div>
+    <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+    <div id="confirm-root" class="modal-root" hidden>
+        <button id="confirm-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть"></button>
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+            <span id="confirm-eyebrow" class="eyebrow">Подтверждение</span>
+            <h2 id="confirm-title">Подтвердите действие</h2>
+            <p id="confirm-message"></p>
+            <div id="confirm-input-group" class="modal-input-group" hidden>
+                <label id="confirm-input-label" for="confirm-input">Введите значение</label>
+                <input id="confirm-input" type="text" autocomplete="off" spellcheck="false">
+                <p id="confirm-input-hint" class="modal-input-hint" hidden></p>
+                <p id="confirm-input-error" class="modal-input-error" role="alert" hidden></p>
+            </div>
+            <div class="modal-actions">
+                <button id="confirm-cancel" class="button button-secondary" type="button">Отмена</button>
+                <button id="confirm-accept" class="button button-danger" type="button">Продолжить</button>
+            </div>
+        </section>
+    </div>
+{{PAGE_EXTRAS}}
+    <script src="/assets/js/common.js?v={{BUILD_ID}}"></script>
+    <script src="/assets/js/icons.js?v={{BUILD_ID}}"></script>
+    <script src="/assets/js/app-shell.js?v={{BUILD_ID}}"></script>
+    <script src="/assets/js/theme.js?v={{BUILD_ID}}"></script>
+{{PAGE_SCRIPTS}}
+</body>
+</html>

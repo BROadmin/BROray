@@ -1,0 +1,439 @@
+#!/opt/bin/ash
+
+PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+
+ROOT="/opt/broray"
+SOURCE_CONFIG="${1:-}"
+SERVER_ID="${2:-unknown}"
+
+WORK="/tmp/broray-server-probe-$$"
+CONFIG="$WORK/config.json"
+XRAY_LOG="$WORK/xray.log"
+CURL_LOG="$WORK/curl.log"
+
+XRAY_PID=""
+
+cleanup()
+{
+    if [ -n "$XRAY_PID" ] &&
+       kill -0 "$XRAY_PID" 2>/dev/null
+    then
+        kill "$XRAY_PID" 2>/dev/null || true
+        sleep 1
+
+        if kill -0 "$XRAY_PID" 2>/dev/null; then
+            kill -9 "$XRAY_PID" 2>/dev/null || true
+        fi
+
+        wait "$XRAY_PID" 2>/dev/null || true
+    fi
+
+    rm -rf "$WORK"
+}
+
+trap cleanup EXIT
+trap 'exit 130' HUP INT TERM
+
+emit()
+{
+    SUCCESS="$1"
+    STAGE="$2"
+    ERROR_TEXT="$3"
+    URL="$4"
+    HTTP="$5"
+    LATENCY="$6"
+
+    case "$HTTP" in
+        ''|*[!0-9]*)
+            HTTP_JSON="null"
+            ;;
+
+        *)
+            HTTP_JSON="$HTTP"
+            ;;
+    esac
+
+    case "$LATENCY" in
+        ''|*[!0-9]*)
+            LATENCY_JSON="null"
+            ;;
+
+        *)
+            LATENCY_JSON="$LATENCY"
+            ;;
+    esac
+
+    jq -n \
+        --arg serverId "$SERVER_ID" \
+        --argjson success "$SUCCESS" \
+        --arg stage "$STAGE" \
+        --arg error "$ERROR_TEXT" \
+        --arg url "$URL" \
+        --argjson httpStatus "$HTTP_JSON" \
+        --argjson latencyMs "$LATENCY_JSON" \
+        --arg checkedAt "$(date '+%Y-%m-%dT%H:%M:%S%z')" '
+        {
+            serverId: $serverId,
+            success: $success,
+            stage: $stage,
+
+            url: (
+                if $url == ""
+                then null
+                else $url
+                end
+            ),
+
+            httpStatus: $httpStatus,
+            latencyMs: $latencyMs,
+
+            error: (
+                if $error == ""
+                then null
+                else $error
+                end
+            ),
+
+            checkedAt: $checkedAt
+        }
+    '
+}
+
+fail_probe()
+{
+    emit \
+        false \
+        "$1" \
+        "$2" \
+        "${3:-}" \
+        "${4:-}" \
+        "${5:-}"
+
+    exit 1
+}
+
+[ -s "$SOURCE_CONFIG" ] ||
+    fail_probe \
+        "probe-config" \
+        "Временная конфигурация сервера не найдена."
+
+jq -e \
+    '
+        type == "object"
+        and
+        (.outbounds | type) == "array"
+        and
+        (.outbounds | length) > 0
+    ' \
+    "$SOURCE_CONFIG" \
+    >/dev/null 2>&1 ||
+    fail_probe \
+        "probe-config" \
+        "Сформирована некорректная конфигурация Xray."
+
+mkdir -m 700 "$WORK" ||
+    fail_probe \
+        "probe-workdir" \
+        "Не удалось создать временный каталог."
+
+if [ -r "$ROOT/lib/xray.sh" ]; then
+    . "$ROOT/lib/xray.sh"
+fi
+
+XRAY_BIN="${BRORAY_XRAY_BINARY:-$ROOT/bin/xray}"
+XRAY_ASSET_DIR="${BRORAY_XRAY_ASSET_DIR:-}"
+
+[ -x "$XRAY_BIN" ] ||
+    fail_probe \
+        "probe-xray" \
+        "Бинарный файл Xray недоступен."
+
+port_used()
+{
+    netstat -lnt 2>/dev/null |
+        awk -v port="$1" '
+            $4 ~ (":" port "$") {
+                found = 1
+            }
+
+            END {
+                exit found ? 0 : 1
+            }
+        '
+}
+
+PORT=$((35000 + ($$ % 18000)))
+ATTEMPT=0
+
+while port_used "$PORT"
+do
+    PORT=$((PORT + 1))
+    ATTEMPT=$((ATTEMPT + 1))
+
+    [ "$PORT" -le 54999 ] ||
+        PORT=35000
+
+    [ "$ATTEMPT" -lt 200 ] ||
+        fail_probe \
+            "probe-port" \
+            "Не удалось подобрать свободный порт."
+done
+
+INBOUND_TAG="$(
+    jq -r \
+        '.inbounds[0].tag // "broray-test-socks"' \
+        "$SOURCE_CONFIG" \
+        2>/dev/null
+)"
+
+[ -n "$INBOUND_TAG" ] ||
+    INBOUND_TAG="broray-test-socks"
+
+jq \
+    --arg tag "$INBOUND_TAG" \
+    --argjson port "$PORT" '
+    .log = {
+        loglevel: "warning"
+    }
+    |
+    .inbounds = [
+        {
+            tag: $tag,
+            listen: "127.0.0.1",
+            port: $port,
+            protocol: "socks",
+
+            settings: {
+                auth: "noauth",
+                udp: false
+            },
+
+            sniffing: {
+                enabled: true,
+
+                destOverride: [
+                    "http",
+                    "tls",
+                    "quic"
+                ],
+
+                routeOnly: true
+            }
+        }
+    ]
+' \
+    "$SOURCE_CONFIG" \
+    > "$CONFIG" ||
+    fail_probe \
+        "probe-config" \
+        "Не удалось подготовить конфигурацию пробника."
+
+run_test()
+{
+    if [ -n "$XRAY_ASSET_DIR" ]; then
+        XRAY_LOCATION_ASSET="$XRAY_ASSET_DIR" \
+            "$XRAY_BIN" \
+            run \
+            -test \
+            -c "$CONFIG"
+    else
+        "$XRAY_BIN" \
+            run \
+            -test \
+            -c "$CONFIG"
+    fi
+}
+
+run_start()
+{
+    if [ -n "$XRAY_ASSET_DIR" ]; then
+        XRAY_LOCATION_ASSET="$XRAY_ASSET_DIR"
+        export XRAY_LOCATION_ASSET
+    fi
+
+    exec \
+        "$XRAY_BIN" \
+        run \
+        -c "$CONFIG"
+}
+
+if ! run_test > "$XRAY_LOG" 2>&1; then
+    MESSAGE="$(
+        tail -n 25 "$XRAY_LOG" |
+            tr '\n' ' ' |
+            cut -c 1-800
+    )"
+
+    [ -n "$MESSAGE" ] ||
+        MESSAGE="Конфигурация пробника не прошла проверку."
+
+    fail_probe \
+        "probe-xray-config" \
+        "$MESSAGE"
+fi
+
+run_start > "$XRAY_LOG" 2>&1 &
+
+XRAY_PID="$!"
+READY=false
+ATTEMPT=0
+
+while [ "$ATTEMPT" -lt 12 ]
+do
+    if ! kill -0 "$XRAY_PID" 2>/dev/null; then
+        MESSAGE="$(
+            tail -n 25 "$XRAY_LOG" |
+                tr '\n' ' ' |
+                cut -c 1-800
+        )"
+
+        [ -n "$MESSAGE" ] ||
+            MESSAGE="Тестовый Xray завершился после запуска."
+
+        fail_probe \
+            "probe-xray-start" \
+            "$MESSAGE"
+    fi
+
+    if port_used "$PORT"; then
+        READY=true
+        break
+    fi
+
+    ATTEMPT=$((ATTEMPT + 1))
+    sleep 1
+done
+
+[ "$READY" = "true" ] ||
+    fail_probe \
+        "probe-socks-listen" \
+        "Тестовый SOCKS-порт не начал принимать соединения."
+
+if curl --help all 2>/dev/null |
+    grep -q -- '--socks5-hostname'
+then
+    SOCKS_OPTION="--socks5-hostname"
+    SOCKS_VALUE="127.0.0.1:$PORT"
+else
+    SOCKS_OPTION="--proxy"
+    SOCKS_VALUE="socks5h://127.0.0.1:$PORT"
+fi
+
+LAST_STAGE="proxy-https"
+LAST_ERROR="HTTPS-запрос через сервер не выполнен."
+LAST_URL=""
+LAST_HTTP=""
+LAST_LATENCY=""
+
+for URL in \
+    "https://cp.cloudflare.com/generate_204" \
+    "https://www.gstatic.com/generate_204" \
+    "https://connectivitycheck.gstatic.com/generate_204" \
+    "https://www.cloudflare.com/cdn-cgi/trace"
+do
+    rm -f "$CURL_LOG"
+
+    RESULT="$(
+        curl \
+            --silent \
+            --show-error \
+            --location \
+            --connect-timeout 6 \
+            --max-time 16 \
+            "$SOCKS_OPTION" "$SOCKS_VALUE" \
+            --output /dev/null \
+            --write-out '%{http_code} %{time_total}' \
+            "$URL" \
+            2> "$CURL_LOG"
+    )"
+
+    CODE="$?"
+
+    HTTP="$(
+        printf '%s\n' "$RESULT" |
+            awk '{print $1}'
+    )"
+
+    TOTAL="$(
+        printf '%s\n' "$RESULT" |
+            awk '{print $2}'
+    )"
+
+    LATENCY="$(
+        awk -v value="$TOTAL" '
+            BEGIN {
+                if (
+                    value ~
+                    /^[0-9]+([.][0-9]+)?$/
+                ) {
+                    printf "%d",
+                        (value * 1000) + 0.5
+                }
+            }
+        '
+    )"
+
+    case "$HTTP" in
+        2??|3??)
+            if [ "$CODE" -eq 0 ]; then
+                emit \
+                    true \
+                    "proxy-https" \
+                    "" \
+                    "$URL" \
+                    "$HTTP" \
+                    "$LATENCY"
+
+                exit 0
+            fi
+            ;;
+    esac
+
+    MESSAGE="$(
+        tail -n 8 "$CURL_LOG" |
+            tr '\n' ' ' |
+            cut -c 1-600
+    )"
+
+    [ -n "$MESSAGE" ] ||
+        MESSAGE="curl завершился с кодом $CODE"
+
+    case "$CODE" in
+        5|6)
+            LAST_STAGE="proxy-dns"
+            ;;
+
+        7)
+            LAST_STAGE="proxy-connect"
+            ;;
+
+        28)
+            LAST_STAGE="proxy-timeout"
+            ;;
+
+        35|51|53|58|59|60|64|66|77|80|82|83|90|91)
+            LAST_STAGE="proxy-tls"
+            ;;
+
+        97)
+            LAST_STAGE="socks-handshake"
+            ;;
+
+        *)
+            LAST_STAGE="proxy-https"
+            ;;
+    esac
+
+    LAST_ERROR="$MESSAGE"
+    LAST_URL="$URL"
+    LAST_HTTP="$HTTP"
+    LAST_LATENCY="$LATENCY"
+done
+
+fail_probe \
+    "$LAST_STAGE" \
+    "Реальный HTTPS-запрос через сервер не прошёл: $LAST_ERROR" \
+    "$LAST_URL" \
+    "$LAST_HTTP" \
+    "$LAST_LATENCY"

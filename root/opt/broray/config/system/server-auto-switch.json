@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 2,
+  "enabled": false,
+  "failureThreshold": 3,
+  "cooldownMinutes": 10,
+  "minimumRating": "acceptable",
+  "selectionRule": "best-quality",
+  "preferredServerId": null,
+  "updatedAt": null
+}

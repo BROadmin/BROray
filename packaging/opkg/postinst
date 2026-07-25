@@ -1,0 +1,5 @@
+#!/bin/sh
+
+[ -z "${IPKG_INSTROOT:-}" ] || exit 0
+
+exec /opt/bin/ash /opt/broray/lib/package-setup.sh

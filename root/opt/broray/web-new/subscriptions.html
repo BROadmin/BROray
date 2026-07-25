@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ru" data-build-id="20260725-webui-desktop-layout-11">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#0b1117">
+    <meta name="robots" content="noindex,nofollow">
+    <title>BROray — Подписки</title>
+    <link rel="icon" href="/assets/images/branding/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png">
+    <link rel="manifest" href="/manifest.json?v=20260725-webui-desktop-layout-11">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=20260725-webui-desktop-layout-11">
+    <script src="/assets/js/theme-init.js?v=20260725-webui-desktop-layout-11"></script>
+</head>
+<body class="app-body page-subscriptions" data-page="subscriptions" data-webui-build="20260725-webui-desktop-layout-11">
+    <div id="app" class="app-layout" hidden>
+        <aside id="sidebar" class="sidebar" aria-label="Основная навигация">
+            <div class="sidebar-header">
+                <a class="sidebar-brand" href="/home.html" aria-label="BROray — Главная">
+                    <span class="sidebar-brand-mark" aria-hidden="true">
+                        <img class="sidebar-brand-image" src="/assets/images/branding/broray-logo-64.png" alt="" width="40" height="40">
+                    </span>
+                    <span class="sidebar-brand-copy">
+                        <strong>BROray</strong>
+                        <small>Менеджер Xray</small>
+                    </span>
+                </a>
+                <button id="sidebar-collapse" class="sidebar-icon-button sidebar-collapse-button" type="button" aria-label="Свернуть боковое меню" aria-expanded="true">
+                    <span id="sidebar-collapse-symbol" class="sidebar-collapse-symbol" data-icon="chevron" aria-hidden="true"></span>
+                </button>
+            </div>
+            <nav class="sidebar-navigation" aria-label="Разделы BROray">
+                <a class="sidebar-link" href="/home.html" title="Главная" data-page="home">
+                    <span class="sidebar-link-icon" data-icon="home" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Главная</span>
+                </a>
+                <a class="sidebar-link" href="/servers.html" title="Серверы" data-page="servers">
+                    <span class="sidebar-link-icon" data-icon="servers" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Серверы</span>
+                </a>
+                <a class="sidebar-link sidebar-link-active" href="/subscriptions.html" title="Подписки" data-page="subscriptions" aria-current="page">
+                    <span class="sidebar-link-icon" data-icon="subscriptions" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Подписки</span>
+                </a>
+                <a class="sidebar-link" href="/routes.html" title="Маршруты" data-page="routes">
+                    <span class="sidebar-link-icon" data-icon="routes" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Маршруты</span>
+                </a>
+                <a class="sidebar-link" href="/keenetic.html" title="Keenetic" data-page="keenetic">
+                    <span class="sidebar-link-icon" data-icon="keenetic" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Keenetic</span>
+                </a>
+                <a class="sidebar-link" href="/xray.html" title="Xray" data-page="xray">
+                    <span class="sidebar-link-icon" data-icon="xray" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Xray</span>
+                </a>
+                <a class="sidebar-link" href="/broray.html" title="BROray" data-page="broray">
+                    <span class="sidebar-link-icon" data-icon="security" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">BROray</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sidebar-user">
+                    <span class="sidebar-user-avatar" data-icon="user" aria-hidden="true"></span>
+                    <span class="sidebar-user-copy">
+                        <strong id="current-user"></strong>
+                        <small>KeeneticOS</small>
+                    </span>
+                </div>
+                <button id="logout-button" class="sidebar-logout" type="button">
+                    <span class="sidebar-link-icon" data-icon="exit" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Выйти</span>
+                </button>
+            </div>
+        </aside>
+        <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Закрыть меню" hidden></button>
+        <div class="app-workspace">
+            <header class="workspace-header">
+                <div class="workspace-header-primary">
+                    <button id="mobile-menu-button" class="sidebar-icon-button mobile-menu-button" data-icon="menu" type="button" aria-label="Открыть меню" aria-controls="sidebar" aria-expanded="false"></button>
+                    <div class="workspace-title">
+                        <span class="workspace-section">Источники серверов</span>
+                        <strong>Подписки</strong>
+                    </div>
+                </div>
+                <div class="workspace-header-actions">
+                    <div id="theme-control-mount" class="theme-control-mount"></div>
+                    <button id="refresh-status" class="button button-secondary button-compact" data-icon="update" type="button" hidden aria-hidden="true" tabindex="-1">Обновить</button>
+                </div>
+            </header>
+<main class="workspace-content subscriptions-page" aria-labelledby="subscriptions-page-title">
+    <section class="subscriptions-heading page-heading">
+        <div>
+            <span class="eyebrow">Источники серверов</span>
+            <h1 id="subscriptions-page-title">Подписки</h1>
+            <p>Загрузка и синхронизация серверов через единый серверный модуль. Подписка не управляет Xray напрямую.</p>
+        </div>
+        <button id="add-subscription" class="button button-primary" data-icon="add" type="button">
+            <span class="button-label">Добавить подписку</span>
+        </button>
+    </section>
+
+    <section class="subscriptions-summary" aria-label="Сводка подписок">
+        <article class="subscription-metric">
+            <span>Всего</span>
+            <strong id="subscriptions-total">—</strong>
+        </article>
+        <article class="subscription-metric">
+            <span>Активно</span>
+            <strong id="subscriptions-enabled">—</strong>
+        </article>
+        <article class="subscription-metric">
+            <span>Серверов</span>
+            <strong id="subscriptions-servers">—</strong>
+        </article>
+        <article class="subscription-metric subscription-metric-wide">
+            <span>Последнее обновление</span>
+            <strong id="subscriptions-last-status">—</strong>
+            <small id="subscriptions-last-time">—</small>
+        </article>
+    </section>
+
+    <section id="subscription-form-panel" class="subscription-form-panel" hidden aria-labelledby="subscription-form-title">
+        <div class="subscription-section-heading">
+            <div>
+                <span class="eyebrow">Настройка источника</span>
+                <h2 id="subscription-form-title">Добавить подписку</h2>
+            </div>
+        </div>
+        <form id="subscription-form" class="subscription-form-grid">
+            <label class="subscription-field" for="subscription-name">
+                <span>Название</span>
+                <input id="subscription-name" name="name" maxlength="128" autocomplete="off" required>
+            </label>
+            <label class="subscription-field" for="subscription-interval">
+                <span>Интервал, минут</span>
+                <input id="subscription-interval" name="interval" type="number" min="5" max="10080" step="1" value="360" required>
+            </label>
+            <label class="subscription-field subscription-field-wide" for="subscription-url">
+                <span>URL подписки</span>
+                <input id="subscription-url" name="url" type="url" maxlength="4096" autocomplete="off" spellcheck="false" placeholder="https://example.com/subscription?token=…" required>
+            </label>
+            <div class="subscription-switches" aria-label="Параметры подписки">
+                <label class="subscription-switch-row" for="subscription-enabled">
+                    <input id="subscription-enabled" type="checkbox" checked>
+                    <span>Подписка активна</span>
+                </label>
+                <label class="subscription-switch-row" for="subscription-auto">
+                    <input id="subscription-auto" type="checkbox" checked>
+                    <span>Автообновление включено</span>
+                </label>
+                <label id="subscription-immediate-row" class="subscription-switch-row" for="subscription-immediate">
+                    <input id="subscription-immediate" type="checkbox" checked>
+                    <span>Обновить после добавления</span>
+                </label>
+            </div>
+            <div class="subscription-form-actions">
+                <button id="subscription-cancel" class="button button-secondary" type="button">
+                    <span class="button-label">Отмена</span>
+                </button>
+                <button id="subscription-submit" class="button button-primary" data-icon="update" type="submit">
+                    <span class="button-label">Сохранить</span>
+                    <span class="button-spinner" aria-hidden="true"></span>
+                </button>
+            </div>
+        </form>
+    </section>
+
+    <section id="subscriptions-list" class="subscription-list" aria-live="polite" aria-busy="true">
+        <div class="subscription-loading">
+            <span class="loader-spinner" aria-hidden="true"></span>
+            <span>Загрузка подписок…</span>
+        </div>
+    </section>
+</main>
+            <footer class="workspace-footer">
+                <span>BROray · Менеджер Xray для Keenetic</span>
+                <a href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Поддержать проект</a>
+            </footer>
+        </div>
+    </div>
+    <div id="page-loader" class="page-loader">
+        <span class="loader-spinner" aria-hidden="true"></span>
+        <span>Загрузка BROray…</span>
+    </div>
+    <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+    <div id="confirm-root" class="modal-root" hidden>
+        <button id="confirm-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть"></button>
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+            <span id="confirm-eyebrow" class="eyebrow">Подтверждение</span>
+            <h2 id="confirm-title">Подтвердите действие</h2>
+            <p id="confirm-message"></p>
+            <div id="confirm-input-group" class="modal-input-group" hidden>
+                <label id="confirm-input-label" for="confirm-input">Введите значение</label>
+                <input id="confirm-input" type="text" autocomplete="off" spellcheck="false">
+                <p id="confirm-input-hint" class="modal-input-hint" hidden></p>
+                <p id="confirm-input-error" class="modal-input-error" role="alert" hidden></p>
+            </div>
+            <div class="modal-actions">
+                <button id="confirm-cancel" class="button button-secondary" type="button">Отмена</button>
+                <button id="confirm-accept" class="button button-danger" type="button">Продолжить</button>
+            </div>
+        </section>
+    </div>
+
+    <script src="/assets/js/common.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/icons.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/app-shell.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/theme.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/dialogs.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/subscriptions.js?v=20260725-webui-desktop-layout-11"></script>
+</body>
+</html>

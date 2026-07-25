@@ -1,8 +1,9 @@
 #!/bin/sh
 
-. /opt/broray/lib/util.sh
+BRORAY_BASE="${BRORAY_BASE:-${BRORAY_ROOT:-/opt/broray}}"
 
-BRORAY_BASE="/opt/broray"
+. "$BRORAY_BASE/lib/util.sh"
+
 BRORAY_SERVERS="$BRORAY_BASE/servers"
 BRORAY_ACTIVE_SERVER_FILE="$BRORAY_BASE/config/active-server"
 

@@ -1,0 +1,181 @@
+<main class="workspace-content broray-page" id="main-content">
+    <section class="page-heading broray-page-heading" aria-labelledby="broray-page-title">
+        <div>
+            <span class="eyebrow">Версия, компоненты и обслуживание</span>
+            <h1 id="broray-page-title">BROray</h1>
+            <p>Состояние установки, состав системы, обновление, восстановление и безопасное удаление.</p>
+        </div>
+        <span id="installation-status" class="status-badge status-loading" data-icon="status">Проверка…</span>
+    </section>
+
+    <section class="card broray-overview-card" aria-labelledby="broray-version-title">
+        <div class="broray-version-panel">
+            <span class="broray-product-icon" data-icon="security" aria-hidden="true"></span>
+            <div class="broray-version-copy">
+                <span class="eyebrow" id="broray-version-title">Установленная версия</span>
+                <strong class="broray-version" id="current-version">—</strong>
+                <p id="build-description">Сборка: загрузка…</p>
+                <p class="broray-last-check">Последняя проверка: <span id="last-update-check">—</span></p>
+            </div>
+        </div>
+
+        <dl class="broray-overview-facts">
+            <div class="broray-fact">
+                <dt>Архитектура</dt>
+                <dd id="architecture">—</dd>
+            </div>
+            <div class="broray-fact">
+                <dt>Канал обновлений</dt>
+                <dd id="update-channel">—</dd>
+            </div>
+            <div class="broray-fact">
+                <dt>Доступная версия</dt>
+                <dd id="available-version">—</dd>
+            </div>
+            <div class="broray-fact">
+                <dt>WebUI</dt>
+                <dd id="webui-build">—</dd>
+            </div>
+        </dl>
+
+    </section>
+
+    <section class="card broray-update-card" aria-labelledby="broray-update-title">
+        <div class="section-heading">
+            <div>
+                <span class="eyebrow">Обслуживание</span>
+                <h2 id="broray-update-title">Обновление</h2>
+            </div>
+        </div>
+        <div class="broray-update-actions" aria-label="Обновление BROray">
+            <button id="check-update" class="button button-secondary" data-icon="search" type="button">
+                <span class="button-label">Проверить обновление</span>
+            </button>
+            <button id="install-update" class="button button-primary" data-icon="update" type="button" disabled>
+                <span class="button-label">Установить обновление</span>
+            </button>
+        </div>
+    </section>
+
+    <div class="broray-information-grid">
+        <section class="card broray-components-card" aria-labelledby="components-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">Состав установки</span>
+                    <h2 id="components-title">Компоненты</h2>
+                </div>
+            </div>
+            <div id="component-list" class="broray-component-list" aria-live="polite"></div>
+        </section>
+
+        <section class="card broray-protocols-card" aria-labelledby="protocols-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">Импорт конфигураций</span>
+                    <h2 id="protocols-title">Протоколы</h2>
+                </div>
+            </div>
+            <div id="protocol-list" class="broray-protocol-grid" aria-live="polite"></div>
+            <p class="section-note">Показываются парсеры, фактически установленные в BROray.</p>
+        </section>
+
+        <section class="card broray-capabilities-card" aria-labelledby="capabilities-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">Возможности</span>
+                    <h2 id="capabilities-title">Что умеет BROray</h2>
+                </div>
+            </div>
+            <ul id="capability-list" class="broray-capability-list"></ul>
+        </section>
+
+        <section class="card broray-project-card" aria-labelledby="project-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">Проект</span>
+                    <h2 id="project-title">Ссылки и поддержка</h2>
+                </div>
+            </div>
+            <div class="broray-project-links">
+                <a id="project-link" class="broray-link-card" data-icon="help" href="https://docs.brovibe.cloud/broray/" target="_blank" rel="noopener noreferrer">
+                    <span>
+                        <strong>Страница проекта</strong>
+                        <small>Документация и сведения о BROray</small>
+                    </span>
+                </a>
+                <a id="github-link" class="broray-link-card" data-icon="integrations" href="https://github.com/BROadmin/BROray" target="_blank" rel="noopener noreferrer">
+                    <span>
+                        <strong>GitHub</strong>
+                        <small>Исходный код и выпуски</small>
+                    </span>
+                </a>
+                <a id="donate-link" class="broray-link-card broray-donation-card" data-icon="help" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">
+                    <span>
+                        <strong>Поддержать проект</strong>
+                        <small>Помочь развитию BROray</small>
+                    </span>
+                </a>
+            </div>
+        </section>
+    </div>
+
+    <section class="card broray-operation-card" aria-labelledby="operation-title">
+        <div class="section-heading broray-operation-heading">
+            <div>
+                <span class="eyebrow">Последняя операция</span>
+                <h2 id="operation-title">Обновление и восстановление</h2>
+            </div>
+            <span id="operation-state" class="status-badge status-neutral" data-icon="logs">Нет операций</span>
+        </div>
+
+        <div id="operation-progress" class="broray-operation-progress" hidden>
+            <progress id="operation-progress-bar" max="100" value="0">0%</progress>
+            <span id="operation-progress-value">0%</span>
+        </div>
+
+        <p id="operation-message" class="broray-operation-message">Операции ещё не выполнялись.</p>
+        <p id="operation-error" class="broray-operation-error" role="alert" hidden></p>
+
+        <div class="broray-operation-actions">
+            <button id="restore-backup" class="button button-secondary" data-icon="restore" type="button" disabled>
+                <span class="button-label">Восстановить резервную копию</span>
+            </button>
+        </div>
+
+        <details class="broray-log-details">
+            <summary data-icon="logs">Технический журнал</summary>
+            <pre id="operation-log">Журнал пока пуст.</pre>
+        </details>
+    </section>
+
+    <section class="card broray-danger-zone" aria-labelledby="danger-title">
+        <div class="section-heading">
+            <div>
+                <span class="eyebrow">Опасная зона</span>
+                <h2 id="danger-title">Удаление BROray</h2>
+            </div>
+        </div>
+        <div class="broray-danger-grid">
+            <article class="broray-danger-option">
+                <div>
+                    <h3>Обычное удаление</h3>
+                    <p>Удаляет программу и созданные ею рабочие объекты. Перед удалением создаётся резервная копия пользовательских данных.</p>
+                </div>
+                <button id="uninstall-normal" class="button button-danger-outline" data-icon="delete" type="button">
+                    <span class="button-label">Удалить BROray</span>
+                </button>
+            </article>
+            <article class="broray-danger-option broray-danger-option-critical">
+                <div>
+                    <h3>Полное удаление</h3>
+                    <p>Удаляет BROray, настройки, подписки, серверы, маршруты, управляемый ProxyN, KeenDNS HTTP Proxy и служебные данные.</p>
+                </div>
+                <button id="uninstall-full" class="button button-danger" data-icon="delete" type="button">
+                    <span class="button-label">Удалить полностью</span>
+                </button>
+            </article>
+        </div>
+    </section>
+
+    <div id="page-error" class="page-error" role="alert" hidden></div>
+</main>

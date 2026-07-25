@@ -1,0 +1,60 @@
+<main class="workspace-content routes-page">
+    <section class="page-heading routes-page-heading" aria-labelledby="routes-page-title">
+        <div>
+            <span class="eyebrow">Маршрутизация</span>
+            <h1 id="routes-page-title">Маршруты</h1>
+            <p>
+                Проверяйте источники, устанавливайте и восстанавливайте наборы
+                маршрутов через управляемый интерфейс ProxyN.
+            </p>
+        </div>
+        <span id="routes-page-status" class="status-badge status-loading" data-icon="status" role="status">
+            Загрузка…
+        </span>
+    </section>
+
+    <section class="routes-summary ui-card" aria-labelledby="routes-summary-title">
+        <div class="routes-summary-copy">
+            <span class="eyebrow">Общее состояние</span>
+            <h2 id="routes-summary-title">Наборы маршрутов</h2>
+            <p id="routes-summary-message">Получение состояния девяти наборов…</p>
+        </div>
+        <div class="routes-summary-metrics" role="list" aria-label="Сводка маршрутов">
+            <div class="routes-summary-metric" role="listitem">
+                <strong id="routes-installed-count">—</strong>
+                <span>установлено</span>
+            </div>
+            <div class="routes-summary-metric" role="listitem">
+                <strong id="routes-attention-count">—</strong>
+                <span>требуют действия</span>
+            </div>
+            <div class="routes-summary-metric" role="listitem">
+                <strong id="routes-total-count">9</strong>
+                <span>всего наборов</span>
+            </div>
+        </div>
+    </section>
+
+    <div id="routes-bundles" class="routes-bundle-list" aria-live="polite">
+        <div class="routes-loading-card ui-card">
+            <span class="large-spinner" aria-hidden="true"></span>
+            <span>Загрузка наборов маршрутов…</span>
+        </div>
+    </div>
+
+    <section class="routes-more ui-card" aria-labelledby="routes-more-title">
+        <div>
+            <span class="eyebrow">Другие ресурсы</span>
+            <h2 id="routes-more-title">Дополнительные маршруты</h2>
+            <p>
+                В каталоге источника доступны и другие наборы. Их можно скачать
+                и установить вручную через интерфейс Keenetic.
+            </p>
+        </div>
+        <a class="button button-secondary" data-icon="routes"
+           href="https://github.com/RockBlack-VPN/ip-address/tree/main/Global"
+           target="_blank" rel="noopener noreferrer">
+            Открыть каталог
+        </a>
+    </section>
+</main>

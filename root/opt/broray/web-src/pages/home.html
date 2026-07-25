@@ -1,0 +1,238 @@
+<main class="workspace-content home-page">
+ <section aria-labelledby="home-title" class="page-heading home-heading">
+  <div>
+   <span class="eyebrow">
+    BROray
+   </span>
+   <h1 id="home-title">
+    Главная
+   </h1>
+   <p>
+    Общее состояние Xray, серверов, подписок, ProxyN, маршрутов и самой установки.
+   </p>
+  </div>
+  <span class="status-badge status-loading" id="home-health">
+   Загрузка…
+  </span>
+ </section>
+ <div class="home-warning" hidden="" id="home-warning" role="status">
+ </div>
+ <section aria-label="Модули BROray" class="home-grid">
+  <a class="home-module-card ui-card" data-module="servers" href="/servers.html">
+   <div class="home-card-heading">
+    <div class="home-card-title">
+     <span aria-hidden="true" class="home-card-icon" data-icon="servers">
+     </span>
+     <h2>
+      Серверы
+     </h2>
+    </div>
+    <span class="home-card-status status-loading" id="home-servers-status">
+     Загрузка…
+    </span>
+   </div>
+   <p id="home-server-name">
+    Загрузка активного сервера…
+   </p>
+   <dl class="home-card-data">
+    <div class="home-card-data-row">
+     <dt>
+      Всего
+     </dt>
+     <dd id="home-servers-total">
+      —
+     </dd>
+    </div>
+    <div class="home-card-data-row">
+     <dt>
+      Качество
+     </dt>
+     <dd id="home-server-quality">
+      —
+     </dd>
+    </div>
+   </dl>
+  </a>
+  <a class="home-module-card ui-card" data-module="subscriptions" href="/subscriptions.html">
+   <div class="home-card-heading">
+    <div class="home-card-title">
+     <span aria-hidden="true" class="home-card-icon" data-icon="subscriptions">
+     </span>
+     <h2>
+      Подписки
+     </h2>
+    </div>
+    <span class="home-card-status status-loading" id="home-subscriptions-status">
+     Загрузка…
+    </span>
+   </div>
+   <p id="home-subscriptions-main">
+    Загрузка состояния подписок…
+   </p>
+   <dl class="home-card-data">
+    <div class="home-card-data-row">
+     <dt>
+      Включено
+     </dt>
+     <dd id="home-subscriptions-enabled">
+      —
+     </dd>
+    </div>
+    <div class="home-card-data-row">
+     <dt>
+      Серверов
+     </dt>
+     <dd id="home-subscriptions-servers">
+      —
+     </dd>
+    </div>
+   </dl>
+  </a>
+  <a class="home-module-card ui-card" data-module="routes" href="/routes.html">
+   <div class="home-card-heading">
+    <div class="home-card-title">
+     <span aria-hidden="true" class="home-card-icon" data-icon="routes">
+     </span>
+     <h2>
+      Маршруты
+     </h2>
+    </div>
+    <span class="home-card-status status-loading" id="home-routes-status">
+     Загрузка…
+    </span>
+   </div>
+   <p id="home-routes-main">
+    Загрузка установленных наборов…
+   </p>
+   <dl class="home-card-data">
+    <div class="home-card-data-row">
+     <dt>
+      Установлено
+     </dt>
+     <dd id="home-routes-count">
+      —
+     </dd>
+    </div>
+    <div class="home-card-data-row">
+     <dt>
+      Обновление
+     </dt>
+     <dd id="home-routes-update">
+      —
+     </dd>
+    </div>
+   </dl>
+  </a>
+  <a class="home-module-card ui-card" data-module="keenetic" href="/keenetic.html">
+   <div class="home-card-heading">
+    <div class="home-card-title">
+     <span aria-hidden="true" class="home-card-icon" data-icon="keenetic">
+     </span>
+     <h2>
+      Keenetic
+     </h2>
+    </div>
+    <span class="home-card-status status-loading" id="home-keenetic-status">
+     Загрузка…
+    </span>
+   </div>
+   <p id="home-keenetic-main">
+    Загрузка состояния ProxyN…
+   </p>
+   <dl class="home-card-data">
+    <div class="home-card-data-row">
+     <dt>
+      Связь
+     </dt>
+     <dd id="home-keenetic-link">
+      —
+     </dd>
+    </div>
+    <div class="home-card-data-row">
+     <dt>
+      Состояние
+     </dt>
+     <dd id="home-keenetic-state">
+      —
+     </dd>
+    </div>
+   </dl>
+  </a>
+  <a class="home-module-card ui-card" data-module="xray" href="/xray.html">
+   <div class="home-card-heading">
+    <div class="home-card-title">
+     <span aria-hidden="true" class="home-card-icon" data-icon="xray">
+     </span>
+     <h2>
+      Xray
+     </h2>
+    </div>
+    <span class="home-card-status status-loading" id="home-xray-status">
+     Загрузка…
+    </span>
+   </div>
+   <p id="home-xray-main">
+    Загрузка состояния процесса…
+   </p>
+   <dl class="home-card-data">
+    <div class="home-card-data-row">
+     <dt>
+      Версия
+     </dt>
+     <dd id="home-xray-version">
+      —
+     </dd>
+    </div>
+    <div class="home-card-data-row">
+     <dt>
+      Конфигурация
+     </dt>
+     <dd id="home-xray-config">
+      —
+     </dd>
+    </div>
+   </dl>
+  </a>
+  <a class="home-module-card ui-card" data-module="broray" href="/broray.html">
+   <div class="home-card-heading">
+    <div class="home-card-title">
+     <span aria-hidden="true" class="home-card-icon" data-icon="security">
+     </span>
+     <h2>
+      BROray
+     </h2>
+    </div>
+    <span class="home-card-status status-loading" id="home-broray-status">
+     Загрузка…
+    </span>
+   </div>
+   <p id="home-broray-main">
+    Загрузка сведений об установке…
+   </p>
+   <dl class="home-card-data">
+    <div class="home-card-data-row">
+     <dt>
+      Версия
+     </dt>
+     <dd id="home-broray-version">
+      —
+     </dd>
+    </div>
+    <div class="home-card-data-row">
+     <dt>
+      Обновление
+     </dt>
+     <dd id="home-broray-update">
+      —
+     </dd>
+    </div>
+   </dl>
+  </a>
+ </section>
+ <p class="home-updated">
+  Обновлено:
+  <span id="home-updated-at">
+   —
+  </span>
+ </p>
+</main>

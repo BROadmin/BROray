@@ -1,0 +1,129 @@
+<main class="workspace-content keenetic-page" aria-labelledby="keenetic-page-title">
+    <section class="keenetic-page-heading page-heading">
+        <div>
+            <span class="eyebrow">Интеграция</span>
+            <h1 id="keenetic-page-title">Keenetic</h1>
+            <p>Управление штатным прокси-интерфейсом ProxyN и проверка его соответствия активному серверу BROray.</p>
+        </div>
+        <div class="keenetic-heading-actions">
+            <button id="keenetic-check-upstream" class="button button-secondary" data-icon="connection" type="button">
+                <span class="button-label">Проверить подключение к Xray</span>
+                <span class="button-spinner" aria-hidden="true"></span>
+            </button>
+            <button id="keenetic-refresh" class="button button-primary" data-icon="update" type="button">
+                <span class="button-label">Обновить</span>
+                <span class="button-spinner" aria-hidden="true"></span>
+            </button>
+        </div>
+    </section>
+
+    <section class="keenetic-overview" aria-label="Состояние ProxyN">
+        <article class="keenetic-status-card">
+            <div class="keenetic-status-copy">
+                <span id="keenetic-status-badge" class="keenetic-status-badge status-loading">Проверяется</span>
+                <h2 id="keenetic-status-title">ProxyN</h2>
+                <p id="keenetic-status-description">Чтение параметров интерфейса KeeneticOS…</p>
+                <div class="keenetic-status-tags">
+                    <span id="keenetic-expected-tag">Ожидаемая конфигурация: —</span>
+                    <span id="keenetic-upstream-tag">Прокси Xray: —</span>
+                </div>
+            </div>
+            <div class="keenetic-primary-actions">
+                <button id="keenetic-create" class="button button-primary" data-icon="add" type="button" hidden>
+                    <span class="button-label">Создать</span>
+                    <span class="button-spinner" aria-hidden="true"></span>
+                </button>
+                <button id="keenetic-repair" class="button button-primary" data-icon="restore" type="button" hidden>
+                    <span class="button-label">Восстановить</span>
+                    <span class="button-spinner" aria-hidden="true"></span>
+                </button>
+                <button id="keenetic-sync-description" class="button button-secondary" data-icon="edit" type="button" hidden>
+                    <span class="button-label">Синхронизировать описание</span>
+                    <span class="button-spinner" aria-hidden="true"></span>
+                </button>
+                <button id="keenetic-delete" class="button button-danger-outline" data-icon="delete" type="button" hidden>
+                    <span class="button-label">Удалить</span>
+                    <span class="button-spinner" aria-hidden="true"></span>
+                </button>
+            </div>
+        </article>
+
+        <div class="keenetic-metrics-grid">
+            <article class="keenetic-metric-card"><span>Интерфейс</span><strong id="keenetic-interface-name">ProxyN</strong></article>
+            <article class="keenetic-metric-card"><span>Протокол</span><strong id="keenetic-protocol">—</strong></article>
+            <article class="keenetic-metric-card"><span>Адрес Xray</span><strong id="keenetic-upstream">—</strong></article>
+            <article class="keenetic-metric-card"><span>Связь</span><strong id="keenetic-link">—</strong></article>
+            <article class="keenetic-metric-card"><span>Подключение</span><strong id="keenetic-connected">—</strong></article>
+            <article class="keenetic-metric-card"><span>Состояние</span><strong id="keenetic-state">—</strong></article>
+        </div>
+    </section>
+
+    <section class="keenetic-details-grid">
+        <article class="keenetic-panel">
+            <div class="keenetic-panel-heading">
+                <div><span class="eyebrow">Сравнение</span><h2>Ожидаемое и фактическое состояние</h2></div>
+            </div>
+            <div class="keenetic-comparison" role="table" aria-label="Сравнение параметров ProxyN">
+                <div class="keenetic-comparison-row keenetic-comparison-header" role="row">
+                    <span role="columnheader">Параметр</span>
+                    <span role="columnheader">Ожидается</span>
+                    <span role="columnheader">Фактически</span>
+                    <span role="columnheader">Проверка</span>
+                </div>
+                <div class="keenetic-comparison-row" role="row">
+                    <span class="keenetic-comparison-parameter" role="cell">Описание</span>
+                    <span id="keenetic-expected-description" data-label="Ожидается" role="cell">—</span>
+                    <span id="keenetic-actual-description" data-label="Фактически" role="cell">—</span>
+                    <span id="keenetic-description-check" data-label="Проверка" role="cell">—</span>
+                </div>
+                <div class="keenetic-comparison-row" role="row">
+                    <span class="keenetic-comparison-parameter" role="cell">Протокол</span>
+                    <span id="keenetic-expected-protocol" data-label="Ожидается" role="cell">—</span>
+                    <span id="keenetic-actual-protocol" data-label="Фактически" role="cell">—</span>
+                    <span id="keenetic-protocol-check" data-label="Проверка" role="cell">—</span>
+                </div>
+                <div class="keenetic-comparison-row" role="row">
+                    <span class="keenetic-comparison-parameter" role="cell">Адрес Xray</span>
+                    <span id="keenetic-expected-upstream" data-label="Ожидается" role="cell">—</span>
+                    <span id="keenetic-actual-upstream" data-label="Фактически" role="cell">—</span>
+                    <span id="keenetic-upstream-check" data-label="Проверка" role="cell">—</span>
+                </div>
+            </div>
+        </article>
+
+        <article class="keenetic-panel">
+            <div class="keenetic-panel-heading">
+                <div><span class="eyebrow">Диагностика</span><h2>Проверки ProxyN</h2></div>
+            </div>
+            <div id="keenetic-checks" class="keenetic-check-list" aria-live="polite">
+                <div class="keenetic-check-row status-loading">
+                    <span class="keenetic-check-indicator" aria-hidden="true"></span>
+                    <span>Получение результатов…</span>
+                </div>
+            </div>
+        </article>
+    </section>
+
+    <section class="keenetic-details-grid">
+        <article class="keenetic-panel">
+            <div class="keenetic-panel-heading">
+                <div><span class="eyebrow">Технические данные</span><h2>Параметры интерфейса</h2></div>
+            </div>
+            <dl class="keenetic-technical-grid">
+                <div><dt>Тип</dt><dd id="keenetic-type">—</dd></div>
+                <div><dt>MTU</dt><dd id="keenetic-mtu">—</dd></div>
+                <div><dt>Подключение через</dt><dd id="keenetic-via">—</dd></div>
+                <div><dt>Локальный адрес</dt><dd id="keenetic-local-address">—</dd></div>
+                <div><dt>Удалённый адрес</dt><dd id="keenetic-remote-address">—</dd></div>
+                <div><dt>Обновлено</dt><dd id="keenetic-updated-at">—</dd></div>
+            </dl>
+        </article>
+
+        <article id="keenetic-problems-panel" class="keenetic-panel keenetic-problems-panel" hidden>
+            <div class="keenetic-panel-heading">
+                <div><span class="eyebrow">Требуется исправление</span><h2>Обнаруженные проблемы</h2></div>
+            </div>
+            <ul id="keenetic-problems" class="keenetic-problems"></ul>
+        </article>
+    </section>
+</main>

@@ -1,0 +1,122 @@
+#!/opt/bin/ash
+
+set -u
+
+PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+
+ROOT="${BRORAY_ROOT:-/opt/broray}"
+DOWNLOAD_LIBRARY="$ROOT/lib/routes-download.sh"
+EXPORT_BUILD_LIBRARY="$ROOT/lib/routes-export-build.sh"
+PREFLIGHT_LIBRARY="$ROOT/lib/routes-router-preflight.sh"
+ROUTER_EXPORT_LIBRARY="$ROOT/lib/routes-router-export.sh"
+ROUTER_DELETE_LIBRARY="$ROOT/lib/routes-router-delete.sh"
+
+broray_routes_cli_run_self()
+{
+    if [ -n "${BRORAY_ASH_BIN:-}" ] && [ -x "$BRORAY_ASH_BIN" ]; then
+        "$BRORAY_ASH_BIN" "$CLI_SELF" "$@"
+    elif [ -x /opt/bin/ash ]; then
+        /opt/bin/ash "$CLI_SELF" "$@"
+    elif command -v ash >/dev/null 2>&1; then
+        ash "$CLI_SELF" "$@"
+    elif command -v busybox >/dev/null 2>&1; then
+        busybox ash "$CLI_SELF" "$@"
+    else
+        "$CLI_SELF" "$@"
+    fi
+}
+
+usage()
+{
+    echo "Использование:" >&2
+    echo "  broray-routes check <bundleId>" >&2
+    echo "  broray-routes download <bundleId>" >&2
+    echo "  broray-routes build-export <bundleId>" >&2
+    echo "  broray-routes preflight <bundleId>" >&2
+    echo "  broray-routes export <bundleId>" >&2
+    echo "  broray-routes delete <bundleId>" >&2
+    exit 2
+}
+
+case "${1:-}" in
+    check)
+        [ "$#" -eq 2 ] || usage
+        [ -r "$DOWNLOAD_LIBRARY" ] || {
+            echo "ОШИБКА: модуль проверки маршрутов недоступен." >&2
+            exit 1
+        }
+        . "$DOWNLOAD_LIBRARY"
+        broray_routes_check_run "$2"
+        ;;
+    download)
+        [ "$#" -eq 2 ] || usage
+        [ -r "$DOWNLOAD_LIBRARY" ] || {
+            echo "ОШИБКА: модуль загрузки маршрутов недоступен." >&2
+            exit 1
+        }
+        . "$DOWNLOAD_LIBRARY"
+        broray_routes_download_run "$2"
+        ;;
+    build-export)
+        [ "$#" -eq 2 ] || usage
+        [ -r "$EXPORT_BUILD_LIBRARY" ] || {
+            echo "ОШИБКА: модуль подготовки экспорта недоступен." >&2
+            exit 1
+        }
+        . "$EXPORT_BUILD_LIBRARY"
+        broray_routes_export_build_run "$2"
+        ;;
+    preflight)
+        [ "$#" -eq 2 ] || usage
+        [ -r "$PREFLIGHT_LIBRARY" ] || {
+            echo "ОШИБКА: модуль предварительной проверки недоступен." >&2
+            exit 1
+        }
+        . "$PREFLIGHT_LIBRARY"
+        broray_routes_preflight_run "$2"
+        ;;
+    export)
+        [ "$#" -eq 2 ] || usage
+
+        case "$0" in
+            */*) CLI_SELF="$0" ;;
+            *) CLI_SELF="$(command -v "$0" 2>/dev/null || true)" ;;
+        esac
+
+        [ -n "$CLI_SELF" ] && [ -x "$CLI_SELF" ] || {
+            echo "ОШИБКА: не удалось определить путь broray-routes." >&2
+            exit 1
+        }
+
+        # Экспорт является единой пользовательской операцией. Каждый этап
+        # запускается отдельным процессом, чтобы его блокировки и trap не
+        # пересекались со следующим этапом.
+        broray_routes_cli_run_self build-export "$2" || exit $?
+        broray_routes_cli_run_self preflight "$2" || exit $?
+
+        [ -r "$ROUTER_EXPORT_LIBRARY" ] || {
+            echo "ОШИБКА: модуль экспорта в Keenetic недоступен." >&2
+            exit 1
+        }
+        . "$ROUTER_EXPORT_LIBRARY"
+        broray_routes_router_export_run "$2"
+        ;;
+    delete)
+        [ "$#" -eq 2 ] || usage
+        [ -r "$ROUTER_DELETE_LIBRARY" ] || {
+            echo "ОШИБКА: модуль удаления из Keenetic недоступен." >&2
+            exit 1
+        }
+        . "$ROUTER_DELETE_LIBRARY"
+        trap broray_routes_delete_cleanup EXIT HUP INT TERM
+        broray_routes_router_delete_run "$2"
+        rc=$?
+        trap - EXIT HUP INT TERM
+        broray_routes_delete_cleanup
+        exit "$rc"
+        ;;
+    *)
+        usage
+        ;;
+esac

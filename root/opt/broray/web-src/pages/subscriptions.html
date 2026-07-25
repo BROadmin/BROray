@@ -1,0 +1,85 @@
+<main class="workspace-content subscriptions-page" aria-labelledby="subscriptions-page-title">
+    <section class="subscriptions-heading page-heading">
+        <div>
+            <span class="eyebrow">Источники серверов</span>
+            <h1 id="subscriptions-page-title">Подписки</h1>
+            <p>Загрузка и синхронизация серверов через единый серверный модуль. Подписка не управляет Xray напрямую.</p>
+        </div>
+        <button id="add-subscription" class="button button-primary" data-icon="add" type="button">
+            <span class="button-label">Добавить подписку</span>
+        </button>
+    </section>
+
+    <section class="subscriptions-summary" aria-label="Сводка подписок">
+        <article class="subscription-metric">
+            <span>Всего</span>
+            <strong id="subscriptions-total">—</strong>
+        </article>
+        <article class="subscription-metric">
+            <span>Активно</span>
+            <strong id="subscriptions-enabled">—</strong>
+        </article>
+        <article class="subscription-metric">
+            <span>Серверов</span>
+            <strong id="subscriptions-servers">—</strong>
+        </article>
+        <article class="subscription-metric subscription-metric-wide">
+            <span>Последнее обновление</span>
+            <strong id="subscriptions-last-status">—</strong>
+            <small id="subscriptions-last-time">—</small>
+        </article>
+    </section>
+
+    <section id="subscription-form-panel" class="subscription-form-panel" hidden aria-labelledby="subscription-form-title">
+        <div class="subscription-section-heading">
+            <div>
+                <span class="eyebrow">Настройка источника</span>
+                <h2 id="subscription-form-title">Добавить подписку</h2>
+            </div>
+        </div>
+        <form id="subscription-form" class="subscription-form-grid">
+            <label class="subscription-field" for="subscription-name">
+                <span>Название</span>
+                <input id="subscription-name" name="name" maxlength="128" autocomplete="off" required>
+            </label>
+            <label class="subscription-field" for="subscription-interval">
+                <span>Интервал, минут</span>
+                <input id="subscription-interval" name="interval" type="number" min="5" max="10080" step="1" value="360" required>
+            </label>
+            <label class="subscription-field subscription-field-wide" for="subscription-url">
+                <span>URL подписки</span>
+                <input id="subscription-url" name="url" type="url" maxlength="4096" autocomplete="off" spellcheck="false" placeholder="https://example.com/subscription?token=…" required>
+            </label>
+            <div class="subscription-switches" aria-label="Параметры подписки">
+                <label class="subscription-switch-row" for="subscription-enabled">
+                    <input id="subscription-enabled" type="checkbox" checked>
+                    <span>Подписка активна</span>
+                </label>
+                <label class="subscription-switch-row" for="subscription-auto">
+                    <input id="subscription-auto" type="checkbox" checked>
+                    <span>Автообновление включено</span>
+                </label>
+                <label id="subscription-immediate-row" class="subscription-switch-row" for="subscription-immediate">
+                    <input id="subscription-immediate" type="checkbox" checked>
+                    <span>Обновить после добавления</span>
+                </label>
+            </div>
+            <div class="subscription-form-actions">
+                <button id="subscription-cancel" class="button button-secondary" type="button">
+                    <span class="button-label">Отмена</span>
+                </button>
+                <button id="subscription-submit" class="button button-primary" data-icon="update" type="submit">
+                    <span class="button-label">Сохранить</span>
+                    <span class="button-spinner" aria-hidden="true"></span>
+                </button>
+            </div>
+        </form>
+    </section>
+
+    <section id="subscriptions-list" class="subscription-list" aria-live="polite" aria-busy="true">
+        <div class="subscription-loading">
+            <span class="loader-spinner" aria-hidden="true"></span>
+            <span>Загрузка подписок…</span>
+        </div>
+    </section>
+</main>
