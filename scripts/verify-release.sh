@@ -31,6 +31,7 @@ printf '%s\n' "=== Verification 1/3: source, syntax and privacy ==="
 
 bash -n \
     "$REPOSITORY_ROOT/scripts/build-opkg-release.sh" \
+    "$REPOSITORY_ROOT/scripts/test-manual-to-opkg-migration.sh" \
     "$REPOSITORY_ROOT/scripts/test-opkg-rollback.sh" \
     "$REPOSITORY_ROOT/scripts/test-safe-opkg-upgrade.sh" \
     "$REPOSITORY_ROOT/scripts/test-opkg-upgrade.sh" \
@@ -50,6 +51,7 @@ bash -n \
         -type f
     printf '%s\n' \
         "$REPOSITORY_ROOT/install.sh" \
+        "$REPOSITORY_ROOT/scripts/migrate-manual-to-opkg.sh" \
         "$REPOSITORY_ROOT/scripts/safe-opkg-upgrade.sh" \
         "$REPOSITORY_ROOT/packaging/opkg/opkg.sh" \
         "$REPOSITORY_ROOT/packaging/opkg/preinst" \
@@ -208,6 +210,7 @@ printf '%s\n' "=== Verification 3/3: OPKG package and feed ==="
 PACKAGE="$REPOSITORY_ROOT/dist/opkg/aarch64-3.10/broray_2.1.0-2_aarch64-3.10.ipk"
 PACKAGES="$REPOSITORY_ROOT/dist/opkg/aarch64-3.10/Packages"
 SAFE_UPGRADE="$REPOSITORY_ROOT/dist/broray-safe-upgrade-2.1.0-2.sh"
+MANUAL_MIGRATOR="$REPOSITORY_ROOT/dist/broray-manual-to-opkg-2.1.0-2.sh"
 
 [ -s "$PACKAGE" ] ||
     fail "package was not built"
@@ -215,6 +218,13 @@ SAFE_UPGRADE="$REPOSITORY_ROOT/dist/broray-safe-upgrade-2.1.0-2.sh"
     fail "Packages index was not built"
 [ -s "$SAFE_UPGRADE" ] ||
     fail "safe transition script was not built"
+[ -s "$MANUAL_MIGRATOR" ] ||
+    fail "manual migration script was not built"
+[ "$(
+    sha256sum "$MANUAL_MIGRATOR" |
+        awk '{print $1}'
+)" = "6c976a0b3958a8ad1b78584ff54874f283b8218c9c97dd57937ea0b86c214518" ] ||
+    fail "manual migration script SHA256 changed"
 
 mkdir -p \
     "$WORK_ROOT/ipk" \
@@ -332,9 +342,14 @@ OLD_PACKAGE="$OLD_DIST/opkg/aarch64-3.10/broray_2.1.0-1_aarch64-3.10.ipk"
 "$REPOSITORY_ROOT/scripts/test-safe-opkg-upgrade.sh" \
     "$OLD_PACKAGE" \
     "$PACKAGE"
+BRORAY_TEST_PACKAGE="$PACKAGE" \
+BRORAY_TEST_PACKAGE_SHA256="$package_sha" \
+    "$REPOSITORY_ROOT/scripts/test-manual-to-opkg-migration.sh"
 
 grep -Fq 'TARGET_VERSION="2.1.0-2"' "$SAFE_UPGRADE" ||
     fail "safe transition script targets the wrong package"
+grep -Fq 'TARGET_VERSION="2.1.0-2"' "$MANUAL_MIGRATOR" ||
+    fail "manual migration script targets the wrong package"
 
 printf '%s\n' "Verification 3 PASS"
 printf '%s\n' "ALL VERIFICATIONS PASS"
