@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BROray — установка и настройка</title>
+    <meta name="description" content="Установка, переход на OPKG и настройка BROray 2.1.0 на Keenetic с Entware.">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="site-header">
+    <div class="header-inner">
+        <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+        <nav class="nav" aria-label="Основная навигация">
+            <a href="/">Главная</a>
+            <a href="/broray/" aria-current="page">BROray</a>
+        </nav>
+    </div>
+</header>
+
+<div class="layout">
+<aside class="sidebar">
+    <p class="sidebar-title">На этой странице</p>
+    <a href="#about">О BROray</a>
+    <a href="#requirements">Требования</a>
+    <a href="#install">Установка</a>
+    <a href="#migration">Переход на OPKG</a>
+    <a href="#webui">Открытие WebUI</a>
+    <a href="#subscription">Подписка</a>
+    <a href="#server">Выбор сервера</a>
+    <a href="#interface">Интерфейс Keenetic</a>
+    <a href="#routing">Маршрутизация</a>
+    <a href="#update">Обновление</a>
+    <a href="#diagnostics">Диагностика</a>
+    <a href="#conffiles">Предупреждения OPKG</a>
+    <a href="#uninstall">Удаление</a>
+</aside>
+
+<main class="content">
+<section id="about">
+    <p class="eyebrow">Keenetic · Entware · Xray</p>
+    <h1>BROray</h1>
+    <p class="lead">
+        Менеджер Xray для Keenetic с WebUI, подписками, выбором серверов
+        и интеграцией со штатным прокси-интерфейсом KeeneticOS.
+    </p>
+
+    <div class="meta">
+        <span class="badge accent">BROray 2.1.0</span>
+        <span class="badge">OPKG 2.1.0-2</span>
+        <span class="badge">aarch64 / arm64</span>
+        <span class="badge">BusyBox / ash</span>
+    </div>
+
+    <div class="note">
+        <span class="note-title">Проверенное окружение</span>
+        Инструкция подготовлена по результатам установки и обновления
+        BROray на Keenetic с Entware и BusyBox 1.37.0. Команды рассчитаны
+        на оболочку <code>ash</code>.
+    </div>
+
+    <p>
+        Исходный код и полная техническая инструкция доступны в
+        <a href="https://github.com/BROadmin/BROray#readme"
+           target="_blank" rel="noopener noreferrer">
+            репозитории BROray на GitHub
+        </a>.
+    </p>
+</section>
+
+<section id="requirements">
+    <h2>1. Требования</h2>
+
+    <ul>
+        <li>совместимый роутер Keenetic с архитектурой aarch64/arm64;</li>
+        <li>установленный и запущенный Entware;</li>
+        <li>доступ к терминалу Entware с правами root;</li>
+        <li>доступ роутера в интернет;</li>
+        <li>достаточно свободного места в разделе <code>/opt</code>.</li>
+    </ul>
+
+    <h3>Предварительная проверка</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>uname -m
+command -v opkg
+df -h /opt</code></pre>
+
+    <p>
+        Архитектура должна определиться как <code>aarch64</code> или
+        <code>arm64</code>, а команда <code>opkg</code> должна быть
+        доступна.
+    </p>
+
+    <div class="facultative">
+        <span class="facultative-title">
+            Факультатив: установка Entware во внутреннюю память
+        </span>
+        Если Entware ещё не установлен, на некоторых моделях его можно
+        разместить во внутренней памяти роутера. Возможность зависит от
+        модели и версии KeeneticOS.
+        <br><br>
+        <a href="https://support.keenetic.ru/ultra/kn-1811/ru/18482.html"
+           target="_blank" rel="noopener noreferrer">
+            Официальная инструкция Keenetic
+        </a>
+        <p>
+            Это внешний материал. Он не является обязательным этапом,
+            если Entware уже установлен и работает.
+        </p>
+    </div>
+</section>
+
+<section id="install">
+    <h2>2. Установка BROray</h2>
+
+    <p>
+        Подключитесь к терминалу Entware на роутере и выполните одну
+        команду:
+    </p>
+
+    <pre><button class="copy" type="button">Копировать</button><code>opkg update &amp;&amp;
+opkg install ca-bundle ca-certificates wget-ssl
+
+wget -qO /tmp/broray-opkg.sh \
+    https://api.brovibe.cloud/releases/opkg.sh &amp;&amp;
+ash /tmp/broray-opkg.sh</code></pre>
+
+    <p>Сценарий установки автоматически:</p>
+
+    <ol class="steps">
+        <li>проверяет наличие Entware и архитектуру устройства;</li>
+        <li>устанавливает необходимые сертификаты и HTTPS-загрузчик;</li>
+        <li>подключает официальный OPKG-репозиторий BROvibe;</li>
+        <li>устанавливает пакет <code>broray</code> и его зависимости;</li>
+        <li>создаёт безопасную начальную конфигурацию Xray;</li>
+        <li>запускает Xray, монитор и WebUI;</li>
+        <li>настраивает публикацию WebUI через KeenDNS HTTP Proxy;</li>
+        <li>показывает локальный и внешний адреса WebUI.</li>
+    </ol>
+
+    <div class="note">
+        <span class="note-title">Не закрывайте терминал раньше времени</span>
+        Дождитесь сообщения об успешной установке и появления адресов
+        WebUI.
+    </div>
+
+    <div class="note warning">
+        <span class="note-title">Если BROray 2.1.0 уже установлен вручную</span>
+        Не выполняйте <code>opkg install broray</code> поверх ручной
+        установки. Используйте одноразовый мигратор из следующего раздела.
+    </div>
+</section>
+
+<section id="migration">
+    <h2>3. Переход с ручной установки на OPKG</h2>
+
+    <p>
+        Этот сценарий предназначен только для существующей ручной
+        установки BROray <code>2.1.0</code> на Entware
+        <code>aarch64-3.10</code>.
+    </p>
+
+    <h3>1. Установите HTTPS-загрузчик</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>opkg update &amp;&amp;
+opkg install ca-bundle ca-certificates wget-ssl</code></pre>
+
+    <h3>2. Загрузите, проверьте и запустите мигратор</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>MIGRATOR="/tmp/broray-manual-to-opkg-2.1.0-2.sh"
+EXPECTED_SHA256="6c976a0b3958a8ad1b78584ff54874f283b8218c9c97dd57937ea0b86c214518"
+
+/opt/bin/wget -qO "$MIGRATOR.part" \
+    https://api.brovibe.cloud/releases/broray-manual-to-opkg-2.1.0-2.sh &amp;&amp;
+ACTUAL_SHA256="$(
+    sha256sum "$MIGRATOR.part" |
+        awk '{print $1}'
+)" &amp;&amp;
+if [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ]; then
+    mv "$MIGRATOR.part" "$MIGRATOR" &amp;&amp;
+    ash "$MIGRATOR"
+else
+    echo "ОШИБКА: SHA-256 мигратора не совпала"
+    rm -f "$MIGRATOR.part"
+    false
+fi</code></pre>
+
+    <p>Мигратор автоматически:</p>
+
+    <ol class="steps">
+        <li>проверяет версию, архитектуру, репозиторий и свободное место;</li>
+        <li>создаёт и проверяет резервную копию;</li>
+        <li>сохраняет серверы, подписки, маршруты и настройки;</li>
+        <li>регистрирует BROray <code>2.1.0-2</code> в OPKG;</li>
+        <li>проверяет Xray, WebUI и все пять служб;</li>
+        <li>при ошибке возвращает ручную установку <code>2.1.0</code>.</li>
+    </ol>
+
+    <div class="note warning">
+        <span class="note-title">Мигратор запускается один раз</span>
+        После сообщения об успешном переходе и кода результата
+        <code>0</code> повторно запускать его не нужно.
+    </div>
+</section>
+
+<section id="webui">
+    <h2>4. Открытие WebUI</h2>
+
+    <p>Стандартный локальный адрес:</p>
+
+    <pre><code>http://192.168.1.1:8080/</code></pre>
+
+    <p>
+        Если LAN-адрес роутера изменён, установщик покажет фактический
+        адрес. При настроенном KeenDNS также будет выведен внешний
+        HTTPS-адрес вида:
+    </p>
+
+    <pre><code>https://broray.&lt;домен-KeenDNS&gt;/</code></pre>
+
+    <div class="note warning">
+        <span class="note-title">Защищайте доступ к роутеру</span>
+        Не публикуйте адрес WebUI, ссылки подписок, UUID и полные URI
+        серверов в открытом доступе.
+    </div>
+</section>
+
+<section id="subscription">
+    <h2>5. Добавление подписки</h2>
+
+    <ol class="steps">
+        <li>Откройте страницу BROray.</li>
+        <li>Перейдите к разделу <strong>«Добавить подписку»</strong>.</li>
+        <li>
+            В поле имени укажите понятное название, например
+            <code>BROvibe</code>.
+        </li>
+        <li>Вставьте полную ссылку подписки.</li>
+        <li>Нажмите кнопку добавления подписки.</li>
+        <li>
+            Откройте список узлов добавленной подписки и импортируйте
+            нужные серверы.
+        </li>
+    </ol>
+
+    <p>
+        Импортированные конфигурации появятся в разделе
+        <strong>«Серверы»</strong>. Ссылки подписки и параметры доступа
+        хранятся на роутере.
+    </p>
+
+    <h3>Обновление подписки</h3>
+
+    <p>
+        В разделе <strong>«Подписки»</strong> можно обновить одну
+        подписку или воспользоваться общим обновлением всех подписок.
+        После обновления проверьте список серверов.
+    </p>
+</section>
+
+<section id="server">
+    <h2>6. Выбор сервера</h2>
+
+    <ol class="steps">
+        <li>Откройте раздел <strong>«Серверы»</strong>.</li>
+        <li>Выберите нужную конфигурацию.</li>
+        <li>Нажмите кнопку активации сервера.</li>
+        <li>Дождитесь проверки конфигурации и перезапуска Xray.</li>
+        <li>Убедитесь, что сервер отмечен как активный.</li>
+    </ol>
+
+    <p>
+        BROray проверяет конфигурацию до её применения. Название
+        активного сервера используется в описании интерфейса Keenetic.
+    </p>
+</section>
+
+<section id="interface">
+    <h2>7. Интерфейс Keenetic</h2>
+
+    <p>
+        BROray использует штатный прокси-интерфейс KeeneticOS
+        <code>Proxy0</code>. В WebUI откройте раздел
+        <strong>«Интерфейс Keenetic»</strong>.
+    </p>
+
+    <p>В рабочем состоянии должны отображаться:</p>
+
+    <table>
+        <thead>
+        <tr>
+            <th>Параметр</th>
+            <th>Ожидаемое состояние</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td>Интерфейс</td>
+            <td><code>Proxy0</code></td>
+        </tr>
+        <tr>
+            <td>Тип</td>
+            <td><code>Proxy</code></td>
+        </tr>
+        <tr>
+            <td>Связь</td>
+            <td><code>up</code></td>
+        </tr>
+        <tr>
+            <td>Подключение</td>
+            <td><code>yes</code></td>
+        </tr>
+        <tr>
+            <td>Состояние</td>
+            <td><code>up</code></td>
+        </tr>
+        </tbody>
+    </table>
+
+    <p>
+        Если интерфейс отсутствует или находится в неправильном
+        состоянии, используйте доступные в WebUI действия создания или
+        восстановления интерфейса. После смены сервера обновите его
+        название, если оно не изменилось автоматически.
+    </p>
+</section>
+
+<section id="routing">
+    <h2>8. Маршрутизация устройств</h2>
+
+    <p>
+        После запуска <code>Proxy0</code> выберите в KeeneticOS, какие
+        устройства или сегменты домашней сети должны использовать
+        подключение BROray.
+    </p>
+
+    <ol class="steps">
+        <li>Откройте веб-интерфейс KeeneticOS.</li>
+        <li>Перейдите к настройкам приоритетов подключений.</li>
+        <li>
+            Создайте отдельную политику доступа в интернет либо
+            отредактируйте существующую.
+        </li>
+        <li>Добавьте в политику подключение BROray/Proxy0.</li>
+        <li>Назначьте этой политике нужные домашние устройства.</li>
+        <li>Сохраните настройки и проверьте доступ в интернет.</li>
+    </ol>
+
+    <div class="note">
+        <span class="note-title">Рекомендуемый порядок проверки</span>
+        Сначала назначьте BROray одному тестовому устройству. После
+        успешной проверки добавляйте остальные устройства.
+    </div>
+</section>
+
+<section id="update">
+    <h2>9. Обновление BROray</h2>
+
+    <h3>Переход с пакета 2.1.0-1 на 2.1.0-2</h3>
+
+    <p>
+        Для этой конкретной редакции используйте проверяемый сценарий
+        с подготовленным OPKG-откатом:
+    </p>
+
+    <pre><button class="copy" type="button">Копировать</button><code>wget -qO /tmp/broray-safe-upgrade-2.1.0-2.sh \
+    https://api.brovibe.cloud/releases/broray-safe-upgrade-2.1.0-2.sh &amp;&amp;
+ash /tmp/broray-safe-upgrade-2.1.0-2.sh</code></pre>
+
+    <h3>Штатные обновления, начиная с 2.1.0-2</h3>
+
+    <p>Обновление выполняется через подключённый OPKG-репозиторий:</p>
+
+    <pre><button class="copy" type="button">Копировать</button><code>opkg update &amp;&amp; opkg upgrade broray</code></pre>
+
+    <p>Проверить установленную версию:</p>
+
+    <pre><button class="copy" type="button">Копировать</button><code>/opt/broray/bin/broray version</code></pre>
+
+    <div class="note">
+        <span class="note-title">Обновляйте только пакет BROray</span>
+        Команда выше не выполняет массовое обновление всех пакетов
+        Entware.
+    </div>
+</section>
+
+<section id="diagnostics">
+    <h2>10. Проверка и диагностика</h2>
+
+    <h3>Состояние BROray и активного сервера</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>/opt/broray/bin/broray status</code></pre>
+
+    <h3>Проверка конфигурации Xray</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>/opt/broray/bin/broray test</code></pre>
+
+    <p>Успешная проверка заканчивается сообщением:</p>
+
+    <pre><code>Configuration OK.</code></pre>
+
+    <h3>Состояние служб</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>/opt/etc/init.d/S23broray-monitor status
+/opt/etc/init.d/S24broray status
+/opt/etc/init.d/S25broray-web status
+/opt/etc/init.d/S27broray-auto-switch status
+/opt/etc/init.d/S28broray-subscriptions status</code></pre>
+
+    <h3>Состояние интерфейса Keenetic</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>ash /opt/broray/lib/interface.sh status</code></pre>
+
+    <h3>Перезапуск BROray</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>/opt/broray/bin/broray restart</code></pre>
+
+    <h3>Проверка локального WebUI</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>curl -fsS http://192.168.1.1:8080/ &gt;/dev/null &amp;&amp; echo "WebUI отвечает"</code></pre>
+</section>
+
+<section id="conffiles">
+    <h2>11. Предупреждения OPKG о настройках</h2>
+
+    <p>
+        При обновлении может появиться сообщение
+        <code>resolve_conffiles</code>:
+    </p>
+
+    <pre><code>Existing conffile ... is different from the conffile in the new package.
+The new conffile will be placed at ...-opkg.</code></pre>
+
+    <p>Это не ошибка установки. OPKG:</p>
+
+    <ul>
+        <li>сохраняет действующий пользовательский файл без изменений;</li>
+        <li>
+            помещает новый шаблон из пакета рядом с суффиксом
+            <code>-opkg</code>.
+        </li>
+    </ul>
+
+    <p>В BROray это может касаться файлов:</p>
+
+    <pre><code>/opt/broray/config/system/settings.json-opkg
+/opt/broray/config/lighttpd.conf-opkg</code></pre>
+
+    <p>Перед удалением шаблонов можно сравнить версии:</p>
+
+    <pre><button class="copy" type="button">Копировать</button><code>diff -u \
+    /opt/broray/config/system/settings.json \
+    /opt/broray/config/system/settings.json-opkg
+
+diff -u \
+    /opt/broray/config/lighttpd.conf \
+    /opt/broray/config/lighttpd.conf-opkg</code></pre>
+
+    <div class="note warning">
+        <span class="note-title">Не заменяйте настройки вслепую</span>
+        Файлы <code>-opkg</code> являются новыми шаблонами. Автоматическая
+        замена действующих файлов может сбросить адрес WebUI и другие
+        пользовательские параметры.
+    </div>
+</section>
+<section id="uninstall">
+    <h2>12. Удаление BROray</h2>
+
+    <div class="note warning">
+        <span class="note-title">Сначала измените маршрутизацию</span>
+        До удаления исключите интерфейс BROray из политик доступа
+        KeeneticOS или назначьте устройствам другое рабочее подключение.
+        Иначе выбранные устройства могут потерять доступ в интернет.
+    </div>
+
+    <h3>Рекомендуемое удаление с сохранением данных</h3>
+
+    <p>
+        Этот вариант удаляет BROray и интерфейс
+        <code>Proxy0</code>, но сохраняет оставшиеся пользовательские
+        данные для возможной повторной установки.
+    </p>
+
+    <p>
+        Выполняйте команды последовательно в терминале Entware:
+    </p>
+
+    <pre><button class="copy" type="button">Копировать</button><code>ash /opt/broray/lib/interface.sh delete
+opkg remove broray</code></pre>
+
+    <p>При штатном удалении пакет автоматически:</p>
+
+    <ul>
+        <li>останавливает BROray Monitor;</li>
+        <li>останавливает Xray;</li>
+        <li>останавливает BROray WebUI;</li>
+        <li>останавливает автовыбор сервера;</li>
+        <li>останавливает обновление подписок;</li>
+        <li>удаляет KeenDNS HTTP Proxy с именем <code>broray</code>;</li>
+        <li>сохраняет конфигурацию KeeneticOS.</li>
+    </ul>
+
+    <div class="note">
+        <span class="note-title">Почему интерфейс удаляется отдельно</span>
+        Штатный сценарий OPKG не удаляет <code>Proxy0</code>.
+        Поэтому команда
+        <code>ash /opt/broray/lib/interface.sh delete</code>
+        выполняется до удаления пакета, пока служебные сценарии BROray
+        ещё доступны.
+    </div>
+
+    <h3>Полное удаление</h3>
+
+    <p>
+        Полное удаление дополнительно уничтожает настройки, подписки,
+        импортированные серверы и запись репозитория BROray.
+    </p>
+
+    <div class="note warning">
+        <span class="note-title">Необратимое действие</span>
+        Каталог <code>/opt/broray</code> содержит ссылки подписок,
+        серверы и пользовательские настройки. После выполнения команд
+        восстановить их можно будет только из резервной копии.
+    </div>
+
+    <h3>1. Необязательная резервная копия</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>STAMP="$(date +%Y%m%d-%H%M%S)"
+tar -czf "/opt/broray-backup-$STAMP.tar.gz" /opt/broray
+chmod 600 "/opt/broray-backup-$STAMP.tar.gz"</code></pre>
+
+    <p>
+        Архив будет сохранён непосредственно в каталоге
+        <code>/opt</code>, то есть за пределами удаляемого каталога
+        BROray.
+    </p>
+
+    <h3>2. Удаление интерфейса и пакета</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>ash /opt/broray/lib/interface.sh delete
+opkg remove broray</code></pre>
+
+    <h3>3. Удаление оставшихся данных и репозитория</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>rm -rf /opt/broray
+rm -f /opt/etc/opkg/broray.conf
+rm -f /opt/bin/broray /opt/bin/broray-server</code></pre>
+
+    <p>
+        Зависимости Entware, например <code>curl</code>,
+        <code>jq</code> или <code>lighttpd</code>, автоматически не
+        удаляются: они могут использоваться другими установленными
+        приложениями.
+    </p>
+
+    <h3>Проверка удаления</h3>
+
+    <pre><button class="copy" type="button">Копировать</button><code>opkg list-installed | grep '^broray ' || echo "Пакет BROray удалён"
+
+[ ! -e /opt/broray ] &amp;&amp; echo "Каталог BROray удалён"
+
+ndmc -c "show interface Proxy0" 2&gt;/dev/null ||
+    echo "Интерфейс Proxy0 отсутствует"</code></pre>
+
+    <h3>Повторная установка</h3>
+
+    <p>
+        После полного удаления BROray можно установить заново стандартной
+        командой:
+    </p>
+
+    <pre><button class="copy" type="button">Копировать</button><code>wget -qO /tmp/broray-opkg.sh https://api.brovibe.cloud/releases/opkg.sh &amp;&amp; ash /tmp/broray-opkg.sh</code></pre>
+</section>
+</main>
+</div>
+
+<footer class="site-footer">
+    <div class="footer-inner">
+        BROvibe Docs · BROray 2.1.0 · OPKG 2.1.0-2
+    </div>
+</footer>
+
+<script>
+document.querySelectorAll(".copy").forEach(function (button) {
+    button.addEventListener("click", function () {
+        var code = button.parentElement.querySelector("code");
+        navigator.clipboard.writeText(code.innerText).then(function () {
+            var oldText = button.textContent;
+            button.textContent = "Скопировано";
+            window.setTimeout(function () {
+                button.textContent = oldText;
+            }, 1400);
+        });
+    });
+});
+</script>
+</body>
+</html>
