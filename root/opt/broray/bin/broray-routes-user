@@ -1,0 +1,56 @@
+#!/opt/bin/ash
+
+set -u
+
+PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+
+ROOT="${BRORAY_ROOT:-/opt/broray}"
+LIBRARY="${BRORAY_USER_ROUTES_LIBRARY:-$ROOT/lib/routes-user-import.sh}"
+
+usage()
+{
+    cat >&2 <<'USAGE'
+Использование:
+  broray-routes-user preview <request.json>
+  broray-routes-user commit <request.json>
+  broray-routes-user list
+  broray-routes-user validate <bundleId>
+  broray-routes-user remove <bundleId>
+USAGE
+    exit 2
+}
+
+[ -r "$LIBRARY" ] || {
+    echo "BRORAY_ERROR:MODULE_UNAVAILABLE:Модуль пользовательских маршрутов недоступен." >&2
+    exit 1
+}
+
+. "$LIBRARY"
+trap broray_user_routes_cleanup EXIT HUP INT TERM
+
+case "${1:-}" in
+    preview)
+        [ "$#" -eq 2 ] || usage
+        broray_user_routes_preview "$2"
+        ;;
+    commit)
+        [ "$#" -eq 2 ] || usage
+        broray_user_routes_commit "$2"
+        ;;
+    list)
+        [ "$#" -eq 1 ] || usage
+        broray_user_routes_list
+        ;;
+    validate)
+        [ "$#" -eq 2 ] || usage
+        broray_user_routes_validate "$2"
+        ;;
+    remove)
+        [ "$#" -eq 2 ] || usage
+        broray_user_routes_remove "$2"
+        ;;
+    *)
+        usage
+        ;;
+esac

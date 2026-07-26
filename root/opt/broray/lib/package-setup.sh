@@ -6,7 +6,7 @@ PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
 PRODUCT="BROray"
-VERSION="2.1.0"
+VERSION="2.1.1"
 TARGET="/opt/broray"
 LIGHTTPD=""
 LAN_IP=""
@@ -40,6 +40,7 @@ create_runtime_directories()
         "$TARGET/routes/manifests" \
         "$TARGET/routes/state" \
         "$TARGET/routes/tmp" \
+        "$TARGET/routes/tmp/user-previews" \
         "$TARGET/routes/transactions" \
         "$TARGET/run/server-quality" \
         "$TARGET/run/subscriptions" \
@@ -92,6 +93,7 @@ create_command_links()
     for command_name in \
         broray \
         broray-routes \
+        broray-routes-user \
         broray-server \
         broray-servers \
         broray-subscriptions \
@@ -163,7 +165,7 @@ server.modules = (
 server.document-root = "/opt/broray/web-new"
 server.bind = "$LAN_IP"
 server.port = 8080
-server.max-request-size = 16
+server.max-request-size = 5120
 
 server.pid-file = "/opt/broray/run/lighttpd.pid"
 server.errorlog = "/opt/broray/logs/lighttpd-error.log"
@@ -381,14 +383,18 @@ validate_release()
     for required_file in \
         "$TARGET/bin/broray" \
         "$TARGET/bin/broray-routes" \
+        "$TARGET/bin/broray-routes-user" \
         "$TARGET/bin/broray-servers" \
         "$TARGET/bin/broray-subscriptions" \
         "$TARGET/bin/xray" \
         "$TARGET/lib/interface-owner.sh" \
+        "$TARGET/lib/routes-user-import.sh" \
         "$TARGET/lib/package-setup.sh" \
         "$TARGET/web-new/index.html" \
         "$TARGET/web-new/home.html" \
-        "$TARGET/web-new/api/session.cgi"
+        "$TARGET/web-new/api/session.cgi" \
+        "$TARGET/web-new/api/routes/custom-preview.cgi" \
+        "$TARGET/web-new/api/routes/custom-commit.cgi"
     do
         [ -f "$required_file" ] ||
             fail "Не найден обязательный файл: $required_file"
