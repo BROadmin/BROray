@@ -5,7 +5,6 @@
 for service in \
     /opt/etc/init.d/S28broray-subscriptions \
     /opt/etc/init.d/S27broray-auto-switch \
-    /opt/etc/init.d/S26broray-web-new \
     /opt/etc/init.d/S25broray-web \
     /opt/etc/init.d/S24broray \
     /opt/etc/init.d/S23broray-monitor

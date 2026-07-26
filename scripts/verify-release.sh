@@ -31,6 +31,9 @@ printf '%s\n' "=== Verification 1/3: source, syntax and privacy ==="
 
 bash -n \
     "$REPOSITORY_ROOT/scripts/build-opkg-release.sh" \
+    "$REPOSITORY_ROOT/scripts/test-opkg-rollback.sh" \
+    "$REPOSITORY_ROOT/scripts/test-safe-opkg-upgrade.sh" \
+    "$REPOSITORY_ROOT/scripts/test-opkg-upgrade.sh" \
     "$REPOSITORY_ROOT/scripts/verify-release.sh"
 
 {
@@ -47,6 +50,7 @@ bash -n \
         -type f
     printf '%s\n' \
         "$REPOSITORY_ROOT/install.sh" \
+        "$REPOSITORY_ROOT/scripts/safe-opkg-upgrade.sh" \
         "$REPOSITORY_ROOT/packaging/opkg/opkg.sh" \
         "$REPOSITORY_ROOT/packaging/opkg/preinst" \
         "$REPOSITORY_ROOT/packaging/opkg/postinst" \
@@ -188,18 +192,29 @@ BRORAY_INIT_ROOT="$INIT_ROOT" \
 BRORAY_ASH_BIN="$ASH_BIN" \
     "$ASH_BIN" "$RUNTIME_ROOT/tests/subscriptions-selftest.sh"
 
+if find "$RUNTIME_ROOT/routes/tmp" \
+    -mindepth 1 \
+    -print -quit |
+    grep -q .
+then
+    fail "self-tests left files in routes/tmp"
+fi
+
 printf '%s\n' "Verification 2 PASS"
 printf '%s\n' "=== Verification 3/3: OPKG package and feed ==="
 
 "$REPOSITORY_ROOT/scripts/build-opkg-release.sh"
 
-PACKAGE="$REPOSITORY_ROOT/dist/opkg/aarch64-3.10/broray_2.1.0-1_aarch64-3.10.ipk"
+PACKAGE="$REPOSITORY_ROOT/dist/opkg/aarch64-3.10/broray_2.1.0-2_aarch64-3.10.ipk"
 PACKAGES="$REPOSITORY_ROOT/dist/opkg/aarch64-3.10/Packages"
+SAFE_UPGRADE="$REPOSITORY_ROOT/dist/broray-safe-upgrade-2.1.0-2.sh"
 
 [ -s "$PACKAGE" ] ||
     fail "package was not built"
 [ -s "$PACKAGES" ] ||
     fail "Packages index was not built"
+[ -s "$SAFE_UPGRADE" ] ||
+    fail "safe transition script was not built"
 
 mkdir -p \
     "$WORK_ROOT/ipk" \
@@ -209,7 +224,7 @@ tar -xzf "$PACKAGE" -C "$WORK_ROOT/ipk"
 tar -xzf "$WORK_ROOT/ipk/control.tar.gz" -C "$WORK_ROOT/control"
 tar -xzf "$WORK_ROOT/ipk/data.tar.gz" -C "$WORK_ROOT/data"
 
-grep -Fxq 'Version: 2.1.0-1' "$WORK_ROOT/control/control" ||
+grep -Fxq 'Version: 2.1.0-2' "$WORK_ROOT/control/control" ||
     fail "wrong package version"
 grep -Fxq 'Architecture: aarch64-3.10' "$WORK_ROOT/control/control" ||
     fail "wrong package architecture"
@@ -240,11 +255,21 @@ for forbidden_directory in \
     servers \
     subscriptions \
     deleted-subscriptions \
+    backup \
+    backups \
+    data \
+    logs \
+    run \
+    tmp \
+    update \
     config/subscriptions \
+    config/disabled-subscription-servers \
     routes/backup \
     routes/catalog \
     routes/installed \
+    routes/locks \
     routes/state \
+    routes/tmp \
     routes/transactions
 do
     if find \
@@ -272,6 +297,44 @@ if rg -n --no-messages \
 then
     fail "personal value found in package"
 fi
+
+if rg -n --no-messages -- '--exclude' \
+    "$WORK_ROOT/control/preinst"
+then
+    fail "GNU tar --exclude entered the BusyBox preinst"
+fi
+
+for service_name in \
+    S23broray-monitor \
+    S24broray \
+    S25broray-web \
+    S27broray-auto-switch \
+    S28broray-subscriptions
+do
+    grep -Fq "$service_name" \
+        "$WORK_ROOT/data/opt/broray/lib/package-setup.sh" ||
+        fail "package setup does not verify $service_name"
+done
+
+OLD_DIST="$WORK_ROOT/old-dist"
+BRORAY_DIST_ROOT="$OLD_DIST" \
+BRORAY_PACKAGE_REVISION=1 \
+XRAY_BINARY="$WORK_ROOT/data/opt/broray/bin/xray" \
+    "$REPOSITORY_ROOT/scripts/build-opkg-release.sh"
+
+OLD_PACKAGE="$OLD_DIST/opkg/aarch64-3.10/broray_2.1.0-1_aarch64-3.10.ipk"
+
+"$REPOSITORY_ROOT/scripts/test-opkg-upgrade.sh" \
+    "$OLD_PACKAGE" \
+    "$PACKAGE"
+"$REPOSITORY_ROOT/scripts/test-opkg-rollback.sh" \
+    "$OLD_PACKAGE"
+"$REPOSITORY_ROOT/scripts/test-safe-opkg-upgrade.sh" \
+    "$OLD_PACKAGE" \
+    "$PACKAGE"
+
+grep -Fq 'TARGET_VERSION="2.1.0-2"' "$SAFE_UPGRADE" ||
+    fail "safe transition script targets the wrong package"
 
 printf '%s\n' "Verification 3 PASS"
 printf '%s\n' "ALL VERIFICATIONS PASS"

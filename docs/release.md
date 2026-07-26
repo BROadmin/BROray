@@ -18,11 +18,12 @@
 
 ```text
 dist/opkg.sh
+dist/broray-safe-upgrade-2.1.0-2.sh
 dist/SHA256SUMS
 dist/opkg/aarch64-3.10/Packages
 dist/opkg/aarch64-3.10/Packages.gz
-dist/opkg/aarch64-3.10/broray_2.1.0-1_aarch64-3.10.ipk
-dist/BROray-opkg-update-2.1.0-1.tar.gz
+dist/opkg/aarch64-3.10/broray_2.1.0-2_aarch64-3.10.ipk
+dist/BROray-opkg-update-2.1.0-2.tar.gz
 ```
 
 ## Публикация на api.brovibe.cloud
@@ -36,14 +37,18 @@ dist/BROray-opkg-update-2.1.0-1.tar.gz
 Архив обновления раскрывается в этот каталог:
 
 ```sh
-cd /var/www/api.brovibe.cloud/releases || exit 1
-tar -xzf BROray-opkg-update-2.1.0-1.tar.gz
-chmod 644 \
-    opkg.sh \
-    SHA256SUMS \
-    opkg/aarch64-3.10/Packages \
-    opkg/aarch64-3.10/Packages.gz \
-    opkg/aarch64-3.10/broray_2.1.0-1_aarch64-3.10.ipk
+if cd /var/www/api.brovibe.cloud/releases; then
+    tar -xzf BROray-opkg-update-2.1.0-2.tar.gz
+    chmod 644 \
+        opkg.sh \
+        broray-safe-upgrade-2.1.0-2.sh \
+        SHA256SUMS \
+        opkg/aarch64-3.10/Packages \
+        opkg/aarch64-3.10/Packages.gz \
+        opkg/aarch64-3.10/broray_2.1.0-2_aarch64-3.10.ipk
+else
+    echo "ОШИБКА: каталог релизов недоступен"
+fi
 ```
 
 Старый пакет не удаляется до проверки обновления на Keenetic.
@@ -55,7 +60,10 @@ curl -fI \
     https://api.brovibe.cloud/releases/opkg/aarch64-3.10/Packages.gz
 
 curl -fI \
-    https://api.brovibe.cloud/releases/opkg/aarch64-3.10/broray_2.1.0-1_aarch64-3.10.ipk
+    https://api.brovibe.cloud/releases/opkg/aarch64-3.10/broray_2.1.0-2_aarch64-3.10.ipk
+
+curl -fI \
+    https://api.brovibe.cloud/releases/broray-safe-upgrade-2.1.0-2.sh
 ```
 
 На Keenetic:
@@ -65,10 +73,18 @@ opkg update &&
 opkg list-upgradable | grep '^broray '
 ```
 
-После подтверждения доступности пакета:
+Для перехода с `2.1.0-1`:
 
 ```sh
-opkg upgrade broray
+wget -qO /tmp/broray-safe-upgrade-2.1.0-2.sh \
+    https://api.brovibe.cloud/releases/broray-safe-upgrade-2.1.0-2.sh &&
+ash /tmp/broray-safe-upgrade-2.1.0-2.sh
+```
+
+После перехода:
+
+```sh
+opkg list-installed broray
 broray version
 broray status
 ```
