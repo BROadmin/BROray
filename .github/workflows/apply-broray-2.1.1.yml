@@ -49,7 +49,13 @@ jobs:
             .release/overlay.part0050 \
             .release/overlay.part0051 \
             .release/overlay.part0052 \
-            .release/overlay.part0053 \
+            .release/overlay.part00530 \
+            .release/overlay.part00531 \
+            .release/overlay.part00532 \
+            .release/overlay.part00533 \
+            .release/overlay.part00534 \
+            .release/overlay.part00535 \
+            .release/overlay.part00536 \
             .release/overlay.part0060 \
             .release/overlay.part0061 \
             .release/overlay.part0062 \
