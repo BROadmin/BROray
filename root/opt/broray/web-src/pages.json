@@ -100,7 +100,8 @@
       "title": "Маршруты",
       "scripts": [
         "dialogs.js",
-        "routes.js"
+        "routes.js",
+        "routes-custom.js"
       ],
       "styles": []
     },
