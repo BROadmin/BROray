@@ -19,6 +19,7 @@
 ```text
 dist/opkg.sh
 dist/broray-safe-upgrade-2.1.0-2.sh
+dist/broray-manual-to-opkg-2.1.0-2.sh
 dist/SHA256SUMS
 dist/opkg/aarch64-3.10/Packages
 dist/opkg/aarch64-3.10/Packages.gz
@@ -42,6 +43,7 @@ if cd /var/www/api.brovibe.cloud/releases; then
     chmod 644 \
         opkg.sh \
         broray-safe-upgrade-2.1.0-2.sh \
+        broray-manual-to-opkg-2.1.0-2.sh \
         SHA256SUMS \
         opkg/aarch64-3.10/Packages \
         opkg/aarch64-3.10/Packages.gz \
@@ -64,6 +66,9 @@ curl -fI \
 
 curl -fI \
     https://api.brovibe.cloud/releases/broray-safe-upgrade-2.1.0-2.sh
+
+curl -fI \
+    https://api.brovibe.cloud/releases/broray-manual-to-opkg-2.1.0-2.sh
 ```
 
 На Keenetic:
