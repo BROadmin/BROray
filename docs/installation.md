@@ -48,6 +48,39 @@ opkg list-installed broray
 broray version
 ```
 
+## Переход с ручной установки 2.1.0
+
+Для существующей ручной BROray `2.1.0` на Entware `aarch64-3.10`
+используется одноразовый мигратор. Обычный `opkg install broray` поверх
+ручной установки не поддерживается.
+
+```sh
+opkg update &&
+opkg install ca-bundle ca-certificates wget-ssl
+
+MIGRATOR="/tmp/broray-manual-to-opkg-2.1.0-2.sh"
+EXPECTED_SHA256="6c976a0b3958a8ad1b78584ff54874f283b8218c9c97dd57937ea0b86c214518"
+
+/opt/bin/wget -qO "$MIGRATOR.part" \
+    https://api.brovibe.cloud/releases/broray-manual-to-opkg-2.1.0-2.sh &&
+ACTUAL_SHA256="$(
+    sha256sum "$MIGRATOR.part" |
+        awk '{print $1}'
+)" &&
+if [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ]; then
+    mv "$MIGRATOR.part" "$MIGRATOR" &&
+    ash "$MIGRATOR"
+else
+    echo "ОШИБКА: SHA-256 мигратора не совпала"
+    rm -f "$MIGRATOR.part"
+    false
+fi
+```
+
+До изменения установки мигратор проверяет архитектуру, версию BROray,
+зависимости, свободное место, Xray, WebUI и пять служб. Резервная копия
+создаётся автоматически и сохраняется в `/opt/broray/backups`.
+
 ## Обновление
 
 Переход с `2.1.0-1` на `2.1.0-2` выполняется безопасным сценарием:
