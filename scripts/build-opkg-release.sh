@@ -28,6 +28,8 @@ PACKAGE_NAME="${PRODUCT}_${PACKAGE_VERSION}_${ARCHITECTURE}.ipk"
 PACKAGE_PATH="$FEED_ROOT/$PACKAGE_NAME"
 SAFE_UPGRADE_NAME="broray-safe-upgrade-$PACKAGE_VERSION.sh"
 SAFE_UPGRADE_PATH="$DIST_ROOT/$SAFE_UPGRADE_NAME"
+MANUAL_MIGRATOR_NAME="broray-manual-to-opkg-$PACKAGE_VERSION.sh"
+MANUAL_MIGRATOR_PATH="$DIST_ROOT/$MANUAL_MIGRATOR_NAME"
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(date +%s)}"
 
 cleanup()
@@ -342,9 +344,13 @@ cp -a \
 cp -a \
     "$REPOSITORY_ROOT/scripts/safe-opkg-upgrade.sh" \
     "$SAFE_UPGRADE_PATH"
+cp -a \
+    "$REPOSITORY_ROOT/scripts/migrate-manual-to-opkg.sh" \
+    "$MANUAL_MIGRATOR_PATH"
 chmod 644 \
     "$DIST_ROOT/opkg.sh" \
     "$SAFE_UPGRADE_PATH" \
+    "$MANUAL_MIGRATOR_PATH" \
     "$FEED_ROOT/Packages" \
     "$FEED_ROOT/Packages.gz" \
     "$PACKAGE_PATH"
@@ -354,6 +360,7 @@ chmod 644 \
     sha256sum \
         opkg.sh \
         "$SAFE_UPGRADE_NAME" \
+        "$MANUAL_MIGRATOR_NAME" \
         "opkg/$ARCHITECTURE/Packages" \
         "opkg/$ARCHITECTURE/Packages.gz" \
         "opkg/$ARCHITECTURE/$PACKAGE_NAME"
@@ -370,6 +377,7 @@ tar \
     -czf "$UPDATE_ARCHIVE" \
     opkg.sh \
     "$SAFE_UPGRADE_NAME" \
+    "$MANUAL_MIGRATOR_NAME" \
     SHA256SUMS \
     "opkg/$ARCHITECTURE/Packages" \
     "opkg/$ARCHITECTURE/Packages.gz" \
