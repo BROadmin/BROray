@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>BROray — установка и настройка</title>
-    <meta name="description" content="Установка, переход на OPKG и настройка BROray 2.1.0 на Keenetic с Entware.">
+    <meta name="description" content="Установка, обновление и настройка BROray 2.1.1 на Keenetic с Entware.">
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -46,8 +46,8 @@
     </p>
 
     <div class="meta">
-        <span class="badge accent">BROray 2.1.0</span>
-        <span class="badge">OPKG 2.1.0-2</span>
+        <span class="badge accent">BROray 2.1.1</span>
+        <span class="badge">OPKG 2.1.1-1</span>
         <span class="badge">aarch64 / arm64</span>
         <span class="badge">BusyBox / ash</span>
     </div>
@@ -326,6 +326,14 @@ fi</code></pre>
 </section>
 
 <section id="routing">
+
+    <div class="note">
+        <span class="note-title">Свои BAT-маршруты в BROray 2.1.1</span>
+        На странице «Маршруты» можно загрузить один или несколько BAT-файлов Keenetic.
+        BROray не выполняет команды файла: он проверяет строки, нормализует сети,
+        удаляет повторы и показывает отчёт до создания набора. Маршрут
+        <code>0.0.0.0/0</code> запрещён, а широкие сети сопровождаются предупреждением.
+    </div>
     <h2>8. Маршрутизация устройств</h2>
 
     <p>

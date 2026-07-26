@@ -12,12 +12,13 @@ BROray — менеджер Xray для Keenetic с WebUI, подписками,
 - создание, проверка и восстановление принадлежащего BROray интерфейса `ProxyN`;
 - запуск, остановка, перезапуск, диагностика и обновление Xray;
 - готовые наборы маршрутов для Telegram, WhatsApp, YouTube, ChatGPT, Facebook, Instagram, Meta, TikTok и Speedtest;
+- безопасный импорт собственных BAT-маршрутов с предварительной проверкой и отдельными карточками;
 - локальный WebUI на порту `8080` и публикация через KeenDNS HTTP Proxy;
 - обновление BROray через собственный OPKG-репозиторий.
 
 ## Текущая версия
 
-BROray 2.1.0, пакет OPKG `2.1.0-2`.
+BROray 2.1.1, пакет OPKG `2.1.1-1`.
 
 Проверено на Keenetic Ultra KN-1811 с KeeneticOS 5.1.1 Preview, BusyBox 1.37.0 и Entware `aarch64-3.10`.
 

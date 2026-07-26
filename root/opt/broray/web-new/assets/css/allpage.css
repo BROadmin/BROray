@@ -5170,3 +5170,161 @@ body.modal-open {
 }
 
 /* END PAGE BRORAY */
+
+
+/* =========================================================
+   BEGIN PAGE ROUTES CUSTOM BAT
+   ========================================================= */
+.routes-custom-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 18px;
+}
+.routes-custom-panel-copy { max-width: 720px; }
+.routes-custom-panel h2 { margin: 4px 0 8px; }
+.routes-custom-panel p { margin: 0; color: var(--ui-text-muted); }
+.routes-custom-list { margin-bottom: 18px; }
+.route-custom-logo { color: var(--ui-active); }
+.route-custom-details { margin-top: 18px; border-top: 1px solid var(--ui-border); padding-top: 14px; }
+.route-custom-details > summary { cursor: pointer; }
+.route-custom-details .route-details-grid { margin: 16px 0; }
+.routes-custom-empty { display: flex; align-items: center; gap: 12px; color: var(--ui-text-muted); }
+.routes-custom-empty-icon { width: 24px; height: 24px; color: var(--ui-active); }
+.routes-upload-root { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 18px; }
+.routes-upload-root[hidden] { display: none; }
+.routes-upload-modal { position: relative; width: min(680px, 100%); max-height: calc(100vh - 36px); overflow: auto; }
+.routes-upload-intro { margin-top: 0; color: var(--ui-text-muted); }
+.routes-upload-field { display: grid; gap: 8px; margin-top: 16px; font-weight: 700; }
+.routes-upload-field input { width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid var(--ui-border); border-radius: 12px; background: var(--ui-surface-input); color: var(--ui-text); }
+.routes-upload-result { margin-top: 16px; padding: 14px; border-radius: 14px; }
+.routes-upload-result > strong { display: block; margin-bottom: 10px; }
+.routes-upload-result.status-success { background: var(--ui-success-soft); }
+.routes-upload-result.status-warning { background: var(--ui-warning-soft); }
+.routes-upload-result.status-error { background: var(--ui-error-soft); }
+.routes-upload-stat { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; }
+.routes-upload-warning { margin: 12px 0 0; }
+.routes-upload-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+.routes-upload-actions [data-upload-action="preview"] { order: 1; }
+.routes-upload-actions [data-upload-action="commit"] { order: 2; }
+.routes-upload-actions [data-upload-action="cancel"] { order: 3; }
+.routes-upload-actions .button { width: 100%; }
+.routes-upload-actions [data-upload-action="commit"]:disabled {
+    opacity: 0.48;
+    cursor: not-allowed;
+}
+@media (max-width: 720px) {
+    .routes-upload-actions { grid-template-columns: minmax(0, 1fr); }
+    .routes-custom-panel { align-items: stretch; flex-direction: column; }
+    .routes-custom-panel .button { width: 100%; }
+    .route-custom-card .route-card-actions { grid-template-columns: 1fr; }
+    .route-custom-card .route-card-actions .button { width: 100%; }
+}
+
+/* BROray routes local card compact r1 */
+.routes-custom-panel {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 18px;
+    padding: 20px 22px;
+    margin-bottom: 18px;
+}
+
+.routes-custom-panel-logo {
+    display: grid;
+    width: 56px;
+    height: 56px;
+    flex: 0 0 56px;
+    place-items: center;
+    border: 1px solid var(--ui-active-border);
+    border-radius: var(--ui-radius-sm);
+    color: var(--ui-active);
+    background: var(--ui-active-soft);
+}
+
+.routes-custom-panel-logo .ui-icon {
+    width: 28px;
+    height: 28px;
+}
+
+.routes-custom-panel-copy {
+    min-width: 0;
+    max-width: none;
+}
+
+.routes-custom-panel .eyebrow {
+    margin: 0 0 5px;
+}
+
+.routes-custom-panel h2 {
+    margin: 0 0 5px;
+    font-size: clamp(22px, 2vw, 28px);
+    line-height: 1.15;
+    letter-spacing: -0.025em;
+}
+
+.routes-custom-panel p {
+    max-width: 720px;
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.routes-custom-panel > .button {
+    min-height: 46px;
+    padding-inline: 18px;
+    white-space: nowrap;
+}
+
+.routes-custom-list:empty {
+    display: none;
+    margin: 0;
+}
+
+@media (max-width: 720px) {
+    .routes-custom-panel {
+        grid-template-columns: 50px minmax(0, 1fr);
+        align-items: start;
+        gap: 12px 14px;
+        padding: 16px;
+    }
+
+    .routes-custom-panel-logo {
+        width: 50px;
+        height: 50px;
+        flex-basis: 50px;
+    }
+
+    .routes-custom-panel-logo .ui-icon {
+        width: 26px;
+        height: 26px;
+    }
+
+    .routes-custom-panel-copy {
+        grid-column: 2;
+    }
+
+    .routes-custom-panel h2 {
+        font-size: 23px;
+    }
+
+    .routes-custom-panel p {
+        font-size: 14px;
+        line-height: 1.45;
+    }
+
+    .routes-custom-panel > .button {
+        grid-column: 1 / -1;
+        width: 100%;
+        min-height: 48px;
+        margin-top: 2px;
+    }
+}
+
+/* END PAGE ROUTES CUSTOM BAT */
