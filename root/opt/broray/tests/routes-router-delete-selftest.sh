@@ -249,6 +249,7 @@ trap broray_routes_delete_cleanup EXIT HUP INT TERM
 broray_routes_router_delete_run telegram >/dev/null
 trap - EXIT HUP INT TERM
 broray_routes_delete_cleanup
+trap cleanup EXIT HUP INT TERM
 
 jq -e '
     (.routes | length) == 1 and
@@ -413,6 +414,7 @@ fi
 
 trap - EXIT HUP INT TERM
 broray_routes_delete_cleanup
+trap cleanup EXIT HUP INT TERM
 
 sha256sum \
     "$FAIL_ROOT/routes/installed/routes.json" \
