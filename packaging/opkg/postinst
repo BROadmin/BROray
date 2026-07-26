@@ -2,4 +2,9 @@
 
 [ -z "${IPKG_INSTROOT:-}" ] || exit 0
 
-exec /opt/bin/ash /opt/broray/lib/package-setup.sh
+/opt/bin/ash /opt/broray/lib/package-setup.sh || exit $?
+
+rm -f \
+    /tmp/broray-opkg-services-before-upgrade \
+    /tmp/broray-opkg-existing-backup
+exit 0

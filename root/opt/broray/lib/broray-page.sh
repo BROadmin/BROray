@@ -14,6 +14,8 @@ BRORAY_LOCK="$BRORAY_RUN/operation.lock"
 BRORAY_LOG="$BRORAY_RUN/operation.log"
 BRORAY_LAST_BACKUP="$BRORAY_RUN/last-backup"
 BRORAY_PACKAGE="broray"
+BRORAY_INIT_ROOT="${BRORAY_INIT_ROOT:-/opt/etc/init.d}"
+BRORAY_FEED_FILE="${BRORAY_FEED_FILE:-/opt/etc/opkg/broray.conf}"
 BRORAY_PROJECT_URL="https://docs.brovibe.cloud/broray/"
 BRORAY_GITHUB_URL="https://github.com/BROadmin/BROray"
 BRORAY_DONATE_URL="https://pay.cloudtips.ru/p/09b23d0a"
@@ -429,6 +431,277 @@ broray_system_feed_value() {
     done | sed -n '1p'
 }
 
+broray_system_installed_package_version() {
+    opkg list-installed "$BRORAY_PACKAGE" 2>/dev/null |
+        awk -F ' - ' -v package="$BRORAY_PACKAGE" '
+            $1 == package {
+                print $2
+                exit
+            }
+        '
+}
+
+broray_system_installed_package_architecture() {
+    opkg status "$BRORAY_PACKAGE" 2>/dev/null |
+        awk '
+            $1 == "Architecture:" {
+                print $2
+                exit
+            }
+        '
+}
+
+broray_system_feed_base_url() {
+    [ -r "$BRORAY_FEED_FILE" ] || return 1
+
+    awk \
+        -v package="$BRORAY_PACKAGE" '
+            $1 == "src/gz" && $2 == package {
+                print $3
+                exit
+            }
+        ' "$BRORAY_FEED_FILE"
+}
+
+broray_system_ipk_control_value() {
+    broray_ipk_file="$1"
+    broray_ipk_key="$2"
+    broray_ipk_work="/tmp/broray-ipk-control-$$"
+    broray_ipk_control_tar="$broray_ipk_work/control.tar.gz"
+    broray_ipk_control="$broray_ipk_work/control"
+    broray_ipk_value=""
+
+    rm -rf "$broray_ipk_work"
+    mkdir -p "$broray_ipk_work" || return 1
+
+    if ! tar -xzOf "$broray_ipk_file" ./control.tar.gz \
+        >"$broray_ipk_control_tar" 2>/dev/null
+    then
+        tar -xzOf "$broray_ipk_file" control.tar.gz \
+            >"$broray_ipk_control_tar" 2>/dev/null || {
+                rm -rf "$broray_ipk_work"
+                return 1
+            }
+    fi
+
+    if ! tar -xzOf "$broray_ipk_control_tar" ./control \
+        >"$broray_ipk_control" 2>/dev/null
+    then
+        tar -xzOf "$broray_ipk_control_tar" control \
+            >"$broray_ipk_control" 2>/dev/null || {
+                rm -rf "$broray_ipk_work"
+                return 1
+            }
+    fi
+
+    broray_ipk_value="$(
+        awk \
+            -v wanted="$broray_ipk_key" '
+                index($0, wanted ":") == 1 {
+                    value = $0
+                    sub(wanted ":[ \t]*", "", value)
+                    print value
+                    exit
+                }
+            ' "$broray_ipk_control"
+    )"
+
+    rm -rf "$broray_ipk_work"
+    [ -n "$broray_ipk_value" ] || return 1
+    printf '%s\n' "$broray_ipk_value"
+}
+
+broray_system_make_rollback_ipk() {
+    broray_original_ipk="$1"
+    broray_rollback_ipk="$2"
+    broray_repack_root="/tmp/broray-rollback-repack-$$"
+    broray_repack_outer="$broray_repack_root/outer"
+    broray_repack_control="$broray_repack_root/control"
+
+    rm -rf "$broray_repack_root"
+    mkdir -p "$broray_repack_outer" "$broray_repack_control" ||
+        return 1
+
+    tar -xzf "$broray_original_ipk" -C "$broray_repack_outer" ||
+        return 1
+    tar -xzf "$broray_repack_outer/control.tar.gz" \
+        -C "$broray_repack_control" ||
+        return 1
+
+    cat >"$broray_repack_control/preinst" <<'EOF'
+#!/bin/sh
+
+[ -z "${IPKG_INSTROOT:-}" ] || exit 0
+
+for service in \
+    /opt/etc/init.d/S28broray-subscriptions \
+    /opt/etc/init.d/S27broray-auto-switch \
+    /opt/etc/init.d/S25broray-web \
+    /opt/etc/init.d/S24broray \
+    /opt/etc/init.d/S23broray-monitor
+do
+    [ -x "$service" ] || continue
+    "$service" stop >/dev/null 2>&1 || true
+done
+
+exit 0
+EOF
+
+    cat >"$broray_repack_control/postinst" <<'EOF'
+#!/bin/sh
+
+# The update worker restores the exact pre-upgrade snapshot and starts all
+# services after OPKG has restored the previous package version.
+exit 0
+EOF
+
+    chmod 755 \
+        "$broray_repack_control/preinst" \
+        "$broray_repack_control/postinst" ||
+        return 1
+
+    (
+        cd "$broray_repack_control" || exit 1
+        tar -czf "$broray_repack_outer/control.tar.gz" .
+    ) || return 1
+
+    (
+        cd "$broray_repack_outer" || exit 1
+        tar -czf "$broray_rollback_ipk" \
+            ./debian-binary \
+            ./data.tar.gz \
+            ./control.tar.gz
+    ) || return 1
+
+    rm -rf "$broray_repack_root"
+    [ -s "$broray_rollback_ipk" ]
+}
+
+broray_system_prepare_rollback_package() {
+    broray_rollback_dir="$1"
+    broray_rollback_version="$2"
+    broray_rollback_arch="$(broray_system_installed_package_architecture)"
+    broray_rollback_feed="$(broray_system_feed_base_url)"
+    broray_rollback_filename="$(
+        broray_system_feed_value "$broray_rollback_version" Filename
+    )"
+    broray_rollback_sha="$(
+        broray_system_feed_value "$broray_rollback_version" SHA256sum
+    )"
+
+    case "$broray_rollback_version" in
+        ''|*[!0-9A-Za-z._+-]*)
+            return 1
+            ;;
+    esac
+    case "$broray_rollback_arch" in
+        ''|*[!0-9A-Za-z._+-]*)
+            return 1
+            ;;
+    esac
+    [ -n "$broray_rollback_feed" ] || return 1
+
+    if [ -z "$broray_rollback_filename" ]; then
+        broray_rollback_filename="$BRORAY_PACKAGE"_"$broray_rollback_version"_"$broray_rollback_arch".ipk
+    else
+        broray_rollback_filename="${broray_rollback_filename##*/}"
+    fi
+
+    mkdir -p "$broray_rollback_dir" || return 1
+    broray_downloaded_ipk="$broray_rollback_dir/original-$broray_rollback_filename"
+    broray_downloaded_part="$broray_downloaded_ipk.part"
+    broray_ready_ipk="$broray_rollback_dir/rollback-$broray_rollback_filename"
+
+    rm -f \
+        "$broray_downloaded_part" \
+        "$broray_downloaded_ipk" \
+        "$broray_ready_ipk"
+
+    curl \
+        -fL \
+        --connect-timeout 15 \
+        --max-time 180 \
+        -o "$broray_downloaded_part" \
+        "${broray_rollback_feed%/}/$broray_rollback_filename" \
+        >>"$BRORAY_LOG" 2>&1 ||
+        return 1
+
+    mv "$broray_downloaded_part" "$broray_downloaded_ipk" ||
+        return 1
+
+    if [ -n "$broray_rollback_sha" ]; then
+        broray_rollback_actual_sha="$(
+            sha256sum "$broray_downloaded_ipk" |
+                awk '{print $1}'
+        )"
+        [ "$broray_rollback_actual_sha" = "$broray_rollback_sha" ] ||
+            return 1
+    fi
+
+    [ "$(
+        broray_system_ipk_control_value \
+            "$broray_downloaded_ipk" Package
+    )" = "$BRORAY_PACKAGE" ] ||
+        return 1
+    [ "$(
+        broray_system_ipk_control_value \
+            "$broray_downloaded_ipk" Version
+    )" = "$broray_rollback_version" ] ||
+        return 1
+    [ "$(
+        broray_system_ipk_control_value \
+            "$broray_downloaded_ipk" Architecture
+    )" = "$broray_rollback_arch" ] ||
+        return 1
+
+    broray_system_make_rollback_ipk \
+        "$broray_downloaded_ipk" \
+        "$broray_ready_ipk" ||
+        return 1
+
+    [ "$(
+        broray_system_ipk_control_value \
+            "$broray_ready_ipk" Version
+    )" = "$broray_rollback_version" ] ||
+        return 1
+
+    printf '%s\n' "$broray_ready_ipk"
+}
+
+broray_system_rollback_package() {
+    broray_rollback_package="$1"
+    broray_rollback_version="$2"
+    broray_rollback_backup="$3"
+
+    [ -s "$broray_rollback_package" ] || return 1
+    [ -s "$broray_rollback_backup" ] || return 1
+
+    rm -f /tmp/broray-opkg-existing-backup
+    broray_system_log \
+        "OPKG возвращается к пакету $broray_rollback_version."
+
+    opkg install \
+        --force-downgrade \
+        "$broray_rollback_package" \
+        >>"$BRORAY_LOG" 2>&1 ||
+        return 1
+
+    [ "$(
+        broray_system_installed_package_version
+    )" = "$broray_rollback_version" ] ||
+        return 1
+
+    broray_system_backup_restore "$broray_rollback_backup" ||
+        return 1
+    broray_system_restart_services ||
+        return 1
+    broray_system_health_check || return 1
+    rm -f \
+        /tmp/broray-opkg-services-before-upgrade \
+        /tmp/broray-opkg-existing-backup
+    return 0
+}
+
 broray_system_update_check_internal() {
     broray_system_log 'Обновляются списки пакетов OPKG.'
     opkg update >>"$BRORAY_LOG" 2>&1 || return 1
@@ -498,7 +771,24 @@ broray_system_backup_create() {
         rm -f "$temporary"
         return 1
     }
-    mv -f "$temporary" "$archive" || return 1
+
+    backup_size_kb="$(du -k "$temporary" 2>/dev/null | awk 'NR == 1 {print $1}')"
+    backup_free_kb="$(df -Pk "$BRORAY_BACKUP" 2>/dev/null | awk 'NR == 2 {print $4}')"
+    case "$backup_size_kb:$backup_free_kb" in
+        *[!0-9:]*|'')
+            rm -f "$temporary"
+            return 1
+            ;;
+    esac
+    [ "$backup_free_kb" -gt $((backup_size_kb + 2048)) ] || {
+        rm -f "$temporary"
+        return 1
+    }
+
+    mv -f "$temporary" "$archive" || {
+        rm -f "$temporary"
+        return 1
+    }
     printf '%s\n' "$archive" >"$BRORAY_LAST_BACKUP"
     printf '%s\n' "$archive"
 }
@@ -519,6 +809,11 @@ $BRORAY_BASE/web-new/index.html
 $BRORAY_BASE/web-new/home.html
 $BRORAY_BASE/web-new/broray.html
 $BRORAY_BASE/web-new/api/auth-common.sh
+$BRORAY_INIT_ROOT/S23broray-monitor
+$BRORAY_INIT_ROOT/S24broray
+$BRORAY_INIT_ROOT/S25broray-web
+$BRORAY_INIT_ROOT/S27broray-auto-switch
+$BRORAY_INIT_ROOT/S28broray-subscriptions
 "
 
     printf '%s\n' "$required_files" |
@@ -541,22 +836,46 @@ $BRORAY_BASE/web-new/api/auth-common.sh
     done
 
     jq -e . "$BRORAY_BASE/config/config.json" >/dev/null 2>&1 || return 1
+    broray_system_services_health_check
+}
+
+broray_system_services_health_check() {
+    for broray_service in \
+        "$BRORAY_INIT_ROOT/S23broray-monitor" \
+        "$BRORAY_INIT_ROOT/S24broray" \
+        "$BRORAY_INIT_ROOT/S25broray-web" \
+        "$BRORAY_INIT_ROOT/S27broray-auto-switch" \
+        "$BRORAY_INIT_ROOT/S28broray-subscriptions"
+    do
+        [ -x "$broray_service" ] || return 1
+        "$broray_service" status >>"$BRORAY_LOG" 2>&1 ||
+            return 1
+    done
+
     return 0
 }
 
 broray_system_restart_services() {
-    if [ -x /opt/etc/init.d/S25broray-web ]; then
-        /opt/etc/init.d/S25broray-web restart >>"$BRORAY_LOG" 2>&1 || return 1
-    fi
-    if [ -x /opt/etc/init.d/S24broray ]; then
-        /opt/etc/init.d/S24broray restart >>"$BRORAY_LOG" 2>&1 || return 1
-    fi
-    return 0
+    for broray_service in \
+        "$BRORAY_INIT_ROOT/S24broray" \
+        "$BRORAY_INIT_ROOT/S23broray-monitor" \
+        "$BRORAY_INIT_ROOT/S27broray-auto-switch" \
+        "$BRORAY_INIT_ROOT/S28broray-subscriptions" \
+        "$BRORAY_INIT_ROOT/S25broray-web"
+    do
+        [ -x "$broray_service" ] || return 1
+        "$broray_service" restart >>"$BRORAY_LOG" 2>&1 ||
+            return 1
+    done
+
+    broray_system_services_health_check
 }
 
 broray_system_worker_update() {
     operation_id="$1"
     backup=""
+    rollback_package=""
+    installed_package_version=""
 
     broray_system_status_write "$operation_id" update running check 5 \
         'Проверяется наличие обновления.' ''
@@ -576,7 +895,17 @@ broray_system_worker_update() {
         return 0
     fi
 
-    staging="$BRORAY_UPDATE/$operation_id"
+    installed_package_version="$(
+        broray_system_installed_package_version
+    )"
+    [ -n "$installed_package_version" ] || {
+        broray_system_status_write "$operation_id" update error verify 100 \
+            'Не удалось определить установленный пакет BROray.' \
+            'Обновление остановлено до изменения файлов.'
+        return 1
+    }
+
+    staging="/tmp/broray-update-$operation_id"
     rm -rf "$staging"
     mkdir -p "$staging" || return 1
 
@@ -590,6 +919,7 @@ broray_system_worker_update() {
         broray_system_status_write "$operation_id" update error download 100 \
             'Не удалось загрузить пакет обновления.' \
             'Команда opkg download завершилась ошибкой.'
+        rm -rf "$staging"
         return 1
     }
 
@@ -598,6 +928,7 @@ broray_system_worker_update() {
         broray_system_status_write "$operation_id" update error verify 100 \
             'Загруженный пакет не найден.' \
             'В каталоге обновления нет файла broray_*.ipk.'
+        rm -rf "$staging"
         return 1
     }
 
@@ -613,6 +944,7 @@ broray_system_worker_update() {
         broray_system_status_write "$operation_id" update error verify 100 \
             'Контрольная сумма пакета не совпала.' \
             'Установка остановлена до изменения файлов.'
+        rm -rf "$staging"
         return 1
     }
 
@@ -623,6 +955,7 @@ broray_system_worker_update() {
             broray_system_status_write "$operation_id" update error verify 100 \
                 'Имя пакета не совпало с индексом репозитория.' \
                 'Установка остановлена до изменения файлов.'
+            rm -rf "$staging"
             return 1
         }
     fi
@@ -633,72 +966,115 @@ broray_system_worker_update() {
                 broray_system_status_write "$operation_id" update error verify 100 \
                     'Архитектура пакета не поддерживается устройством.' \
                     "Ожидалась архитектура $expected_arch."
+                rm -rf "$staging"
                 return 1
             }
     fi
 
     free_kb="$(df -Pk /opt 2>/dev/null | awk 'NR == 2 {print $4}')"
-    used_kb="$(du -sk "$BRORAY_BASE" 2>/dev/null | awk 'NR == 1 {print $1}')"
-    package_kb="$(du -k "$package_file" 2>/dev/null | awk 'NR == 1 {print $1}')"
-    case "$free_kb:$used_kb:$package_kb" in
-        *[!0-9:]*|'')
+    case "$free_kb" in
+        ''|*[!0-9]*)
             broray_system_status_write "$operation_id" update error verify 100 \
                 'Не удалось определить свободное место.' \
                 'Установка остановлена до создания резервной копии.'
+            rm -rf "$staging"
             return 1
             ;;
     esac
-    required_kb=$((used_kb + package_kb * 2 + 10240))
-    [ "$free_kb" -gt "$required_kb" ] || {
+    [ "$free_kb" -gt 10240 ] || {
         broray_system_status_write "$operation_id" update error verify 100 \
             'Недостаточно свободного места для безопасного обновления.' \
-            "Требуется не менее ${required_kb} КБ свободного места."
+            'Требуется более 10240 КБ до создания проверяемого снимка.'
+        rm -rf "$staging"
         return 1
     }
 
-    broray_system_status_write "$operation_id" update running backup 50 \
+    broray_system_status_write "$operation_id" update running rollback 45 \
+        'Подготавливается пакет возврата к предыдущей версии.' ''
+    rollback_package="$(
+        broray_system_prepare_rollback_package \
+            "$staging" \
+            "$installed_package_version"
+    )" || {
+        broray_system_status_write "$operation_id" update error rollback 100 \
+            'Не удалось подготовить безопасный возврат через OPKG.' \
+            'Установка обновления не запускалась.'
+        rm -rf "$staging"
+        return 1
+    }
+    broray_system_log \
+        "Подготовлен пакет возврата к $installed_package_version."
+
+    broray_system_status_write "$operation_id" update running backup 55 \
         'Создаётся резервная копия.' ''
     backup="$(broray_system_backup_create system-before-update)" || {
         broray_system_status_write "$operation_id" update error backup 100 \
             'Не удалось создать резервную копию.' \
             'Установка пакета не запускалась.'
+        rm -rf "$staging"
         return 1
     }
     broray_system_log "Создана резервная копия: $backup"
 
-    broray_system_status_write "$operation_id" update running install 68 \
+    {
+        printf '%s\n' "$backup"
+        date '+%s'
+    } >/tmp/broray-opkg-existing-backup || {
+        broray_system_status_write "$operation_id" update error backup 100 \
+            'Не удалось передать резервную копию установщику.' \
+            'Установка пакета не запускалась.'
+        rm -rf "$staging"
+        return 1
+    }
+
+    broray_system_status_write "$operation_id" update running install 70 \
         "Устанавливается BROray $available_version." ''
-    opkg install "$package_file" >>"$BRORAY_LOG" 2>&1 || {
+    BRORAY_OPKG_BACKUP="$backup" \
+        opkg install "$package_file" >>"$BRORAY_LOG" 2>&1 || {
         broray_system_log 'OPKG сообщил об ошибке. Запускается восстановление.'
         broray_system_status_write "$operation_id" update restoring restore 82 \
             'Обновление завершилось ошибкой. Восстанавливается предыдущая версия.' ''
-        if broray_system_backup_restore "$backup" && broray_system_restart_services; then
+        if broray_system_rollback_package \
+            "$rollback_package" \
+            "$installed_package_version" \
+            "$backup"
+        then
             broray_system_status_write "$operation_id" update error restored 100 \
-                'Предыдущая версия восстановлена.' \
+                'Предыдущая версия и состояние OPKG восстановлены.' \
                 'OPKG не смог установить обновление.'
         else
             broray_system_status_write "$operation_id" update error restore-failed 100 \
                 'Автоматическое восстановление не завершено.' \
                 "Резервная копия: $backup"
         fi
+        rm -rf "$staging"
         return 1
     }
 
     broray_system_status_write "$operation_id" update running health 88 \
         'Проверяется обновлённая установка.' ''
-    if ! broray_system_health_check; then
+    if [ "$(
+        broray_system_installed_package_version
+    )" != "$available_version" ] ||
+       ! broray_system_health_check
+    then
         broray_system_log 'Проверка установки не пройдена. Запускается восстановление.'
         broray_system_status_write "$operation_id" update restoring restore 92 \
             'Проверка не пройдена. Восстанавливается предыдущая версия.' ''
-        if broray_system_backup_restore "$backup" && broray_system_restart_services; then
+        if broray_system_rollback_package \
+            "$rollback_package" \
+            "$installed_package_version" \
+            "$backup"
+        then
             broray_system_status_write "$operation_id" update error restored 100 \
-                'Предыдущая версия восстановлена.' \
+                'Предыдущая версия и состояние OPKG восстановлены.' \
                 'Обновлённая установка не прошла проверку.'
         else
             broray_system_status_write "$operation_id" update error restore-failed 100 \
                 'Автоматическое восстановление не завершено.' \
                 "Резервная копия: $backup"
         fi
+        rm -rf "$staging"
         return 1
     fi
 
@@ -728,7 +1104,7 @@ broray_system_worker_restore() {
 
     broray_system_status_write "$operation_id" restore running health 75 \
         'Проверяется восстановленная установка.' ''
-    broray_system_health_check && broray_system_restart_services || {
+    broray_system_restart_services && broray_system_health_check || {
         broray_system_status_write "$operation_id" restore error health 100 \
             'Восстановленная установка не прошла проверку.' "$archive"
         return 1

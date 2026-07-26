@@ -429,6 +429,27 @@ start_services()
         fail "Не удалось запустить WebUI"
 }
 
+validate_services()
+{
+    sleep 1
+
+    for service in \
+        /opt/etc/init.d/S23broray-monitor \
+        /opt/etc/init.d/S24broray \
+        /opt/etc/init.d/S25broray-web \
+        /opt/etc/init.d/S27broray-auto-switch \
+        /opt/etc/init.d/S28broray-subscriptions
+    do
+        [ -x "$service" ] ||
+            fail "Не найдена служба: $service"
+
+        "$service" status >/dev/null 2>&1 ||
+            fail "Служба не работает: ${service##*/}"
+    done
+
+    printf '%s\n' "Все пять служб BROray работают"
+}
+
 validate_webui()
 {
     attempt=1
@@ -474,7 +495,8 @@ for required_command in \
     mkdir \
     ndmc \
     sed \
-    sha256sum
+    sha256sum \
+    sleep
 do
     require_command "$required_command"
 done
@@ -501,5 +523,6 @@ configure_web_proxy
 configure_proxy_interface
 validate_release
 start_services
+validate_services
 validate_webui
 print_result

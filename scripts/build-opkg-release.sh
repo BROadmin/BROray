@@ -4,7 +4,7 @@ set -euo pipefail
 
 PRODUCT="broray"
 VERSION="2.1.0"
-REVISION="1"
+REVISION="${BRORAY_PACKAGE_REVISION:-2}"
 PACKAGE_VERSION="${VERSION}-${REVISION}"
 ARCHITECTURE="aarch64-3.10"
 XRAY_VERSION="26.7.11"
@@ -18,7 +18,7 @@ REPOSITORY_ROOT="$(
 )"
 SOURCE_ROOT="$REPOSITORY_ROOT/root"
 PACKAGING_ROOT="$REPOSITORY_ROOT/packaging/opkg"
-DIST_ROOT="$REPOSITORY_ROOT/dist"
+DIST_ROOT="${BRORAY_DIST_ROOT:-$REPOSITORY_ROOT/dist}"
 WORK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/broray-opkg-build.XXXXXX")"
 DATA_ROOT="$WORK_ROOT/data"
 CONTROL_ROOT="$WORK_ROOT/control"
@@ -26,6 +26,8 @@ IPK_ROOT="$WORK_ROOT/ipk"
 FEED_ROOT="$DIST_ROOT/opkg/$ARCHITECTURE"
 PACKAGE_NAME="${PRODUCT}_${PACKAGE_VERSION}_${ARCHITECTURE}.ipk"
 PACKAGE_PATH="$FEED_ROOT/$PACKAGE_NAME"
+SAFE_UPGRADE_NAME="broray-safe-upgrade-$PACKAGE_VERSION.sh"
+SAFE_UPGRADE_PATH="$DIST_ROOT/$SAFE_UPGRADE_NAME"
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(date +%s)}"
 
 cleanup()
@@ -77,6 +79,38 @@ for source_name in bin config lib routes share web-new; do
         "$SOURCE_ROOT/opt/broray/$source_name" \
         "$DATA_ROOT/opt/broray/"
 done
+
+# The source tree is also used by local self-tests.  Never let ignored
+# runtime state from that tree enter an OPKG staging directory.
+for runtime_path in \
+    backup \
+    backups \
+    data \
+    deleted-subscriptions \
+    logs \
+    run \
+    servers \
+    subscriptions \
+    tmp \
+    update \
+    config/disabled-subscription-servers \
+    config/subscriptions \
+    routes/backup \
+    routes/catalog \
+    routes/installed \
+    routes/locks \
+    routes/manifests \
+    routes/state \
+    routes/tmp \
+    routes/transactions
+do
+    rm -rf "$DATA_ROOT/opt/broray/$runtime_path"
+done
+
+rm -f \
+    "$DATA_ROOT/opt/broray/config/config.json" \
+    "$DATA_ROOT/opt/broray/config/active-server" \
+    "$DATA_ROOT/opt/broray/config/interface.json"
 
 cp -a \
     "$SOURCE_ROOT/opt/etc/init.d/." \
@@ -197,11 +231,21 @@ chmod 600 \
 find "$DATA_ROOT/opt/broray/servers" \
     "$DATA_ROOT/opt/broray/subscriptions" \
     "$DATA_ROOT/opt/broray/deleted-subscriptions" \
+    "$DATA_ROOT/opt/broray/backup" \
+    "$DATA_ROOT/opt/broray/backups" \
+    "$DATA_ROOT/opt/broray/data" \
+    "$DATA_ROOT/opt/broray/logs" \
+    "$DATA_ROOT/opt/broray/run" \
+    "$DATA_ROOT/opt/broray/tmp" \
+    "$DATA_ROOT/opt/broray/update" \
     "$DATA_ROOT/opt/broray/config/subscriptions" \
+    "$DATA_ROOT/opt/broray/config/disabled-subscription-servers" \
     "$DATA_ROOT/opt/broray/routes/backup" \
     "$DATA_ROOT/opt/broray/routes/catalog" \
     "$DATA_ROOT/opt/broray/routes/installed" \
+    "$DATA_ROOT/opt/broray/routes/locks" \
     "$DATA_ROOT/opt/broray/routes/state" \
+    "$DATA_ROOT/opt/broray/routes/tmp" \
     "$DATA_ROOT/opt/broray/routes/transactions" \
     -type f \
     -print -quit |
@@ -295,8 +339,12 @@ gzip -n -9 -c \
 cp -a \
     "$PACKAGING_ROOT/opkg.sh" \
     "$DIST_ROOT/opkg.sh"
+cp -a \
+    "$REPOSITORY_ROOT/scripts/safe-opkg-upgrade.sh" \
+    "$SAFE_UPGRADE_PATH"
 chmod 644 \
     "$DIST_ROOT/opkg.sh" \
+    "$SAFE_UPGRADE_PATH" \
     "$FEED_ROOT/Packages" \
     "$FEED_ROOT/Packages.gz" \
     "$PACKAGE_PATH"
@@ -305,6 +353,7 @@ chmod 644 \
     cd "$DIST_ROOT"
     sha256sum \
         opkg.sh \
+        "$SAFE_UPGRADE_NAME" \
         "opkg/$ARCHITECTURE/Packages" \
         "opkg/$ARCHITECTURE/Packages.gz" \
         "opkg/$ARCHITECTURE/$PACKAGE_NAME"
@@ -320,6 +369,7 @@ tar \
     -C "$DIST_ROOT" \
     -czf "$UPDATE_ARCHIVE" \
     opkg.sh \
+    "$SAFE_UPGRADE_NAME" \
     SHA256SUMS \
     "opkg/$ARCHITECTURE/Packages" \
     "opkg/$ARCHITECTURE/Packages.gz" \
