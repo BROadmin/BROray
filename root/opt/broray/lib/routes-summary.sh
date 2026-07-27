@@ -161,7 +161,7 @@ broray_routes_summary()
         --slurpfile state "$summary_state_file" \
         --slurpfile bundle "$summary_bundle_file" \
         --slurpfile global "$summary_global_file" '
-        def version_key:
+        def route_version_key:
             if . == null then null
             elif ((.contentSha256 // "") != "") then
                 "sha256:" + .contentSha256
@@ -173,10 +173,23 @@ broray_routes_summary()
                 (tojson)
             end;
 
-        def same_version($left; $right):
+        def source_version_key:
+            if . == null then null
+            elif ((.sourceSetSha256 // "") != "") then
+                "sources:" + .sourceSetSha256
+            else
+                (route_version_key)
+            end;
+
+        def same_route_version($left; $right):
             ($left != null) and
             ($right != null) and
-            (($left | version_key) == ($right | version_key));
+            (($left | route_version_key) == ($right | route_version_key));
+
+        def same_source_version($left; $right):
+            ($left != null) and
+            ($right != null) and
+            (($left | source_version_key) == ($right | source_version_key));
 
         def operation_item($type; $completedAt; $message):
             if ($completedAt == null) or ($completedAt == "") then
@@ -202,19 +215,27 @@ broray_routes_summary()
         ) as $installed |
         (
             $available and
-            (same_version($s.availableVersion; $s.downloadedVersion) | not)
+            (same_source_version($s.availableVersion; $s.downloadedVersion) | not)
         ) as $downloadRequired |
         (
             $downloaded and
             (
                 ($s.installedVersion == null) or
-                (same_version($s.downloadedVersion; $s.installedVersion) | not)
+                (same_route_version($s.downloadedVersion; $s.installedVersion) | not)
             )
-        ) as $exportRequired |
+        ) as $keeneticUpdateRequired |
         (
+            $downloaded and
             ($s.installedVersion != null) and
+            (same_route_version($s.downloadedVersion; $s.installedVersion) | not)
+        ) as $keeneticUpdateAvailable |
+        (
             $available and
-            (same_version($s.availableVersion; $s.installedVersion) | not)
+            ($s.downloadedVersion != null) and
+            (same_source_version($s.availableVersion; $s.downloadedVersion) | not)
+        ) as $sourceUpdateAvailable |
+        (
+            $sourceUpdateAvailable or $keeneticUpdateAvailable
         ) as $updateAvailable |
 
         (($b.routeKeys // []) | length) as $installedRouteCount |
@@ -237,7 +258,7 @@ broray_routes_summary()
                 (
                     ($s.installedVersion != null) and
                     ($b.installedVersion != null) and
-                    same_version(
+                    same_route_version(
                         $s.installedVersion;
                         $b.installedVersion
                     )
@@ -263,7 +284,7 @@ broray_routes_summary()
                     ($s.downloadResult.message // null)
                 ),
                 operation_item(
-                    "export";
+                    "install";
                     ($s.lastExportedAt // null);
                     ($s.exportResult.message // null)
                 ),
@@ -305,8 +326,8 @@ broray_routes_summary()
             if $operationRunning then "wait"
             elif $error != null then "review"
             elif $downloadRequired then "download"
-            elif $exportRequired and ($s.installedVersion != null) then "update"
-            elif $exportRequired then "export"
+            elif $keeneticUpdateRequired and ($s.installedVersion != null) then "update"
+            elif $keeneticUpdateRequired then "install"
             elif $installed then "none"
             else "check"
             end
@@ -322,8 +343,11 @@ broray_routes_summary()
             downloaded: $downloaded,
             available: $available,
             updateAvailable: $updateAvailable,
+            sourceUpdateAvailable: $sourceUpdateAvailable,
+            keeneticUpdateAvailable: $keeneticUpdateAvailable,
             downloadRequired: $downloadRequired,
-            exportRequired: $exportRequired,
+            keeneticUpdateRequired: $keeneticUpdateRequired,
+            exportRequired: $keeneticUpdateRequired,
             operationRunning: $operationRunning,
             recommendedAction: $recommendedAction,
             routeCount: ($s.routeCount // 0),
@@ -409,9 +433,22 @@ broray_routes_summary_all()
             ),
             installed: any($bundles[]; .installed == true),
             downloaded: any($bundles[]; .downloaded == true),
-            updateAvailable: any(
+            updatesAvailableCount: (
+                [
+                    $bundles[] |
+                    select((.bundleId | startswith("user-") | not)) |
+                    select(.updateAvailable == true)
+                ] |
+                length
+            ),
+            sourceUpdateAvailable: any(
                 $bundles[];
-                .updateAvailable == true
+                ((.bundleId | startswith("user-") | not) and
+                 (.sourceUpdateAvailable == true))
+            ),
+            keeneticUpdateRequired: any(
+                $bundles[];
+                .keeneticUpdateRequired == true
             ),
             operationRunning: any(
                 $bundles[];
@@ -437,6 +474,7 @@ broray_routes_summary_all()
                 last // null
             )
         } |
+        .updateAvailable = (.updatesAvailableCount > 0) |
         .state = (
             if .operationRunning then "busy"
             elif (.healthy | not) then "error"
