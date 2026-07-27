@@ -19,12 +19,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reconstruct and verify overlay
+      - name: Download and verify official source overlay
         shell: bash
         run: |
           set -euo pipefail
-          cat .release-overlay/chunk-* > /tmp/broray-overlay.b64
-          base64 -d /tmp/broray-overlay.b64 > /tmp/broray-overlay.tar.gz
+          curl -fL \
+            -H 'Accept-Encoding: identity' \
+            -H 'Cache-Control: no-cache, no-store' \
+            --connect-timeout 20 \
+            --max-time 300 \
+            -o /tmp/broray-overlay.tar.gz \
+            'https://api.brovibe.cloud/releases/2.1.1-2/github-source-overlay-2.1.1-2.tar.gz?v=20260727-official'
           echo "2051fac16bdb959613a537d1e3af46234396478219c31bb26f455451aee1cf26  /tmp/broray-overlay.tar.gz" | sha256sum -c -
           python3 - <<'PY'
           import tarfile
