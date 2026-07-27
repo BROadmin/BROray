@@ -168,7 +168,7 @@ case "$ACTION" in
             broray_api_error \
                 "409 Conflict" \
                 "ROUTES_EXPORT_NOT_READY" \
-                "Маршруты ещё не загружены и не готовы к экспорту."
+                "Маршруты ещё не загружены и не готовы к установке в Keenetic."
         fi
         ;;
     delete)
@@ -228,7 +228,7 @@ if [ "$command_ok" != true ]; then
     case "$ACTION" in
         export)
             error_code="ROUTES_EXPORT_FAILED"
-            error_message="Не удалось экспортировать маршруты в Keenetic."
+            error_message="Не удалось установить маршруты в Keenetic."
             ;;
         delete)
             error_code="ROUTES_DELETE_FAILED"
@@ -268,7 +268,7 @@ case "$ACTION" in
             broray_api_error \
                 "500 Internal Server Error" \
                 "ROUTES_EXPORT_RESULT_INVALID" \
-                "Результат экспорта не подтверждён локальным состоянием." \
+                "Результат установки не подтверждён локальным состоянием." \
                 "$details"
         fi
         ;;

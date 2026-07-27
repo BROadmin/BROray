@@ -166,15 +166,15 @@
             return {text: state.installedVersion ? "Готово обновление" : "Готово к установке", className: "status-badge-warning", icon: "update"};
         }
         if (isInstalled(state)) return {text: "Установлено", className: "status-badge-success", icon: "status"};
-        return {text: "Готово к экспорту", className: "status-badge-neutral", icon: "routes"};
+        return {text: "Готово к установке", className: "status-badge-neutral", icon: "routes"};
     }
 
     function primaryPresentation(state) {
-        if (hasDrift(state)) return {text: "Восстановить", icon: "restore"};
+        if (hasDrift(state)) return {text: "Восстановить в Keenetic", icon: "restore"};
         if (needsExport(state)) {
-            return {text: state.installedVersion ? "Обновить" : "Экспортировать", icon: state.installedVersion ? "update" : "routes"};
+            return {text: state.installedVersion ? "Обновить в Keenetic" : "Установить в Keenetic", icon: state.installedVersion ? "update" : "routes"};
         }
-        return {text: "Экспортировать", icon: "routes", hidden: isInstalled(state)};
+        return {text: "Установить в Keenetic", icon: "routes", hidden: isInstalled(state)};
     }
 
     function noticeMessage(state, bundle) {
@@ -182,10 +182,17 @@
         if (state && state.lastError) {
             return typeof state.lastError === "string" ? state.lastError : (state.lastError.message || "Последняя операция завершилась ошибкой.");
         }
-        if (hasDrift(state)) return "Часть зарегистрированных маршрутов отсутствует в Keenetic. Выполните восстановление.";
+        if (hasDrift(state)) {
+            var currentPresence = presence(state) || {};
+            var expected = Number(currentPresence.expectedRouteCount || 0);
+            var present = Number(currentPresence.presentRouteCount || 0);
+            var missing = Math.max(0, expected - present);
+            return "Маршруты были установлены ранее, но сейчас в Keenetic отсутствуют " +
+                missing + " из " + expected + ". Нажмите «Восстановить в Keenetic».";
+        }
         if (needsExport(state)) return state.installedVersion
             ? "Новый BAT-файл проверен. Выполните обновление маршрутов в Keenetic."
-            : "BAT-файлы проверены. Набор готов к экспорту в Keenetic.";
+            : "BAT-файлы проверены. Набор готов к установке в Keenetic.";
         if (report && report.warning) return report.warning;
         if (isInstalled(state)) return "Все зарегистрированные маршруты присутствуют в Keenetic.";
         return bundle.description;
@@ -236,7 +243,7 @@
         badge.setAttribute("data-icon", status.icon);
         summary.append(service, badge);
 
-        [[report.canonicalRouteCount || bundle.canonicalRouteCount || 0, "канонических"], [report.exportRouteCount || bundle.exportRouteCount || state.routeCount || 0, "к экспорту"], [presentCount, "в Keenetic"]].forEach(function (item) {
+        [[report.canonicalRouteCount || bundle.canonicalRouteCount || 0, "канонических"], [report.exportRouteCount || bundle.exportRouteCount || state.routeCount || 0, "к установке"], [presentCount, "в Keenetic"]].forEach(function (item) {
             var metric = create("div", "route-card-metric");
             metric.append(create("strong", "", item[0]), create("span", "", item[1]));
             metrics.append(metric);
@@ -319,19 +326,17 @@
 
     function updateSummary() {
         var installed = 0;
-        var attention = 0;
         bundles.forEach(function (bundle) {
             var state = states[bundle.id];
             if (isInstalled(state)) installed += 1;
-            if (isAttention(state)) attention += 1;
         });
         adjustedNumber(byId("routes-installed-count"), installed);
-        adjustedNumber(byId("routes-attention-count"), attention);
+        // Локальные наборы не участвуют в счётчике обновлений GitHub.
         adjustedNumber(byId("routes-total-count"), bundles.length, 9);
     }
 
     function watchSummary() {
-        var nodes = [byId("routes-installed-count"), byId("routes-attention-count")].filter(Boolean);
+        var nodes = [byId("routes-installed-count")].filter(Boolean);
         if (!nodes.length || !window.MutationObserver) return;
         summaryObserver = new MutationObserver(function () { window.setTimeout(updateSummary, 0); });
         nodes.forEach(function (node) { summaryObserver.observe(node, {childList: true, characterData: true, subtree: true}); });
@@ -368,6 +373,71 @@
         });
     }
 
+    function syncPlanMessage(plan) {
+        var summary = plan.summary || {};
+        if (plan.mode === "update") {
+            return "Новая версия: добавлено " + Number(summary.addedRoutes || 0) +
+                ", удалено " + Number(summary.removedRoutes || 0) +
+                ", без изменений " + Number(summary.unchangedRoutes || 0) +
+                ". Из Keenetic будут удалены " + Number(summary.toDelete || 0) +
+                " маршрутов. Ещё " + Number(summary.sharedKept || 0) +
+                " используются другими наборами и сохранятся.";
+        }
+        if (plan.mode === "restore") {
+            return "В Keenetic будут восстановлены " +
+                Number(summary.toCreate || 0) + " маршрутов.";
+        }
+        return "В Keenetic будут установлены " + Number(summary.total || 0) + " маршрутов.";
+    }
+
+    function confirmSync(bundle, plan) {
+        var primary = primaryPresentation(states[bundle.id] || {});
+        if (!plan.canApply) return Promise.reject(new Error(plan.message || "План содержит конфликты."));
+        if (plan.mode === "none") return Promise.resolve(false);
+        if (!window.BROrayDialogs || typeof window.BROrayDialogs.confirm !== "function") {
+            return Promise.reject(new Error("Фирменное окно подтверждения недоступно."));
+        }
+        return window.BROrayDialogs.confirm({
+            eyebrow: "Маршруты Keenetic",
+            title: primary.text,
+            message: syncPlanMessage(plan),
+            confirmText: primary.text,
+            cancelText: "Отмена"
+        });
+    }
+
+    function prepareSync(bundle) {
+        setBusy(true);
+        return withTimeout(request("/api/routes/plan.cgi?bundleId=" + encodeURIComponent(bundle.id), {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {"Accept": "application/json"}
+        }), REQUEST_TIMEOUT_MS).then(function (plan) {
+            busy = false;
+            render();
+            if (plan.mode === "none") {
+                toast("Изменения в Keenetic не требуются.", "success");
+                return false;
+            }
+            return confirmSync(bundle, plan);
+        }).then(function (confirmed) {
+            if (confirmed) {
+                return runAction(
+                    bundle.id,
+                    "export",
+                    "/api/routes/export.cgi?bundleId=" + encodeURIComponent(bundle.id)
+                );
+            }
+            return null;
+        }).catch(function (error) {
+            busy = false;
+            render();
+            if (error && error.status === 401) return window.BROrayUI.redirectToLogin();
+            toast(error && error.message ? error.message : "Не удалось подготовить план установки.", "error");
+            return null;
+        });
+    }
+
     function confirmRemove(bundle) {
         if (!window.BROrayDialogs || typeof window.BROrayDialogs.confirm !== "function") {
             return Promise.reject(new Error("Фирменное окно подтверждения недоступно."));
@@ -390,7 +460,7 @@
         if (!bundle || busy) return;
         if (action === "replace") return openUpload(bundle);
         if (action === "validate") return runAction(bundleId, action, "/api/routes/custom-validate.cgi?bundleId=" + encodeURIComponent(bundleId));
-        if (action === "export") return runAction(bundleId, action, "/api/routes/export.cgi?bundleId=" + encodeURIComponent(bundleId));
+        if (action === "export") return prepareSync(bundle);
         if (action === "remove") {
             confirmRemove(bundle).then(function (confirmed) {
                 if (confirmed) runAction(bundleId, action, "/api/routes/custom-remove.cgi?bundleId=" + encodeURIComponent(bundleId));
@@ -499,7 +569,7 @@
         }
         box.className = "routes-upload-result " + (data.broadRouteCount > 0 ? "status-warning" : "status-success");
         box.append(create("strong", "", "Проверка завершена"));
-        [["Строк маршрутов", data.sourceRouteLineCount], ["Канонических CIDR", data.canonicalRouteCount], ["К экспорту", data.exportRouteCount], ["Исправлено адресов сети", data.normalizedNetworkCount], ["Удалено повторов", data.duplicateCount], ["Широких сетей /7–/8", data.broadRouteCount]].forEach(function (item) {
+        [["Строк маршрутов", data.sourceRouteLineCount], ["Канонических CIDR", data.canonicalRouteCount], ["К установке", data.exportRouteCount], ["Исправлено адресов сети", data.normalizedNetworkCount], ["Удалено повторов", data.duplicateCount], ["Широких сетей /7–/8", data.broadRouteCount]].forEach(function (item) {
             var row = create("div", "routes-upload-stat");
             row.append(create("span", "", item[0]), create("strong", "", item[1]));
             box.append(row);
