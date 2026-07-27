@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>BROray — установка и настройка</title>
-    <meta name="description" content="Установка, безопасное обновление и настройка BROray 2.1.1-2 на Keenetic с Entware.">
+    <meta name="description" content="Установка, безопасное обновление и настройка BROray 2.1.1-2 на Keenetic и Netcraze с Entware.">
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -35,9 +35,9 @@
 </aside>
 <main class="content">
 <section id="about">
-    <p class="eyebrow">Keenetic · Entware · Xray</p>
+    <p class="eyebrow">Keenetic · Netcraze · Entware · Xray</p>
     <h1>BROray</h1>
-    <p class="lead">Менеджер Xray для Keenetic с WebUI, подписками, выбором серверов и управляемыми маршрутами.</p>
+    <p class="lead">Менеджер Xray для Keenetic и Netcraze с WebUI, подписками, выбором серверов и управляемыми маршрутами.</p>
     <div class="meta">
         <span class="badge accent">BROray 2.1.1</span>
         <span class="badge">OPKG 2.1.1-2</span>
@@ -46,7 +46,11 @@
     </div>
     <div class="note">
         <span class="note-title">Проверено на реальных устройствах</span>
-        Обновление успешно проверено на Keenetic Peak KN-2710 EAEU и Hopper KN-3811 EAEU. Чистая установка успешно проверена на Peak KN-2710 EAEU.
+        Обновление успешно проверено на Keenetic Peak KN-2710 EAEU и Keenetic Hopper KN-3811 EAEU. Обновление и чистая установка успешно проверены на Keenetic Ultra KN-1811 EAEU. Чистая установка успешно проверена на Keenetic Peak KN-2710 EAEU и Netcraze Ultra NC-1812 EAEU.
+    </div>
+    <div class="note">
+        <span class="note-title">Keenetic и Netcraze</span>
+        С 2025 года часть устройств для рынка ЕАЭС выпускается под брендом Netcraze. В списке проверенных устройств такие модели указываются отдельно по фактическому бренду и индексу модели.
     </div>
     <p>Исходный код: <a href="https://github.com/BROadmin/BROray" target="_blank" rel="noopener noreferrer">GitHub BROadmin/BROray</a>.</p>
     <p>Обсуждение и поддержка: <a href="https://t.me/BROvibe_vpn" target="_blank" rel="noopener noreferrer">Telegram-канал BROvibe</a>.</p>
@@ -54,7 +58,7 @@
 <section id="requirements">
     <h2>1. Требования</h2>
     <ul>
-        <li>Keenetic с архитектурой aarch64/arm64;</li>
+        <li>Keenetic или Netcraze с архитектурой aarch64/arm64;</li>
         <li>установленный Entware;</li>
         <li>доступ к терминалу Entware под root;</li>
         <li>доступ роутера в интернет;</li>
@@ -95,7 +99,7 @@ mv "$TARGET.part" "$TARGET" &amp;&amp;
 </section>
 <section id="interface">
     <h2>6. Интерфейс Keenetic</h2>
-    <p>BROray создаёт и обслуживает штатный прокси-интерфейс KeeneticOS. Состояние, адрес Xray, связь и подключение отображаются на странице «Keenetic».</p>
+    <p>BROray создаёт и обслуживает штатный прокси-интерфейс KeeneticOS/NDMS. Состояние, адрес Xray, связь и подключение отображаются на странице «Keenetic».</p>
 </section>
 <section id="routes">
     <h2>7. Маршруты</h2>
