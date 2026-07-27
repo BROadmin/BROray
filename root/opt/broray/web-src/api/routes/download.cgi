@@ -186,7 +186,7 @@ if [ "$command_ok" != true ]; then
     broray_api_error \
         "502 Bad Gateway" \
         "ROUTES_DOWNLOAD_FAILED" \
-        "Не удалось скачать новые маршруты." \
+        "Не удалось загрузить файлы маршрутов." \
         "$details"
 fi
 

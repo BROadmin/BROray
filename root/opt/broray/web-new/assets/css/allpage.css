@@ -5328,3 +5328,19 @@ body.modal-open {
 }
 
 /* END PAGE ROUTES CUSTOM BAT */
+
+/* BEGIN ROUTES ACTIONS HOTFIX 20260726 */
+.page-routes .route-card-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.page-routes .route-card-actions [data-action="toggle-details"] {
+    grid-column: auto;
+}
+
+@media (max-width: 680px) {
+    .page-routes .route-card-actions {
+        grid-template-columns: 1fr;
+    }
+}
+/* END ROUTES ACTIONS HOTFIX 20260726 */

@@ -86,41 +86,37 @@
 
     window.BROrayRouteBundles = BUNDLES.slice();
 
+
+    var AUTO_CHECK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+    var busyBundles = Object.create(null);
+    var expandedBundles = Object.create(null);
+    var autoCheckCancelled = false;
+
     function byId(id) {
         return document.getElementById(id);
     }
 
     function create(tag, className, text) {
         var node = document.createElement(tag);
-
-        if (className) {
-            node.className = className;
-        }
-        if (text !== undefined && text !== null) {
-            node.textContent = String(text);
-        }
+        if (className) node.className = className;
+        if (text !== undefined && text !== null) node.textContent = String(text);
         return node;
     }
 
     function unwrap(payload) {
         var error;
-
         if (payload && payload.success === false) {
-            error = new Error(
-                payload.error && payload.error.message
-                    ? payload.error.message
-                    : "Операция с маршрутами завершилась ошибкой."
-            );
+            error = new Error(payload.error && payload.error.message
+                ? payload.error.message
+                : "Операция с маршрутами завершилась ошибкой.");
             error.code = payload.error ? payload.error.code : null;
             error.details = payload.error ? payload.error.details : null;
+            error.status = payload.status || null;
             throw error;
         }
-
-        if (payload && Object.prototype.hasOwnProperty.call(payload, "data")) {
-            return payload.data;
-        }
-
-        return payload;
+        return payload && Object.prototype.hasOwnProperty.call(payload, "data")
+            ? payload.data
+            : payload;
     }
 
     function request(url, options) {
@@ -136,30 +132,24 @@
                     reject(new Error("Операция не завершилась за отведённое время."));
                 }
             }, milliseconds);
-
-            promise.then(
-                function (value) {
-                    if (!finished) {
-                        finished = true;
-                        window.clearTimeout(timer);
-                        resolve(value);
-                    }
-                },
-                function (error) {
-                    if (!finished) {
-                        finished = true;
-                        window.clearTimeout(timer);
-                        reject(error);
-                    }
+            promise.then(function (value) {
+                if (!finished) {
+                    finished = true;
+                    window.clearTimeout(timer);
+                    resolve(value);
                 }
-            );
+            }, function (error) {
+                if (!finished) {
+                    finished = true;
+                    window.clearTimeout(timer);
+                    reject(error);
+                }
+            });
         });
     }
 
-    function sameVersion(left, right) {
-        if (!left || !right) {
-            return false;
-        }
+    function sameRouteVersion(left, right) {
+        if (!left || !right) return false;
         if (left.contentSha256 && right.contentSha256) {
             return left.contentSha256 === right.contentSha256;
         }
@@ -167,62 +157,43 @@
             String(left.sourceDate || "") === String(right.sourceDate || "");
     }
 
+    function sameSourceVersion(left, right) {
+        if (!left || !right) return false;
+        if (left.sourceSetSha256 && right.sourceSetSha256) {
+            return left.sourceSetSha256 === right.sourceSetSha256;
+        }
+        return sameRouteVersion(left, right);
+    }
+
     function formatDate(value) {
         var date;
-
-        if (!value) {
-            return "Не выполнялась";
-        }
+        if (!value) return "Не выполнялась";
         date = new Date(value);
         return isNaN(date.getTime()) ? String(value) : date.toLocaleString("ru-RU");
     }
 
     function formatVersion(value, emptyValue) {
         var parts = [];
-
-        if (!value) {
-            return emptyValue;
-        }
-        if (typeof value === "string") {
-            return value;
-        }
-        if (value.sourceDate) {
-            parts.push(formatDate(value.sourceDate));
-        }
-        if (value.sourceCommit) {
-            parts.push(String(value.sourceCommit).slice(0, 7));
-        }
+        if (!value) return emptyValue;
+        if (typeof value === "string") return value;
+        if (value.sourceDate) parts.push(formatDate(value.sourceDate));
+        if (value.sourceCommit) parts.push(String(value.sourceCommit).slice(0, 7));
         return parts.length ? parts.join(" · ") : emptyValue;
     }
 
     function formatBytes(value) {
         var size = Number(value);
-
-        if (!isFinite(size) || size <= 0) {
-            return "—";
-        }
-        if (size < 1024) {
-            return size + " Б";
-        }
-        if (size < 1024 * 1024) {
-            return Math.round(size / 1024) + " КБ";
-        }
+        if (!isFinite(size) || size <= 0) return "—";
+        if (size < 1024) return size + " Б";
+        if (size < 1024 * 1024) return Math.round(size / 1024) + " КБ";
         return (size / (1024 * 1024)).toFixed(1).replace(".", ",") + " МБ";
     }
 
     function sourceFiles(state) {
-        if (
-            state &&
-            state.availableVersion &&
-            Array.isArray(state.availableVersion.sourceFiles)
-        ) {
+        if (state && state.availableVersion && Array.isArray(state.availableVersion.sourceFiles)) {
             return state.availableVersion.sourceFiles;
         }
-        if (
-            state &&
-            state.checkResult &&
-            Array.isArray(state.checkResult.sourceFiles)
-        ) {
+        if (state && state.checkResult && Array.isArray(state.checkResult.sourceFiles)) {
             return state.checkResult.sourceFiles;
         }
         return [];
@@ -234,87 +205,109 @@
 
     function hasRouterDrift(state) {
         var presence = routerPresence(state);
-
-        return Boolean(
-            state &&
-            state.installedVersion &&
-            presence &&
-            presence.available === true &&
-            presence.registered === true &&
-            presence.drift === true
-        );
+        return Boolean(state && state.installedVersion && presence &&
+            presence.available === true && presence.registered === true &&
+            presence.drift === true);
     }
 
     function isActuallyInstalled(state) {
         var presence = routerPresence(state);
-
         if (presence && presence.available === true && presence.registered === true) {
             return presence.actualInstalled === true;
         }
         return Boolean(state && state.installedVersion);
     }
 
+    function downloadRequired(state) {
+        if (!state || !state.availableVersion) return false;
+        if (state.checkResult && typeof state.checkResult.downloadRequired === "boolean") {
+            return state.checkResult.downloadRequired;
+        }
+        return !sameSourceVersion(state.availableVersion, state.downloadedVersion);
+    }
+
+    function sourceUpdateAvailable(state) {
+        return Boolean(state && state.downloadedVersion && downloadRequired(state));
+    }
+
+    function keeneticAction(state) {
+        if (!state || !state.downloadedVersion) return null;
+        if (hasRouterDrift(state)) {
+            return {action: "export", text: "Восстановить в Keenetic", icon: "restore", mode: "restore"};
+        }
+        if (!state.installedVersion) {
+            return {action: "export", text: "Установить в Keenetic", icon: "routes", mode: "install"};
+        }
+        if (!sameRouteVersion(state.downloadedVersion, state.installedVersion)) {
+            return {action: "export", text: "Обновить в Keenetic", icon: "update", mode: "update"};
+        }
+        return null;
+    }
+
+    function nextAction(state) {
+        var keenetic = keeneticAction(state);
+        if (hasRouterDrift(state) && keenetic) return "export";
+        if (!state || !state.availableVersion) return "check";
+        if (downloadRequired(state)) return "download";
+        if (keenetic) return "export";
+        return null;
+    }
+
+    function checkLabel(state) {
+        return state && state.lastCheckedAt ? "Проверить обновления" : "Найти маршруты";
+    }
+
     function statusPresentation(state) {
+        var action;
         if (state && state.lastError) {
             return {text: "Ошибка", className: "status-badge-danger", icon: "status"};
         }
         if (hasRouterDrift(state)) {
             return {text: "Требуется восстановление", className: "status-badge-warning", icon: "restore"};
         }
-        if (
-            state &&
-            state.availableVersion &&
-            state.installedVersion &&
-            !sameVersion(state.availableVersion, state.installedVersion)
-        ) {
+        if (sourceUpdateAvailable(state)) {
+            if (state.checkResult && state.checkResult.routesChanged === false) {
+                return {text: "Источник изменился", className: "status-badge-warning", icon: "update"};
+            }
             return {text: "Доступно обновление", className: "status-badge-warning", icon: "update"};
+        }
+        action = keeneticAction(state);
+        if (action && action.mode === "update") {
+            return {text: "Готово обновление", className: "status-badge-warning", icon: "update"};
+        }
+        if (action && action.mode === "install") {
+            return {text: "Готово к установке", className: "status-badge-neutral", icon: "routes"};
         }
         if (isActuallyInstalled(state)) {
             return {text: "Установлено", className: "status-badge-success", icon: "status"};
         }
-        if (state && state.downloadedVersion) {
-            return {text: "Готово к установке", className: "status-badge-neutral", icon: "routes"};
-        }
         if (state && state.availableVersion) {
-            return {text: "Доступно", className: "status-badge-neutral", icon: "backup"};
+            return {text: "Доступно для загрузки", className: "status-badge-neutral", icon: "backup"};
         }
         return {text: "Источник не проверен", className: "status-badge-neutral", icon: "search"};
     }
 
-    function primaryPresentation(state) {
-        if (hasRouterDrift(state) && state.downloadedVersion) {
-            return {action: "export", text: "Восстановить", icon: "restore", disabled: false};
-        }
-        if (
-            state &&
-            state.availableVersion &&
-            !sameVersion(state.availableVersion, state.downloadedVersion)
-        ) {
-            return {action: "download", text: "Скачать", icon: "backup", disabled: false};
-        }
-        if (
-            state &&
-            state.downloadedVersion &&
-            !sameVersion(state.downloadedVersion, state.installedVersion)
-        ) {
-            return {
-                action: "export",
-                text: state.installedVersion ? "Обновить" : "Установить",
-                icon: state.installedVersion ? "update" : "routes",
-                disabled: false
-            };
-        }
-        if (isActuallyInstalled(state)) {
-            return {action: "export", text: "Установлено", icon: "status", disabled: true, hidden: true};
-        }
-        return {action: "export", text: "Сначала проверить", icon: "search", disabled: true};
+    function fileChangeText(state) {
+        var changes = state && state.checkResult ? state.checkResult.fileChanges : null;
+        if (!changes) return "";
+        return "На GitHub добавлено " + Number((changes.addedFiles || []).length) +
+            ", изменено " + Number((changes.changedFiles || []).length) +
+            ", удалено " + Number((changes.removedFiles || []).length) + " файлов.";
+    }
+
+    function routeChangeText(state) {
+        var changes = state && state.checkResult ? state.checkResult.routeChanges : null;
+        if (!changes) return "";
+        return "Маршруты: добавлено " + Number(changes.added || 0) +
+            ", удалено " + Number(changes.removed || 0) +
+            ", без изменений " + Number(changes.unchanged || 0) + ".";
     }
 
     function messageFor(state) {
         var presence;
-        var missing;
-        var expected;
+        var action;
         var lastError;
+        var parts = [];
 
         if (state && state.lastError) {
             lastError = typeof state.lastError === "string"
@@ -325,43 +318,52 @@
 
         if (hasRouterDrift(state)) {
             presence = routerPresence(state) || {};
-            missing = Number(presence.missingRouteCount || 0);
-            expected = Number(presence.expectedRouteCount || 0);
-            return "В Keenetic отсутствуют " + missing + " из " + expected +
-                " маршрутов. Выполните восстановление.";
+            return "Маршруты были установлены ранее, но сейчас в Keenetic отсутствуют " +
+                Number(presence.missingRouteCount || 0) + " из " +
+                Number(presence.expectedRouteCount || 0) +
+                ". Нажмите «Восстановить в Keenetic».";
         }
 
-        if (
-            state &&
-            state.availableVersion &&
-            state.installedVersion &&
-            !sameVersion(state.availableVersion, state.installedVersion)
-        ) {
-            return "Для набора доступно обновление источника.";
+        if (downloadRequired(state)) {
+            if (state.checkResult && state.checkResult.sourceChanged) parts.push(fileChangeText(state));
+            if (state.checkResult && state.checkResult.routesChanged) parts.push(routeChangeText(state));
+            if (state.checkResult && state.checkResult.routesChanged === false && state.downloadedVersion) {
+                parts.push("Итоговый список маршрутов не изменился. Обновление Keenetic не требуется.");
+            } else {
+                parts.push(state && state.downloadedVersion
+                    ? "Нажмите «Обновить файлы»."
+                    : "Нажмите «Скачать».");
+            }
+            return parts.filter(Boolean).join(" ");
         }
 
-        if (
-            state &&
-            state.downloadedVersion &&
-            !sameVersion(state.downloadedVersion, state.installedVersion)
-        ) {
-            return "Маршруты готовы к установке в Keenetic.";
+        action = keeneticAction(state);
+        if (action && action.mode === "update") {
+            parts.push("Новая версия файлов загружена.");
+            parts.push(routeChangeText(state));
+            parts.push("Нажмите «Обновить в Keenetic».");
+            return parts.filter(Boolean).join(" ");
         }
-
+        if (action && action.mode === "install") {
+            return "Маршруты загружены. Нажмите «Установить в Keenetic».";
+        }
         if (isActuallyInstalled(state)) {
+            if (state.checkResult && state.checkResult.result === "source_changed_routes_unchanged") {
+                return "Источник изменился, но итоговый список маршрутов не изменился. Обновление Keenetic не требуется.";
+            }
             return "Все зарегистрированные маршруты присутствуют в Keenetic.";
         }
-
-        if (state && state.availableVersion) {
-            return "Источник проверен. Скачайте набор для установки.";
+        if (state && state.checkResult && state.checkResult.message) {
+            return state.checkResult.message;
         }
-
-        return "Выполните проверку источника, чтобы получить список всех .bat-файлов.";
+        if (state && state.availableVersion) {
+            return "Источник проверен. Нажмите «Скачать».";
+        }
+        return "Нажмите «Найти маршруты», чтобы BROray нашёл и проверил все доступные BAT-файлы этого ресурса.";
     }
 
     function button(bundleId, action, text, variant, icon) {
         var node = create("button", "button " + variant, text);
-
         node.type = "button";
         node.setAttribute("data-bundle-id", bundleId);
         node.setAttribute("data-action", action);
@@ -374,7 +376,6 @@
         var row = create("div", "ui-data-row");
         var labelNode = create("span", "ui-data-row__label", label);
         var valueNode = create("strong", "ui-data-row__value", "—");
-
         valueNode.setAttribute("data-field", fieldName);
         row.append(labelNode, valueNode);
         return row;
@@ -407,7 +408,6 @@
         card.setAttribute("data-bundle-id", bundle.id);
         title.id = "route-title-" + bundle.id;
         card.setAttribute("aria-labelledby", title.id);
-
         logoBox.setAttribute("aria-hidden", "true");
         logoBox.innerHTML = bundle.logo;
         logo = logoBox.firstElementChild;
@@ -424,16 +424,11 @@
             create("p", "route-card-description", bundle.description)
         );
         service.append(logoBox, copy);
-
         status.setAttribute("data-field", "status");
         status.setAttribute("data-icon", "status");
         summary.append(service, status);
 
-        [
-            ["route-count", "маршрутов"],
-            ["source-count", "исходных файлов"],
-            ["presence-count", "в Keenetic"]
-        ].forEach(function (item) {
+        [["route-count", "маршрутов"], ["source-count", "исходных файлов"], ["presence-count", "в Keenetic"]].forEach(function (item) {
             var metric = create("div", "route-card-metric");
             var value = create("strong", "", "—");
             value.setAttribute("data-field", item[0]);
@@ -443,20 +438,17 @@
 
         notice.setAttribute("data-field", "notice-box");
         notice.setAttribute("role", "status");
-        notice.append(
-            create("span", "route-card-notice-icon", ""),
-            create("p", "", "Загрузка состояния…")
-        );
+        notice.append(create("span", "route-card-notice-icon", ""), create("p", "", "Загрузка состояния…"));
         notice.firstChild.setAttribute("data-icon", "status");
         notice.lastChild.setAttribute("data-field", "message");
 
         detailsButton = button(bundle.id, "toggle-details", "Подробнее", "button-secondary", "chevron");
         detailsButton.setAttribute("aria-expanded", "false");
         detailsButton.setAttribute("aria-controls", "route-details-" + bundle.id);
-
         actions.append(
-            button(bundle.id, "check", "Проверить", "button-secondary", "search"),
-            button(bundle.id, "primary", "Сначала проверить", "button-primary", "search"),
+            button(bundle.id, "check", "Найти маршруты", "button-secondary", "search"),
+            button(bundle.id, "download", "Скачать", "button-secondary", "backup"),
+            button(bundle.id, "export", "Установить в Keenetic", "button-secondary", "routes"),
             detailsButton
         );
 
@@ -466,33 +458,26 @@
             dataRow("Установленная версия", "installed-version"),
             dataRow("Доступная версия", "available-version"),
             dataRow("Последняя проверка", "last-checked"),
+            dataRow("Добавлено файлов", "files-added"),
+            dataRow("Изменено файлов", "files-changed"),
+            dataRow("Удалено файлов", "files-removed"),
+            dataRow("Добавлено маршрутов", "routes-added"),
+            dataRow("Удалено маршрутов", "routes-removed"),
+            dataRow("Без изменений", "routes-unchanged"),
             dataRow("Интерфейс", "target-interface"),
             dataRow("Метрика", "managed-metric")
         );
 
-        sourceHeading.append(
-            create("div", "", "Файлы источника"),
-            create("a", "route-source-root", "Открыть раздел GitHub")
-        );
-        sourceHeading.firstChild.className = "route-source-title";
+        sourceHeading.append(create("div", "route-source-title", "Файлы источника"), create("a", "route-source-root", "Открыть раздел GitHub"));
         sourceHeading.lastChild.href = bundle.source;
         sourceHeading.lastChild.target = "_blank";
         sourceHeading.lastChild.rel = "noopener noreferrer";
         sourceList.setAttribute("data-field", "source-files");
         sourceBlock.append(sourceHeading, sourceList);
-
         technical.append(technicalSummary, operationOutput);
         operationOutput.setAttribute("data-field", "operation-output");
-
-        danger.append(
-            create("div", "route-danger-copy"),
-            button(bundle.id, "delete", "Удалить из Keenetic", "button-danger-outline", "delete")
-        );
-        danger.firstChild.append(
-            create("strong", "", "Удаление набора"),
-            create("p", "", "Общие маршруты, принадлежащие другим установленным наборам, будут сохранены.")
-        );
-
+        danger.append(create("div", "route-danger-copy"), button(bundle.id, "delete", "Удалить из Keenetic", "button-danger-outline", "delete"));
+        danger.firstChild.append(create("strong", "", "Удаление набора"), create("p", "", "Общие маршруты, принадлежащие другим установленным наборам, будут сохранены."));
         details.append(detailsGrid, sourceBlock, technical, danger);
         card.append(summary, metrics, notice, actions, details);
         return card;
@@ -504,94 +489,68 @@
 
     function setField(card, name, value) {
         var node = card.querySelector('[data-field="' + name + '"]');
-
-        if (node) {
-            node.textContent = value === null || value === undefined || value === ""
-                ? "—"
-                : String(value);
-        }
+        if (node) node.textContent = value === null || value === undefined || value === "" ? "—" : String(value);
     }
 
     function setButtonLabel(node, label, icon) {
-        if (!node) {
-            return;
-        }
+        if (!node) return;
         node.textContent = label;
-        if (icon) {
-            node.setAttribute("data-icon", icon);
-        }
-        if (window.BROrayIcons) {
-            window.BROrayIcons.scan(node);
-        }
+        if (icon) node.setAttribute("data-icon", icon);
+        if (window.BROrayIcons) window.BROrayIcons.scan(node);
+    }
+
+    function setButtonVariant(node, primary) {
+        if (!node) return;
+        node.classList.remove("button-primary", "button-secondary");
+        node.classList.add(primary ? "button-primary" : "button-secondary");
     }
 
     function setStatus(card, presentation) {
         var node = card.querySelector('[data-field="status"]');
-
-        if (!node) {
-            return;
-        }
+        if (!node) return;
         node.className = "status-badge " + presentation.className;
         node.textContent = presentation.text;
         node.setAttribute("data-icon", presentation.icon);
-        if (window.BROrayIcons) {
-            window.BROrayIcons.scan(node);
-        }
+        if (window.BROrayIcons) window.BROrayIcons.scan(node);
     }
 
     function setNotice(card, state) {
         var box = card.querySelector('[data-field="notice-box"]');
         var status = statusPresentation(state);
-
-        if (!box) {
-            return;
-        }
+        if (!box) return;
         box.className = "route-card-notice ";
-        if (status.className === "status-badge-danger") {
-            box.className += "status-error";
-        } else if (status.className === "status-badge-warning") {
-            box.className += "status-warning";
-        } else if (status.className === "status-badge-success") {
-            box.className += "status-success";
-        } else {
-            box.className += "status-neutral";
-        }
+        if (status.className === "status-badge-danger") box.className += "status-error";
+        else if (status.className === "status-badge-warning") box.className += "status-warning";
+        else if (status.className === "status-badge-success") box.className += "status-success";
+        else box.className += "status-neutral";
+        box.firstChild.setAttribute("data-icon", status.icon);
         setField(card, "message", messageFor(state));
+        if (window.BROrayIcons) window.BROrayIcons.scan(box);
     }
 
     function renderSourceFiles(card, state) {
         var list = card.querySelector('[data-field="source-files"]');
         var files = sourceFiles(state);
-
-        if (!list) {
-            return;
-        }
+        if (!list) return;
         list.textContent = "";
-
         if (!files.length) {
-            list.appendChild(create("li", "route-source-empty", "Список ещё не получен. Выполните проверку источника."));
+            list.appendChild(create("li", "route-source-empty", "Список ещё не получен. Нажмите «Найти маршруты»."));
             return;
         }
-
         files.forEach(function (file) {
             var item = create("li", "route-source-item");
             var link = create("a", "route-source-link", file.name || "Файл маршрутов");
             var meta = create("span", "route-source-meta");
             var hash = file.sha256 ? String(file.sha256).slice(0, 12) : "—";
-
             if (file.htmlUrl) {
                 link.href = file.htmlUrl;
                 link.target = "_blank";
                 link.rel = "noopener noreferrer";
             } else {
                 link.href = "#";
-                link.addEventListener("click", function (event) {
-                    event.preventDefault();
-                });
+                link.addEventListener("click", function (event) { event.preventDefault(); });
             }
-
-            meta.textContent = String(file.routeCount || 0) + " маршрутов · " +
-                formatBytes(file.sizeBytes) + " · SHA " + hash;
+            meta.textContent = String(file.routeCount || 0) + " маршрутов · " + formatBytes(file.sizeBytes) + " · SHA " + hash;
             item.append(link, meta);
             list.appendChild(item);
         });
@@ -599,22 +558,15 @@
 
     function operationOutput(state) {
         var output;
-
-        if (state && state.operation && state.operation.output) {
-            return state.operation.output;
-        }
+        if (state && state.operation && state.operation.output) return state.operation.output;
         if (state && state.lastError) {
-            output = typeof state.lastError === "string"
-                ? state.lastError
-                : state.lastError.message;
+            output = typeof state.lastError === "string" ? state.lastError : state.lastError.message;
             return output || "Последняя операция завершилась ошибкой.";
         }
-        if (state && state.exportResult) {
-            return "Последний экспорт: " + (state.exportResult.message || "завершён") + ".";
-        }
-        if (state && state.deleteResult) {
-            return "Последнее удаление: " + (state.deleteResult.message || "завершено") + ".";
-        }
+        if (state && state.exportResult) return "Последняя установка: " + (state.exportResult.message || "завершена") + ".";
+        if (state && state.downloadResult) return state.downloadResult.message || "Файлы маршрутов загружены.";
+        if (state && state.checkResult) return state.checkResult.message || "Поиск обновлений завершён.";
+        if (state && state.deleteResult) return "Последнее удаление: " + (state.deleteResult.message || "завершено") + ".";
         return "Нет данных о выполненных операциях.";
     }
 
@@ -622,34 +574,29 @@
         var card = cardFor(bundleId);
         var presence = routerPresence(state);
         var files = sourceFiles(state);
-        var primary = primaryPresentation(state);
-        var primaryButton;
+        var changes = state && state.checkResult ? state.checkResult : {};
+        var fileChanges = changes.fileChanges || {};
+        var routeChanges = changes.routeChanges || {};
+        var next = nextAction(state);
+        var keenetic = keeneticAction(state);
         var checkButton;
+        var downloadButton;
+        var keeneticButton;
         var deleteButton;
         var detailsButton;
-        var expected;
-        var present;
-        var targetInterface;
-        var metric;
-
-        if (!card) {
-            return;
-        }
-
-        states[bundleId] = state;
-        expected = presence && presence.registered ? Number(presence.expectedRouteCount || 0) : 0;
-        present = presence && presence.registered ? Number(presence.presentRouteCount || 0) : 0;
-        targetInterface =
-            (state.exportBuild && state.exportBuild.targetInterface) ||
+        var actions;
+        var orderedButtons;
+        var busy = Boolean(busyBundles[bundleId]);
+        var expected = presence && presence.registered ? Number(presence.expectedRouteCount || 0) : 0;
+        var present = presence && presence.registered ? Number(presence.presentRouteCount || 0) : 0;
+        var targetInterface = (state.exportBuild && state.exportBuild.targetInterface) ||
             (state.checkResult && state.checkResult.managedInterface) ||
-            (state.exportResult && state.exportResult.targetInterface) ||
-            "ProxyN";
-        metric =
-            (state.exportBuild && state.exportBuild.managedMetric) ||
-            (state.exportResult && state.exportResult.managedMetric) ||
-            (state.deleteResult && state.deleteResult.managedMetric) ||
-            "1200";
+            (state.exportResult && state.exportResult.targetInterface) || "ProxyN";
+        var metric = (state.exportBuild && state.exportBuild.managedMetric) ||
+            (state.exportResult && state.exportResult.managedMetric) || 1200;
 
+        if (!card) return;
+        states[bundleId] = state;
         setStatus(card, statusPresentation(state));
         setNotice(card, state);
         setField(card, "route-count", state.routeCount || 0);
@@ -658,37 +605,56 @@
         setField(card, "installed-version", formatVersion(state.installedVersion, "Не установлено"));
         setField(card, "available-version", formatVersion(state.availableVersion, "Не проверялась"));
         setField(card, "last-checked", formatDate(state.lastCheckedAt));
+        setField(card, "files-added", (fileChanges.addedFiles || []).length || 0);
+        setField(card, "files-changed", (fileChanges.changedFiles || []).length || 0);
+        setField(card, "files-removed", (fileChanges.removedFiles || []).length || 0);
+        setField(card, "routes-added", routeChanges.added || 0);
+        setField(card, "routes-removed", routeChanges.removed || 0);
+        setField(card, "routes-unchanged", routeChanges.unchanged || 0);
         setField(card, "target-interface", targetInterface);
         setField(card, "managed-metric", metric);
         setField(card, "operation-output", operationOutput(state));
         renderSourceFiles(card, state);
 
-        primaryButton = card.querySelector('[data-action="primary"], [data-action="download"], [data-action="export"]');
         checkButton = card.querySelector('[data-action="check"]');
+        downloadButton = card.querySelector('[data-action="download"]');
+        keeneticButton = card.querySelector('[data-action="export"]');
         deleteButton = card.querySelector('[data-action="delete"]');
         detailsButton = card.querySelector('[data-action="toggle-details"]');
 
-        if (primaryButton) {
-            primaryButton.setAttribute("data-action", primary.action);
-            setButtonLabel(primaryButton, primary.text, primary.icon);
-            primaryButton.hidden = primary.hidden === true;
-            primaryButton.disabled = operationRunning || primary.disabled;
-            primaryButton.parentElement.classList.toggle(
-                "route-card-actions-primary-hidden",
-                primary.hidden === true
-            );
+        setButtonLabel(checkButton, busyBundles[bundleId] === "check" ? "Поиск обновлений…" : checkLabel(state), "search");
+        checkButton.disabled = busy;
+        checkButton.hidden = false;
+        setButtonVariant(checkButton, next === "check");
+
+        setButtonLabel(downloadButton, state.downloadedVersion ? "Обновить файлы" : "Скачать", state.downloadedVersion ? "update" : "backup");
+        downloadButton.disabled = busy || !downloadRequired(state);
+        downloadButton.hidden = !downloadRequired(state);
+        setButtonVariant(downloadButton, next === "download");
+
+        if (keenetic) {
+            setButtonLabel(keeneticButton, keenetic.text, keenetic.icon);
+            keeneticButton.disabled = busy;
+            keeneticButton.hidden = false;
+            setButtonVariant(keeneticButton, next === "export");
+        } else {
+            keeneticButton.hidden = true;
+            keeneticButton.disabled = true;
+            setButtonVariant(keeneticButton, false);
         }
-        if (checkButton) {
-            setButtonLabel(checkButton, "Проверить", "search");
-            checkButton.disabled = operationRunning;
-        }
-        if (deleteButton) {
-            setButtonLabel(deleteButton, "Удалить из Keenetic", "delete");
-            deleteButton.disabled = operationRunning || !state.installedVersion;
-        }
-        if (detailsButton) {
-            detailsButton.disabled = operationRunning;
-        }
+
+        deleteButton.disabled = busy || !state.installedVersion;
+        detailsButton.disabled = false;
+
+        actions = checkButton.parentElement;
+        orderedButtons = next === "export"
+            ? [keeneticButton, checkButton, downloadButton, detailsButton]
+            : next === "download"
+                ? [downloadButton, checkButton, keeneticButton, detailsButton]
+                : [checkButton, downloadButton, keeneticButton, detailsButton];
+        orderedButtons.forEach(function (node) {
+            if (node && node.parentElement === actions) actions.appendChild(node);
+        });
 
         card.classList.toggle("has-warning", hasRouterDrift(state));
         card.classList.toggle("has-error", Boolean(state.lastError));
@@ -696,91 +662,81 @@
 
     function renderLoadError(bundleId, error) {
         var card = cardFor(bundleId);
-
-        if (!card) {
-            return;
-        }
+        var checkButton;
+        if (!card) return;
         setStatus(card, {text: "Ошибка", className: "status-badge-danger", icon: "status"});
         setField(card, "message", error && error.message ? error.message : "Не удалось загрузить состояние набора.");
         card.classList.add("has-error");
         Array.prototype.forEach.call(card.querySelectorAll("button"), function (node) {
-            if (node.getAttribute("data-action") !== "toggle-details") {
-                node.disabled = true;
-            }
+            node.disabled = node.getAttribute("data-action") !== "check" && node.getAttribute("data-action") !== "toggle-details";
         });
+        checkButton = card.querySelector('[data-action="check"]');
+        if (checkButton) {
+            setButtonLabel(checkButton, "Найти маршруты", "search");
+            setButtonVariant(checkButton, true);
+            checkButton.disabled = false;
+        }
     }
 
     function renderSummary() {
         var installed = 0;
-        var attention = 0;
+        var updates = 0;
         var loaded = 0;
+        var actions = 0;
         var status = byId("routes-page-status");
         var message = byId("routes-summary-message");
 
         BUNDLES.forEach(function (bundle) {
             var state = states[bundle.id];
-            if (!state) {
-                return;
-            }
+            if (!state) return;
             loaded += 1;
-            if (isActuallyInstalled(state)) {
-                installed += 1;
-            }
-            if (
-                state.lastError ||
-                hasRouterDrift(state) ||
-                (state.availableVersion && state.installedVersion && !sameVersion(state.availableVersion, state.installedVersion))
-            ) {
-                attention += 1;
-            }
+            if (isActuallyInstalled(state)) installed += 1;
+            if (sourceUpdateAvailable(state) || (state.installedVersion && keeneticAction(state) && keeneticAction(state).mode === "update")) updates += 1;
+            if (state.lastError || hasRouterDrift(state)) actions += 1;
         });
 
         byId("routes-installed-count").textContent = String(installed);
-        byId("routes-attention-count").textContent = String(attention);
+        byId("routes-attention-count").textContent = String(updates);
         byId("routes-total-count").textContent = String(BUNDLES.length);
 
         if (message) {
             message.textContent = loaded < BUNDLES.length
                 ? "Загружено " + loaded + " из " + BUNDLES.length + " наборов."
-                : attention > 0
+                : actions > 0
                     ? "Некоторые наборы требуют действия. Подробная причина показана в карточке."
-                    : "Состояние всех наборов получено. Ошибок и обязательных действий нет.";
+                    : updates > 0
+                        ? "Доступны обновления маршрутов."
+                        : "Состояние всех наборов получено. Обновлений нет.";
         }
 
         if (status) {
             if (loaded < BUNDLES.length) {
                 status.className = "status-badge status-loading";
                 status.textContent = "Загрузка…";
-                status.setAttribute("data-icon", "status");
-            } else if (attention > 0) {
+            } else if (actions > 0) {
                 status.className = "status-badge status-badge-warning";
                 status.textContent = "Требуется действие";
-                status.setAttribute("data-icon", "status");
+            } else if (updates > 0) {
+                status.className = "status-badge status-badge-warning";
+                status.textContent = "Доступны обновления";
             } else {
                 status.className = "status-badge status-badge-success";
                 status.textContent = "Состояние получено";
-                status.setAttribute("data-icon", "status");
             }
-            if (window.BROrayIcons) {
-                window.BROrayIcons.scan(status);
-            }
+            status.setAttribute("data-icon", "status");
+            if (window.BROrayIcons) window.BROrayIcons.scan(status);
         }
     }
 
     function renderAll() {
         BUNDLES.forEach(function (bundle) {
-            if (states[bundle.id]) {
-                renderCard(bundle.id, states[bundle.id]);
-            }
+            if (states[bundle.id]) renderCard(bundle.id, states[bundle.id]);
         });
         renderSummary();
     }
 
     function loadState(bundleId) {
-        return request(
-            "/api/routes/status.cgi?bundleId=" + encodeURIComponent(bundleId),
-            {method: "GET", credentials: "same-origin"}
-        ).then(function (state) {
+        return request("/api/routes/status.cgi?bundleId=" + encodeURIComponent(bundleId), {method: "GET", credentials: "same-origin"}).then(function (state) {
             renderCard(bundleId, state);
             renderSummary();
             return state;
@@ -802,38 +758,21 @@
     }
 
     function operationText(action, bundleId) {
-        if (action === "check") {
-            return "Проверка…";
-        }
-        if (action === "download") {
-            return "Загрузка…";
-        }
+        if (action === "check") return "Поиск обновлений…";
+        if (action === "download") return "Загрузка…";
         if (action === "export") {
-            return hasRouterDrift(states[bundleId])
-                ? "Восстановление…"
-                : states[bundleId] && states[bundleId].installedVersion
-                    ? "Обновление…"
-                    : "Установка…";
+            return hasRouterDrift(states[bundleId]) ? "Восстановление…" :
+                states[bundleId] && states[bundleId].installedVersion ? "Обновление…" : "Установка…";
         }
-        if (action === "delete") {
-            return "Удаление…";
-        }
+        if (action === "delete") return "Удаление…";
         return "Выполнение…";
     }
 
     function successMessage(action, bundle) {
-        if (action === "check") {
-            return "Проверка источника «" + bundle.name + "» завершена.";
-        }
-        if (action === "download") {
-            return "Маршруты «" + bundle.name + "» загружены.";
-        }
-        if (action === "export") {
-            return "Маршруты «" + bundle.name + "» установлены или восстановлены.";
-        }
-        if (action === "delete") {
-            return "Маршруты «" + bundle.name + "» удалены.";
-        }
+        if (action === "check") return "Поиск обновлений «" + bundle.name + "» завершён.";
+        if (action === "download") return "Файлы маршрутов «" + bundle.name + "» загружены.";
+        if (action === "export") return "Маршруты «" + bundle.name + "» применены в Keenetic.";
+        if (action === "delete") return "Маршруты «" + bundle.name + "» удалены.";
         return "Операция завершена.";
     }
 
@@ -841,10 +780,7 @@
         var card = cardFor(bundleId);
         var details = card ? card.querySelector(".route-card-details") : null;
         var expanded;
-
-        if (!details || !buttonNode) {
-            return;
-        }
+        if (!details || !buttonNode) return;
         expanded = buttonNode.getAttribute("aria-expanded") === "true";
         expandedBundles[bundleId] = !expanded;
         details.hidden = expanded;
@@ -867,41 +803,84 @@
         });
     }
 
+    function syncPlanMessage(plan) {
+        var summary = plan.summary || {};
+        if (plan.mode === "update") {
+            return "Новая версия: добавлено " + Number(summary.addedRoutes || 0) +
+                ", удалено " + Number(summary.removedRoutes || 0) +
+                ", без изменений " + Number(summary.unchangedRoutes || 0) +
+                ". Из Keenetic будут удалены " + Number(summary.toDelete || 0) +
+                " маршрутов. Ещё " + Number(summary.sharedKept || 0) +
+                " используются другими наборами и сохранятся.";
+        }
+        if (plan.mode === "restore") {
+            return "В Keenetic будут восстановлены " +
+                Number(summary.toCreate || 0) + " маршрутов.";
+        }
+        return "В Keenetic будут установлены " + Number(summary.total || 0) + " маршрутов.";
+    }
+
+    function confirmSync(bundle, plan) {
+        var state = states[bundle.id];
+        var action = keeneticAction(state);
+        if (!plan.canApply) return Promise.reject(new Error(plan.message || "План содержит конфликты."));
+        if (plan.mode === "none") return Promise.resolve(false);
+        if (!window.BROrayDialogs || typeof window.BROrayDialogs.confirm !== "function") {
+            return Promise.reject(new Error("Фирменное окно подтверждения недоступно."));
+        }
+        return window.BROrayDialogs.confirm({
+            eyebrow: "Маршруты Keenetic",
+            title: action ? action.text : "Применить маршруты",
+            message: syncPlanMessage(plan),
+            confirmText: action ? action.text : "Продолжить",
+            cancelText: "Отмена"
+        });
+    }
+
     function executeOperation(bundle, action, buttonNode) {
-        operationRunning = true;
-        renderAll();
+        busyBundles[bundle.id] = action;
+        renderCard(bundle.id, states[bundle.id] || {});
         setButtonLabel(buttonNode, operationText(action, bundle.id), buttonNode.getAttribute("data-icon"));
         buttonNode.setAttribute("aria-busy", "true");
 
-        return withTimeout(
-            request(
-                "/api/routes/" + action + ".cgi?bundleId=" + encodeURIComponent(bundle.id),
-                {
-                    method: "POST",
-                    credentials: "same-origin",
-                    headers: {"Accept": "application/json"}
-                }
-            ),
-            REQUEST_TIMEOUT_MS
-        ).then(function (state) {
+        return withTimeout(request("/api/routes/" + action + ".cgi?bundleId=" + encodeURIComponent(bundle.id), {
+            method: "POST", credentials: "same-origin", headers: {"Accept": "application/json"}
+        }), REQUEST_TIMEOUT_MS).then(function (state) {
             states[bundle.id] = state;
             window.BROrayUI.toast(successMessage(action, bundle), "success");
         }).catch(function (error) {
-            if (
-                error &&
-                (error.status === 401 || error.code === "AUTH_REQUIRED" || error.code === "SESSION_REQUIRED")
-            ) {
+            if (error && (error.status === 401 || error.code === "AUTH_REQUIRED" || error.code === "SESSION_REQUIRED")) {
                 window.BROrayUI.redirectToLogin();
                 return;
             }
-            window.BROrayUI.toast(
-                error && error.message ? error.message : "Операция с маршрутами завершилась ошибкой.",
-                "error"
-            );
+            window.BROrayUI.toast(error && error.message ? error.message : "Операция с маршрутами завершилась ошибкой.", "error");
         }).then(function () {
-            operationRunning = false;
+            delete busyBundles[bundle.id];
             buttonNode.removeAttribute("aria-busy");
-            return loadAllStates();
+            return loadState(bundle.id).catch(function (error) { renderLoadError(bundle.id, error); });
+        });
+    }
+
+    function prepareSync(bundle, buttonNode) {
+        busyBundles[bundle.id] = "plan";
+        renderCard(bundle.id, states[bundle.id] || {});
+        return withTimeout(request("/api/routes/plan.cgi?bundleId=" + encodeURIComponent(bundle.id), {
+            method: "POST", credentials: "same-origin", headers: {"Accept": "application/json"}
+        }), REQUEST_TIMEOUT_MS).then(function (plan) {
+            delete busyBundles[bundle.id];
+            renderCard(bundle.id, states[bundle.id] || {});
+            if (plan.mode === "none") {
+                window.BROrayUI.toast("Изменения в Keenetic не требуются.", "success");
+                return false;
+            }
+            return confirmSync(bundle, plan);
+        }).then(function (confirmed) {
+            if (confirmed) return executeOperation(bundle, "export", buttonNode);
+            return null;
+        }).catch(function (error) {
+            delete busyBundles[bundle.id];
+            renderCard(bundle.id, states[bundle.id] || {});
+            window.BROrayUI.toast(error && error.message ? error.message : "Не удалось подготовить план установки.", "error");
         });
     }
 
@@ -909,74 +888,89 @@
         var buttonNode = event.currentTarget;
         var bundleId = buttonNode.getAttribute("data-bundle-id");
         var action = buttonNode.getAttribute("data-action");
-        var bundle = BUNDLES.filter(function (item) {
-            return item.id === bundleId;
-        })[0];
-
-        if (!bundle) {
-            return;
-        }
+        var bundle = BUNDLES.filter(function (item) { return item.id === bundleId; })[0];
+        if (!bundle) return;
         if (action === "toggle-details") {
             toggleDetails(bundleId, buttonNode);
             return;
         }
-        if (operationRunning) {
-            return;
-        }
+        autoCheckCancelled = true;
+        if (busyBundles[bundleId]) return;
         if (action === "delete") {
             confirmDelete(bundle).then(function (confirmed) {
-                if (confirmed) {
-                    executeOperation(bundle, action, buttonNode);
-                }
-            }).catch(function (error) {
-                window.BROrayUI.toast(error.message, "error");
-            });
+                if (confirmed) executeOperation(bundle, action, buttonNode);
+            }).catch(function (error) { window.BROrayUI.toast(error.message, "error"); });
+            return;
+        }
+        if (action === "export") {
+            prepareSync(bundle, buttonNode);
             return;
         }
         executeOperation(bundle, action, buttonNode);
+    }
+
+    function staleForAutomaticCheck(state) {
+        var checked;
+        if (!state || !state.lastCheckedAt) return false;
+        checked = new Date(state.lastCheckedAt).getTime();
+        return !isNaN(checked) && (Date.now() - checked) > AUTO_CHECK_MAX_AGE_MS;
+    }
+
+    function runAutomaticChecks(queue, index) {
+        var bundle;
+        if (autoCheckCancelled || index >= queue.length) return Promise.resolve();
+        bundle = queue[index];
+        busyBundles[bundle.id] = "check";
+        renderCard(bundle.id, states[bundle.id] || {});
+        return withTimeout(request("/api/routes/check.cgi?bundleId=" + encodeURIComponent(bundle.id), {
+            method: "POST", credentials: "same-origin", headers: {"Accept": "application/json"}
+        }), REQUEST_TIMEOUT_MS).then(function (state) {
+            states[bundle.id] = state;
+        }).catch(function (error) {
+            if (error && error.status === 401) {
+                autoCheckCancelled = true;
+                window.BROrayUI.redirectToLogin();
+            }
+        }).then(function () {
+            delete busyBundles[bundle.id];
+            if (states[bundle.id]) renderCard(bundle.id, states[bundle.id]);
+            renderSummary();
+            return runAutomaticChecks(queue, index + 1);
+        });
+    }
+
+    function startAutomaticChecks() {
+        var queue = BUNDLES.filter(function (bundle) { return staleForAutomaticCheck(states[bundle.id]); });
+        if (queue.length) runAutomaticChecks(queue, 0);
     }
 
     function revealApplication(session) {
         var app = byId("app");
         var loader = byId("page-loader");
         var user = byId("current-user");
-
-        if (user) {
-            user.textContent = session && session.user ? session.user : "admin";
-        }
-        if (loader) {
-            loader.hidden = true;
-        }
-        if (app) {
-            app.hidden = false;
-        }
+        if (user) user.textContent = session && session.user ? session.user : "admin";
+        if (loader) loader.hidden = true;
+        if (app) app.hidden = false;
     }
 
     function initialize() {
         var mount = byId("routes-bundles");
         var fragment = document.createDocumentFragment();
-
-        BUNDLES.forEach(function (bundle) {
-            fragment.appendChild(createCard(bundle));
-        });
+        BUNDLES.forEach(function (bundle) { fragment.appendChild(createCard(bundle)); });
         mount.replaceChildren(fragment);
-
-        request("/api/session.cgi", {method: "GET", credentials: "same-origin"})
-            .then(function (session) {
-                revealApplication(session);
-                return loadAllStates();
-            })
-            .catch(function (error) {
-                if (error && error.status === 401) {
-                    window.BROrayUI.redirectToLogin();
-                    return;
-                }
-                revealApplication(null);
-                window.BROrayUI.toast(
-                    error && error.message ? error.message : "Не удалось открыть страницу маршрутов.",
-                    "error"
-                );
-            });
+        request("/api/session.cgi", {method: "GET", credentials: "same-origin"}).then(function (session) {
+            revealApplication(session);
+            return loadAllStates();
+        }).then(function () {
+            startAutomaticChecks();
+        }).catch(function (error) {
+            if (error && error.status === 401) {
+                window.BROrayUI.redirectToLogin();
+                return;
+            }
+            revealApplication(null);
+            window.BROrayUI.toast(error && error.message ? error.message : "Не удалось открыть страницу маршрутов.", "error");
+        });
     }
 
     if (document.readyState === "loading") {

@@ -602,8 +602,12 @@ broray_routes_check_run()
     local repository branch source_directory bundle_name max_bytes max_routes managed_interface discovery_mode
     local enabled_count unsupported total_bytes index parser source_file source_path source_raw source_part source_errors tab
     local commit_url contents_url raw_url source_commit source_date source_bytes details route_count content_sha256
-    local previous_sha256 now check_result status message state_new api_message
+    local now check_result status message state_new api_message
     local source_files_tsv source_files_json source_file_routes source_file_sha source_html_url
+    local catalog baseline_normalized baseline_source_files baseline_source_set baseline_content_sha baseline_route_count
+    local source_set_tsv source_set_sha256 file_changes_json route_added route_removed route_unchanged
+    local added_files changed_files removed_files unchanged_files source_changed routes_changed download_required
+    local downloaded_present installed_present installed_content_sha keenetic_update_required
 
     bundle_id="${1:-}"
 
@@ -641,14 +645,9 @@ broray_routes_check_run()
     broray_routes_lock_acquire || lock_result=$?
 
     case "$lock_result" in
-        0)
-            ;;
-        2)
-            broray_routes_check_error "Другая операция с маршрутами уже выполняется."
-            ;;
-        *)
-            broray_routes_check_error "Не удалось установить блокировку операции."
-            ;;
+        0) ;;
+        2) broray_routes_check_error "Другая операция с маршрутами уже выполняется." ;;
+        *) broray_routes_check_error "Не удалось установить блокировку операции." ;;
     esac
 
     work="$BRORAY_ROUTES_TMP/check-$bundle_id.$$"
@@ -661,6 +660,10 @@ broray_routes_check_run()
     parse_errors="$work/parse-errors.txt"
     source_files_tsv="$work/source-files.tsv"
     source_files_json="$work/source-files.json"
+    source_set_tsv="$work/source-set.tsv"
+    file_changes_json="$work/file-changes.json"
+    baseline_normalized="$work/baseline-normalized.txt"
+    baseline_source_files="$work/baseline-source-files.json"
 
     mkdir -p "$work" || {
         broray_routes_lock_release
@@ -722,34 +725,21 @@ broray_routes_check_run()
         ((type) == "array") and
         (length >= 1) and
         ((.[0].sha | type) == "string") and
-        (
-            (
-                .[0].commit.committer.date //
-                .[0].commit.author.date
-            ) |
-            type
-        ) == "string"
+        (((.[0].commit.committer.date // .[0].commit.author.date) | type) == "string")
     ' "$commit_json" >/dev/null 2>&1
     then
         api_message="$(jq -r '.message // empty' "$commit_json" 2>/dev/null)"
-
         if [ -n "$api_message" ]; then
             message="GitHub вернул ошибку: $api_message"
         else
             message="GitHub вернул неожиданный ответ о версии $bundle_name."
         fi
-
         broray_routes_check_state_error "$message" || true
         broray_routes_check_error "$message"
     fi
 
     source_commit="$(jq -r '.[0].sha' "$commit_json")"
-    source_date="$(
-        jq -r '
-            .[0].commit.committer.date //
-            .[0].commit.author.date
-        ' "$commit_json"
-    )"
+    source_date="$(jq -r '.[0].commit.committer.date // .[0].commit.author.date' "$commit_json")"
 
     if ! broray_routes_commit_sha_valid "$source_commit"; then
         message="GitHub вернул некорректный SHA коммита."
@@ -768,13 +758,11 @@ broray_routes_check_run()
 
         if ! jq -e 'type == "array"' "$contents_json" >/dev/null 2>&1; then
             api_message="$(jq -r '.message // empty' "$contents_json" 2>/dev/null)"
-
             if [ -n "$api_message" ]; then
                 message="GitHub вернул ошибку при чтении раздела: $api_message"
             else
                 message="GitHub вернул неожиданный список файлов раздела $bundle_name."
             fi
-
             broray_routes_check_state_error "$message" || true
             broray_routes_check_error "$message"
         fi
@@ -784,10 +772,7 @@ broray_routes_check_run()
                 .[] |
                 select(.type == "file") |
                 select((.name | ascii_downcase | endswith(".bat"))) |
-                {
-                    type: "windows-route-bat",
-                    name: .name
-                }
+                {type: "windows-route-bat", name: .name}
             ] |
             sort_by(.name | ascii_downcase)[] |
             [.type, .name] |
@@ -799,7 +784,6 @@ broray_routes_check_run()
         }
 
         enabled_count="$(wc -l <"$enabled_files" | tr -d ' ')"
-
         case "$enabled_count" in
             ''|*[!0-9]*) enabled_count=0 ;;
         esac
@@ -817,7 +801,6 @@ broray_routes_check_run()
                 broray_routes_check_state_error "$message" || true
                 broray_routes_check_error "$message"
             }
-
             broray_routes_safe_filename "$source_file" || {
                 message="GitHub вернул некорректное имя файла источника."
                 broray_routes_check_state_error "$message" || true
@@ -847,7 +830,6 @@ broray_routes_check_run()
         fi
 
         source_bytes="$(wc -c <"$source_raw" | tr -d ' ')"
-
         case "$source_bytes" in
             ''|*[!0-9]*)
                 message="Не удалось определить размер файла $source_file."
@@ -863,26 +845,16 @@ broray_routes_check_run()
         }
 
         total_bytes=$((total_bytes + source_bytes))
-
         [ "$total_bytes" -le "$max_bytes" ] || {
             message="Общий размер файлов набора превышает разрешённый предел."
             broray_routes_check_state_error "$message" || true
             broray_routes_check_error "$message"
         }
 
-        if ! broray_routes_parse_windows_bat \
-            "$source_raw" \
-            "$source_part" \
-            "$source_errors" \
-            "$max_routes"
-        then
+        if ! broray_routes_parse_windows_bat "$source_raw" "$source_part" "$source_errors" "$max_routes"; then
             details="$(sed -n '1,8p' "$source_errors" 2>/dev/null)"
             message="Файл $source_file не прошёл проверку."
-
-            if [ -n "$details" ]; then
-                message="$message $details"
-            fi
-
+            [ -z "$details" ] || message="$message $details"
             broray_routes_check_state_error "$message" || true
             broray_routes_check_error "$message"
         fi
@@ -892,11 +864,8 @@ broray_routes_check_run()
         source_html_url="https://github.com/$repository/blob/$source_commit/$source_path"
 
         printf '%s\t%s\t%s\t%s\t%s\n' \
-            "$source_file" \
-            "$source_file_sha" \
-            "$source_bytes" \
-            "$source_file_routes" \
-            "$source_html_url" >>"$source_files_tsv" || {
+            "$source_file" "$source_file_sha" "$source_bytes" "$source_file_routes" "$source_html_url" \
+            >>"$source_files_tsv" || {
                 message="Не удалось записать сведения о файле $source_file."
                 broray_routes_check_state_error "$message" || true
                 broray_routes_check_error "$message"
@@ -918,17 +887,14 @@ broray_routes_check_run()
     jq -R -s '
         split("\n") |
         map(select(length > 0)) |
-        map(
-            split("\t") |
-            {
-                name: .[0],
-                parser: "windows-route-bat",
-                sha256: .[1],
-                sizeBytes: (.[2] | tonumber),
-                routeCount: (.[3] | tonumber),
-                htmlUrl: .[4]
-            }
-        )
+        map(split("\t") | {
+            name: .[0],
+            parser: "windows-route-bat",
+            sha256: .[1],
+            sizeBytes: (.[2] | tonumber),
+            routeCount: (.[3] | tonumber),
+            htmlUrl: .[4]
+        })
     ' "$source_files_tsv" >"$source_files_json" || {
         message="Не удалось сформировать проверенный список файлов источника."
         broray_routes_check_state_error "$message" || true
@@ -936,7 +902,6 @@ broray_routes_check_run()
     }
 
     route_count="$(wc -l <"$normalized" | tr -d ' ')"
-
     case "$route_count" in
         ''|*[!0-9]*)
             message="Не удалось определить количество маршрутов."
@@ -950,7 +915,6 @@ broray_routes_check_run()
         broray_routes_check_state_error "$message" || true
         broray_routes_check_error "$message"
     }
-
     [ "$route_count" -le "$max_routes" ] || {
         message="Количество маршрутов превышает лимит: $route_count > $max_routes"
         broray_routes_check_state_error "$message" || true
@@ -958,27 +922,118 @@ broray_routes_check_run()
     }
 
     content_sha256="$(sha256sum "$normalized" | awk '{print $1}')"
-    previous_sha256="$(
-        jq -r \
-            '.availableVersion.contentSha256 // empty' \
-            "$state"
-    )"
-    now="$(broray_routes_check_now)"
+    jq -r 'sort_by(.name | ascii_downcase)[] | [.name, .sha256, (.sizeBytes | tostring)] | @tsv' \
+        "$source_files_json" >"$source_set_tsv" || broray_routes_check_error "Не удалось сформировать отпечаток файлов источника."
+    source_set_sha256="$(sha256sum "$source_set_tsv" | awk '{print $1}')"
 
-    if [ -z "$previous_sha256" ]; then
-        check_result="initial_available"
-        status="available"
-        message="Доступен проверенный набор маршрутов $bundle_name."
-    elif [ "$previous_sha256" = "$content_sha256" ]; then
-        check_result="no_changes"
-        status="no_changes"
-        message="Новых маршрутов не найдено"
-    else
-        check_result="changed"
-        status="update_available"
-        message="Появилась новая версия маршрутов $bundle_name."
+    catalog="$BRORAY_ROUTES_ROOT/catalog/$bundle_id"
+    : >"$baseline_normalized"
+    printf '%s\n' '[]' >"$baseline_source_files"
+    baseline_source_set=""
+    baseline_content_sha=""
+    baseline_route_count=0
+    downloaded_present=false
+    installed_present=false
+
+    if jq -e '.downloadedVersion != null' "$state" >/dev/null 2>&1; then
+        downloaded_present=true
+        [ -r "$catalog/normalized.txt" ] && [ -r "$catalog/source-files.json" ] && [ -r "$catalog/version.json" ] || {
+            message="Локальный каталог скачанной версии отсутствует или повреждён."
+            broray_routes_check_state_error "$message" || true
+            broray_routes_check_error "$message"
+        }
+        cp "$catalog/normalized.txt" "$baseline_normalized" || broray_routes_check_error "Не удалось прочитать локальный список маршрутов."
+        cp "$catalog/source-files.json" "$baseline_source_files" || broray_routes_check_error "Не удалось прочитать локальный список файлов."
+        baseline_content_sha="$(sha256sum "$baseline_normalized" | awk '{print $1}')"
+        [ "$baseline_content_sha" = "$(jq -r '.downloadedVersion.contentSha256 // empty' "$state")" ] || {
+            message="Контрольная сумма локального каталога не совпадает с состоянием."
+            broray_routes_check_state_error "$message" || true
+            broray_routes_check_error "$message"
+        }
+        baseline_route_count="$(wc -l <"$baseline_normalized" | tr -d ' ')"
+        jq -r 'sort_by(.name | ascii_downcase)[] | [.name, .sha256, (.sizeBytes | tostring)] | @tsv' \
+            "$baseline_source_files" >"$work/baseline-source-set.tsv" || broray_routes_check_error "Не удалось проверить локальный список файлов."
+        baseline_source_set="$(sha256sum "$work/baseline-source-set.tsv" | awk '{print $1}')"
     fi
 
+    jq -n --slurpfile old "$baseline_source_files" --slurpfile current "$source_files_json" '
+        ($old[0] // []) as $o |
+        ($current[0] // []) as $n |
+        ($o | map({key: .name, value: .}) | from_entries) as $om |
+        ($n | map({key: .name, value: .}) | from_entries) as $nm |
+        {
+            addedFiles: [$n[] | select(($om[.name] // null) == null) | .name],
+            removedFiles: [$o[] | select(($nm[.name] // null) == null) | .name],
+            changedFiles: [
+                $n[] as $f |
+                ($om[$f.name] // null) as $p |
+                select($p != null and (($p.sha256 != $f.sha256) or ($p.sizeBytes != $f.sizeBytes))) |
+                $f.name
+            ],
+            unchangedFiles: [
+                $n[] as $f |
+                ($om[$f.name] // null) as $p |
+                select($p != null and ($p.sha256 == $f.sha256) and ($p.sizeBytes == $f.sizeBytes)) |
+                $f.name
+            ]
+        }
+    ' >"$file_changes_json" || broray_routes_check_error "Не удалось сравнить файлы источника."
+
+    route_added="$(awk 'FILENAME == ARGV[1] {old[$0]=1; next} !($0 in old) {count++} END {print count+0}' "$baseline_normalized" "$normalized")"
+    route_removed="$(awk 'FILENAME == ARGV[1] {new[$0]=1; next} !($0 in new) {count++} END {print count+0}' "$normalized" "$baseline_normalized")"
+    route_unchanged=$((route_count - route_added))
+    [ "$route_unchanged" -ge 0 ] 2>/dev/null || route_unchanged=0
+
+    added_files="$(jq -r '.addedFiles | length' "$file_changes_json")"
+    changed_files="$(jq -r '.changedFiles | length' "$file_changes_json")"
+    removed_files="$(jq -r '.removedFiles | length' "$file_changes_json")"
+    unchanged_files="$(jq -r '.unchangedFiles | length' "$file_changes_json")"
+
+    if [ "$added_files" -gt 0 ] || [ "$changed_files" -gt 0 ] || [ "$removed_files" -gt 0 ]; then
+        source_changed=true
+    else
+        source_changed=false
+    fi
+
+    if [ "$route_added" -gt 0 ] || [ "$route_removed" -gt 0 ]; then
+        routes_changed=true
+    else
+        routes_changed=false
+    fi
+
+    if [ "$downloaded_present" = false ]; then
+        download_required=true
+        check_result="initial_available"
+        status="available"
+        message="Найдено файлов: $enabled_count. Маршрутов: $route_count."
+    elif [ "$source_changed" = false ] && [ "$routes_changed" = false ]; then
+        download_required=false
+        check_result="no_changes"
+        status="no_changes"
+        message="Проверено файлов: $enabled_count. Новых или изменённых маршрутов нет."
+    elif [ "$routes_changed" = false ]; then
+        download_required=true
+        check_result="source_changed_routes_unchanged"
+        status="update_available"
+        message="Источник изменился, но итоговый список маршрутов не изменился. Обновление Keenetic не требуется."
+    else
+        download_required=true
+        check_result="changed"
+        status="update_available"
+        message="На GitHub добавлено $added_files, изменено $changed_files, удалено $removed_files файлов. Маршруты: добавлено $route_added, удалено $route_removed, без изменений $route_unchanged."
+    fi
+
+    installed_content_sha="$(jq -r '.installedVersion.contentSha256 // empty' "$state")"
+    if [ -n "$installed_content_sha" ]; then
+        installed_present=true
+    fi
+    if [ "$installed_present" = true ] && [ "$installed_content_sha" != "$content_sha256" ]; then
+        keenetic_update_required=true
+    else
+        keenetic_update_required=false
+    fi
+
+    now="$(broray_routes_check_now)"
     state_new="$state.new.$$"
 
     jq \
@@ -988,20 +1043,31 @@ broray_routes_check_run()
         --arg source_commit "$source_commit" \
         --arg source_date "$source_date" \
         --arg content_sha256 "$content_sha256" \
-        --arg previous_sha256 "$previous_sha256" \
+        --arg source_set_sha256 "$source_set_sha256" \
+        --arg baseline_content_sha "$baseline_content_sha" \
+        --arg baseline_source_set "$baseline_source_set" \
         --arg message "$message" \
         --arg now "$now" \
         --arg managed_interface "$managed_interface" \
         --argjson route_count "$route_count" \
         --argjson source_file_count "$enabled_count" \
+        --argjson baseline_route_count "$baseline_route_count" \
+        --argjson route_added "$route_added" \
+        --argjson route_removed "$route_removed" \
+        --argjson route_unchanged "$route_unchanged" \
+        --argjson source_changed "$source_changed" \
+        --argjson routes_changed "$routes_changed" \
+        --argjson download_required "$download_required" \
+        --argjson keenetic_update_required "$keenetic_update_required" \
         --slurpfile source_files "$source_files_json" \
-        '
+        --slurpfile file_changes "$file_changes_json" '
             .bundleId = $bundle_id |
             .status = $status |
             .availableVersion = {
                 sourceCommit: $source_commit,
                 sourceDate: $source_date,
                 contentSha256: $content_sha256,
+                sourceSetSha256: $source_set_sha256,
                 sourceFileCount: $source_file_count,
                 sourceFiles: $source_files[0]
             } |
@@ -1010,73 +1076,75 @@ broray_routes_check_run()
             .lastError = null |
             .checkResult = {
                 result: $check_result,
-                previousContentSha256: (
-                    if $previous_sha256 == ""
-                    then null
-                    else $previous_sha256
-                    end
-                ),
+                baselineContentSha256: (if $baseline_content_sha == "" then null else $baseline_content_sha end),
                 currentContentSha256: $content_sha256,
+                baselineSourceSetSha256: (if $baseline_source_set == "" then null else $baseline_source_set end),
+                currentSourceSetSha256: $source_set_sha256,
                 sourceFileCount: $source_file_count,
                 sourceFiles: $source_files[0],
+                fileChanges: $file_changes[0],
+                routeChanges: {
+                    before: $baseline_route_count,
+                    after: $route_count,
+                    added: $route_added,
+                    removed: $route_removed,
+                    unchanged: $route_unchanged
+                },
+                sourceChanged: $source_changed,
+                routesChanged: $routes_changed,
+                downloadRequired: $download_required,
+                keeneticUpdateRequired: $keenetic_update_required,
                 discoveryMode: "all-bat",
                 managedInterface: $managed_interface,
                 message: $message
             } |
             .updatedAt = $now
-        ' \
-        "$state" >"$state_new" || {
+        ' "$state" >"$state_new" || {
             rm -f "$state_new"
             broray_routes_check_error "Не удалось обновить локальное состояние."
         }
 
-    jq -e \
-        --arg bundle_id "$bundle_id" \
-        --arg managed_interface "$managed_interface" \
-        '
-            (.schemaVersion == 1) and
-            (.bundleId == $bundle_id) and
-            ((.status | type) == "string") and
-            ((.availableVersion.sourceCommit | type) == "string") and
-            ((.availableVersion.sourceDate | type) == "string") and
-            ((.availableVersion.contentSha256 | type) == "string") and
-            ((.availableVersion.sourceFileCount | type) == "number") and
-            ((.availableVersion.sourceFiles | type) == "array") and
-            ((.availableVersion.sourceFiles | length) == .availableVersion.sourceFileCount) and
-            (all(.availableVersion.sourceFiles[];
-                ((.name | type) == "string") and
-                ((.routeCount | type) == "number") and
-                ((.sha256 | type) == "string") and
-                ((.htmlUrl | type) == "string")
-            )) and
-            ((.routeCount | type) == "number") and
-            ((.lastCheckedAt | type) == "string") and
-            (.lastError == null) and
-            (.checkResult.managedInterface == $managed_interface) and
-            ((.checkResult.message | type) == "string")
-        ' \
-        "$state_new" >/dev/null || {
-            rm -f "$state_new"
-            broray_routes_check_error "Новое состояние не прошло проверку."
-        }
+    jq -e --arg bundle_id "$bundle_id" --arg managed_interface "$managed_interface" '
+        (.schemaVersion == 1) and
+        (.bundleId == $bundle_id) and
+        ((.status | type) == "string") and
+        ((.availableVersion.sourceCommit | type) == "string") and
+        ((.availableVersion.sourceDate | type) == "string") and
+        ((.availableVersion.contentSha256 | type) == "string") and
+        ((.availableVersion.sourceSetSha256 | type) == "string") and
+        ((.availableVersion.sourceFileCount | type) == "number") and
+        ((.availableVersion.sourceFiles | type) == "array") and
+        ((.availableVersion.sourceFiles | length) == .availableVersion.sourceFileCount) and
+        ((.routeCount | type) == "number") and
+        ((.lastCheckedAt | type) == "string") and
+        (.lastError == null) and
+        (.checkResult.managedInterface == $managed_interface) and
+        ((.checkResult.fileChanges.addedFiles | type) == "array") and
+        ((.checkResult.fileChanges.changedFiles | type) == "array") and
+        ((.checkResult.fileChanges.removedFiles | type) == "array") and
+        ((.checkResult.routeChanges.added | type) == "number") and
+        ((.checkResult.routeChanges.removed | type) == "number") and
+        ((.checkResult.message | type) == "string")
+    ' "$state_new" >/dev/null || {
+        rm -f "$state_new"
+        broray_routes_check_error "Новое состояние не прошло проверку."
+    }
 
-    mv "$state_new" "$state" ||
-        broray_routes_check_error "Не удалось установить новое состояние."
-
+    mv "$state_new" "$state" || broray_routes_check_error "Не удалось установить новое состояние."
     chmod 644 "$state" 2>/dev/null || true
 
     printf '%s\n' "$message"
     printf 'Набор: %s\n' "$bundle_id"
-    printf 'Интерфейс будущего экспорта: %s\n' "$managed_interface"
+    printf 'Управляемый интерфейс: %s\n' "$managed_interface"
     printf 'Версия источника: %s\n' "${source_commit%${source_commit#???????}}"
     printf 'Дата источника: %s\n' "$source_date"
     printf 'Файлов источника: %s\n' "$enabled_count"
     printf 'Маршрутов: %s\n' "$route_count"
-    printf 'SHA-256 списка: %s\n' "$content_sha256"
+    printf 'SHA-256 списка маршрутов: %s\n' "$content_sha256"
+    printf 'SHA-256 состава файлов: %s\n' "$source_set_sha256"
 
     broray_routes_check_cleanup
     BRORAY_ROUTES_ACTIVE_WORK=""
     trap - EXIT HUP INT TERM
-
     return 0
 }

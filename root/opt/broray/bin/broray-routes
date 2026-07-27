@@ -10,6 +10,7 @@ DOWNLOAD_LIBRARY="$ROOT/lib/routes-download.sh"
 EXPORT_BUILD_LIBRARY="$ROOT/lib/routes-export-build.sh"
 PREFLIGHT_LIBRARY="$ROOT/lib/routes-router-preflight.sh"
 ROUTER_EXPORT_LIBRARY="$ROOT/lib/routes-router-export.sh"
+SYNC_LIBRARY="$ROOT/lib/routes-router-sync.sh"
 ROUTER_DELETE_LIBRARY="$ROOT/lib/routes-router-delete.sh"
 
 broray_routes_cli_run_self()
@@ -34,6 +35,7 @@ usage()
     echo "  broray-routes download <bundleId>" >&2
     echo "  broray-routes build-export <bundleId>" >&2
     echo "  broray-routes preflight <bundleId>" >&2
+    echo "  broray-routes plan <bundleId>" >&2
     echo "  broray-routes export <bundleId>" >&2
     echo "  broray-routes delete <bundleId>" >&2
     exit 2
@@ -61,7 +63,7 @@ case "${1:-}" in
     build-export)
         [ "$#" -eq 2 ] || usage
         [ -r "$EXPORT_BUILD_LIBRARY" ] || {
-            echo "ОШИБКА: модуль подготовки экспорта недоступен." >&2
+            echo "ОШИБКА: модуль подготовки маршрутов недоступен." >&2
             exit 1
         }
         . "$EXPORT_BUILD_LIBRARY"
@@ -76,6 +78,28 @@ case "${1:-}" in
         . "$PREFLIGHT_LIBRARY"
         broray_routes_preflight_run "$2"
         ;;
+    plan)
+        [ "$#" -eq 2 ] || usage
+
+        case "$0" in
+            */*) CLI_SELF="$0" ;;
+            *) CLI_SELF="$(command -v "$0" 2>/dev/null || true)" ;;
+        esac
+
+        [ -n "$CLI_SELF" ] && [ -x "$CLI_SELF" ] || {
+            echo "ОШИБКА: не удалось определить путь broray-routes." >&2
+            exit 1
+        }
+
+        broray_routes_cli_run_self build-export "$2" >/dev/null || exit $?
+
+        [ -r "$SYNC_LIBRARY" ] || {
+            echo "ОШИБКА: модуль безопасного плана Keenetic недоступен." >&2
+            exit 1
+        }
+        . "$SYNC_LIBRARY"
+        broray_routes_sync_plan "$2"
+        ;;
     export)
         [ "$#" -eq 2 ] || usage
 
@@ -89,18 +113,16 @@ case "${1:-}" in
             exit 1
         }
 
-        # Экспорт является единой пользовательской операцией. Каждый этап
-        # запускается отдельным процессом, чтобы его блокировки и trap не
-        # пересекались со следующим этапом.
-        broray_routes_cli_run_self build-export "$2" || exit $?
-        broray_routes_cli_run_self preflight "$2" || exit $?
+        # Подготовка и применение выполняются отдельными процессами, чтобы
+        # блокировки и обработчики завершения каждого этапа не пересекались.
+        broray_routes_cli_run_self build-export "$2" >/dev/null || exit $?
 
-        [ -r "$ROUTER_EXPORT_LIBRARY" ] || {
-            echo "ОШИБКА: модуль экспорта в Keenetic недоступен." >&2
+        [ -r "$SYNC_LIBRARY" ] || {
+            echo "ОШИБКА: модуль безопасной установки в Keenetic недоступен." >&2
             exit 1
         }
-        . "$ROUTER_EXPORT_LIBRARY"
-        broray_routes_router_export_run "$2"
+        . "$SYNC_LIBRARY"
+        broray_routes_sync_apply "$2"
         ;;
     delete)
         [ "$#" -eq 2 ] || usage

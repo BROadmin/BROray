@@ -140,12 +140,13 @@ broray_routes_download_restore_catalog()
 broray_routes_download_run()
 {
     local bundle_id manifest state bundle_name repository source_directory managed_interface route_comment discovery_mode
-    local max_bytes max_routes source_commit source_date expected_sha expected_count
-    local enabled_files enabled_count unsupported tab work catalog_work source_dir combined normalized metadata_tsv
+    local max_bytes max_routes source_commit source_date expected_sha expected_source_set expected_count
+    local enabled_files enabled_count unsupported tab work catalog_work source_dir combined normalized metadata_tsv source_set_tsv
     local index parser source_file source_path source_raw source_part source_errors raw_url source_bytes total_bytes
-    local route_count actual_sha details message lock_result now version_json routes_json source_files_json
+    local route_count actual_sha actual_source_set details message lock_result now version_json routes_json source_files_json
     local source_file_routes source_html_url
-    local catalog_parent catalog_target catalog_new catalog_backup had_catalog state_new previous_download_sha result
+    local catalog_parent catalog_target catalog_new catalog_backup had_catalog state_new previous_download_sha previous_download_source_set result
+    local installed_content_sha keenetic_update_required status_value
 
     bundle_id="${1:-}"
 
@@ -165,6 +166,7 @@ broray_routes_download_run()
     source_commit="$(jq -r '.availableVersion.sourceCommit // empty' "$state")"
     source_date="$(jq -r '.availableVersion.sourceDate // empty' "$state")"
     expected_sha="$(jq -r '.availableVersion.contentSha256 // empty' "$state")"
+    expected_source_set="$(jq -r '.availableVersion.sourceSetSha256 // empty' "$state")"
     expected_count="$(jq -r '.routeCount // empty' "$state")"
 
     broray_routes_safe_repository "$repository" ||
@@ -181,6 +183,11 @@ broray_routes_download_run()
 
     broray_routes_download_hash_valid "$expected_sha" ||
         broray_routes_download_error "В локальном состоянии отсутствует корректный хеш версии."
+
+    if [ -n "$expected_source_set" ]; then
+        broray_routes_download_hash_valid "$expected_source_set" ||
+            broray_routes_download_error "В локальном состоянии указан некорректный отпечаток файлов источника."
+    fi
 
     case "$expected_count" in
         ''|*[!0-9]*)
@@ -435,6 +442,22 @@ broray_routes_download_run()
     mv "$source_files_json" "$catalog_work/source-files.json" ||
         broray_routes_download_error "Не удалось сохранить сведения о файлах источника."
 
+    source_set_tsv="$work/source-set.tsv"
+    jq -r '
+        sort_by(.name | ascii_downcase)[] |
+        [.name, .sha256, (.sizeBytes | tostring)] |
+        @tsv
+    ' "$catalog_work/source-files.json" >"$source_set_tsv" ||
+        broray_routes_download_error "Не удалось сформировать отпечаток файлов источника."
+
+    actual_source_set="$(sha256sum "$source_set_tsv" | awk '{print $1}')"
+
+    if [ -n "$expected_source_set" ] && [ "$actual_source_set" != "$expected_source_set" ]; then
+        message="Состав файлов источника изменился после проверки. Выполните поиск обновлений повторно."
+        broray_routes_download_state_error "$state" "$message" || true
+        broray_routes_download_error "$message"
+    fi
+
     routes_json="$catalog_work/routes.json"
     jq -Rn \
         --arg bundle_id "$bundle_id" \
@@ -472,6 +495,7 @@ broray_routes_download_run()
         --arg source_commit "$source_commit" \
         --arg source_date "$source_date" \
         --arg content_sha256 "$actual_sha" \
+        --arg source_set_sha256 "$actual_source_set" \
         --arg downloaded_at "$now" \
         --arg managed_interface "$managed_interface" \
         --argjson route_count "$route_count" \
@@ -484,6 +508,7 @@ broray_routes_download_run()
                 sourceCommit: $source_commit,
                 sourceDate: $source_date,
                 contentSha256: $content_sha256,
+                sourceSetSha256: $source_set_sha256,
                 routeCount: $route_count,
                 sourceFileCount: $source_file_count,
                 sourceFiles: $source_files[0],
@@ -520,6 +545,7 @@ broray_routes_download_run()
         --arg bundle_id "$bundle_id" \
         --arg source_commit "$source_commit" \
         --arg content_sha256 "$actual_sha" \
+        --arg source_set_sha256 "$actual_source_set" \
         --arg managed_interface "$managed_interface" \
         --argjson route_count "$route_count" \
         '
@@ -527,6 +553,7 @@ broray_routes_download_run()
             (.bundleId == $bundle_id) and
             (.sourceCommit == $source_commit) and
             (.contentSha256 == $content_sha256) and
+            ((.sourceSetSha256 | type) == "string") and
             (.routeCount == $route_count) and
             (.targetInterface == $managed_interface)
         ' "$version_json" >/dev/null ||
@@ -559,34 +586,59 @@ broray_routes_download_run()
     fi
 
     previous_download_sha="$(jq -r '.downloadedVersion.contentSha256 // empty' "$state")"
+    previous_download_source_set="$(jq -r '.downloadedVersion.sourceSetSha256 // empty' "$state")"
+    installed_content_sha="$(jq -r '.installedVersion.contentSha256 // empty' "$state")"
 
-    if [ "$previous_download_sha" = "$actual_sha" ]; then
+    if [ -n "$installed_content_sha" ] && [ "$installed_content_sha" = "$actual_sha" ]; then
+        keenetic_update_required=false
+        status_value="installed"
+    else
+        keenetic_update_required=true
+        status_value="downloaded"
+    fi
+
+    if [ "$previous_download_sha" = "$actual_sha" ] &&
+       [ "$previous_download_source_set" = "$actual_source_set" ]
+    then
         result="already_downloaded"
-        message="Проверенная версия маршрутов уже скачана."
+        message="Проверенная версия файлов уже загружена."
+    elif [ -n "$installed_content_sha" ] && [ "$installed_content_sha" = "$actual_sha" ]; then
+        result="files_updated_routes_unchanged"
+        message="Файлы маршрутов обновлены. Итоговый список маршрутов не изменился; обновление Keenetic не требуется."
+    elif [ -n "$installed_content_sha" ]; then
+        result="updated"
+        message="Файлы маршрутов обновлены. Набор готов к обновлению в Keenetic."
     else
         result="downloaded"
-        message="Маршруты готовы к экспорту"
+        message="Файлы маршрутов загружены. Набор готов к установке в Keenetic."
     fi
 
     state_new="$state.new.$$"
 
     if ! jq \
-        --arg status "downloaded" \
+        --arg status "$status_value" \
         --arg source_commit "$source_commit" \
         --arg source_date "$source_date" \
         --arg content_sha256 "$actual_sha" \
+        --arg source_set_sha256 "$actual_source_set" \
         --arg now "$now" \
         --arg result "$result" \
         --arg message "$message" \
         --arg catalog_path "$catalog_target" \
         --arg managed_interface "$managed_interface" \
         --argjson route_count "$route_count" \
+        --argjson source_file_count "$enabled_count" \
+        --argjson keenetic_update_required "$keenetic_update_required" \
+        --slurpfile source_files "$catalog_target/source-files.json" \
         '
             .status = $status |
             .downloadedVersion = {
                 sourceCommit: $source_commit,
                 sourceDate: $source_date,
-                contentSha256: $content_sha256
+                contentSha256: $content_sha256,
+                sourceSetSha256: $source_set_sha256,
+                sourceFileCount: $source_file_count,
+                sourceFiles: $source_files[0]
             } |
             .routeCount = $route_count |
             .lastDownloadedAt = $now |
@@ -596,7 +648,10 @@ broray_routes_download_run()
                 message: $message,
                 catalogPath: $catalog_path,
                 managedInterface: $managed_interface,
-                routeCount: $route_count
+                routeCount: $route_count,
+                sourceFileCount: $source_file_count,
+                sourceSetSha256: $source_set_sha256,
+                keeneticUpdateRequired: $keenetic_update_required
             } |
             .updatedAt = $now
         ' "$state" >"$state_new"
@@ -610,14 +665,16 @@ broray_routes_download_run()
         --arg bundle_id "$bundle_id" \
         --arg source_commit "$source_commit" \
         --arg content_sha256 "$actual_sha" \
+        --arg source_set_sha256 "$actual_source_set" \
         --arg managed_interface "$managed_interface" \
         --argjson route_count "$route_count" \
         '
             (.schemaVersion == 1) and
             (.bundleId == $bundle_id) and
-            (.status == "downloaded") and
+            ((.status == "downloaded") or (.status == "installed")) and
             (.downloadedVersion.sourceCommit == $source_commit) and
             (.downloadedVersion.contentSha256 == $content_sha256) and
+            (.downloadedVersion.sourceSetSha256 == $source_set_sha256) and
             (.routeCount == $route_count) and
             (.lastError == null) and
             (.downloadResult.managedInterface == $managed_interface)
@@ -640,7 +697,7 @@ broray_routes_download_run()
     printf 'Набор: %s\n' "$bundle_id"
     printf 'Версия источника: %s\n' "${source_commit%${source_commit#???????}}"
     printf 'Маршрутов: %s\n' "$route_count"
-    printf 'Интерфейс будущего экспорта: %s\n' "$managed_interface"
+    printf 'Управляемый интерфейс: %s\n' "$managed_interface"
     printf 'Локальный каталог: %s\n' "$catalog_target"
 
     broray_routes_download_cleanup

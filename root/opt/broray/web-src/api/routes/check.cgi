@@ -190,7 +190,7 @@ if [ "$command_ok" != true ]; then
             broray_api_error \
                 "502 Bad Gateway" \
                 "ROUTES_CHECK_FAILED" \
-                "Не удалось проверить новые маршруты." \
+                "Не удалось выполнить поиск обновлений маршрутов." \
                 "$details"
             ;;
     esac

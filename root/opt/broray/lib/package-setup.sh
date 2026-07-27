@@ -309,6 +309,26 @@ install_route_manifests()
     done
 }
 
+repair_route_runtime()
+{
+    runtime_library="$TARGET/lib/routes-runtime-repair.sh"
+
+    [ -r "$runtime_library" ] ||
+        fail "Не найден $runtime_library"
+
+    BRORAY_ROOT="$TARGET"
+    BRORAY_ROUTES_ROOT="$TARGET/routes"
+    export BRORAY_ROOT BRORAY_ROUTES_ROOT
+
+    . "$runtime_library"
+
+    broray_routes_runtime_prepare ||
+        fail "Не удалось подготовить runtime маршрутов"
+
+    printf '%s
+' "Runtime маршрутов проверен и подготовлен"
+}
+
 configure_web_proxy()
 {
     ndmc -c "no ip http proxy broray" >/dev/null 2>&1 || true
@@ -388,11 +408,14 @@ validate_release()
         "$TARGET/bin/broray-subscriptions" \
         "$TARGET/bin/xray" \
         "$TARGET/lib/interface-owner.sh" \
+        "$TARGET/lib/routes-router-sync.sh" \
+        "$TARGET/lib/routes-runtime-repair.sh" \
         "$TARGET/lib/routes-user-import.sh" \
         "$TARGET/lib/package-setup.sh" \
         "$TARGET/web-new/index.html" \
         "$TARGET/web-new/home.html" \
         "$TARGET/web-new/api/session.cgi" \
+        "$TARGET/web-new/api/routes/plan.cgi" \
         "$TARGET/web-new/api/routes/custom-preview.cgi" \
         "$TARGET/web-new/api/routes/custom-commit.cgi"
     do
@@ -525,6 +548,7 @@ configure_lighttpd
 configure_initial_xray
 configure_auto_switch
 install_route_manifests
+repair_route_runtime
 configure_web_proxy
 configure_proxy_interface
 validate_release

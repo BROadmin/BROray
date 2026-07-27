@@ -13,7 +13,8 @@ CACHE_TAG="20260727-official-2.1.1-2-r1"
 WORK="$TMP_ROOT/broray-install-2.1.1-2-$$"
 IPK="$WORK/broray_2.1.1-2_aarch64-3.10.ipk"
 
-fail() { printf 'ОШИБКА: %s\n' "$*" >&2; rm -rf "$WORK"; exit 1; }
+fail() { printf 'ОШИБКА: %s
+' "$*" >&2; rm -rf "$WORK"; exit 1; }
 download() {
     if [ -x "$OPT_ROOT/bin/curl" ]; then
         "$OPT_ROOT/bin/curl" -fL -H 'Accept-Encoding: identity' -H 'Cache-Control: no-cache, no-store' --connect-timeout 20 --max-time 600 -o "$IPK.part" "$PACKAGE_URL?v=$CACHE_TAG-$(date +%s)-$$" || return 1

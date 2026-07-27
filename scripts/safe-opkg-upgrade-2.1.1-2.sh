@@ -31,7 +31,9 @@ $OPT_ROOT/etc/init.d/S28broray-subscriptions
 "
 COMMANDS="broray broray-routes broray-routes-user broray-server broray-servers broray-subscriptions broray-system"
 
-say() { printf '%s\n' "$*"; printf '%s\n' "$*" >>"$LOG" 2>/dev/null || true; }
+say() { printf '%s
+' "$*"; printf '%s
+' "$*" >>"$LOG" 2>/dev/null || true; }
 cleanup_work() { rm -f "$MARKER"; rm -rf "$WORK" 2>/dev/null || true; }
 save_log() {
     [ -d "$OPT_ROOT/broray/logs" ] || return 0
@@ -41,7 +43,9 @@ finish() {
     rc="$1"
     save_log
     if [ "$rc" -eq 0 ] || [ "$ROLLBACK_OK" = true ] || [ "$BACKUP_READY" = false ]; then cleanup_work; fi
-    printf '\nТерминал остаётся открытым.\n'
+    printf '
+Терминал остаётся открытым.
+'
     exit "$rc"
 }
 
@@ -77,7 +81,8 @@ record_services() {
     : >"$META/services-running" || return 1
     for service in $SERVICES; do
         [ -x "$service" ] || continue
-        "$service" status >/dev/null 2>&1 && printf '%s\n' "$service" >>"$META/services-running"
+        "$service" status >/dev/null 2>&1 && printf '%s
+' "$service" >>"$META/services-running"
     done
 }
 stop_services() { for service in $SERVICES; do [ -x "$service" ] && "$service" stop >>"$LOG" 2>&1 || true; done; }
@@ -202,7 +207,9 @@ free_kb="$(free_opt_kb)"; case "$free_kb" in ''|*[!0-9]*) fail_update "не уд
 [ "$free_kb" -ge "$required_kb" ] || fail_update "недостаточно места после очистки: $free_kb КБ, требуется $required_kb КБ"
 create_backup || fail_update "не удалось создать временную резервную копию"
 free_kb="$(free_opt_kb)"; [ "$free_kb" -ge "$required_kb" ] || fail_update "недостаточно места после резервного копирования"
-printf '%s\n%s\n' "$TARGET_VERSION" "$(date '+%s')" >"$MARKER" || fail_update "не удалось подготовить OPKG"
+printf '%s
+%s
+' "$TARGET_VERSION" "$(date '+%s')" >"$MARKER" || fail_update "не удалось подготовить OPKG"
 stop_services
 INSTALL_STARTED=true
 say "Устанавливается проверенный локальный IPK..."

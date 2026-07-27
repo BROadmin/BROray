@@ -237,24 +237,32 @@
     }
 
     function renderRoutes(data) {
+        var updates;
         if (!data) {
             setStatus("home-routes-status", "Недоступно", "error");
             setText("home-routes-main", "Сводка маршрутов недоступна.");
+            setText("home-routes-count", "—");
+            setText("home-routes-update", "—");
             return;
         }
 
+        updates = Number(data.updatesAvailableCount || 0);
         setStatus(
             "home-routes-status",
-            data.installed
-                ? data.updateAvailable
-                    ? "Доступно обновление"
-                    : "Установлено"
-                : "Не установлено",
-            data.installed
-                ? data.updateAvailable
+            data.healthy === false
+                ? "Требуется внимание"
+                : updates > 0
+                    ? "Доступны обновления"
+                    : data.installed
+                        ? "Установлено"
+                        : "Не установлено",
+            data.healthy === false
+                ? "error"
+                : updates > 0
                     ? "warning"
-                    : "success"
-                : "neutral"
+                    : data.installed
+                        ? "success"
+                        : "neutral"
         );
         setText(
             "home-routes-main",
@@ -265,10 +273,7 @@
                 "."
         );
         setText("home-routes-count", data.installedBundles || 0);
-        setText(
-            "home-routes-update",
-            data.updateAvailable ? "Доступно" : "Нет"
-        );
+        setText("home-routes-update", updates);
     }
 
     function renderBroray(data) {
