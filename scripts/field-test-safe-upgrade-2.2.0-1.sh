@@ -9,9 +9,8 @@ export PATH
 
 TARGET_VERSION="2.2.0-1"
 TARGET_APP_VERSION="2.2.0"
-PACKAGE_URL="https://api.brovibe.cloud/releases/opkg/aarch64-3.10/broray_2.2.0-1_aarch64-3.10.ipk"
 PACKAGE_SHA="d6df5cf179b66e7f1867071db6f649d584dda3eac17df630e70ec23e38a09f07"
-CACHE_TAG="20260729-rc-2.2.0-1-r2"
+SOURCE_IPK="${1:-$TMP_ROOT/broray_2.2.0-1_aarch64-3.10.ipk}"
 BRORAY_DIR="$OPT_ROOT/broray"
 WORK="$TMP_ROOT/broray-field-test-upgrade-2.2.0-1-$$"
 LOG="$WORK/update.log"
@@ -60,28 +59,6 @@ finish() {
 installed_version() {
     opkg list-installed broray 2>/dev/null |
         awk -F ' - ' '$1 == "broray" {print $2; exit}'
-}
-
-download_file() {
-    url="$1"
-    out="$2"
-    rm -f "$out" "$out.part"
-    if [ -x "$OPT_ROOT/bin/curl" ]; then
-        "$OPT_ROOT/bin/curl" -fL \
-            -H 'Accept-Encoding: identity' \
-            -H 'Cache-Control: no-cache, no-store' \
-            --connect-timeout 20 \
-            --max-time 600 \
-            -o "$out.part" \
-            "$url?v=$CACHE_TAG-$(date +%s)-$$" >>"$LOG" 2>&1 || return 1
-    elif [ -x "$OPT_ROOT/bin/wget" ]; then
-        "$OPT_ROOT/bin/wget" -qO "$out.part" \
-            --header='Cache-Control: no-cache, no-store' \
-            "$url?v=$CACHE_TAG-$(date +%s)-$$" >>"$LOG" 2>&1 || return 1
-    else
-        return 1
-    fi
-    mv "$out.part" "$out"
 }
 
 ipk_value() {
@@ -321,7 +298,7 @@ mkdir -p "$WORK" || {
 : >"$LOG"
 
 say "=================================================="
-say "BROray — безопасное обновление до $TARGET_VERSION"
+say "BROray — полевой тест обновления до $TARGET_VERSION"
 say "=================================================="
 OLD_VERSION="$(installed_version)"
 [ -n "$OLD_VERSION" ] || OLD_VERSION="ручная/не зарегистрирована"
@@ -332,8 +309,8 @@ case "$(uname -m 2>/dev/null)" in
 esac
 command -v opkg >/dev/null 2>&1 || fail_update "Entware OPKG не установлен"
 prepare_dependencies || fail_update "не удалось подготовить зависимости Entware"
-download_file "$PACKAGE_URL" "$NEW_IPK" || fail_update "не удалось скачать точный пакет"
-[ "$PACKAGE_SHA" != "d6df5cf179b66e7f1867071db6f649d584dda3eac17df630e70ec23e38a09f07" ] || fail_update "обновитель не подготовлен к публикации"
+[ -f "$SOURCE_IPK" ] && [ ! -L "$SOURCE_IPK" ] || fail_update "не найден безопасный локальный IPK: $SOURCE_IPK"
+cp -p "$SOURCE_IPK" "$NEW_IPK" || fail_update "не удалось скопировать локальный IPK"
 [ "$(sha256sum "$NEW_IPK" | awk '{print $1}')" = "$PACKAGE_SHA" ] || fail_update "SHA-256 пакета не совпала"
 [ "$(ipk_value "$NEW_IPK" Package)" = "broray" ] || fail_update "в пакете неверное имя"
 [ "$(ipk_value "$NEW_IPK" Version)" = "$TARGET_VERSION" ] || fail_update "в пакете неверная версия"
