@@ -11,11 +11,14 @@ BRORAY_BACKUP="$BRORAY_BASE/backup"
 BRORAY_STATUS="$BRORAY_RUN/operation.json"
 BRORAY_UPDATE_CACHE="$BRORAY_RUN/update.json"
 BRORAY_LOCK="$BRORAY_RUN/operation.lock"
+BRORAY_GLOBAL_LOCK="${BRORAY_GLOBAL_LOCK:-$BRORAY_BASE/run/global-operation.lock}"
+BRORAY_GLOBAL_LOCK_HELD=false
 BRORAY_LOG="$BRORAY_RUN/operation.log"
 BRORAY_LAST_BACKUP="$BRORAY_RUN/last-backup"
 BRORAY_PACKAGE="broray"
 BRORAY_INIT_ROOT="${BRORAY_INIT_ROOT:-/opt/etc/init.d}"
 BRORAY_FEED_FILE="${BRORAY_FEED_FILE:-/opt/etc/opkg/broray.conf}"
+BRORAY_OPKG_LISTS_DIR="${BRORAY_OPKG_LISTS_DIR:-/opt/var/opkg-lists}"
 BRORAY_PROJECT_URL="https://docs.brovibe.cloud/broray/"
 BRORAY_GITHUB_URL="https://github.com/BROadmin/BROray"
 BRORAY_DONATE_URL="https://pay.cloudtips.ru/p/09b23d0a"
@@ -170,6 +173,84 @@ broray_system_parser_available() {
     esac
 }
 
+broray_system_is_pid() {
+    case "${1:-}" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    return 0
+}
+
+broray_system_global_operation_running() {
+    [ -d "$BRORAY_GLOBAL_LOCK" ] || return 1
+    [ -r "$BRORAY_GLOBAL_LOCK/pid" ] || return 1
+    global_pid="$(sed -n '1p' "$BRORAY_GLOBAL_LOCK/pid" 2>/dev/null)"
+    broray_system_is_pid "$global_pid" || return 1
+    kill -0 "$global_pid" 2>/dev/null
+}
+
+broray_system_global_lock_recover_stale() {
+    [ -d "$BRORAY_GLOBAL_LOCK" ] || return 0
+    broray_system_global_operation_running && return 1
+    rm -rf "$BRORAY_GLOBAL_LOCK"
+}
+
+broray_system_global_lock_acquire() {
+    global_action="${1:-system}"
+    mkdir -p "$(dirname "$BRORAY_GLOBAL_LOCK")" || return 1
+    broray_system_global_lock_recover_stale || return 2
+    mkdir "$BRORAY_GLOBAL_LOCK" 2>/dev/null || return 2
+    printf '%s\n' "$$" >"$BRORAY_GLOBAL_LOCK/pid" || {
+        rm -rf "$BRORAY_GLOBAL_LOCK"
+        return 1
+    }
+    printf '%s\n' system >"$BRORAY_GLOBAL_LOCK/scope" || {
+        rm -rf "$BRORAY_GLOBAL_LOCK"
+        return 1
+    }
+    printf '%s\n' "$global_action" >"$BRORAY_GLOBAL_LOCK/action" || {
+        rm -rf "$BRORAY_GLOBAL_LOCK"
+        return 1
+    }
+    : >"$BRORAY_GLOBAL_LOCK/bundle" || {
+        rm -rf "$BRORAY_GLOBAL_LOCK"
+        return 1
+    }
+    printf '%s\n' "$(broray_system_now)" >"$BRORAY_GLOBAL_LOCK/startedAt" || {
+        rm -rf "$BRORAY_GLOBAL_LOCK"
+        return 1
+    }
+    BRORAY_GLOBAL_LOCK_HELD=true
+    return 0
+}
+
+broray_system_global_lock_transfer() {
+    global_pid="${1:-}"
+    global_operation_id="${2:-}"
+    broray_system_is_pid "$global_pid" || return 1
+    [ -d "$BRORAY_GLOBAL_LOCK" ] || return 1
+    [ "$(sed -n '1p' "$BRORAY_GLOBAL_LOCK/scope" 2>/dev/null || true)" = system ] || return 1
+    [ "$(sed -n '1p' "$BRORAY_GLOBAL_LOCK/pid" 2>/dev/null || true)" = "$$" ] || return 1
+    printf '%s\n' "$global_pid" >"$BRORAY_GLOBAL_LOCK/pid" || return 1
+    printf '%s\n' "$global_operation_id" >"$BRORAY_GLOBAL_LOCK/operation-id" || return 1
+    BRORAY_GLOBAL_LOCK_HELD=false
+    return 0
+}
+
+broray_system_global_lock_release() {
+    [ -d "$BRORAY_GLOBAL_LOCK" ] || {
+        BRORAY_GLOBAL_LOCK_HELD=false
+        return 0
+    }
+    global_pid="$(sed -n '1p' "$BRORAY_GLOBAL_LOCK/pid" 2>/dev/null || true)"
+    global_scope="$(sed -n '1p' "$BRORAY_GLOBAL_LOCK/scope" 2>/dev/null || true)"
+    if [ "$global_scope" = system ] && {
+        [ "$BRORAY_GLOBAL_LOCK_HELD" = true ] || [ "$global_pid" = "$$" ];
+    }; then
+        rm -rf "$BRORAY_GLOBAL_LOCK" 2>/dev/null || true
+    fi
+    BRORAY_GLOBAL_LOCK_HELD=false
+}
+
 broray_system_operation_running() {
     [ -d "$BRORAY_LOCK" ] || return 1
     [ -r "$BRORAY_LOCK/pid" ] || return 0
@@ -268,6 +349,8 @@ broray_system_status_json() {
                 'Операция была прервана.' \
                 'Фоновый процесс операции больше не выполняется.'
             rm -rf "$BRORAY_LOCK"
+            broray_system_global_lock_release
+            broray_system_global_lock_recover_stale >/dev/null 2>&1 || true
         fi
     fi
 
@@ -289,6 +372,16 @@ broray_system_info_json() {
     }
 
     current_version="$(broray_system_version)"
+    installed_package_version="$(broray_system_installed_package_version 2>/dev/null || true)"
+    reinstall_supported=false
+    if [ -n "$installed_package_version" ] &&
+       command -v opkg >/dev/null 2>&1 &&
+       command -v curl >/dev/null 2>&1 &&
+       command -v sha256sum >/dev/null 2>&1 &&
+       command -v tar >/dev/null 2>&1
+    then
+        reinstall_supported=true
+    fi
     build="$(broray_system_build)"
     architecture="$(broray_system_architecture)"
     available_version="$(broray_system_available_version)"
@@ -334,6 +427,7 @@ broray_system_info_json() {
 
     jq -nc \
         --arg version "$current_version" \
+        --arg installedPackageVersion "$installed_package_version" \
         --arg build "$build" \
         --arg architecture "$architecture" \
         --arg channel 'stable' \
@@ -345,12 +439,15 @@ broray_system_info_json() {
         --arg donateUrl "$BRORAY_DONATE_URL" \
         --arg updatedAt "$(broray_system_now)" \
         --argjson updateAvailable "$update_available" \
+        --argjson reinstallSupported "$reinstall_supported" \
         --argjson installationHealthy "$healthy" \
         --argjson components "$components" \
         --argjson protocols "$protocols" \
         '{
             ok:true,
             version:$version,
+            installedPackageVersion:(if $installedPackageVersion == "" then null else $installedPackageVersion end),
+            reinstallSupported:$reinstallSupported,
             build:$build,
             architecture:$architecture,
             updateChannel:$channel,
@@ -368,7 +465,9 @@ broray_system_info_json() {
                 "Интеграция с управляемым ProxyN",
                 "Маршрутизация сервисов",
                 "Проверка и восстановление компонентов",
-                "Обновление через WebUI"
+                "Обновление через WebUI",
+                "Восстановительная переустановка текущей версии",
+                "Безопасная очистка резервных копий и временных файлов"
             ],
             links:{github:$githubUrl,project:$projectUrl,donate:$donateUrl},
             updatedAt:$updatedAt
@@ -379,7 +478,7 @@ broray_system_feed_value() {
     wanted_version="$1"
     wanted_key="$2"
 
-    for feed in /opt/var/opkg-lists/*; do
+    for feed in "$BRORAY_OPKG_LISTS_DIR"/*; do
         [ -f "$feed" ] || continue
         awk \
             -v wanted_package="$BRORAY_PACKAGE" \
@@ -761,7 +860,7 @@ broray_system_backup_create() {
     set --
     for item in \
         VERSION BUILD .build \
-        bin lib web-new web config subscriptions servers routes; do
+        bin lib web-new web config data deleted-subscriptions subscriptions servers routes; do
         [ -e "$BRORAY_BASE/$item" ] && set -- "$@" "$item"
     done
 
@@ -793,9 +892,57 @@ broray_system_backup_create() {
     printf '%s\n' "$archive"
 }
 
-broray_system_backup_restore() {
+broray_system_archive_safe() {
+    local archive list result
     archive="$1"
-    [ -f "$archive" ] || return 1
+    list="/tmp/broray-archive-list-$$"
+    [ -s "$archive" ] || return 1
+    rm -f "$list"
+    tar -tzf "$archive" >"$list" 2>/dev/null || {
+        rm -f "$list"
+        return 1
+    }
+    awk '
+        /^\// {bad = 1}
+        /(^|\/)\.\.($|\/)/ {bad = 1}
+        END {exit bad ? 1 : 0}
+    ' "$list"
+    result=$?
+    rm -f "$list"
+    return "$result"
+}
+
+broray_system_backup_restore() {
+    local archive members roots root
+    archive="$1"
+    members="/tmp/broray-restore-members-$$"
+    roots="/tmp/broray-restore-roots-$$"
+    broray_system_archive_safe "$archive" || return 1
+    tar -tzf "$archive" >"$members" 2>/dev/null || {
+        rm -f "$members" "$roots"
+        return 1
+    }
+    sed 's#^\./##; s#/.*##' "$members" |
+        awk 'NF > 0 && $0 != "." {print}' |
+        sort -u >"$roots" || {
+            rm -f "$members" "$roots"
+            return 1
+        }
+    while IFS= read -r root; do
+        case "$root" in
+            VERSION|BUILD|.build|bin|lib|web-new|web|config|data|deleted-subscriptions|subscriptions|servers|routes)
+                rm -rf "$BRORAY_BASE/$root" || {
+                    rm -f "$members" "$roots"
+                    return 1
+                }
+                ;;
+            *)
+                rm -f "$members" "$roots"
+                return 1
+                ;;
+        esac
+    done <"$roots"
+    rm -f "$members" "$roots"
     tar -xzf "$archive" -C "$BRORAY_BASE" >>"$BRORAY_LOG" 2>&1
 }
 
@@ -805,10 +952,14 @@ $BRORAY_BASE/bin/broray
 $BRORAY_BASE/bin/xray
 $BRORAY_BASE/lib/xray.sh
 $BRORAY_BASE/lib/server-service.sh
+$BRORAY_BASE/bin/broray-routes-dot
+$BRORAY_BASE/lib/routes-dot.sh
 $BRORAY_BASE/web-new/index.html
 $BRORAY_BASE/web-new/home.html
 $BRORAY_BASE/web-new/broray.html
 $BRORAY_BASE/web-new/api/auth-common.sh
+$BRORAY_BASE/web-new/api/broray/reinstall.cgi
+$BRORAY_BASE/web-new/api/routes/dot-status.cgi
 $BRORAY_INIT_ROOT/S23broray-monitor
 $BRORAY_INIT_ROOT/S24broray
 $BRORAY_INIT_ROOT/S25broray-web
@@ -869,6 +1020,422 @@ broray_system_restart_services() {
     done
 
     broray_system_services_health_check
+}
+
+broray_system_reinstall_user_items() {
+    for item in config data deleted-subscriptions subscriptions servers routes; do
+        [ -e "$BRORAY_BASE/$item" ] && printf '%s\n' "$item"
+    done
+}
+
+broray_system_reinstall_user_backup_create() {
+    local purpose stamp archive temporary staging items item item_size_kb
+    local source_size_kb backup_size_kb backup_free_kb required_kb
+    purpose="$1"
+    stamp="$(date -u '+%Y%m%d-%H%M%S')"
+    archive="$BRORAY_BACKUP/${purpose}-${stamp}.tar.gz"
+    temporary="$BRORAY_BACKUP/.${purpose}-${stamp}.tar.gz.$$"
+    staging="$BRORAY_BACKUP/.${purpose}-stage-$$"
+    items="/tmp/broray-${purpose}-items-$$"
+
+    rm -rf "$staging"
+    rm -f "$temporary" "$items"
+    broray_system_reinstall_user_items >"$items" || return 1
+    [ -s "$items" ] || {
+        rm -f "$items"
+        return 1
+    }
+
+    source_size_kb=0
+    while IFS= read -r item; do
+        [ -n "$item" ] || continue
+        item_size_kb="$(du -sk "$BRORAY_BASE/$item" 2>/dev/null | awk 'NR == 1 {print $1}')"
+        case "$item_size_kb" in
+            ''|*[!0-9]*)
+                rm -f "$items"
+                return 1
+                ;;
+        esac
+        source_size_kb=$((source_size_kb + item_size_kb))
+    done <"$items"
+
+    backup_free_kb="$(df -Pk "$BRORAY_BACKUP" 2>/dev/null | awk 'NR == 2 {print $4}')"
+    case "$backup_free_kb" in
+        ''|*[!0-9]*)
+            rm -f "$items"
+            return 1
+            ;;
+    esac
+    required_kb=$((source_size_kb * 2 + 2048))
+    [ "$backup_free_kb" -gt "$required_kb" ] || {
+        rm -f "$items"
+        return 1
+    }
+
+    mkdir -p "$staging" || {
+        rm -f "$items"
+        return 1
+    }
+    while IFS= read -r item; do
+        [ -n "$item" ] || continue
+        cp -a "$BRORAY_BASE/$item" "$staging/$item" >>"$BRORAY_LOG" 2>&1 || {
+            rm -rf "$staging"
+            rm -f "$temporary" "$items"
+            return 1
+        }
+    done <"$items"
+
+    rm -rf \
+        "$staging/routes/tmp" \
+        "$staging/routes/locks" \
+        "$staging/routes/transactions" || {
+            rm -rf "$staging"
+            rm -f "$temporary" "$items"
+            return 1
+        }
+
+    tar -czf "$temporary" -C "$staging" . >>"$BRORAY_LOG" 2>&1 || {
+        rm -rf "$staging"
+        rm -f "$temporary" "$items"
+        return 1
+    }
+    rm -rf "$staging"
+    rm -f "$items"
+
+    broray_system_archive_safe "$temporary" || {
+        rm -f "$temporary"
+        return 1
+    }
+    backup_size_kb="$(du -k "$temporary" 2>/dev/null | awk 'NR == 1 {print $1}')"
+    backup_free_kb="$(df -Pk "$BRORAY_BACKUP" 2>/dev/null | awk 'NR == 2 {print $4}')"
+    case "$backup_size_kb:$backup_free_kb" in
+        *[!0-9:]*|'')
+            rm -f "$temporary"
+            return 1
+            ;;
+    esac
+    [ "$backup_free_kb" -gt $((backup_size_kb + 2048)) ] || {
+        rm -f "$temporary"
+        return 1
+    }
+    mv -f "$temporary" "$archive" || {
+        rm -f "$temporary"
+        return 1
+    }
+    chmod 600 "$archive" 2>/dev/null || true
+    printf '%s\n' "$archive"
+}
+
+broray_system_reinstall_user_manifest() {
+    local output temporary paths item path relative target hash
+    output="$1"
+    temporary="$output.new.$$"
+    paths="$output.paths.$$"
+
+    : >"$paths" || return 1
+    broray_system_reinstall_user_items |
+        while IFS= read -r item; do
+            [ -n "$item" ] || continue
+            find "$BRORAY_BASE/$item" \( -type f -o -type l \) 2>/dev/null
+        done | sort >"$paths" || {
+            rm -f "$paths"
+            return 1
+        }
+
+    : >"$temporary" || {
+        rm -f "$paths"
+        return 1
+    }
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        relative="${path#"$BRORAY_BASE"/}"
+        case "$relative" in
+            routes/tmp/*|routes/locks/*|routes/transactions/*) continue ;;
+        esac
+        if [ -L "$path" ]; then
+            target="$(readlink "$path" 2>/dev/null)" || {
+                rm -f "$paths" "$temporary"
+                return 1
+            }
+            printf 'L  %s  %s\n' "$relative" "$target" >>"$temporary" || return 1
+        else
+            hash="$(sha256sum "$path" 2>/dev/null | awk '{print $1}')"
+            [ -n "$hash" ] || {
+                rm -f "$paths" "$temporary"
+                return 1
+            }
+            printf 'F  %s  %s\n' "$relative" "$hash" >>"$temporary" || return 1
+        fi
+    done <"$paths"
+    rm -f "$paths"
+    mv -f "$temporary" "$output"
+}
+
+broray_system_reinstall_user_backup_restore() {
+    local archive item
+    archive="$1"
+    broray_system_archive_safe "$archive" || return 1
+
+    broray_system_reinstall_user_items |
+        while IFS= read -r item; do
+            [ -n "$item" ] || continue
+            rm -rf "$BRORAY_BASE/$item" || exit 1
+        done || return 1
+
+    tar -xzf "$archive" -C "$BRORAY_BASE" >>"$BRORAY_LOG" 2>&1 || return 1
+    mkdir -p \
+        "$BRORAY_BASE/routes/locks" \
+        "$BRORAY_BASE/routes/tmp" \
+        "$BRORAY_BASE/routes/transactions" || return 1
+    return 0
+}
+
+broray_system_download_exact_package() {
+    local staging wanted_version installed_arch feed_base filename expected_sha feed_arch
+    local package part actual_sha package_arch
+    staging="$1"
+    wanted_version="$2"
+    installed_arch="$(broray_system_installed_package_architecture)"
+    feed_base="$(broray_system_feed_base_url)"
+    filename="$(broray_system_feed_value "$wanted_version" Filename)"
+    expected_sha="$(broray_system_feed_value "$wanted_version" SHA256sum)"
+    feed_arch="$(broray_system_feed_value "$wanted_version" Architecture)"
+
+    case "$wanted_version" in
+        ''|*[!0-9A-Za-z._+-]*) return 1 ;;
+    esac
+    case "$installed_arch" in
+        ''|*[!0-9A-Za-z._+-]*) return 1 ;;
+    esac
+    [ -n "$feed_base" ] && [ -n "$filename" ] && [ -n "$expected_sha" ] || return 1
+    case "$filename" in
+        /*|*'..'*|*[!0-9A-Za-z._+/-]*) return 1 ;;
+    esac
+    case "$expected_sha" in
+        ''|*[!0-9a-fA-F]*) return 1 ;;
+    esac
+    [ "${#expected_sha}" -eq 64 ] || return 1
+    [ "$feed_arch" = "$installed_arch" ] || [ "$feed_arch" = all ] || return 1
+
+    mkdir -p "$staging" || return 1
+    package="$staging/${filename##*/}"
+    part="$package.part"
+    rm -f "$part" "$package"
+    curl -fL --connect-timeout 15 --max-time 180 \
+        -o "$part" "${feed_base%/}/$filename" >>"$BRORAY_LOG" 2>&1 || {
+            rm -f "$part"
+            return 1
+        }
+    mv -f "$part" "$package" || return 1
+
+    actual_sha="$(sha256sum "$package" | awk '{print $1}')"
+    [ "$(printf '%s' "$actual_sha" | tr 'A-F' 'a-f')" = "$(printf '%s' "$expected_sha" | tr 'A-F' 'a-f')" ] || return 1
+    [ "$(broray_system_ipk_control_value "$package" Package)" = "$BRORAY_PACKAGE" ] || return 1
+    [ "$(broray_system_ipk_control_value "$package" Version)" = "$wanted_version" ] || return 1
+    package_arch="$(broray_system_ipk_control_value "$package" Architecture)"
+    [ "$package_arch" = "$installed_arch" ] || [ "$package_arch" = all ] || return 1
+    printf '%s\n' "$package"
+}
+
+broray_system_reinstall_rollback() {
+    local rollback_package expected_version full_backup
+    rollback_package="$1"
+    expected_version="$2"
+    full_backup="$3"
+
+    [ -s "$rollback_package" ] && [ -s "$full_backup" ] || return 1
+    broray_system_log "Возвращается пакет BROray $expected_version после неудачной переустановки."
+    opkg install --force-reinstall "$rollback_package" >>"$BRORAY_LOG" 2>&1 || return 1
+    [ "$(broray_system_installed_package_version)" = "$expected_version" ] || return 1
+    broray_system_backup_restore "$full_backup" || return 1
+    broray_system_restart_services || return 1
+    broray_system_health_check || return 1
+    rm -f /tmp/broray-opkg-services-before-upgrade /tmp/broray-opkg-existing-backup
+    return 0
+}
+
+broray_system_worker_reinstall() {
+    local operation_id installed_version staging package_file rollback_package
+    local full_backup user_backup manifest_before manifest_after free_kb reinstall_ok
+    operation_id="$1"
+    installed_version=""
+    staging=""
+    package_file=""
+    rollback_package=""
+    full_backup=""
+    user_backup=""
+    manifest_before=""
+    manifest_after=""
+
+    broray_system_status_write "$operation_id" reinstall running check 5 \
+        'Проверяется возможность переустановки текущей версии.' ''
+
+    installed_version="$(broray_system_installed_package_version)"
+    [ -n "$installed_version" ] || {
+        broray_system_status_write "$operation_id" reinstall error check 100 \
+            'Не удалось определить установленный пакет BROray.' \
+            'Переустановка остановлена до изменения файлов.'
+        return 1
+    }
+
+    broray_system_log 'Обновляются списки пакетов OPKG для поиска точной текущей версии.'
+    opkg update >>"$BRORAY_LOG" 2>&1 || {
+        broray_system_status_write "$operation_id" reinstall error check 100 \
+            'Не удалось обновить индекс пакетов.' \
+            'Переустановка остановлена до изменения файлов.'
+        return 1
+    }
+
+    staging="/tmp/broray-reinstall-$operation_id"
+    rm -rf "$staging"
+    mkdir -p "$staging" || return 1
+
+    broray_system_status_write "$operation_id" reinstall running download 18 \
+        "Загружается текущая версия BROray $installed_version." ''
+    package_file="$(broray_system_download_exact_package "$staging" "$installed_version")" || {
+        broray_system_status_write "$operation_id" reinstall error download 100 \
+            'Точный пакет текущей версии недоступен или не прошёл проверку.' \
+            'Файлы BROray не изменялись.'
+        rm -rf "$staging"
+        return 1
+    }
+
+    free_kb="$(df -Pk /opt 2>/dev/null | awk 'NR == 2 {print $4}')"
+    case "$free_kb" in
+        ''|*[!0-9]*)
+            broray_system_status_write "$operation_id" reinstall error verify 100 \
+                'Не удалось определить свободное место.' \
+                'Файлы BROray не изменялись.'
+            rm -rf "$staging"
+            return 1
+            ;;
+    esac
+    [ "$free_kb" -gt 15360 ] || {
+        broray_system_status_write "$operation_id" reinstall error verify 100 \
+            'Недостаточно свободного места для безопасной переустановки.' \
+            'Требуется более 15360 КБ.'
+        rm -rf "$staging"
+        return 1
+    }
+
+    broray_system_status_write "$operation_id" reinstall running rollback 30 \
+        'Подготавливается пакет автоматического возврата.' ''
+    rollback_package="$staging/rollback-${package_file##*/}"
+    broray_system_make_rollback_ipk "$package_file" "$rollback_package" || {
+        broray_system_status_write "$operation_id" reinstall error rollback 100 \
+            'Не удалось подготовить автоматический возврат.' \
+            'Файлы BROray не изменялись.'
+        rm -rf "$staging"
+        return 1
+    }
+
+    broray_system_status_write "$operation_id" reinstall running backup 42 \
+        'Создаётся полный снимок для аварийного возврата.' ''
+    full_backup="$(broray_system_backup_create system-before-reinstall)" || {
+        broray_system_status_write "$operation_id" reinstall error backup 100 \
+            'Не удалось создать полный резервный снимок.' \
+            'Файлы BROray не изменялись.'
+        rm -rf "$staging"
+        return 1
+    }
+
+    broray_system_status_write "$operation_id" reinstall running backup 50 \
+        'Отдельно сохраняются пользовательские данные.' ''
+    user_backup="$(broray_system_reinstall_user_backup_create user-before-reinstall)" || {
+        broray_system_status_write "$operation_id" reinstall error backup 100 \
+            'Не удалось сохранить пользовательские данные.' \
+            'Файлы BROray не изменялись.'
+        rm -rf "$staging"
+        return 1
+    }
+    manifest_before="$staging/user-before.manifest"
+    manifest_after="$staging/user-after.manifest"
+    broray_system_reinstall_user_manifest "$manifest_before" || {
+        broray_system_status_write "$operation_id" reinstall error backup 100 \
+            'Не удалось зафиксировать контрольные суммы пользовательских данных.' \
+            'Файлы BROray не изменялись.'
+        rm -rf "$staging"
+        return 1
+    }
+
+    {
+        printf '%s\n' "$full_backup"
+        date '+%s'
+    } >/tmp/broray-opkg-existing-backup || {
+        broray_system_status_write "$operation_id" reinstall error backup 100 \
+            'Не удалось передать резервный снимок установщику.' \
+            'Файлы BROray не изменялись.'
+        rm -rf "$staging"
+        return 1
+    }
+
+    broray_system_status_write "$operation_id" reinstall running install 65 \
+        "Переустанавливается BROray $installed_version." ''
+    BRORAY_OPKG_BACKUP="$full_backup" \
+        opkg install --force-reinstall "$package_file" >>"$BRORAY_LOG" 2>&1 || {
+            broray_system_status_write "$operation_id" reinstall restoring restore 80 \
+                'Переустановка завершилась ошибкой. Возвращается исходное состояние.' ''
+            if broray_system_reinstall_rollback "$rollback_package" "$installed_version" "$full_backup"; then
+                broray_system_status_write "$operation_id" reinstall error restored 100 \
+                    'Исходная версия и состояние восстановлены.' \
+                    'OPKG не смог переустановить пакет.'
+            else
+                broray_system_status_write "$operation_id" reinstall error restore-failed 100 \
+                    'Автоматический возврат не завершён.' \
+                    "Полный снимок: $full_backup"
+            fi
+            rm -rf "$staging"
+            return 1
+        }
+
+    broray_system_status_write "$operation_id" reinstall running user-data 76 \
+        'Возвращаются пользовательские настройки и данные.' ''
+    broray_system_reinstall_user_backup_restore "$user_backup" || {
+        broray_system_status_write "$operation_id" reinstall restoring restore 86 \
+            'Пользовательские данные восстановить не удалось. Выполняется возврат.' ''
+        if broray_system_reinstall_rollback "$rollback_package" "$installed_version" "$full_backup"; then
+            broray_system_status_write "$operation_id" reinstall error restored 100 \
+                'Исходная версия и состояние восстановлены.' \
+                'Восстановление пользовательских данных завершилось ошибкой.'
+        else
+            broray_system_status_write "$operation_id" reinstall error restore-failed 100 \
+                'Автоматический возврат не завершён.' \
+                "Полный снимок: $full_backup"
+        fi
+        rm -rf "$staging"
+        return 1
+    }
+
+    broray_system_status_write "$operation_id" reinstall running health 88 \
+        'Проверяются версия, службы и сохранность пользовательских данных.' ''
+    reinstall_ok=true
+    [ "$(broray_system_installed_package_version)" = "$installed_version" ] || reinstall_ok=false
+    broray_system_restart_services || reinstall_ok=false
+    broray_system_health_check || reinstall_ok=false
+    broray_system_reinstall_user_manifest "$manifest_after" || reinstall_ok=false
+    cmp -s "$manifest_before" "$manifest_after" || reinstall_ok=false
+
+    if [ "$reinstall_ok" != true ]; then
+        broray_system_status_write "$operation_id" reinstall restoring restore 94 \
+            'Проверка переустановки не пройдена. Выполняется автоматический возврат.' ''
+        if broray_system_reinstall_rollback "$rollback_package" "$installed_version" "$full_backup"; then
+            broray_system_status_write "$operation_id" reinstall error restored 100 \
+                'Исходная версия и состояние восстановлены.' \
+                'Переустановленная система не прошла контрольную проверку.'
+        else
+            broray_system_status_write "$operation_id" reinstall error restore-failed 100 \
+                'Автоматический возврат не завершён.' \
+                "Полный снимок: $full_backup"
+        fi
+        rm -rf "$staging"
+        return 1
+    fi
+
+    rm -f /tmp/broray-opkg-services-before-upgrade /tmp/broray-opkg-existing-backup
+    rm -rf "$staging"
+    broray_system_status_write "$operation_id" reinstall success complete 100 \
+        "BROray $installed_version переустановлен. Пользовательские данные сохранены." ''
+    return 0
 }
 
 broray_system_worker_update() {
@@ -1137,12 +1704,28 @@ broray_system_start_worker() {
         return 1
     }
 
+    global_lock_rc=0
+    broray_system_global_lock_acquire "$operation" || global_lock_rc=$?
+    case "$global_lock_rc" in
+        0) ;;
+        2)
+            broray_system_error_json OPERATION_BUSY 'Сейчас выполняется другая конфликтующая операция.'
+            return 1
+            ;;
+        *)
+            broray_system_error_json GLOBAL_LOCK_FAILED 'Не удалось установить общую блокировку операции.'
+            return 1
+            ;;
+    esac
+
     broray_system_recover_stale_lock || {
+        broray_system_global_lock_release
         broray_system_error_json OPERATION_BUSY 'Сейчас выполняется другая операция.'
         return 1
     }
 
     mkdir "$BRORAY_LOCK" 2>/dev/null || {
+        broray_system_global_lock_release
         broray_system_error_json OPERATION_BUSY 'Сейчас выполняется другая операция.'
         return 1
     }
@@ -1150,6 +1733,7 @@ broray_system_start_worker() {
     operation_id="${operation}-$(date -u '+%Y%m%d%H%M%S')-$$"
     workers="$(broray_system_copy_worker "$operation_id")" || {
         rm -rf "$BRORAY_LOCK"
+        broray_system_global_lock_release
         broray_system_error_json WORKER_COPY_FAILED 'Не удалось подготовить фоновую операцию.'
         return 1
     }
@@ -1166,6 +1750,13 @@ broray_system_start_worker() {
     worker_pid=$!
     printf '%s\n' "$worker_pid" >"$BRORAY_LOCK/pid"
     printf '%s\n' "$operation_id" >"$BRORAY_LOCK/operation-id"
+    broray_system_global_lock_transfer "$worker_pid" "$operation_id" || {
+        kill "$worker_pid" 2>/dev/null || true
+        rm -rf "$BRORAY_LOCK"
+        broray_system_global_lock_release
+        broray_system_error_json GLOBAL_LOCK_TRANSFER_FAILED 'Не удалось передать общую блокировку фоновой операции.'
+        return 1
+    }
 
     jq -nc \
         --arg operationId "$operation_id" \
@@ -1177,6 +1768,7 @@ broray_system_worker_finish() {
     worker_bin="$1"
     worker_lib="$2"
     rm -rf "$BRORAY_LOCK"
+    broray_system_global_lock_release
     rm -f "$worker_bin" "$worker_lib"
 }
 
@@ -1306,13 +1898,16 @@ broray_system_main() {
         update-start)
             broray_system_start_worker update
             ;;
+        reinstall-start)
+            broray_system_start_worker reinstall
+            ;;
         restore-start)
             broray_system_start_worker restore
             ;;
         uninstall-start)
             broray_system_uninstall_start "${1:-}" "${2:-}"
             ;;
-        worker-update|worker-restore|worker-uninstall)
+        worker-update|worker-reinstall|worker-restore|worker-uninstall)
             operation_id="${1:-}"
             mode="${2:-}"
             worker_bin="$0"
@@ -1321,6 +1916,9 @@ broray_system_main() {
             case "$command_name" in
                 worker-update)
                     broray_system_worker_update "$operation_id" || result=$?
+                    ;;
+                worker-reinstall)
+                    broray_system_worker_reinstall "$operation_id" || result=$?
                     ;;
                 worker-restore)
                     broray_system_worker_restore "$operation_id" || result=$?
@@ -1342,7 +1940,7 @@ broray_system_main() {
             return "$result"
             ;;
         *)
-            printf '%s\n' 'Использование: broray-system {info|status|update-check|update-start|restore-start|uninstall-start}' >&2
+            printf '%s\n' 'Использование: broray-system {info|status|update-check|update-start|reinstall-start|restore-start|uninstall-start}' >&2
             return 2
             ;;
     esac

@@ -4,23 +4,24 @@ set -u
 
 [ -z "${IPKG_INSTROOT:-}" ] || exit 0
 
-SERVICE_STATE="/tmp/broray-opkg-services-before-upgrade"
-BACKUP_MARKER="/tmp/broray-opkg-existing-backup"
-EXCLUDES="/tmp/broray-opkg-backup-excludes.$$"
+OPT_ROOT="${BRORAY_OPT_ROOT:-/opt}"
+TMP_ROOT="${BRORAY_TMP_ROOT:-/tmp}"
+SERVICE_STATE="$TMP_ROOT/broray-opkg-services-before-upgrade"
+BACKUP_MARKER="$TMP_ROOT/broray-opkg-prepared-update"
 BACKUP_PART=""
+TAR_BIN=""
 
 services="
-    /opt/etc/init.d/S28broray-subscriptions \
-    /opt/etc/init.d/S27broray-auto-switch \
-    /opt/etc/init.d/S25broray-web \
-    /opt/etc/init.d/S24broray \
-    /opt/etc/init.d/S23broray-monitor
+    $OPT_ROOT/etc/init.d/S28broray-subscriptions \
+    $OPT_ROOT/etc/init.d/S27broray-auto-switch \
+    $OPT_ROOT/etc/init.d/S25broray-web \
+    $OPT_ROOT/etc/init.d/S24broray \
+    $OPT_ROOT/etc/init.d/S23broray-monitor
 "
 
 restart_previously_running()
 {
     [ -r "$SERVICE_STATE" ] || return 0
-
     while IFS= read -r service; do
         [ -x "$service" ] || continue
         "$service" start >/dev/null 2>&1 || true
@@ -29,7 +30,7 @@ restart_previously_running()
 
 cleanup()
 {
-    rm -f "$EXCLUDES" "$BACKUP_MARKER"
+    rm -f "$BACKUP_MARKER"
     [ -n "$BACKUP_PART" ] && rm -f "$BACKUP_PART"
 }
 
@@ -42,35 +43,48 @@ fail()
     exit 1
 }
 
-: >"$SERVICE_STATE" ||
-    fail "не удалось сохранить состояние служб"
+archive_safe()
+{
+    archive="$1"
+    members="$TMP_ROOT/broray-opkg-members-$$"
+    [ -f "$archive" ] && [ ! -L "$archive" ] || return 1
+    "$TAR_BIN" -tzf "$archive" >"$members" 2>/dev/null || { rm -f "$members"; return 1; }
+    awk '/^\// {bad=1} /(^|\/)\.\.($|\/)/ {bad=1} END {exit bad ? 1 : 0}' "$members"
+    result=$?
+    rm -f "$members"
+    return "$result"
+}
 
+if [ -x "$OPT_ROOT/bin/tar" ]; then
+    TAR_BIN="$OPT_ROOT/bin/tar"
+elif command -v tar >/dev/null 2>&1; then
+    TAR_BIN="$(command -v tar)"
+else
+    fail "не найдена команда tar"
+fi
+
+"$TAR_BIN" --help 2>&1 | grep -q -- '--exclude' ||
+    fail "требуется Entware tar с поддержкой --exclude"
+
+: >"$SERVICE_STATE" || fail "не удалось сохранить состояние служб"
 for service in $services; do
     [ -x "$service" ] || continue
-
     if "$service" status >/dev/null 2>&1; then
-        printf '%s\n' "$service" >>"$SERVICE_STATE" ||
-            fail "не удалось сохранить состояние $service"
+        printf '%s\n' "$service" >>"$SERVICE_STATE" || fail "не удалось сохранить состояние $service"
     fi
-
     "$service" stop >/dev/null 2>&1 || true
 done
 
 prepared_backup="${BRORAY_OPKG_BACKUP:-}"
-
 if [ -z "$prepared_backup" ] && [ -r "$BACKUP_MARKER" ]; then
     marker_backup="$(sed -n '1p' "$BACKUP_MARKER")"
     marker_epoch="$(sed -n '2p' "$BACKUP_MARKER")"
     current_epoch="$(date '+%s')"
-
     case "$marker_epoch:$current_epoch" in
-        *[!0-9:]*|'')
-            ;;
+        *[!0-9:]*|'') ;;
         *)
             marker_age=$((current_epoch - marker_epoch))
-            if [ "$marker_age" -ge 0 ] &&
-               [ "$marker_age" -le 600 ]
-            then
+            if [ "$marker_age" -ge 0 ] && [ "$marker_age" -le 600 ]; then
                 prepared_backup="$marker_backup"
             fi
             ;;
@@ -79,63 +93,41 @@ fi
 
 if [ -n "$prepared_backup" ]; then
     case "$prepared_backup" in
-        /opt/broray/backup/*.tar.gz)
+        "$OPT_ROOT"/broray/backup/*.tar.gz|"$OPT_ROOT"/broray/backups/*.tar.gz|"$TMP_ROOT"/broray-safe-upgrade-2.2.0-1-*/backup.tar.gz)
             ;;
         *)
             fail "передан небезопасный путь готовой резервной копии"
             ;;
     esac
-
-    [ -f "$prepared_backup" ] ||
-        fail "готовая резервная копия не найдена"
-    tar -tzf "$prepared_backup" >/dev/null 2>&1 ||
-        fail "готовая резервная копия не прошла проверку"
-    printf 'Резервная копия: %s\n' "$prepared_backup"
+    archive_safe "$prepared_backup" || fail "готовая резервная копия не прошла проверку"
+    printf 'Резервная копия подготовлена обновителем: %s\n' "$prepared_backup"
     cleanup
     exit 0
 fi
 
-if [ -d /opt/broray ]; then
-    backup_dir="/opt/broray/backups"
+if [ -d "$OPT_ROOT/broray" ]; then
+    backup_dir="$OPT_ROOT/broray/backups"
     backup_stamp="$(date '+%Y%m%d-%H%M%S')"
-    backup_file="$backup_dir/opkg-before-2.1.0-2-$backup_stamp.tar.gz"
+    backup_file="$backup_dir/opkg-before-2.2.0-1-$backup_stamp.tar.gz"
     BACKUP_PART="$backup_file.part"
 
-    mkdir -p "$backup_dir" ||
-        fail "не удалось создать каталог резервных копий"
+    mkdir -p "$backup_dir" || fail "не удалось создать каталог резервных копий"
 
-    printf '%s\n' \
-        'broray/backup' \
-        'broray/backup/*' \
-        'broray/backups' \
-        'broray/backups/*' \
-        'broray/cache' \
-        'broray/cache/*' \
-        'broray/logs' \
-        'broray/logs/*' \
-        'broray/run' \
-        'broray/run/*' \
-        'broray/tmp' \
-        'broray/tmp/*' \
-        'broray/update' \
-        'broray/update/*' \
-        'broray/routes/tmp' \
-        'broray/routes/tmp/*' \
-        >"$EXCLUDES" ||
-        fail "не удалось подготовить список исключений"
-
-    tar \
-        -X "$EXCLUDES" \
+    "$TAR_BIN" \
+        --exclude='broray/backup' \
+        --exclude='broray/backups' \
+        --exclude='broray/cache' \
+        --exclude='broray/logs' \
+        --exclude='broray/run' \
+        --exclude='broray/tmp' \
+        --exclude='broray/update' \
+        --exclude='broray/routes/tmp' \
         -czf "$BACKUP_PART" \
-        -C /opt \
-        broray ||
-        fail "не удалось создать резервную копию"
+        -C "$OPT_ROOT" \
+        broray || fail "не удалось создать резервную копию"
 
-    tar -tzf "$BACKUP_PART" >/dev/null 2>&1 ||
-        fail "резервная копия не прошла проверку"
-
-    mv "$BACKUP_PART" "$backup_file" ||
-        fail "не удалось сохранить резервную копию"
+    archive_safe "$BACKUP_PART" || fail "резервная копия не прошла проверку"
+    mv "$BACKUP_PART" "$backup_file" || fail "не удалось сохранить резервную копию"
     BACKUP_PART=""
     chmod 600 "$backup_file"
     printf 'Резервная копия: %s\n' "$backup_file"

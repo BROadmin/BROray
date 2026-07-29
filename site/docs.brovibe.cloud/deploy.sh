@@ -11,7 +11,7 @@ SERVICE_PATH="/etc/systemd/system/brovibe-docs-deploy.service"
 TIMER_PATH="/etc/systemd/system/brovibe-docs-deploy.timer"
 LOCK_FILE="${BROVIBE_DOCS_LOCK_FILE:-/run/lock/brovibe-docs-deploy.lock}"
 SITE_OWNER="${BROVIBE_DOCS_OWNER-www-data:www-data}"
-FILES="index.html styles.css broray/index.html"
+FILES="index.html styles.css broray/index.html assets/cloudtips-qr.svg"
 
 fail()
 {
@@ -29,8 +29,8 @@ validate_manifest()
 {
     manifest="$1"
 
-    [ "$(wc -l <"$manifest" | tr -d ' ')" = "3" ] ||
-        fail "манифест должен содержать ровно три файла"
+    [ "$(wc -l <"$manifest" | tr -d ' ')" = "4" ] ||
+        fail "манифест должен содержать ровно четыре файла"
 
     for file in $FILES
     do
@@ -85,7 +85,7 @@ download_site()
     manifest="$work_root/SHA256SUMS"
     payload="$work_root/site"
 
-    mkdir -p "$payload/broray"
+    mkdir -p "$payload/broray" "$payload/assets"
 
     curl \
         --proto '=https' \

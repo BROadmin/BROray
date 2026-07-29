@@ -9,7 +9,8 @@
     var state = {
         info: null,
         pollTimer: null,
-        busy: false
+        busy: false,
+        cleanupPlan: null
     };
     var app = document.getElementById("app");
     var loader = document.getElementById("page-loader");
@@ -39,6 +40,21 @@
         return Number.isNaN(date.getTime())
             ? String(value)
             : date.toLocaleString("ru-RU");
+    }
+
+    function formatBytes(value) {
+        var bytes = Math.max(0, Number(value) || 0);
+        var units = ["Б", "КБ", "МБ", "ГБ"];
+        var index = 0;
+
+        while (bytes >= 1024 && index < units.length - 1) {
+            bytes /= 1024;
+            index += 1;
+        }
+
+        return new Intl.NumberFormat("ru-RU", {
+            maximumFractionDigits: index === 0 ? 0 : 1
+        }).format(bytes) + " " + units[index];
     }
 
     function errorMessage(error) {
@@ -151,9 +167,15 @@
 
         byId("check-update").disabled = state.busy;
         byId("install-update").disabled = state.busy || !info || !info.updateAvailable;
+        byId("reinstall-current").disabled = state.busy || !info || !info.reinstallSupported;
         byId("restore-backup").disabled = state.busy || !info || !info.lastBackup;
         byId("uninstall-normal").disabled = state.busy;
         byId("uninstall-full").disabled = state.busy;
+        byId("cleanup-plan").disabled = state.busy;
+        byId("cleanup-run").disabled = state.busy || !state.cleanupPlan || state.cleanupPlan.candidateCount < 1;
+        ["cleanup-temp", "cleanup-backups", "cleanup-route-backups", "cleanup-logs"].forEach(function (id) {
+            byId(id).disabled = state.busy;
+        });
     }
 
     function setBusy(busy) {
@@ -262,6 +284,7 @@
         setText("build-description", "Сборка: " + (info.build || "не определена"));
         setText("architecture", info.architecture);
         setText("update-channel", info.updateChannel === "stable" ? "Стабильный" : info.updateChannel);
+        setText("installed-package-version", info.installedPackageVersion);
         setText(
             "available-version",
             info.updateAvailable ? (info.availableVersion || "Доступно") : "Не требуется"
@@ -289,6 +312,7 @@
     function operationLabel(operation) {
         return {
             update: "Обновление",
+            reinstall: "Переустановка",
             restore: "Восстановление",
             uninstall: "Удаление"
         }[operation] || "Операция";
@@ -476,6 +500,146 @@
         return window.BROrayDialogs.confirm(options);
     }
 
+    function cleanupOptions() {
+        return {
+            temp: byId("cleanup-temp").checked,
+            backups: byId("cleanup-backups").checked,
+            routeBackups: byId("cleanup-route-backups").checked,
+            logs: byId("cleanup-logs").checked
+        };
+    }
+
+    function invalidateCleanupPlan() {
+        state.cleanupPlan = null;
+        byId("cleanup-result").hidden = true;
+        byId("cleanup-state").textContent = "Не проверено";
+        byId("cleanup-state").className = "status-badge status-neutral";
+        byId("cleanup-state").setAttribute("data-icon", "storage");
+        applyControlState();
+    }
+
+    function renderCleanupPlan(plan) {
+        var list = byId("cleanup-candidates");
+        var badge = byId("cleanup-state");
+
+        state.cleanupPlan = plan;
+        setText("cleanup-count", plan.candidateCount || 0);
+        setText("cleanup-bytes", formatBytes(plan.estimatedBytes));
+        setText("cleanup-expiry", "действует " + (plan.ttlSeconds || 120) + " секунд");
+        list.replaceChildren();
+        (plan.candidates || []).forEach(function (candidate) {
+            var item = document.createElement("li");
+            var path = document.createElement("code");
+            var size = document.createElement("span");
+
+            path.textContent = candidate.path;
+            size.textContent = formatBytes(candidate.sizeBytes);
+            item.append(path, size);
+            list.appendChild(item);
+        });
+        if (!(plan.candidates || []).length) {
+            var empty = document.createElement("li");
+            empty.textContent = "Подходящих файлов не найдено.";
+            empty.className = "is-empty";
+            list.appendChild(empty);
+        }
+        badge.textContent = plan.candidateCount > 0 ? "Готово к очистке" : "Очистка не требуется";
+        badge.className = "status-badge " + (plan.candidateCount > 0 ? "status-warning" : "status-success");
+        badge.setAttribute("data-icon", plan.candidateCount > 0 ? "storage" : "status");
+        byId("cleanup-result").hidden = false;
+        applyControlState();
+    }
+
+    async function planCleanup(event) {
+        var button = event.currentTarget;
+
+        if (state.busy) {
+            return;
+        }
+        hidePageError();
+        setBusy(true);
+        setButtonBusy(button, true, "Проверка…");
+        try {
+            var plan = await request("/api/broray/cleanup-plan.cgi", {
+                method: "POST",
+                headers: {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "X-BROray-Request": "1"
+                },
+                body: JSON.stringify(cleanupOptions())
+            });
+            renderCleanupPlan(plan);
+            toast(
+                plan.candidateCount > 0
+                    ? "План очистки сформирован."
+                    : "Очистка не требуется.",
+                plan.candidateCount > 0 ? "info" : "success"
+            );
+        } catch (error) {
+            invalidateCleanupPlan();
+            showPageError(errorMessage(error));
+            toast(errorMessage(error), "error");
+        } finally {
+            setBusy(false);
+            setButtonBusy(button, false);
+            applyControlState();
+        }
+    }
+
+    async function runCleanup(event) {
+        var button = event.currentTarget;
+        var plan = state.cleanupPlan;
+        var confirmed;
+
+        if (!plan || state.busy) {
+            return;
+        }
+        confirmed = await confirmAction({
+            eyebrow: "Безопасная очистка",
+            title: "Удалить найденные служебные файлы?",
+            message: "Будет удалено объектов: " + plan.candidateCount + ". Ожидаемое освобождение: " + formatBytes(plan.estimatedBytes) + ". Неизвестные файлы и последние резервные копии не затрагиваются.",
+            confirmText: "Очистить",
+            variant: "primary",
+            icon: "delete"
+        });
+        if (!confirmed) {
+            return;
+        }
+
+        hidePageError();
+        setBusy(true);
+        setButtonBusy(button, true, "Очистка…");
+        try {
+            var result = await request("/api/broray/cleanup.cgi", {
+                method: "POST",
+                headers: {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "X-BROray-Request": "1"
+                },
+                body: JSON.stringify({ token: plan.token })
+            });
+            state.cleanupPlan = null;
+            byId("cleanup-state").textContent = "Очищено";
+            byId("cleanup-state").className = "status-badge status-success";
+            byId("cleanup-state").setAttribute("data-icon", "status");
+            setText("cleanup-count", result.deletedCount || 0);
+            setText("cleanup-bytes", formatBytes(result.freedBytes));
+            setText("cleanup-expiry", "завершено");
+            byId("cleanup-candidates").replaceChildren();
+            toast("Очистка завершена: освобождено " + formatBytes(result.freedBytes) + ".", "success");
+        } catch (error) {
+            invalidateCleanupPlan();
+            showPageError(errorMessage(error));
+            toast(errorMessage(error), "error");
+        } finally {
+            setBusy(false);
+            setButtonBusy(button, false);
+            applyControlState();
+        }
+    }
+
     async function installUpdate(event) {
         var confirmed = await confirmAction({
             eyebrow: "Обновление",
@@ -493,6 +657,28 @@
                 null,
                 event.currentTarget,
                 "Установка…"
+            );
+        }
+    }
+
+    async function reinstallCurrent(event) {
+        var version = state.info && (state.info.installedPackageVersion || state.info.version);
+        var confirmed = await confirmAction({
+            eyebrow: "Восстановительная переустановка",
+            title: "Переустановить текущую версию BROray?",
+            message: "Будет повторно установлен пакет " + (version || "текущей версии") + ". Перед изменениями создаются полный снимок и отдельная копия пользовательских данных. При ошибке BROray автоматически вернёт исходное состояние.",
+            confirmText: "Переустановить",
+            variant: "primary",
+            icon: "restore"
+        });
+
+        if (confirmed) {
+            startAction(
+                "/api/broray/reinstall.cgi",
+                "Восстановительная переустановка запущена.",
+                null,
+                event.currentTarget,
+                "Переустановка…"
             );
         }
     }
@@ -557,7 +743,17 @@
     function bind() {
         byId("check-update").addEventListener("click", checkUpdate);
         byId("install-update").addEventListener("click", installUpdate);
+        byId("reinstall-current").addEventListener("click", reinstallCurrent);
         byId("restore-backup").addEventListener("click", restoreBackup);
+        byId("cleanup-plan").addEventListener("click", planCleanup);
+        byId("cleanup-run").addEventListener("click", function (event) {
+            runCleanup(event).catch(function (error) {
+                toast(errorMessage(error), "error");
+            });
+        });
+        ["cleanup-temp", "cleanup-backups", "cleanup-route-backups", "cleanup-logs"].forEach(function (id) {
+            byId(id).addEventListener("change", invalidateCleanupPlan);
+        });
         byId("uninstall-normal").addEventListener("click", function (event) {
             uninstall("normal", event.currentTarget).catch(function (error) {
                 toast(errorMessage(error), "error");

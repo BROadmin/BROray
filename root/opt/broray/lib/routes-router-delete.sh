@@ -15,14 +15,71 @@ BRORAY_ROUTES_DELETE_ORIGINAL=""
 BRORAY_ROUTES_DELETE_BUNDLE_ID=""
 BRORAY_ROUTES_DELETE_INTERFACE="${BRORAY_ROUTES_DELETE_INTERFACE:-Proxy0}"
 BRORAY_ROUTES_DELETE_NDMC=""
+BRORAY_ROUTES_DELETE_PROGRESS_ACTIVE=false
+BRORAY_ROUTES_DELETE_PROGRESS_CURRENT=0
+BRORAY_ROUTES_DELETE_PROGRESS_TOTAL=0
+BRORAY_ROUTES_DELETE_LAST_ERROR=""
+BRORAY_ROUTES_DELETE_COMPLETED_FILE=""
+BRORAY_ROUTES_DELETE_TRANSACTION=""
+BRORAY_ROUTES_DELETE_PAUSED=false
+BRORAY_ROUTES_DELETE_SAVE_NEEDED=false
+BRORAY_ROUTES_DELETE_RESUME_BASE=0
+BRORAY_ROUTES_DELETE_RESUMED=false
+BRORAY_ROUTES_DELETE_PREVIOUS_DELETED=0
+BRORAY_ROUTES_DELETE_PREVIOUS_ABSENT=0
 
 BRORAY_ROOT="${BRORAY_ROOT:-$BRORAY_ROUTES_DELETE_ROOT}"
 BRORAY_INTERFACE_OWNER_LIBRARY="${BRORAY_INTERFACE_OWNER_LIBRARY:-$BRORAY_ROOT/lib/interface-owner.sh}"
+BRORAY_ROUTES_DELETE_PROGRESS_LIBRARY="${BRORAY_ROUTES_DELETE_PROGRESS_LIBRARY:-$BRORAY_ROOT/lib/routes-operation-progress.sh}"
 if [ -r "$BRORAY_INTERFACE_OWNER_LIBRARY" ]; then
     BRORAY_BASE="$BRORAY_ROOT"
     export BRORAY_BASE
     . "$BRORAY_INTERFACE_OWNER_LIBRARY"
 fi
+[ -r "$BRORAY_ROUTES_DELETE_PROGRESS_LIBRARY" ] &&
+    . "$BRORAY_ROUTES_DELETE_PROGRESS_LIBRARY"
+
+broray_routes_delete_progress_begin()
+{
+    command -v broray_routes_progress_begin >/dev/null 2>&1 || return 0
+    broray_routes_progress_begin "$@" || return 1
+    BRORAY_ROUTES_DELETE_PROGRESS_ACTIVE=true
+}
+
+broray_routes_delete_progress_update()
+{
+    [ "$BRORAY_ROUTES_DELETE_PROGRESS_ACTIVE" = true ] || return 0
+    command -v broray_routes_progress_update >/dev/null 2>&1 || return 0
+    broray_routes_progress_update "$@"
+}
+
+broray_routes_delete_progress_tick()
+{
+    [ "$BRORAY_ROUTES_DELETE_PROGRESS_ACTIVE" = true ] || return 0
+    command -v broray_routes_progress_tick >/dev/null 2>&1 || return 0
+    broray_routes_progress_tick "$@"
+}
+
+broray_routes_delete_progress_complete()
+{
+    [ "$BRORAY_ROUTES_DELETE_PROGRESS_ACTIVE" = true ] || return 0
+    command -v broray_routes_progress_complete >/dev/null 2>&1 || return 0
+    broray_routes_progress_complete "$@"
+}
+
+broray_routes_delete_progress_fail()
+{
+    [ "$BRORAY_ROUTES_DELETE_PROGRESS_ACTIVE" = true ] || return 0
+    command -v broray_routes_progress_fail >/dev/null 2>&1 || return 0
+    broray_routes_progress_fail "$@"
+}
+
+broray_routes_delete_progress_pause()
+{
+    [ "$BRORAY_ROUTES_DELETE_PROGRESS_ACTIVE" = true ] || return 0
+    command -v broray_routes_progress_pause >/dev/null 2>&1 || return 0
+    broray_routes_progress_pause "$@"
+}
 
 broray_routes_delete_now()
 {
@@ -36,6 +93,7 @@ broray_routes_delete_stamp()
 
 broray_routes_delete_error()
 {
+    BRORAY_ROUTES_DELETE_LAST_ERROR="$*"
     echo "ОШИБКА: $*" >&2
 }
 
@@ -314,6 +372,8 @@ broray_routes_delete_prepare()
         ) |
         .installedVersion = null |
         .lastDeletedAt = $now |
+        .lastVerifiedAt = null |
+        .verifyResult = null |
         .deleteResult = {
             result: "removed",
             message: $message,
@@ -514,28 +574,230 @@ broray_routes_delete_rollback_routes()
     done
 }
 
+broray_routes_delete_partial_commit()
+{
+    local message error_route completed_json output now registry bundle_registry state
+    local completed_count deleted_now absent_now total_deleted total_absent
+
+    message="$1"
+    error_route="${2:-}"
+    completed_json="$BRORAY_ROUTES_DELETE_WORK/completed.json"
+    output="$BRORAY_ROUTES_DELETE_WORK/partial"
+    now="$(broray_routes_delete_now)"
+    registry="$BRORAY_ROUTES_DELETE_ROUTES/installed/routes.json"
+    bundle_registry="$BRORAY_ROUTES_DELETE_ROUTES/installed/bundles/$BRORAY_ROUTES_DELETE_BUNDLE_ID.json"
+    state="$BRORAY_ROUTES_DELETE_ROUTES/state/$BRORAY_ROUTES_DELETE_BUNDLE_ID.json"
+
+    mkdir -p "$output" || return 1
+    jq -Rn '
+        [
+            inputs | split("\t") | select(length == 7) |
+            {
+                result: .[0], key: .[1], network: .[2],
+                prefix: (.[3] | tonumber), mask: .[4],
+                interface: .[5], metric: (.[6] | tonumber)
+            }
+        ]
+    ' <"$BRORAY_ROUTES_DELETE_COMPLETED_FILE" >"$completed_json" || return 1
+
+    completed_count="$(jq -r 'length' "$completed_json")"
+    deleted_now="$(jq -r '[.[] | select(.result == "deleted")] | length' "$completed_json")"
+    absent_now="$(jq -r '[.[] | select(.result == "absent")] | length' "$completed_json")"
+    total_deleted="$((BRORAY_ROUTES_DELETE_PREVIOUS_DELETED + deleted_now))"
+    total_absent="$((BRORAY_ROUTES_DELETE_PREVIOUS_ABSENT + absent_now))"
+
+    [ "$completed_count" -eq "$((BRORAY_ROUTES_DELETE_PROGRESS_CURRENT - BRORAY_ROUTES_DELETE_RESUME_BASE))" ] || return 1
+
+    jq -n \
+        --slurpfile old "$registry" \
+        --slurpfile completed "$completed_json" \
+        --arg bundleId "$BRORAY_ROUTES_DELETE_BUNDLE_ID" \
+        --arg now "$now" '
+        $old[0] as $o |
+        ($completed[0] | map(.key) | unique) as $keys |
+        [
+            ($o.routes // [])[] |
+            if (.key as $key | $keys | index($key)) != null then
+                .owners = (((.owners // []) - [$bundleId]) | unique) |
+                .updatedAt = $now
+            else . end |
+            select(((.owners // []) | length) > 0)
+        ] as $routes |
+        $o + {routes: $routes, updatedAt: $now}
+    ' >"$output/routes.json" || return 1
+
+    jq -n \
+        --slurpfile old "$bundle_registry" \
+        --slurpfile completed "$completed_json" \
+        --arg now "$now" '
+        $old[0] as $o |
+        ($completed[0] | map(.key) | unique) as $keys |
+        $o + {
+            routeKeys: (($o.routeKeys // []) - $keys),
+            managedRouteKeys: (($o.managedRouteKeys // []) - $keys),
+            externalRouteKeys: (($o.externalRouteKeys // []) - $keys),
+            updatedAt: $now
+        }
+    ' >"$output/bundle.json" || return 1
+
+    jq \
+        --arg now "$now" \
+        --arg message "$message" \
+        --arg errorRoute "$error_route" \
+        --argjson current "$BRORAY_ROUTES_DELETE_PROGRESS_CURRENT" \
+        --argjson total "$BRORAY_ROUTES_DELETE_PROGRESS_TOTAL" \
+        --argjson deleted "$total_deleted" \
+        --argjson alreadyAbsent "$total_absent" '
+        .status = "installed" |
+        .lastVerifiedAt = null |
+        .verifyResult = null |
+        .preflight = null |
+        .resumeOperation = {
+            operation: "delete",
+            resumable: true,
+            current: $current,
+            total: $total,
+            deleted: $deleted,
+            alreadyAbsent: $alreadyAbsent,
+            message: $message,
+            errorRoute: (if $errorRoute == "" then null else $errorRoute end),
+            updatedAt: $now
+        } |
+        .lastError = (
+            if $errorRoute == "" then null
+            else {code: "ROUTES_DELETE_PAUSED_AFTER_ERROR", message: $message, route: $errorRoute, resumable: true}
+            end
+        ) |
+        .updatedAt = $now
+    ' "$state" >"$output/state.json" || return 1
+
+    jq -e --arg interface "$BRORAY_ROUTES_DELETE_INTERFACE" '
+        (.schemaVersion == 1) and
+        (.managedInterface == $interface) and
+        (.managedMetric == 1200) and
+        (([.routes[].key] | length) == ([.routes[].key] | unique | length)) and
+        (all(.routes[];
+            .interface == $interface and
+            .metric == 1200 and
+            .createdByBROray == true and
+            .managed == true and
+            (((.owners // []) | length) > 0)
+        ))
+    ' "$output/routes.json" >/dev/null 2>&1 || return 1
+    jq -e --arg id "$BRORAY_ROUTES_DELETE_BUNDLE_ID" '
+        (.bundleId == $id) and
+        ((.routeKeys | type) == "array") and
+        ((.managedRouteKeys | type) == "array") and
+        (.routeKeys == .managedRouteKeys)
+    ' "$output/bundle.json" >/dev/null 2>&1 || return 1
+    jq -e '.resumeOperation.operation == "delete" and .resumeOperation.resumable == true' \
+        "$output/state.json" >/dev/null 2>&1 || return 1
+
+    cp -p "$output/routes.json" "$registry.new.$$" && mv "$registry.new.$$" "$registry" || return 1
+    cp -p "$output/bundle.json" "$bundle_registry.new.$$" && mv "$bundle_registry.new.$$" "$bundle_registry" || return 1
+    cp -p "$output/state.json" "$state.new.$$" && mv "$state.new.$$" "$state" || return 1
+    chmod 644 "$registry" "$bundle_registry" "$state" 2>/dev/null || true
+    return 0
+}
+
+broray_routes_delete_pause()
+{
+    local message stopped_by_user error_route exit_code out err details
+
+    message="$1"
+    stopped_by_user="${2:-true}"
+    error_route="${3:-}"
+    case "$stopped_by_user" in true|false) ;; *) stopped_by_user=true ;; esac
+    trap - EXIT HUP INT TERM
+
+    if [ "$BRORAY_ROUTES_DELETE_SAVE_NEEDED" = true ]; then
+        out="$BRORAY_ROUTES_DELETE_WORK/pause-save.out"
+        err="$BRORAY_ROUTES_DELETE_WORK/pause-save.err"
+        if ! broray_routes_delete_ndmc "system configuration save" "$out" "$err" 12; then
+            details="$(tail -n 20 "$out" 2>/dev/null; tail -n 20 "$err" 2>/dev/null)"
+            broray_routes_delete_error "Не удалось сохранить частично выполненное удаление. $details"
+            broray_routes_delete_cleanup
+            exit 1
+        fi
+    fi
+
+    broray_routes_delete_partial_commit "$message" "$error_route" || {
+        broray_routes_delete_error "Не удалось сохранить состояние удаления для продолжения."
+        broray_routes_delete_cleanup
+        exit 1
+    }
+
+    BRORAY_ROUTES_DELETE_PAUSED=true
+    BRORAY_ROUTES_DELETE_ROLLBACK_NEEDED=false
+    broray_routes_delete_transaction_write \
+        "$BRORAY_ROUTES_DELETE_TRANSACTION" "paused" \
+        "$BRORAY_ROUTES_DELETE_PROGRESS_CURRENT" \
+        "$BRORAY_ROUTES_DELETE_SAVE_NEEDED" false "$message" || true
+    broray_routes_delete_progress_pause "$message" "$stopped_by_user" "$error_route" >/dev/null 2>&1 || true
+    broray_routes_delete_lock_release
+
+    printf '%s\n' "$message"
+    printf 'Выполнено: %s из %s\n' \
+        "$BRORAY_ROUTES_DELETE_PROGRESS_CURRENT" \
+        "$BRORAY_ROUTES_DELETE_PROGRESS_TOTAL"
+    printf '%s\n' 'Операцию можно продолжить позднее.'
+
+    rm -rf "$BRORAY_ROUTES_DELETE_WORK" 2>/dev/null || true
+    BRORAY_ROUTES_DELETE_WORK=""
+    if [ "$stopped_by_user" = true ]; then exit 74; else exit 76; fi
+}
+
+broray_routes_delete_stop_if_requested()
+{
+    [ "$BRORAY_ROUTES_DELETE_PROGRESS_CURRENT" -lt "$BRORAY_ROUTES_DELETE_PROGRESS_TOTAL" ] || return 0
+    command -v broray_routes_progress_stop_requested >/dev/null 2>&1 || return 0
+    if broray_routes_progress_stop_requested "$BRORAY_ROUTES_DELETE_BUNDLE_ID"; then
+        broray_routes_delete_pause \
+            "Удаление остановлено пользователем. Выполнено $BRORAY_ROUTES_DELETE_PROGRESS_CURRENT из $BRORAY_ROUTES_DELETE_PROGRESS_TOTAL." \
+            true ""
+    fi
+}
+
+broray_routes_delete_route_failure()
+{
+    local message route
+    message="$1"
+    route="$2"
+    broray_routes_delete_pause \
+        "$message Выполнено $BRORAY_ROUTES_DELETE_PROGRESS_CURRENT из $BRORAY_ROUTES_DELETE_PROGRESS_TOTAL. Можно продолжить после устранения причины." \
+        false "$route"
+}
+
 broray_routes_delete_cleanup()
 {
+    local rolled_back progress_error
+
     trap - EXIT HUP INT TERM
+    rolled_back=false
 
     broray_routes_delete_kill_active
 
-    if [ "$BRORAY_ROUTES_DELETE_ROLLBACK_NEEDED" = true ] &&
+    if [ "$BRORAY_ROUTES_DELETE_PAUSED" != true ] &&
+       [ "$BRORAY_ROUTES_DELETE_ROLLBACK_NEEDED" = true ] &&
        [ "$BRORAY_ROUTES_DELETE_COMMITTED" != true ]
     then
         broray_routes_delete_rollback_routes
+        rolled_back=true
 
         if [ -n "$BRORAY_ROUTES_DELETE_ORIGINAL" ] &&
            [ -d "$BRORAY_ROUTES_DELETE_ORIGINAL" ]
         then
-            broray_routes_delete_restore_local \
-                "$BRORAY_ROUTES_DELETE_ORIGINAL" \
-                "$BRORAY_ROUTES_DELETE_ROUTES/installed/routes.json" \
-                "$BRORAY_ROUTES_DELETE_ROUTES/installed/bundles/$BRORAY_ROUTES_DELETE_BUNDLE_ID.json" \
-                "$BRORAY_ROUTES_DELETE_ROUTES/state/$BRORAY_ROUTES_DELETE_BUNDLE_ID.json" \
-                "$BRORAY_ROUTES_DELETE_ROUTES/catalog/$BRORAY_ROUTES_DELETE_BUNDLE_ID/export-plan.json" \
-                "$BRORAY_ROUTES_DELETE_ROUTES/catalog/$BRORAY_ROUTES_DELETE_BUNDLE_ID/router-delete-result.json"
+            broray_routes_delete_restore_local                 "$BRORAY_ROUTES_DELETE_ORIGINAL"                 "$BRORAY_ROUTES_DELETE_ROUTES/installed/routes.json"                 "$BRORAY_ROUTES_DELETE_ROUTES/installed/bundles/$BRORAY_ROUTES_DELETE_BUNDLE_ID.json"                 "$BRORAY_ROUTES_DELETE_ROUTES/state/$BRORAY_ROUTES_DELETE_BUNDLE_ID.json"                 "$BRORAY_ROUTES_DELETE_ROUTES/catalog/$BRORAY_ROUTES_DELETE_BUNDLE_ID/export-plan.json"                 "$BRORAY_ROUTES_DELETE_ROUTES/catalog/$BRORAY_ROUTES_DELETE_BUNDLE_ID/router-delete-result.json"
         fi
+    fi
+
+    if [ "$BRORAY_ROUTES_DELETE_PAUSED" != true ] &&
+       [ "$BRORAY_ROUTES_DELETE_COMMITTED" != true ]; then
+        progress_error="${BRORAY_ROUTES_DELETE_LAST_ERROR:-Операция удаления прервана.}"
+        if [ "$rolled_back" = true ]; then
+            progress_error="$progress_error Изменения операции отменены."
+        fi
+        broray_routes_delete_progress_fail             "$progress_error" "$rolled_back" >/dev/null 2>&1 || true
     fi
 
     broray_routes_delete_lock_release
@@ -551,7 +813,8 @@ broray_routes_router_delete_run()
     local stamp now prepared original transaction delete_tsv deleted_tsv
     local total managed_count external_count physical shared already_absent tab key network prefix mask interface metric
     local actual_config filtered_tsv runtime_absent
-    local out err command_text delete_rc deleted_count save_needed message
+    local out err command_text delete_rc deleted_count processed_count save_needed message current_route
+    local completed_tsv resume_values resume_base resume_total resumed previous_deleted previous_absent
 
     bundle_id="$1"
 
@@ -693,7 +956,9 @@ broray_routes_router_delete_run()
     prepared="$BRORAY_ROUTES_DELETE_WORK/prepared"
     original="$BRORAY_ROUTES_DELETE_WORK/original"
     transaction="$transactions/delete-$bundle_id-$stamp.json"
+    BRORAY_ROUTES_DELETE_TRANSACTION="$transaction"
     deleted_tsv="$BRORAY_ROUTES_DELETE_WORK/deleted.tsv"
+    completed_tsv="$BRORAY_ROUTES_DELETE_WORK/completed.tsv"
 
     mkdir -p "$BRORAY_ROUTES_DELETE_WORK" "$transactions" || {
         broray_routes_delete_error "Не удалось создать рабочий каталог."
@@ -713,7 +978,9 @@ broray_routes_router_delete_run()
     }
 
     : >"$deleted_tsv"
+    : >"$completed_tsv"
     BRORAY_ROUTES_DELETE_DELETED_FILE="$deleted_tsv"
+    BRORAY_ROUTES_DELETE_COMPLETED_FILE="$completed_tsv"
     BRORAY_ROUTES_DELETE_ORIGINAL="$original"
 
     broray_routes_delete_prepare \
@@ -780,8 +1047,43 @@ broray_routes_router_delete_run()
         return 1
     }
 
+    previous_deleted="$(jq -r '.resumeOperation.deleted // 0' "$state" 2>/dev/null || printf 0)"
+    previous_absent="$(jq -r '.resumeOperation.alreadyAbsent // 0' "$state" 2>/dev/null || printf 0)"
+    case "$previous_deleted" in ''|*[!0-9]*) previous_deleted=0 ;; esac
+    case "$previous_absent" in ''|*[!0-9]*) previous_absent=0 ;; esac
+    resume_values="$(broray_routes_progress_resume_values "$bundle_id" delete "$physical" 2>/dev/null || printf '0\t%s\tfalse\n' "$physical")"
+    resume_base="$(printf '%s' "$resume_values" | cut -f1)"
+    resume_total="$(printf '%s' "$resume_values" | cut -f2)"
+    resumed="$(printf '%s' "$resume_values" | cut -f3)"
+    case "$resume_base" in ''|*[!0-9]*) resume_base=0 ;; esac
+    case "$resume_total" in ''|*[!0-9]*) resume_total="$physical" ;; esac
+    case "$resumed" in true|false) ;; *) resumed=false ;; esac
+    if [ "$resumed" != true ]; then
+        previous_deleted=0
+        previous_absent=0
+    fi
+
     deleted_count=0
+    processed_count="$resume_base"
     save_needed=false
+    BRORAY_ROUTES_DELETE_RESUME_BASE="$resume_base"
+    BRORAY_ROUTES_DELETE_RESUMED="$resumed"
+    BRORAY_ROUTES_DELETE_PREVIOUS_DELETED="$previous_deleted"
+    BRORAY_ROUTES_DELETE_PREVIOUS_ABSENT="$previous_absent"
+    BRORAY_ROUTES_DELETE_PROGRESS_CURRENT="$resume_base"
+    BRORAY_ROUTES_DELETE_PROGRESS_TOTAL="$resume_total"
+    broray_routes_delete_progress_begin \
+        "$bundle_id" delete "$resume_total" \
+        "Подготовка удаления: $resume_base из $resume_total." \
+        "$resume_base" "$resumed" || {
+        broray_routes_delete_error "Не удалось создать состояние прогресса удаления."
+        return 1
+    }
+    broray_routes_delete_progress_update \
+        applying "$resume_base" "$resume_total" "Удаление маршрутов из Keenetic." "" || {
+        broray_routes_delete_error "Не удалось обновить состояние прогресса удаления."
+        return 1
+    }
 
     broray_routes_delete_transaction_write \
         "$transaction" "checked" 0 false false \
@@ -843,20 +1145,45 @@ broray_routes_router_delete_run()
             # The route was removed manually after our running-config snapshot.
             # This is an idempotent success, not an operation failure.
             already_absent=$((already_absent + 1))
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                absent "$key" "$network" "$prefix" "$mask" "$interface" "$metric" \
+                >>"$completed_tsv"
+            processed_count=$((processed_count + 1))
+            BRORAY_ROUTES_DELETE_PROGRESS_CURRENT="$processed_count"
+            current_route="$network/$prefix"
+            broray_routes_delete_progress_tick \
+                "$processed_count" "$current_route" || {
+                broray_routes_delete_error "Не удалось записать прогресс удаления маршрутов."
+                return 1
+            }
+            broray_routes_delete_stop_if_requested
             continue
         else
             details="$(tail -n 20 "$out" 2>/dev/null; tail -n 20 "$err" 2>/dev/null)"
-            broray_routes_delete_error \
-                "Не удалось удалить $network/$prefix. $details"
-            return 1
+            broray_routes_delete_route_failure \
+                "Не удалось удалить $network/$prefix. $details" \
+                "$network/$prefix"
         fi
 
         printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
             "$key" "$network" "$prefix" "$mask" "$interface" "$metric" \
             >>"$deleted_tsv"
 
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            deleted "$key" "$network" "$prefix" "$mask" "$interface" "$metric" \
+            >>"$completed_tsv"
         deleted_count=$((deleted_count + 1))
+        processed_count=$((processed_count + 1))
+        BRORAY_ROUTES_DELETE_PROGRESS_CURRENT="$processed_count"
         save_needed=true
+        BRORAY_ROUTES_DELETE_SAVE_NEEDED=true
+        current_route="$network/$prefix"
+        broray_routes_delete_progress_tick \
+            "$processed_count" "$current_route" || {
+            broray_routes_delete_error "Не удалось записать прогресс удаления маршрутов."
+            return 1
+        }
+        broray_routes_delete_stop_if_requested
 
         broray_routes_delete_transaction_write \
             "$transaction" "deleting" "$deleted_count" false false \
@@ -879,6 +1206,13 @@ broray_routes_router_delete_run()
     }
 
 
+    broray_routes_delete_progress_update \
+        verifying "$processed_count" "$resume_total" \
+        "Проверка удаления маршрутов в Keenetic." "" || {
+        broray_routes_delete_error "Не удалось записать этап проверки удаления."
+        return 1
+    }
+
     # Confirm the real configured state before clearing local ownership.
     # ndmc messages alone are insufficient for hidden routes that coexist on
     # another interface.
@@ -898,9 +1232,28 @@ broray_routes_router_delete_run()
         return 1
     }
 
+    # Final result spans all resumed attempts, not only this process.
+    broray_routes_delete_adjust_prepared \
+        "$prepared" \
+        "$((previous_deleted + deleted_count))" \
+        "$shared" \
+        "$((previous_absent + already_absent))" || {
+        broray_routes_delete_error "Не удалось объединить результат продолженной операции удаления."
+        return 1
+    }
+    jq 'del(.resumeOperation)' "$prepared/state.json" >"$prepared/state.json.new.$$" &&
+        mv "$prepared/state.json.new.$$" "$prepared/state.json" || return 1
+
     broray_routes_delete_install_local \
         "$prepared" "$registry" "$bundle_registry" "$state" "$plan" "$result" || {
         broray_routes_delete_error "Не удалось установить локальное состояние удаления."
+        return 1
+    }
+
+    broray_routes_delete_progress_update \
+        saving "$processed_count" "$resume_total" \
+        "Сохранение конфигурации Keenetic." "" || {
+        broray_routes_delete_error "Не удалось записать этап сохранения конфигурации."
         return 1
     }
 
@@ -925,6 +1278,8 @@ broray_routes_router_delete_run()
     broray_routes_delete_transaction_write \
         "$transaction" "committed" "$deleted_count" \
         "$save_needed" true "$message" || true
+    broray_routes_delete_progress_complete \
+        "Удаление маршрутов из Keenetic завершено: $resume_total из $resume_total." || true
 
     broray_routes_delete_lock_release
     rm -rf "$BRORAY_ROUTES_DELETE_WORK" 2>/dev/null || true
@@ -932,9 +1287,9 @@ broray_routes_router_delete_run()
 
     echo "$message"
     echo "Набор: $bundle_id"
-    echo "Удалено физических маршрутов BROray: $deleted_count"
+    echo "Удалено физических маршрутов BROray: $((previous_deleted + deleted_count))"
     echo "Сохранено общих маршрутов: $shared"
-    echo "Уже отсутствовало в Keenetic: $already_absent"
+    echo "Уже отсутствовало в Keenetic: $((previous_absent + already_absent))"
     echo "Не затронуто внешних маршрутов: $external_count"
     echo "Интерфейс удаления: $managed_interface"
     echo "Метрика владения BROray: 1200"

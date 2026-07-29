@@ -112,7 +112,11 @@ broray_routes_summary()
             ((.installedVersion | type) == "object")) and
         ((.lastError == null) or
             ((.lastError | type) == "string") or
-            ((.lastError | type) == "object"))
+            ((.lastError | type) == "object")) and
+        ((.lastVerifiedAt == null) or
+            ((.lastVerifiedAt | type) == "string")) and
+        ((.verifyResult == null) or
+            ((.verifyResult | type) == "object"))
     ' "$summary_state_file" >/dev/null 2>&1 || {
         broray_routes_summary_error \
             "ROUTES_STATE_INVALID" \
@@ -237,6 +241,38 @@ broray_routes_summary()
         (
             $sourceUpdateAvailable or $keeneticUpdateAvailable
         ) as $updateAvailable |
+        ($s.verifyResult // null) as $verify |
+        (
+            $downloaded and
+            ($verify != null) and
+            (($verify.contentSha256 // "") != "") and
+            (($verify.contentSha256 // "") == ($s.downloadedVersion.contentSha256 // ""))
+        ) as $verifyMatchesDownloaded |
+        (
+            $verifyMatchesDownloaded and
+            ($verify.local.valid == false)
+        ) as $localInvalid |
+        (
+            $verifyMatchesDownloaded and
+            ($verify.local.valid == true)
+        ) as $verificationCurrent |
+        (
+            $downloaded and
+            ($localInvalid | not) and
+            ($verificationCurrent | not)
+        ) as $verificationRequired |
+        (
+            $verificationCurrent and
+            (($verify.keenetic.status // "") == "conflict")
+        ) as $verificationConflict |
+        (
+            $verificationCurrent and
+            (
+                (($verify.keenetic.available // true) == false) or
+                (($verify.keenetic.status // "") == "unavailable")
+            )
+        ) as $verificationRetryRequired |
+        ($downloadRequired or $localInvalid) as $downloadActionRequired |
 
         (($b.routeKeys // []) | length) as $installedRouteCount |
         (($b.managedRouteKeys // []) | length) as $managedRouteCount |
@@ -284,6 +320,11 @@ broray_routes_summary()
                     ($s.downloadResult.message // null)
                 ),
                 operation_item(
+                    "verify";
+                    ($s.lastVerifiedAt // null);
+                    ($s.verifyResult.message // null)
+                ),
+                operation_item(
                     "install";
                     ($s.lastExportedAt // null);
                     ($s.exportResult.message // null)
@@ -313,7 +354,7 @@ broray_routes_summary()
 
         (
             if $operationRunning then "busy"
-            elif $error != null then "error"
+            elif $localInvalid or $verificationConflict or ($error != null) then "error"
             elif $installed and $updateAvailable then "update_available"
             elif $installed then "installed"
             elif $downloaded then "downloaded"
@@ -324,11 +365,15 @@ broray_routes_summary()
 
         (
             if $operationRunning then "wait"
+            elif $localInvalid then "download"
+            elif $verificationRetryRequired then "verify"
             elif $error != null then "review"
             elif $downloadRequired then "download"
+            elif $verificationRequired then "verify"
+            elif $verificationConflict then "review"
             elif $keeneticUpdateRequired and ($s.installedVersion != null) then "update"
             elif $keeneticUpdateRequired then "install"
-            elif $installed then "none"
+            elif $installed then "check"
             else "check"
             end
         ) as $recommendedAction |
@@ -346,6 +391,17 @@ broray_routes_summary()
             sourceUpdateAvailable: $sourceUpdateAvailable,
             keeneticUpdateAvailable: $keeneticUpdateAvailable,
             downloadRequired: $downloadRequired,
+            downloadActionRequired: $downloadActionRequired,
+            verificationRequired: $verificationRequired,
+            verificationCurrent: $verificationCurrent,
+            localSetValid: (
+                if $localInvalid then false
+                elif $verificationCurrent then true
+                else null
+                end
+            ),
+            verificationConflict: $verificationConflict,
+            verificationRetryRequired: $verificationRetryRequired,
             keeneticUpdateRequired: $keeneticUpdateRequired,
             exportRequired: $keeneticUpdateRequired,
             operationRunning: $operationRunning,
@@ -360,7 +416,9 @@ broray_routes_summary()
             availableVersion: $s.availableVersion,
             downloadedVersion: $s.downloadedVersion,
             installedVersion: $s.installedVersion,
+            verifyResult: ($s.verifyResult // null),
             lastCheckedAt: ($s.lastCheckedAt // null),
+            lastVerifiedAt: ($s.lastVerifiedAt // null),
             lastDownloadedAt: ($s.lastDownloadedAt // null),
             lastExportedAt: ($s.lastExportedAt // null),
             lastDeletedAt: ($s.lastDeletedAt // null),

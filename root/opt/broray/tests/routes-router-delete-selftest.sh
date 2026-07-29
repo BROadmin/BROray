@@ -4,6 +4,7 @@ set -eu
 
 ROOT="${BRORAY_ROOT:-/opt/broray}"
 LIBRARY="$ROOT/lib/routes-router-delete.sh"
+PROGRESS_LIBRARY="$ROOT/lib/routes-operation-progress.sh"
 WORK="$ROOT/routes/tmp/router-delete-selftest-$$"
 MOCK_BIN="$WORK/bin"
 TEST_ROOT="$WORK/root"
@@ -23,6 +24,7 @@ fail()
 trap cleanup EXIT HUP INT TERM
 
 [ -r "$LIBRARY" ] || fail "Модуль удаления недоступен"
+[ -r "$PROGRESS_LIBRARY" ] || fail "Модуль прогресса недоступен"
 
 mkdir -p \
     "$MOCK_BIN" \
@@ -36,6 +38,7 @@ mkdir -p \
     "$TEST_ROOT/routes/transactions"
 
 cp -p "$LIBRARY" "$TEST_ROOT/lib/routes-router-delete.sh"
+cp -p "$PROGRESS_LIBRARY" "$TEST_ROOT/lib/routes-operation-progress.sh"
 
 cat >"$TEST_ROOT/lib/interface-owner.sh" <<'OWNER_LIBRARY'
 #!/bin/sh
@@ -61,7 +64,7 @@ cat >"$TEST_ROOT/lib/routes-router-config.sh" <<'ROUTES_CONFIG_LIBRARY'
 
 broray_routes_config_fetch()
 {
-    local output last_198 present_198
+    local output last_198 present_198 last_203 present_203
 
     output="$1"
     last_198="$(
@@ -71,6 +74,9 @@ broray_routes_config_fetch()
             tail -n 1
     )"
     present_198=true
+    last_203=""
+    present_203=true
+    [ -f "${BRORAY_TEST_203_DELETED:-/nonexistent}" ] && present_203=false
 
     case "$last_198" in
         "no ip route "*) present_198=false ;;
@@ -78,7 +84,8 @@ broray_routes_config_fetch()
     esac
 
     jq -n \
-        --argjson present_198 "$present_198" '
+        --argjson present_198 "$present_198" \
+        --argjson present_203 "$present_203" '
         {
             schemaVersion: 1,
             source: "running-config",
@@ -97,15 +104,21 @@ broray_routes_config_fetch()
                     else
                         []
                     end
-                ) + [{
-                    network: "203.0.113.0",
-                    mask: "255.255.255.0",
-                    destination: "203.0.113.0/24",
-                    interface: "Proxy0",
-                    gateway: "0.0.0.0",
-                    metric: 1200,
-                    proto: "static"
-                }]
+                ) + (
+                    if $present_203 then
+                        [{
+                            network: "203.0.113.0",
+                            mask: "255.255.255.0",
+                            destination: "203.0.113.0/24",
+                            interface: "Proxy0",
+                            gateway: "0.0.0.0",
+                            metric: 1200,
+                            proto: "static"
+                        }]
+                    else
+                        []
+                    end
+                )
             )
         }
     ' >"$output"
@@ -283,6 +296,14 @@ jq -e '
 [ "$(grep -F -x -c 'system configuration save' "$LOG")" = "1" ] ||
     fail "Конфигурация не сохранена ровно один раз"
 
+jq -e '
+    .operation == "delete" and
+    .phase == "completed" and
+    .current == 1 and .total == 1 and .percent == 100 and
+    .running == false and .success == true
+' "$TEST_ROOT/routes/operations/telegram.json" >/dev/null ||
+    fail "Прогресс успешного удаления не завершён корректно"
+
 # Проверка отката при частичной ошибке удаления.
 FAIL_ROOT="$WORK/failure-root"
 FAIL_LOG="$WORK/failure-ndmc.log"
@@ -299,6 +320,7 @@ mkdir -p \
     "$FAIL_ROOT/routes/transactions"
 
 cp -p "$LIBRARY" "$FAIL_ROOT/lib/routes-router-delete.sh"
+cp -p "$PROGRESS_LIBRARY" "$FAIL_ROOT/lib/routes-operation-progress.sh"
 cp -p "$TEST_ROOT/lib/interface-owner.sh" \
     "$FAIL_ROOT/lib/interface-owner.sh"
 cp -p "$TEST_ROOT/lib/routes-router-config.sh" \
@@ -381,16 +403,22 @@ case "$2" in
     exit 0
     ;;
   "no ip route 203.0.113.0 255.255.255.0 Proxy0")
-    echo "simulated delete failure" >&2
-    exit 9
+    if [ ! -f "$BRORAY_TEST_FAIL_ONCE" ]; then
+      : >"$BRORAY_TEST_FAIL_ONCE"
+      echo "simulated delete failure" >&2
+      exit 9
+    fi
+    : >"$BRORAY_TEST_203_DELETED"
+    echo "Network::RoutingTable: Deleted static route: 203.0.113.0/24 via Proxy0."
+    exit 0
     ;;
   "ip route 198.51.100.0 255.255.255.0 Proxy0 1200")
     echo "Network::RoutingTable: Added static route: 198.51.100.0/24 via Proxy0."
     exit 0
     ;;
   "system configuration save")
-    echo "save must not run" >&2
-    exit 10
+    echo "Core::ConfigurationSaver: Saving configuration."
+    exit 0
     ;;
   *)
     echo "unexpected command: $2" >&2
@@ -403,39 +431,95 @@ chmod 755 "$MOCK_BIN/ndmc"
 BRORAY_ROOT="$FAIL_ROOT"
 BRORAY_TEST_FAIL_LOG="$FAIL_LOG"
 BRORAY_TEST_CONFIG_LOG="$FAIL_LOG"
-export BRORAY_ROOT BRORAY_TEST_FAIL_LOG BRORAY_TEST_CONFIG_LOG
+BRORAY_TEST_FAIL_ONCE="$WORK/delete-fail-once"
+BRORAY_TEST_203_DELETED="$WORK/route-203-deleted"
+export BRORAY_ROOT BRORAY_TEST_FAIL_LOG BRORAY_TEST_CONFIG_LOG BRORAY_TEST_FAIL_ONCE BRORAY_TEST_203_DELETED
 
-. "$FAIL_ROOT/lib/routes-router-delete.sh"
-trap broray_routes_delete_cleanup EXIT HUP INT TERM
+unset BRORAY_ROUTES_DELETE_PROGRESS_LIBRARY
+unset BRORAY_ROUTES_PROGRESS_DIR
+unset BRORAY_ROUTES_PROGRESS_FILE
+unset BRORAY_ROUTES_PROGRESS_COUNTER_FILE
 
-if broray_routes_router_delete_run telegram >/dev/null 2>&1; then
-    fail "Моделируемая ошибка удаления не была обнаружена"
-fi
+set +e
+(
+    . "$FAIL_ROOT/lib/routes-router-delete.sh"
+    trap broray_routes_delete_cleanup EXIT HUP INT TERM
+    broray_routes_router_delete_run telegram >/dev/null 2>&1
+)
+first_rc=$?
+set -e
+[ "$first_rc" = 76 ] || fail "Ошибка удаления не сохранила возобновляемое состояние: rc=$first_rc"
 
-trap - EXIT HUP INT TERM
-broray_routes_delete_cleanup
-trap cleanup EXIT HUP INT TERM
+jq -e '
+    (.routes | length) == 1 and
+    .routes[0].network == "203.0.113.0" and
+    .routes[0].owners == ["telegram"]
+' "$FAIL_ROOT/routes/installed/routes.json" >/dev/null ||
+    fail "Успешно удалённый маршрут не исключён из частичного реестра"
 
-sha256sum \
-    "$FAIL_ROOT/routes/installed/routes.json" \
-    "$FAIL_ROOT/routes/installed/bundles/telegram.json" \
-    "$FAIL_ROOT/routes/state/telegram.json" \
-    "$FAIL_ROOT/routes/catalog/telegram/export-plan.json" \
-    >"$AFTER_SUMS"
+jq -e '
+    (.routeKeys | length) == 1 and
+    (.managedRouteKeys | length) == 1 and
+    (.routeKeys[0] | contains("203.0.113.0/24"))
+' "$FAIL_ROOT/routes/installed/bundles/telegram.json" >/dev/null ||
+    fail "Реестр набора не сохранил только необработанный маршрут"
 
-cmp -s "$BEFORE_SUMS" "$AFTER_SUMS" ||
-    fail "Локальное состояние не восстановлено после ошибки"
+jq -e '
+    .status == "installed" and
+    .resumeOperation.operation == "delete" and
+    .resumeOperation.resumable == true and
+    .resumeOperation.current == 1 and .resumeOperation.total == 2 and
+    .resumeOperation.deleted == 1 and
+    .lastError.resumable == true
+' "$FAIL_ROOT/routes/state/telegram.json" >/dev/null ||
+    fail "Состояние удаления не допускает продолжение после ошибки"
 
-[ "$(grep -F -x -c 'no ip route 198.51.100.0 255.255.255.0 Proxy0' "$FAIL_LOG")" = "1" ] ||
-    fail "Первый маршрут удалялся неверное число раз"
+jq -e '
+    .operation == "delete" and
+    .phase == "failed_resumable" and
+    .current == 1 and .total == 2 and .percent == 50 and
+    .running == false and .success == false and .resumable == true and
+    .rolledBack == false and .errorRoute == "203.0.113.0/24"
+' "$FAIL_ROOT/routes/operations/telegram.json" >/dev/null ||
+    fail "Прогресс неудачного удаления не зафиксировал возможность продолжения"
 
-[ "$(grep -F -x -c 'no ip route 203.0.113.0 255.255.255.0 Proxy0' "$FAIL_LOG")" = "1" ] ||
-    fail "Ошибка второго удаления не была смоделирована"
+[ "$(grep -F -x -c 'ip route 198.51.100.0 255.255.255.0 Proxy0 1200' "$FAIL_LOG" 2>/dev/null || true)" = 0 ] ||
+    fail "Успешно удалённый маршрут был ошибочно восстановлен"
+[ "$(grep -F -x -c 'system configuration save' "$FAIL_LOG" 2>/dev/null || true)" = 1 ] ||
+    fail "Частичное удаление не было сохранено ровно один раз"
 
-[ "$(grep -F -x -c 'ip route 198.51.100.0 255.255.255.0 Proxy0 1200' "$FAIL_LOG")" = "1" ] ||
-    fail "Первый маршрут не восстановлен после ошибки"
+# Повторный запуск продолжает только с оставшегося маршрута.
+unset BRORAY_ROUTES_DELETE_PROGRESS_LIBRARY
+unset BRORAY_ROUTES_PROGRESS_DIR
+unset BRORAY_ROUTES_PROGRESS_FILE
+unset BRORAY_ROUTES_PROGRESS_COUNTER_FILE
+(
+    . "$FAIL_ROOT/lib/routes-router-delete.sh"
+    trap broray_routes_delete_cleanup EXIT HUP INT TERM
+    broray_routes_router_delete_run telegram >/dev/null
+    trap - EXIT HUP INT TERM
+    broray_routes_delete_cleanup
+)
 
-[ "$(grep -F -x -c 'system configuration save' "$FAIL_LOG" 2>/dev/null || true)" = "0" ] ||
-    fail "Конфигурация была сохранена при неудачном удалении"
+jq -e '(.routes | length) == 0' "$FAIL_ROOT/routes/installed/routes.json" >/dev/null ||
+    fail "Продолженное удаление не очистило общий реестр"
+jq -e '.installedVersion == null and (.routeKeys | length) == 0' \
+    "$FAIL_ROOT/routes/installed/bundles/telegram.json" >/dev/null ||
+    fail "Продолженное удаление не завершило реестр набора"
+jq -e '
+    .status == "downloaded" and .installedVersion == null and
+    .deleteResult.deleted == 2 and (.resumeOperation == null)
+' "$FAIL_ROOT/routes/state/telegram.json" >/dev/null ||
+    fail "Итог продолженного удаления не объединён"
+jq -e '
+    .phase == "completed" and .current == 2 and .total == 2 and
+    .percent == 100 and .resumed == true and .resumable == false
+' "$FAIL_ROOT/routes/operations/telegram.json" >/dev/null ||
+    fail "Прогресс продолженного удаления завершён неверно"
+
+[ "$(grep -F -x -c 'no ip route 198.51.100.0 255.255.255.0 Proxy0' "$FAIL_LOG")" = 1 ] ||
+    fail "Первый маршрут был обработан повторно"
+[ "$(grep -F -x -c 'no ip route 203.0.113.0 255.255.255.0 Proxy0' "$FAIL_LOG")" = 2 ] ||
+    fail "Ошибочный маршрут не был повторён при продолжении"
 
 echo "BROray routes router delete self-test: PASS"

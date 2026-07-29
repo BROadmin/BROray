@@ -15,6 +15,11 @@
     var mobileButton = document.getElementById("mobile-menu-button");
     var backdrop = document.getElementById("sidebar-backdrop");
     var logoutButton = document.getElementById("logout-button");
+    var supportButton = document.getElementById("support-button");
+    var supportRoot = document.getElementById("support-root");
+    var supportBackdrop = document.getElementById("support-backdrop");
+    var supportClose = document.getElementById("support-close");
+    var supportPreviousFocus = null;
 
     function isMobile() {
         return window.innerWidth <= MOBILE_BREAKPOINT;
@@ -110,10 +115,40 @@
         });
         if (backdrop) backdrop.addEventListener("click", closeMobileMenu);
         document.addEventListener("keydown", function (event) {
-            if (event.key === "Escape") closeMobileMenu();
+            if (event.key !== "Escape") return;
+            if (supportRoot && !supportRoot.hidden) closeSupport();
+            else closeMobileMenu();
         });
         window.addEventListener("resize", syncLayout);
         syncLayout();
+    }
+
+
+    function openSupport() {
+        if (!supportRoot) return;
+        supportPreviousFocus = document.activeElement;
+        closeMobileMenu();
+        supportRoot.hidden = false;
+        document.body.classList.add("modal-open");
+        if (supportClose) supportClose.focus();
+    }
+
+    function closeSupport() {
+        if (!supportRoot || supportRoot.hidden) return;
+        supportRoot.hidden = true;
+        document.body.classList.remove("modal-open");
+        if (supportPreviousFocus && typeof supportPreviousFocus.focus === "function") {
+            supportPreviousFocus.focus();
+        }
+        supportPreviousFocus = null;
+    }
+
+    function bindSupport() {
+        if (!supportButton || !supportRoot || supportRoot.dataset.staticSupportBound === "true") return;
+        supportRoot.dataset.staticSupportBound = "true";
+        supportButton.addEventListener("click", openSupport);
+        if (supportBackdrop) supportBackdrop.addEventListener("click", closeSupport);
+        if (supportClose) supportClose.addEventListener("click", closeSupport);
     }
 
     function bindLogout() {
@@ -129,5 +164,6 @@
 
     activateNavigation();
     bindShell();
+    bindSupport();
     bindLogout();
 })();

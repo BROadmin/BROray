@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-build-id="20260725-webui-desktop-layout-11">
+<html lang="ru" data-build-id="20260729-release-2.2.0-r1">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -11,11 +11,11 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png">
-    <link rel="manifest" href="/manifest.json?v=20260725-webui-desktop-layout-11">
-    <link rel="stylesheet" href="/assets/css/allpage.css?v=20260725-webui-desktop-layout-11">
-    <script src="/assets/js/theme-init.js?v=20260725-webui-desktop-layout-11"></script>
+    <link rel="manifest" href="/manifest.json?v=20260729-release-2.2.0-r1">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=20260729-release-2.2.0-r1">
+    <script src="/assets/js/theme-init.js?v=20260729-release-2.2.0-r1"></script>
 </head>
-<body class="app-body page-subscriptions" data-page="subscriptions" data-webui-build="20260725-webui-desktop-layout-11">
+<body class="app-body page-subscriptions" data-page="subscriptions" data-webui-build="20260729-release-2.2.0-r1">
     <div id="app" class="app-layout" hidden>
         <aside id="sidebar" class="sidebar" aria-label="Основная навигация">
             <div class="sidebar-header">
@@ -63,6 +63,10 @@
                 </a>
             </nav>
             <div class="sidebar-footer">
+                <button id="support-button" class="sidebar-support" type="button" aria-haspopup="dialog" aria-controls="support-root">
+                    <span class="sidebar-link-icon" data-icon="help" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Поддержать проект</span>
+                </button>
                 <div class="sidebar-user">
                     <span class="sidebar-user-avatar" data-icon="user" aria-hidden="true"></span>
                     <span class="sidebar-user-copy">
@@ -187,6 +191,26 @@
         <span>Загрузка BROray…</span>
     </div>
     <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+    <div id="support-root" class="modal-root support-modal-root" hidden>
+        <button id="support-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть окно поддержки"></button>
+        <section class="modal support-modal" role="dialog" aria-modal="true" aria-labelledby="support-title" aria-describedby="support-message">
+            <span class="eyebrow">Поддержка проекта</span>
+            <h2 id="support-title">Помочь развитию BROray</h2>
+            <div class="support-modal-content">
+                <a class="support-qr-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer" aria-label="Открыть CloudTips для поддержки BROray">
+                    <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=20260729-release-2.2.0-r1" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
+                </a>
+                <div class="support-modal-copy">
+                    <p id="support-message">BROray развивается как открытый проект. Поддержка помогает оплачивать инфраструктуру, тестирование и выпуск обновлений.</p>
+                    <a class="support-direct-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">https://pay.cloudtips.ru/p/09b23d0a</a>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="support-close" class="button button-secondary" type="button">Закрыть</button>
+                <a class="button button-primary" data-icon="help" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Открыть CloudTips</a>
+            </div>
+        </section>
+    </div>
     <div id="confirm-root" class="modal-root" hidden>
         <button id="confirm-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть"></button>
         <section class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
@@ -206,11 +230,11 @@
         </section>
     </div>
 
-    <script src="/assets/js/common.js?v=20260725-webui-desktop-layout-11"></script>
-    <script src="/assets/js/icons.js?v=20260725-webui-desktop-layout-11"></script>
-    <script src="/assets/js/app-shell.js?v=20260725-webui-desktop-layout-11"></script>
-    <script src="/assets/js/theme.js?v=20260725-webui-desktop-layout-11"></script>
-    <script src="/assets/js/dialogs.js?v=20260725-webui-desktop-layout-11"></script>
-    <script src="/assets/js/subscriptions.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/common.js?v=20260729-release-2.2.0-r1"></script>
+    <script src="/assets/js/icons.js?v=20260729-release-2.2.0-r1"></script>
+    <script src="/assets/js/app-shell.js?v=20260729-release-2.2.0-r1"></script>
+    <script src="/assets/js/theme.js?v=20260729-release-2.2.0-r1"></script>
+    <script src="/assets/js/dialogs.js?v=20260729-release-2.2.0-r1"></script>
+    <script src="/assets/js/subscriptions.js?v=20260729-release-2.2.0-r1"></script>
 </body>
 </html>

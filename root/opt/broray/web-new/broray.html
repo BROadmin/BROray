@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-build-id="20260725-webui-desktop-layout-11">
+<html lang="ru" data-build-id="20260729-release-2.2.0-r1">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -11,11 +11,11 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png">
-    <link rel="manifest" href="/manifest.json?v=20260725-webui-desktop-layout-11">
-    <link rel="stylesheet" href="/assets/css/allpage.css?v=20260725-webui-desktop-layout-11">
-    <script src="/assets/js/theme-init.js?v=20260725-webui-desktop-layout-11"></script>
+    <link rel="manifest" href="/manifest.json?v=20260729-release-2.2.0-r1">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=20260729-release-2.2.0-r1">
+    <script src="/assets/js/theme-init.js?v=20260729-release-2.2.0-r1"></script>
 </head>
-<body class="app-body page-broray" data-page="broray" data-webui-build="20260725-webui-desktop-layout-11">
+<body class="app-body page-broray" data-page="broray" data-webui-build="20260729-release-2.2.0-r1">
     <div id="app" class="app-layout" hidden>
         <aside id="sidebar" class="sidebar" aria-label="Основная навигация">
             <div class="sidebar-header">
@@ -63,6 +63,10 @@
                 </a>
             </nav>
             <div class="sidebar-footer">
+                <button id="support-button" class="sidebar-support" type="button" aria-haspopup="dialog" aria-controls="support-root">
+                    <span class="sidebar-link-icon" data-icon="help" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Поддержать проект</span>
+                </button>
                 <div class="sidebar-user">
                     <span class="sidebar-user-avatar" data-icon="user" aria-hidden="true"></span>
                     <span class="sidebar-user-copy">
@@ -96,7 +100,7 @@
         <div>
             <span class="eyebrow">Версия, компоненты и обслуживание</span>
             <h1 id="broray-page-title">BROray</h1>
-            <p>Состояние установки, состав системы, обновление, восстановление и безопасное удаление.</p>
+            <p>Состояние установки, состав системы, обновление, восстановительная переустановка, восстановление и безопасное удаление.</p>
         </div>
         <span id="installation-status" class="status-badge status-loading" data-icon="status">Проверка…</span>
     </section>
@@ -122,6 +126,10 @@
                 <dd id="update-channel">—</dd>
             </div>
             <div class="broray-fact">
+                <dt>Пакет OPKG</dt>
+                <dd id="installed-package-version">—</dd>
+            </div>
+            <div class="broray-fact">
                 <dt>Доступная версия</dt>
                 <dd id="available-version">—</dd>
             </div>
@@ -137,7 +145,7 @@
         <div class="section-heading">
             <div>
                 <span class="eyebrow">Обслуживание</span>
-                <h2 id="broray-update-title">Обновление</h2>
+                <h2 id="broray-update-title">Обновление и переустановка</h2>
             </div>
         </div>
         <div class="broray-update-actions" aria-label="Обновление BROray">
@@ -147,6 +155,58 @@
             <button id="install-update" class="button button-primary" data-icon="update" type="button" disabled>
                 <span class="button-label">Установить обновление</span>
             </button>
+            <button id="reinstall-current" class="button button-secondary" data-icon="restore" type="button" disabled>
+                <span class="button-label">Переустановить текущую версию</span>
+            </button>
+        </div>
+        <p class="section-note broray-reinstall-note">Переустановка повторно установит текущий пакет BROray, сохранив настройки, подписки, серверы, маршруты и DNS-over-TLS.</p>
+    </section>
+
+    <section class="card broray-cleanup-card" aria-labelledby="broray-cleanup-title">
+        <div class="section-heading">
+            <div>
+                <span class="eyebrow">Свободное место</span>
+                <h2 id="broray-cleanup-title">Безопасная очистка</h2>
+            </div>
+            <span id="cleanup-state" class="status-badge status-neutral" data-icon="storage">Не проверено</span>
+        </div>
+        <p class="section-note">BROray удаляет только распознанные старые служебные файлы. Активные журналы, последние резервные копии, неизвестные файлы и внешние симлинки не затрагиваются.</p>
+        <div class="broray-cleanup-options" aria-label="Категории очистки">
+            <label class="broray-cleanup-option">
+                <input id="cleanup-temp" type="checkbox" checked>
+                <span><strong>Временные файлы</strong><small>Незавершённые загрузки и устаревшие служебные каталоги</small></span>
+            </label>
+            <label class="broray-cleanup-option">
+                <input id="cleanup-backups" type="checkbox" checked>
+                <span><strong>Старые резервные копии</strong><small>Последние три копии каждого управляемого типа сохраняются</small></span>
+            </label>
+            <label class="broray-cleanup-option">
+                <input id="cleanup-route-backups" type="checkbox" checked>
+                <span><strong>Копии отката маршрутов</strong><small>Сохраняются три последних набора каждого типа</small></span>
+            </label>
+            <label class="broray-cleanup-option">
+                <input id="cleanup-logs" type="checkbox" checked>
+                <span><strong>Старые журналы</strong><small>Только архивы и ротации старше семи дней</small></span>
+            </label>
+        </div>
+        <div class="broray-cleanup-actions">
+            <button id="cleanup-plan" class="button button-secondary" data-icon="search" type="button">
+                <span class="button-label">Проверить очистку</span>
+            </button>
+            <button id="cleanup-run" class="button button-primary" data-icon="delete" type="button" disabled>
+                <span class="button-label">Очистить</span>
+            </button>
+        </div>
+        <div id="cleanup-result" class="broray-cleanup-result" hidden aria-live="polite">
+            <dl class="broray-cleanup-summary">
+                <div><dt>Объектов</dt><dd id="cleanup-count">0</dd></div>
+                <div><dt>Можно освободить</dt><dd id="cleanup-bytes">0 Б</dd></div>
+                <div><dt>Подтверждение</dt><dd id="cleanup-expiry">—</dd></div>
+            </dl>
+            <details class="broray-cleanup-details">
+                <summary data-icon="logs">Что будет удалено</summary>
+                <ul id="cleanup-candidates" class="broray-cleanup-candidates"></ul>
+            </details>
         </div>
     </section>
 
@@ -202,12 +262,23 @@
                         <small>Исходный код и выпуски</small>
                     </span>
                 </a>
-                <a id="donate-link" class="broray-link-card broray-donation-card" data-icon="help" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">
-                    <span>
-                        <strong>Поддержать проект</strong>
-                        <small>Помочь развитию BROray</small>
-                    </span>
-                </a>
+                <details id="donate-link" class="broray-support-details">
+                    <summary class="broray-link-card broray-donation-card" data-icon="help">
+                        <span>
+                            <strong>Поддержать проект</strong>
+                            <small>QR-код и прямая ссылка CloudTips</small>
+                        </span>
+                    </summary>
+                    <div class="broray-support-panel">
+                        <a class="support-qr-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer" aria-label="Открыть CloudTips для поддержки BROray">
+                            <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
+                        </a>
+                        <div class="broray-support-copy">
+                            <p>Поддержка помогает оплачивать инфраструктуру, тестирование и выпуск обновлений BROray.</p>
+                            <a class="support-direct-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">https://pay.cloudtips.ru/p/09b23d0a</a>
+                        </div>
+                    </div>
+                </details>
             </div>
         </section>
     </div>
@@ -216,7 +287,7 @@
         <div class="section-heading broray-operation-heading">
             <div>
                 <span class="eyebrow">Последняя операция</span>
-                <h2 id="operation-title">Обновление и восстановление</h2>
+                <h2 id="operation-title">Обновление, переустановка и восстановление</h2>
             </div>
             <span id="operation-state" class="status-badge status-neutral" data-icon="logs">Нет операций</span>
         </div>
@@ -283,6 +354,26 @@
         <span>Загрузка BROray…</span>
     </div>
     <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+    <div id="support-root" class="modal-root support-modal-root" hidden>
+        <button id="support-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть окно поддержки"></button>
+        <section class="modal support-modal" role="dialog" aria-modal="true" aria-labelledby="support-title" aria-describedby="support-message">
+            <span class="eyebrow">Поддержка проекта</span>
+            <h2 id="support-title">Помочь развитию BROray</h2>
+            <div class="support-modal-content">
+                <a class="support-qr-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer" aria-label="Открыть CloudTips для поддержки BROray">
+                    <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=20260729-release-2.2.0-r1" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
+                </a>
+                <div class="support-modal-copy">
+                    <p id="support-message">BROray развивается как открытый проект. Поддержка помогает оплачивать инфраструктуру, тестирование и выпуск обновлений.</p>
+                    <a class="support-direct-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">https://pay.cloudtips.ru/p/09b23d0a</a>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="support-close" class="button button-secondary" type="button">Закрыть</button>
+                <a class="button button-primary" data-icon="help" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Открыть CloudTips</a>
+            </div>
+        </section>
+    </div>
     <div id="confirm-root" class="modal-root" hidden>
         <button id="confirm-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть"></button>
         <section class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
@@ -302,11 +393,11 @@
         </section>
     </div>
 
-    <script src="/assets/js/common.js?v=20260725-webui-desktop-layout-11"></script>
-    <script src="/assets/js/icons.js?v=20260725-webui-desktop-layout-11"></script>
-    <script src="/assets/js/app-shell.js?v=20260725-webui-desktop-layout-11"></script>
-    <script src="/assets/js/theme.js?v=20260725-webui-desktop-layout-11"></script>
-    <script src="/assets/js/dialogs.js?v=20260725-webui-desktop-layout-11"></script>
-    <script src="/assets/js/broray.js?v=20260725-webui-desktop-layout-11"></script>
+    <script src="/assets/js/common.js?v=20260729-release-2.2.0-r1"></script>
+    <script src="/assets/js/icons.js?v=20260729-release-2.2.0-r1"></script>
+    <script src="/assets/js/app-shell.js?v=20260729-release-2.2.0-r1"></script>
+    <script src="/assets/js/theme.js?v=20260729-release-2.2.0-r1"></script>
+    <script src="/assets/js/dialogs.js?v=20260729-release-2.2.0-r1"></script>
+    <script src="/assets/js/broray.js?v=20260729-release-2.2.0-r1"></script>
 </body>
 </html>

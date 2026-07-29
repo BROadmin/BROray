@@ -2,9 +2,13 @@
 
 [ -z "${IPKG_INSTROOT:-}" ] || exit 0
 
-/opt/bin/ash /opt/broray/lib/package-setup.sh || exit $?
+OPT_ROOT="${BRORAY_OPT_ROOT:-/opt}"
+TMP_ROOT="${BRORAY_TMP_ROOT:-/tmp}"
+
+"$OPT_ROOT/bin/ash" "$OPT_ROOT/broray/lib/package-setup.sh" || exit $?
 
 rm -f \
-    /tmp/broray-opkg-services-before-upgrade \
-    /tmp/broray-opkg-existing-backup
+    "$TMP_ROOT/broray-opkg-services-before-upgrade" \
+    "$TMP_ROOT/broray-opkg-existing-backup" \
+    "$TMP_ROOT/broray-opkg-prepared-update"
 exit 0

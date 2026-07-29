@@ -1,6 +1,6 @@
 #!/opt/bin/ash
 
-# BROray 2.1.1 — safe local BAT route importer.
+# BROray 2.2.0 — safe local BAT route importer.
 # Uploaded BAT files are treated strictly as text and are never executed.
 
 BRORAY_ROOT="${BRORAY_ROOT:-/opt/broray}"

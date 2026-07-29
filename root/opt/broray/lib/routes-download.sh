@@ -642,6 +642,8 @@ broray_routes_download_run()
             } |
             .routeCount = $route_count |
             .lastDownloadedAt = $now |
+            .lastVerifiedAt = null |
+            .verifyResult = null |
             .lastError = null |
             .downloadResult = {
                 result: $result,

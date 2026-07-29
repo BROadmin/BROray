@@ -36,6 +36,10 @@
 {{NAVIGATION}}
             </nav>
             <div class="sidebar-footer">
+                <button id="support-button" class="sidebar-support" type="button" aria-haspopup="dialog" aria-controls="support-root">
+                    <span class="sidebar-link-icon" data-icon="help" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Поддержать проект</span>
+                </button>
                 <div class="sidebar-user">
                     <span class="sidebar-user-avatar" data-icon="user" aria-hidden="true"></span>
                     <span class="sidebar-user-copy">
@@ -76,6 +80,26 @@
         <span>Загрузка BROray…</span>
     </div>
     <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+    <div id="support-root" class="modal-root support-modal-root" hidden>
+        <button id="support-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть окно поддержки"></button>
+        <section class="modal support-modal" role="dialog" aria-modal="true" aria-labelledby="support-title" aria-describedby="support-message">
+            <span class="eyebrow">Поддержка проекта</span>
+            <h2 id="support-title">Помочь развитию BROray</h2>
+            <div class="support-modal-content">
+                <a class="support-qr-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer" aria-label="Открыть CloudTips для поддержки BROray">
+                    <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v={{BUILD_ID}}" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
+                </a>
+                <div class="support-modal-copy">
+                    <p id="support-message">BROray развивается как открытый проект. Поддержка помогает оплачивать инфраструктуру, тестирование и выпуск обновлений.</p>
+                    <a class="support-direct-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">https://pay.cloudtips.ru/p/09b23d0a</a>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="support-close" class="button button-secondary" type="button">Закрыть</button>
+                <a class="button button-primary" data-icon="help" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Открыть CloudTips</a>
+            </div>
+        </section>
+    </div>
     <div id="confirm-root" class="modal-root" hidden>
         <button id="confirm-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть"></button>
         <section class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">

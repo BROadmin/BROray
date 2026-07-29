@@ -101,7 +101,8 @@
       "scripts": [
         "dialogs.js",
         "routes.js",
-        "routes-custom.js"
+        "routes-custom.js",
+        "routes-dot.js"
       ],
       "styles": []
     },

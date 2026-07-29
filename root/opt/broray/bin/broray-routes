@@ -12,6 +12,7 @@ PREFLIGHT_LIBRARY="$ROOT/lib/routes-router-preflight.sh"
 ROUTER_EXPORT_LIBRARY="$ROOT/lib/routes-router-export.sh"
 SYNC_LIBRARY="$ROOT/lib/routes-router-sync.sh"
 ROUTER_DELETE_LIBRARY="$ROOT/lib/routes-router-delete.sh"
+PROGRESS_LIBRARY="$ROOT/lib/routes-operation-progress.sh"
 
 broray_routes_cli_run_self()
 {
@@ -38,6 +39,8 @@ usage()
     echo "  broray-routes plan <bundleId>" >&2
     echo "  broray-routes export <bundleId>" >&2
     echo "  broray-routes delete <bundleId>" >&2
+    echo "  broray-routes stop <bundleId>" >&2
+    echo "  broray-routes resume <bundleId>" >&2
     exit 2
 }
 
@@ -137,6 +140,57 @@ case "${1:-}" in
         trap - EXIT HUP INT TERM
         broray_routes_delete_cleanup
         exit "$rc"
+        ;;
+    stop)
+        [ "$#" -eq 2 ] || usage
+        [ -r "$PROGRESS_LIBRARY" ] || {
+            echo "ОШИБКА: модуль прогресса маршрутов недоступен." >&2
+            exit 1
+        }
+        . "$PROGRESS_LIBRARY"
+        if broray_routes_progress_request_stop "$2"; then
+            echo "Запрошена остановка после текущего маршрута."
+        else
+            rc=$?
+            case "$rc" in
+                2) echo "ОШИБКА: состояние операции не найдено." >&2 ;;
+                3) echo "ОШИБКА: операция с этим набором сейчас не выполняется." >&2 ;;
+                *) echo "ОШИБКА: не удалось запросить остановку операции." >&2 ;;
+            esac
+            exit 1
+        fi
+        ;;
+    resume)
+        [ "$#" -eq 2 ] || usage
+        [ -r "$PROGRESS_LIBRARY" ] || {
+            echo "ОШИБКА: модуль прогресса маршрутов недоступен." >&2
+            exit 1
+        }
+        . "$PROGRESS_LIBRARY"
+        progress_json="$(broray_routes_progress_read "$2")" || {
+            echo "ОШИБКА: не удалось прочитать состояние операции." >&2
+            exit 1
+        }
+        printf '%s
+' "$progress_json" | jq -e '.resumable == true and .running == false' >/dev/null 2>&1 || {
+            echo "ОШИБКА: для этого набора нет операции, которую можно продолжить." >&2
+            exit 1
+        }
+        operation="$(printf '%s
+' "$progress_json" | jq -r '.operation // empty')"
+        case "$0" in
+            */*) CLI_SELF="$0" ;;
+            *) CLI_SELF="$(command -v "$0" 2>/dev/null || true)" ;;
+        esac
+        [ -n "$CLI_SELF" ] && [ -x "$CLI_SELF" ] || {
+            echo "ОШИБКА: не удалось определить путь broray-routes." >&2
+            exit 1
+        }
+        case "$operation" in
+            delete) broray_routes_cli_run_self delete "$2" ;;
+            install|update|restore) broray_routes_cli_run_self export "$2" ;;
+            *) echo "ОШИБКА: тип сохранённой операции не поддерживается." >&2; exit 1 ;;
+        esac
         ;;
     *)
         usage

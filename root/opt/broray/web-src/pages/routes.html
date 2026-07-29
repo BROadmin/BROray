@@ -42,6 +42,58 @@
         </div>
     </div>
 
+    <section id="routes-dot-card" class="routes-dot-card ui-card" aria-labelledby="routes-dot-title">
+        <div class="routes-dot-heading">
+            <div class="routes-dot-heading-copy">
+                <span class="eyebrow">Защищённый DNS</span>
+                <h2 id="routes-dot-title">DNS-over-TLS</h2>
+                <p>
+                    Выберите несколько DNS-over-TLS серверов, проверьте TLS-соединение
+                    и экспортируйте только подтверждённую конфигурацию в Keenetic.
+                </p>
+            </div>
+            <span id="routes-dot-status" class="status-badge status-loading" data-icon="status" role="status">Загрузка…</span>
+        </div>
+
+        <div class="routes-dot-summary" role="list" aria-label="Сводка DNS-over-TLS">
+            <div role="listitem"><strong id="routes-dot-selected">—</strong><span>выбрано</span></div>
+            <div role="listitem"><strong id="routes-dot-tested">—</strong><span>проверено</span></div>
+            <div role="listitem"><strong id="routes-dot-installed">—</strong><span>в Keenetic</span></div>
+            <div role="listitem"><strong id="routes-dot-capacity">—</strong><span>всего DoT/DoH</span></div>
+        </div>
+
+        <div id="routes-dot-notice" class="routes-dot-notice status-neutral">
+            <span data-icon="security" aria-hidden="true"></span>
+            <p id="routes-dot-message">Получение состояния DNS-over-TLS…</p>
+        </div>
+
+        <div id="routes-dot-servers" class="routes-dot-server-list" aria-live="polite"></div>
+
+        <div class="routes-dot-actions">
+            <button id="routes-dot-test" class="button button-secondary" type="button" data-icon="status">Проверить серверы</button>
+            <button id="routes-dot-apply" class="button button-secondary" type="button" data-icon="download">Экспортировать в Keenetic</button>
+            <button id="routes-dot-refresh" class="button button-secondary" type="button" data-icon="refresh">Обновить состояние</button>
+            <button id="routes-dot-delete" class="button button-danger-outline" type="button" data-icon="delete">Удалить из Keenetic</button>
+        </div>
+
+        <details class="routes-dot-details">
+            <summary>Технические сведения</summary>
+            <dl>
+                <div><dt>Последняя проверка</dt><dd id="routes-dot-last-tested">—</dd></div>
+                <div><dt>Последний экспорт</dt><dd id="routes-dot-last-applied">—</dd></div>
+                <div><dt>Последнее удаление</dt><dd id="routes-dot-last-deleted">—</dd></div>
+                <div><dt>Чужие DoT-записи</dt><dd id="routes-dot-external-dot">—</dd></div>
+                <div><dt>DoH-записи</dt><dd id="routes-dot-doh">—</dd></div>
+            </dl>
+        </details>
+
+        <p class="routes-dot-tip">
+            Для стабильной работы рекомендуется одновременно использовать несколько
+            DNS-over-TLS серверов, желательно от разных DNS-провайдеров. Keenetic
+            поддерживает не более восьми DoT/DoH серверов суммарно.
+        </p>
+    </section>
+
     <section class="routes-more ui-card" aria-labelledby="routes-more-title">
         <div>
             <span class="eyebrow">Другие ресурсы</span>

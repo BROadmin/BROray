@@ -29,17 +29,10 @@ broray_routes_export_build_run()
 }
 EOF
 
-cat >"$WORK/lib/routes-router-preflight.sh" <<'EOF'
-broray_routes_preflight_run()
+cat >"$WORK/lib/routes-router-sync.sh" <<'EOF'
+broray_routes_sync_apply()
 {
-    echo preflight >>"$BRORAY_ROOT/order.log"
-}
-EOF
-
-cat >"$WORK/lib/routes-router-export.sh" <<'EOF'
-broray_routes_router_export_run()
-{
-    echo export >>"$BRORAY_ROOT/order.log"
+    echo sync-apply >>"$BRORAY_ROOT/order.log"
 }
 EOF
 
@@ -49,8 +42,20 @@ broray_routes_download_run() { :; }
 EOF
 
 cat >"$WORK/lib/routes-router-delete.sh" <<'EOF'
-broray_routes_router_delete_run() { :; }
+broray_routes_router_delete_run() { echo delete-run >>"$BRORAY_ROOT/order.log"; }
 broray_routes_delete_cleanup() { :; }
+EOF
+
+cat >"$WORK/lib/routes-operation-progress.sh" <<'EOF'
+broray_routes_progress_request_stop() { echo stop-request >>"$BRORAY_ROOT/order.log"; }
+broray_routes_progress_read()
+{
+    if [ -f "$BRORAY_ROOT/resume-delete" ]; then
+        echo '{"operation":"delete","running":false,"resumable":true}'
+    else
+        echo '{"operation":"install","running":false,"resumable":true}'
+    fi
+}
 EOF
 
 : >"$WORK/order.log"
@@ -69,10 +74,28 @@ else
         "$WORK/bin/broray-routes" export tiktok
 fi
 
+if [ -n "${BRORAY_ASH_BIN:-}" ] && [ -x "$BRORAY_ASH_BIN" ]; then
+    RUN_ASH="$BRORAY_ASH_BIN"
+elif [ -x /opt/bin/ash ]; then
+    RUN_ASH=/opt/bin/ash
+elif command -v ash >/dev/null 2>&1; then
+    RUN_ASH="$(command -v ash)"
+else
+    RUN_ASH="$(command -v busybox) ash"
+fi
+
+BRORAY_ROOT="$WORK" $RUN_ASH "$WORK/bin/broray-routes" stop tiktok >/dev/null
+BRORAY_ROOT="$WORK" $RUN_ASH "$WORK/bin/broray-routes" resume tiktok >/dev/null
+: >"$WORK/resume-delete"
+BRORAY_ROOT="$WORK" $RUN_ASH "$WORK/bin/broray-routes" resume tiktok >/dev/null
+
 cat >"$WORK/expected.log" <<'EOF'
 build-export
-preflight
-export
+sync-apply
+stop-request
+build-export
+sync-apply
+delete-run
 EOF
 
 diff -u "$WORK/expected.log" "$WORK/order.log"

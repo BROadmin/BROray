@@ -3,12 +3,16 @@
 AUTH_COMMON="/opt/broray/web-new/api/auth-common.sh"
 BUNDLES="/opt/broray/routes/bundles.json"
 PRESENCE_LIBRARY="/opt/broray/lib/routes-router-presence.sh"
+PROGRESS_LIBRARY="/opt/broray/lib/routes-operation-progress.sh"
+API_LOCK_LIBRARY="/opt/broray/lib/routes-api-operation.sh"
 ERROR_FILE="/tmp/broray-routes-status-$$.err"
 PRESENCE_FILE="/tmp/broray-routes-presence-$$.json"
+PROGRESS_FILE="/tmp/broray-routes-progress-status-$$.json"
+GLOBAL_OPERATION_FILE="/tmp/broray-routes-global-operation-$$.json"
 
 cleanup()
 {
-    rm -f "$ERROR_FILE" "$PRESENCE_FILE"
+    rm -f "$ERROR_FILE" "$PRESENCE_FILE" "$PROGRESS_FILE" "$GLOBAL_OPERATION_FILE"
 }
 
 trap cleanup EXIT HUP INT TERM
@@ -82,7 +86,9 @@ if ! jq -e \
     ((.availableVersion == null) or ((.availableVersion | type) == "object")) and
     ((.downloadedVersion == null) or ((.downloadedVersion | type) == "object")) and
     ((.installedVersion == null) or ((.installedVersion | type) == "object")) and
-    ((.lastError == null) or ((.lastError | type) == "string") or ((.lastError | type) == "object"))
+    ((.lastError == null) or ((.lastError | type) == "string") or ((.lastError | type) == "object")) and
+    ((.lastVerifiedAt == null) or ((.lastVerifiedAt | type) == "string")) and
+    ((.verifyResult == null) or ((.verifyResult | type) == "object"))
 ' "$STATE_FILE" >/dev/null 2>"$ERROR_FILE"
 then
     details="$(tail -n 20 "$ERROR_FILE" 2>/dev/null)"
@@ -119,9 +125,54 @@ if [ -r "$PRESENCE_LIBRARY" ]; then
     fi
 fi
 
+progress_json="$(
+    jq -n --arg bundleId "$bundle_id" '
+        {
+            schemaVersion: 1,
+            kind: "routes",
+            bundleId: $bundleId,
+            operation: null,
+            phase: "idle",
+            current: 0,
+            total: 0,
+            percent: 0,
+            currentRoute: null,
+            message: "Операция не выполняется.",
+            running: false,
+            success: null,
+            rolledBack: false,
+            pid: null,
+            startedAt: null,
+            updatedAt: null,
+            completedAt: null
+        }
+    '
+)"
+
+if [ -r "$PROGRESS_LIBRARY" ]; then
+    . "$PROGRESS_LIBRARY"
+    if broray_routes_progress_read "$bundle_id" >"$PROGRESS_FILE" &&
+       jq -e 'type == "object"' "$PROGRESS_FILE" >/dev/null 2>&1
+    then
+        progress_json="$(jq -c . "$PROGRESS_FILE")"
+    fi
+fi
+
+global_operation_json='{"active":false,"pid":null,"scope":null,"action":null,"bundleId":null,"startedAt":null,"stale":false}'
+if [ -r "$API_LOCK_LIBRARY" ]; then
+    . "$API_LOCK_LIBRARY"
+    if broray_routes_api_lock_read_json >"$GLOBAL_OPERATION_FILE" &&
+       jq -e 'type == "object"' "$GLOBAL_OPERATION_FILE" >/dev/null 2>&1
+    then
+        global_operation_json="$(jq -c . "$GLOBAL_OPERATION_FILE")"
+    fi
+fi
+
 data_json="$(
     jq -c \
-        --argjson router_presence "$presence_json" '
+        --argjson router_presence "$presence_json" \
+        --argjson operation_progress "$progress_json" \
+        --argjson global_operation "$global_operation_json" '
         {
             schemaVersion,
             bundleId,
@@ -131,18 +182,22 @@ data_json="$(
             installedVersion,
             routeCount,
             lastCheckedAt,
+            lastVerifiedAt,
             lastDownloadedAt,
             lastExportedAt,
             lastDeletedAt,
             lastError,
             checkResult,
+            verifyResult,
             downloadResult,
             exportBuild,
             preflight,
             exportResult,
             deleteResult,
             updatedAt,
-            routerPresence: $router_presence
+            routerPresence: $router_presence,
+            operationProgress: $operation_progress,
+            globalOperation: $global_operation
         }
     ' "$STATE_FILE"
 )" || {

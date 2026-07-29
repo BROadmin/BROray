@@ -10,6 +10,7 @@ BRORAY_SYNC_ROUTES="${BRORAY_ROUTES_ROOT:-$BRORAY_ROOT/routes}"
 BRORAY_SYNC_LOCK="$BRORAY_SYNC_ROUTES/locks/operation.lock"
 BRORAY_SYNC_CONFIG_LIBRARY="${BRORAY_SYNC_CONFIG_LIBRARY:-$BRORAY_ROOT/lib/routes-router-config.sh}"
 BRORAY_SYNC_OWNER_LIBRARY="${BRORAY_SYNC_OWNER_LIBRARY:-$BRORAY_ROOT/lib/interface-owner.sh}"
+BRORAY_SYNC_PROGRESS_LIBRARY="${BRORAY_SYNC_PROGRESS_LIBRARY:-$BRORAY_ROOT/lib/routes-operation-progress.sh}"
 BRORAY_SYNC_NDMC="${BRORAY_SYNC_NDMC:-ndmc}"
 BRORAY_SYNC_ACTIVE_PID=""
 BRORAY_SYNC_WORK=""
@@ -21,9 +22,57 @@ BRORAY_SYNC_ROUTER_CHANGED=false
 BRORAY_SYNC_ROLLING_BACK=false
 BRORAY_SYNC_LOCK_HELD=false
 BRORAY_SYNC_TRANSACTION=""
+BRORAY_SYNC_PROGRESS_ACTIVE=false
+BRORAY_SYNC_PROGRESS_CURRENT=0
+BRORAY_SYNC_PROGRESS_TOTAL=0
+BRORAY_SYNC_RESUME_BASE=0
+BRORAY_SYNC_RESUMED=false
 
 [ -r "$BRORAY_SYNC_CONFIG_LIBRARY" ] && . "$BRORAY_SYNC_CONFIG_LIBRARY"
 [ -r "$BRORAY_SYNC_OWNER_LIBRARY" ] && . "$BRORAY_SYNC_OWNER_LIBRARY"
+[ -r "$BRORAY_SYNC_PROGRESS_LIBRARY" ] && . "$BRORAY_SYNC_PROGRESS_LIBRARY"
+
+broray_routes_sync_progress_begin()
+{
+    command -v broray_routes_progress_begin >/dev/null 2>&1 || return 0
+    broray_routes_progress_begin "$@" || return 1
+    BRORAY_SYNC_PROGRESS_ACTIVE=true
+}
+
+broray_routes_sync_progress_update()
+{
+    [ "$BRORAY_SYNC_PROGRESS_ACTIVE" = true ] || return 0
+    command -v broray_routes_progress_update >/dev/null 2>&1 || return 0
+    broray_routes_progress_update "$@"
+}
+
+broray_routes_sync_progress_tick()
+{
+    [ "$BRORAY_SYNC_PROGRESS_ACTIVE" = true ] || return 0
+    command -v broray_routes_progress_tick >/dev/null 2>&1 || return 0
+    broray_routes_progress_tick "$@"
+}
+
+broray_routes_sync_progress_complete()
+{
+    [ "$BRORAY_SYNC_PROGRESS_ACTIVE" = true ] || return 0
+    command -v broray_routes_progress_complete >/dev/null 2>&1 || return 0
+    broray_routes_progress_complete "$@"
+}
+
+broray_routes_sync_progress_fail()
+{
+    [ "$BRORAY_SYNC_PROGRESS_ACTIVE" = true ] || return 0
+    command -v broray_routes_progress_fail >/dev/null 2>&1 || return 0
+    broray_routes_progress_fail "$@"
+}
+
+broray_routes_sync_progress_pause()
+{
+    [ "$BRORAY_SYNC_PROGRESS_ACTIVE" = true ] || return 0
+    command -v broray_routes_progress_pause >/dev/null 2>&1 || return 0
+    broray_routes_progress_pause "$@"
+}
 
 broray_routes_sync_now()
 {
@@ -205,14 +254,14 @@ broray_routes_sync_restore_local()
 
 broray_routes_sync_rollback_router()
 {
-    local tab key network prefix mask interface metric out err rc
+    local tab kind key network prefix mask interface metric out err rc
 
     [ "$BRORAY_SYNC_ROUTER_CHANGED" = true ] || return 0
     tab="$(printf '\t')"
 
     if [ -f "$BRORAY_SYNC_DELETED_FILE" ]; then
         sed '1!G;h;$!d' "$BRORAY_SYNC_DELETED_FILE" |
-        while IFS="$tab" read -r key network prefix mask interface metric; do
+        while IFS="$tab" read -r kind key network prefix mask interface metric; do
             [ -n "$network" ] || continue
             out="$BRORAY_SYNC_WORK/rollback-add.out"
             err="$BRORAY_SYNC_WORK/rollback-add.err"
@@ -222,7 +271,7 @@ broray_routes_sync_rollback_router()
 
     if [ -f "$BRORAY_SYNC_ADDED_FILE" ]; then
         sed '1!G;h;$!d' "$BRORAY_SYNC_ADDED_FILE" |
-        while IFS="$tab" read -r key network prefix mask interface metric; do
+        while IFS="$tab" read -r kind key network prefix mask interface metric; do
             [ -n "$network" ] || continue
             out="$BRORAY_SYNC_WORK/rollback-delete.out"
             err="$BRORAY_SYNC_WORK/rollback-delete.err"
@@ -243,6 +292,268 @@ broray_routes_sync_cleanup()
     BRORAY_SYNC_WORK=""
 }
 
+broray_routes_sync_partial_commit()
+{
+    local sync_plan message error_route output now registry bundle_registry state
+    local added_json deleted_json added_count deleted_count previous_created previous_deleted
+
+    sync_plan="$1"
+    message="$2"
+    error_route="$3"
+    output="$BRORAY_SYNC_WORK/partial"
+    now="$(broray_routes_sync_now)"
+    registry="$BRORAY_SYNC_ROUTES/installed/routes.json"
+    bundle_registry="$BRORAY_SYNC_ROUTES/installed/bundles/$BRORAY_SYNC_BUNDLE.json"
+    state="$BRORAY_SYNC_ROUTES/state/$BRORAY_SYNC_BUNDLE.json"
+    added_json="$BRORAY_SYNC_WORK/partial-added.json"
+    deleted_json="$BRORAY_SYNC_WORK/partial-deleted.json"
+
+    mkdir -p "$output" || return 1
+
+    jq -Rn '
+        [
+            inputs | split("\t") | select(length == 7) |
+            {
+                kind: .[0], key: .[1], network: .[2],
+                prefix: (.[3] | tonumber), mask: .[4],
+                interface: .[5], metric: (.[6] | tonumber)
+            }
+        ]
+    ' <"$BRORAY_SYNC_ADDED_FILE" >"$added_json" || return 1
+
+    jq -Rn '
+        [
+            inputs | split("\t") | select(length == 7) |
+            {
+                kind: .[0], key: .[1], network: .[2],
+                prefix: (.[3] | tonumber), mask: .[4],
+                interface: .[5], metric: (.[6] | tonumber)
+            }
+        ]
+    ' <"$BRORAY_SYNC_DELETED_FILE" >"$deleted_json" || return 1
+
+    added_count="$(jq -r '[.[] | select(.kind == "create")] | length' "$added_json")"
+    deleted_count="$(jq -r 'length' "$deleted_json")"
+    previous_created="$(jq -r '.resumeOperation.created // 0' "$state" 2>/dev/null || printf 0)"
+    previous_deleted="$(jq -r '.resumeOperation.deleted // 0' "$state" 2>/dev/null || printf 0)"
+
+    jq -n \
+        --slurpfile old "$registry" \
+        --slurpfile sync "$sync_plan" \
+        --slurpfile added "$added_json" \
+        --slurpfile deleted "$deleted_json" \
+        --arg bundleId "$BRORAY_SYNC_BUNDLE" \
+        --arg now "$now" '
+        $old[0] as $o |
+        $sync[0] as $s |
+        def desired_route($key): first($s.desired[]? | select(.route.key == $key) | .route);
+        (reduce $added[0][] as $item (($o.routes // []);
+            if $item.kind == "create" then
+                (desired_route($item.key)) as $r |
+                (map(.key) | index($item.key)) as $idx |
+                if $idx == null then
+                    . + [{
+                        key: $r.key,
+                        family: ($r.family // "ipv4"),
+                        network: $r.network,
+                        prefix: $r.prefix,
+                        mask: $r.mask,
+                        interface: $r.targetInterface,
+                        gatewayToken: ($r.gatewayToken // "0.0.0.0"),
+                        metric: ($r.metric // 1200),
+                        automatic: ($r.automatic // null),
+                        exclusive: ($r.exclusive // null),
+                        comment: ($r.comment // "BROray"),
+                        createdByBROray: true,
+                        managed: true,
+                        routerCommentPersisted: false,
+                        actualStatus: "present",
+                        owners: [$bundleId],
+                        createdAt: $now,
+                        updatedAt: $now
+                    }]
+                else
+                    .[$idx].owners = (((.[$idx].owners // []) + [$bundleId]) | unique) |
+                    .[$idx].actualStatus = "present" |
+                    .[$idx].updatedAt = $now
+                end
+            elif $item.kind == "shared_restore" then
+                (map(.key) | index($item.key)) as $idx |
+                if $idx == null then .
+                else
+                    .[$idx].owners = (((.[$idx].owners // []) - [$bundleId]) | unique) |
+                    .[$idx].actualStatus = "present" |
+                    .[$idx].updatedAt = $now
+                end
+            else . end
+        )) as $after_added |
+        (reduce $deleted[0][] as $item ($after_added;
+            (map(.key) | index($item.key)) as $idx |
+            if $idx == null then .
+            else
+                .[$idx].owners = (((.[$idx].owners // []) - [$bundleId]) | unique) |
+                .[$idx].updatedAt = $now
+            end
+        )) as $routes |
+        $o + {
+            schemaVersion: 1,
+            managedInterface: $s.targetInterface,
+            managedMetric: 1200,
+            routes: ($routes | map(select(((.owners // []) | length) > 0))),
+            updatedAt: $now
+        }
+    ' >"$output/routes.json" || return 1
+
+    jq -n \
+        --slurpfile old "$bundle_registry" \
+        --slurpfile added "$added_json" \
+        --slurpfile deleted "$deleted_json" \
+        --arg now "$now" '
+        $old[0] as $o |
+        (reduce $added[0][] as $item (($o.routeKeys // []);
+            if $item.kind == "create" then (. + [$item.key] | unique)
+            else (. - [$item.key]) end
+        )) as $after_added |
+        (reduce $deleted[0][] as $item ($after_added; . - [$item.key])) as $keys |
+        $o + {
+            routeKeys: $keys,
+            managedRouteKeys: $keys,
+            externalRouteKeys: [],
+            updatedAt: $now
+        }
+    ' >"$output/bundle.json" || return 1
+
+    jq \
+        --arg now "$now" \
+        --arg message "$message" \
+        --arg errorRoute "$error_route" \
+        --arg operation "$(jq -r '.mode // "install"' "$sync_plan")" \
+        --argjson current "$BRORAY_SYNC_PROGRESS_CURRENT" \
+        --argjson total "$BRORAY_SYNC_PROGRESS_TOTAL" \
+        --argjson created "$((previous_created + added_count))" \
+        --argjson deleted "$((previous_deleted + deleted_count))" '
+        .lastVerifiedAt = null |
+        .verifyResult = null |
+        .preflight = null |
+        .resumeOperation = {
+            operation: $operation,
+            resumable: true,
+            current: $current,
+            total: $total,
+            created: $created,
+            deleted: $deleted,
+            message: $message,
+            errorRoute: (if $errorRoute == "" then null else $errorRoute end),
+            updatedAt: $now
+        } |
+        .lastError = (
+            if $errorRoute == "" then null
+            else {code: "ROUTES_OPERATION_PAUSED_AFTER_ERROR", message: $message, route: $errorRoute, resumable: true}
+            end
+        ) |
+        .updatedAt = $now
+    ' "$state" >"$output/state.json" || return 1
+
+    jq -e --arg interface "$(jq -r '.targetInterface' "$sync_plan")" '
+        (.schemaVersion == 1) and
+        (.managedInterface == $interface) and
+        (.managedMetric == 1200) and
+        (([.routes[].key] | length) == ([.routes[].key] | unique | length)) and
+        (all(.routes[];
+            .interface == $interface and
+            .metric == 1200 and
+            .createdByBROray == true and
+            .managed == true and
+            (((.owners // []) | length) > 0)
+        ))
+    ' "$output/routes.json" >/dev/null 2>&1 || return 1
+
+    jq -e --arg id "$BRORAY_SYNC_BUNDLE" '
+        (.bundleId == $id) and
+        ((.routeKeys | type) == "array") and
+        ((.managedRouteKeys | type) == "array") and
+        (.routeKeys == .managedRouteKeys)
+    ' "$output/bundle.json" >/dev/null 2>&1 || return 1
+
+    jq -e '.resumeOperation.resumable == true' "$output/state.json" >/dev/null 2>&1 || return 1
+
+    cp -p "$output/routes.json" "$registry.new.$$" && mv "$registry.new.$$" "$registry" || return 1
+    cp -p "$output/bundle.json" "$bundle_registry.new.$$" && mv "$bundle_registry.new.$$" "$bundle_registry" || return 1
+    cp -p "$output/state.json" "$state.new.$$" && mv "$state.new.$$" "$state" || return 1
+    chmod 644 "$registry" "$bundle_registry" "$state" 2>/dev/null || true
+    return 0
+}
+
+broray_routes_sync_pause()
+{
+    local sync_plan message stopped_by_user error_route exit_code phase_message
+
+    sync_plan="$1"
+    message="$2"
+    stopped_by_user="${3:-true}"
+    error_route="${4:-}"
+    case "$stopped_by_user" in true|false) ;; *) stopped_by_user=true ;; esac
+
+    trap - EXIT HUP INT TERM
+    if [ "$stopped_by_user" = true ]; then
+        phase_message="Остановка после текущего маршрута."
+        exit_code=74
+    else
+        phase_message="Операция приостановлена после ошибки."
+        exit_code=76
+    fi
+
+    broray_routes_sync_progress_update \
+        "stopping" "$BRORAY_SYNC_PROGRESS_CURRENT" "$BRORAY_SYNC_PROGRESS_TOTAL" \
+        "$phase_message" "$error_route" >/dev/null 2>&1 || true
+
+    if [ "$BRORAY_SYNC_ROUTER_CHANGED" = true ]; then
+        broray_routes_sync_save_config ||
+            broray_routes_sync_abort "Не удалось сохранить частично выполненную операцию; выполнен откат."
+    fi
+
+    broray_routes_sync_partial_commit "$sync_plan" "$message" "$error_route" ||
+        broray_routes_sync_abort "Не удалось сохранить состояние для продолжения; выполнен откат."
+
+    broray_routes_sync_transaction_write "paused" "$message" >/dev/null 2>&1 || true
+    BRORAY_SYNC_ROUTER_CHANGED=false
+    BRORAY_SYNC_LOCAL_COMMITTED=false
+    broray_routes_sync_progress_pause "$message" "$stopped_by_user" "$error_route" >/dev/null 2>&1 || true
+    broray_routes_sync_lock_release
+
+    printf '%s\n' "$message"
+    printf 'Выполнено: %s из %s\n' "$BRORAY_SYNC_PROGRESS_CURRENT" "$BRORAY_SYNC_PROGRESS_TOTAL"
+    printf '%s\n' 'Операцию можно продолжить позднее.'
+
+    broray_routes_sync_cleanup
+    exit "$exit_code"
+}
+
+broray_routes_sync_stop_if_requested()
+{
+    local sync_plan
+    sync_plan="$1"
+    command -v broray_routes_progress_stop_requested >/dev/null 2>&1 || return 0
+    if broray_routes_progress_stop_requested "$BRORAY_SYNC_BUNDLE"; then
+        broray_routes_sync_pause \
+            "$sync_plan" \
+            "Операция остановлена пользователем. Выполнено $BRORAY_SYNC_PROGRESS_CURRENT из $BRORAY_SYNC_PROGRESS_TOTAL." \
+            true ""
+    fi
+}
+
+broray_routes_sync_route_failure()
+{
+    local sync_plan message route
+    sync_plan="$1"
+    message="$2"
+    route="$3"
+    broray_routes_sync_pause \
+        "$sync_plan" \
+        "$message Выполнено $BRORAY_SYNC_PROGRESS_CURRENT из $BRORAY_SYNC_PROGRESS_TOTAL. Можно продолжить после устранения причины." \
+        false "$route"
+}
+
 broray_routes_sync_abort()
 {
     local message
@@ -254,6 +565,7 @@ broray_routes_sync_abort()
         broray_routes_sync_rollback_router
         broray_routes_sync_transaction_write "rolled_back" "$message" >/dev/null 2>&1 || true
     fi
+    broray_routes_sync_progress_fail         "$message Изменения операции отменены." true >/dev/null 2>&1 || true
     broray_routes_sync_cleanup
     printf 'ОШИБКА: %s\n' "$message" >&2
     exit 1
@@ -646,7 +958,7 @@ broray_routes_sync_plan()
 broray_routes_sync_prepare_local()
 {
     local sync_plan registry bundle_registry state export_plan output now mode message
-    local total created deleted shared kept restored absent unchanged
+    local total created deleted shared kept restored absent unchanged previous_created previous_deleted
 
     sync_plan="$1"
     output="$2"
@@ -657,8 +969,10 @@ broray_routes_sync_prepare_local()
     now="$(broray_routes_sync_now)"
     mode="$(jq -r '.mode' "$sync_plan")"
     total="$(jq -r '.summary.total' "$sync_plan")"
-    created="$(wc -l <"$BRORAY_SYNC_ADDED_FILE" | tr -d ' ')"
-    deleted="$(wc -l <"$BRORAY_SYNC_DELETED_FILE" | tr -d ' ')"
+    previous_created="$(jq -r '.resumeOperation.created // 0' "$state" 2>/dev/null || printf 0)"
+    previous_deleted="$(jq -r '.resumeOperation.deleted // 0' "$state" 2>/dev/null || printf 0)"
+    created="$((previous_created + $(wc -l <"$BRORAY_SYNC_ADDED_FILE" | tr -d ' ')))"
+    deleted="$((previous_deleted + $(wc -l <"$BRORAY_SYNC_DELETED_FILE" | tr -d ' ')))"
     shared="$(jq -r '.summary.sharedKept' "$sync_plan")"
     restored="$(jq -r '.summary.sharedToRestore' "$sync_plan")"
     absent="$(jq -r '.summary.alreadyAbsent' "$sync_plan")"
@@ -747,6 +1061,37 @@ broray_routes_sync_prepare_local()
         .status = "installed" |
         .installedVersion = .downloadedVersion |
         .lastExportedAt = $now |
+        .lastVerifiedAt = $now |
+        .verifyResult = {
+            result: "complete",
+            success: true,
+            message: "Набор исправен. В Keenetic найдено " + ($total | tostring) + " из " + ($total | tostring) + " маршрутов.",
+            checkedAt: $now,
+            contentSha256: (.downloadedVersion.contentSha256 // null),
+            local: {
+                valid: true,
+                routeCount: $total,
+                sourceFileCount: (.downloadedVersion.sourceFileCount // 0),
+                duplicateRouteCount: 0,
+                invalidRouteCount: 0
+            },
+            keenetic: {
+                checked: true,
+                available: true,
+                status: "complete",
+                expectedRouteCount: $total,
+                presentRouteCount: $total,
+                missingRouteCount: 0,
+                conflictCount: 0,
+                externalRouteCount: 0,
+                complete: true,
+                updatePending: false,
+                mode: $mode,
+                canApply: true,
+                targetInterface: $sync[0].targetInterface,
+                managedMetric: 1200
+            }
+        } |
         .preflight = $sync[0] |
         .exportResult = {
             result: "installed",
@@ -765,6 +1110,7 @@ broray_routes_sync_prepare_local()
             completedAt: $now
         } |
         .lastError = null |
+        .resumeOperation = null |
         .updatedAt = $now
     ' "$state" >"$output/state.json" || return 1
 
@@ -815,6 +1161,8 @@ broray_routes_sync_apply()
 {
     local bundle_id lock_rc sync_plan interface out err tab key network prefix mask metric status rc
     local to_create to_delete added_count deleted_count actual_after prepared original registry bundle_registry state export_plan result transaction
+    local mode processed_count progress_total progress_message current_route remaining_total resume_values
+    local kind
 
     bundle_id="${1:-}"
     broray_routes_sync_id_valid "$bundle_id" || broray_routes_sync_abort "Некорректный идентификатор набора."
@@ -878,18 +1226,51 @@ broray_routes_sync_apply()
         broray_routes_sync_abort "Не удалось записать журнал транзакции."
 
     jq -r '
-        (.desired[] | select(.status == "create") | .route),
-        (.obsolete[] | select(.status == "shared_restore") | .route) |
-        [.key, .network, (.prefix | tostring), .mask, .targetInterface, (.metric | tostring)] | @tsv
+        (.desired[] | select(.status == "create") | ["create", .route.key, .route.network, (.route.prefix | tostring), .route.mask, .route.targetInterface, (.route.metric | tostring)]),
+        (.obsolete[] | select(.status == "shared_restore") | ["shared_restore", .route.key, .route.network, (.route.prefix | tostring), .route.mask, .route.targetInterface, (.route.metric | tostring)]) |
+        @tsv
     ' "$sync_plan" >"$BRORAY_SYNC_WORK/to-create.tsv" || broray_routes_sync_abort "Не удалось подготовить список добавления."
 
-    jq -r '.obsolete[] | select(.status == "delete") | .route | [.key, .network, (.prefix | tostring), .mask, .targetInterface, (.metric | tostring)] | @tsv' \
+    jq -r '.obsolete[] | select(.status == "delete") | ["delete", .route.key, .route.network, (.route.prefix | tostring), .route.mask, .route.targetInterface, (.route.metric | tostring)] | @tsv' \
         "$sync_plan" >"$BRORAY_SYNC_WORK/to-delete.tsv" || broray_routes_sync_abort "Не удалось подготовить список удаления."
+
+    to_create="$(wc -l <"$BRORAY_SYNC_WORK/to-create.tsv" | tr -d ' ')"
+    to_delete="$(wc -l <"$BRORAY_SYNC_WORK/to-delete.tsv" | tr -d ' ')"
+    remaining_total="$((to_create + to_delete))"
+    mode="$(jq -r '.mode // "install"' "$sync_plan")"
+    resume_values="0	$remaining_total	false"
+    if command -v broray_routes_progress_resume_values >/dev/null 2>&1; then
+        resume_values="$(broray_routes_progress_resume_values "$bundle_id" "$mode" "$remaining_total")" ||
+            resume_values="0	$remaining_total	false"
+    fi
+    BRORAY_SYNC_RESUME_BASE="$(printf '%s' "$resume_values" | cut -f1)"
+    progress_total="$(printf '%s' "$resume_values" | cut -f2)"
+    BRORAY_SYNC_RESUMED="$(printf '%s' "$resume_values" | cut -f3)"
+    case "$BRORAY_SYNC_RESUME_BASE" in ''|*[!0-9]*) BRORAY_SYNC_RESUME_BASE=0 ;; esac
+    case "$progress_total" in ''|*[!0-9]*) progress_total="$remaining_total" ;; esac
+    case "$BRORAY_SYNC_RESUMED" in true|false) ;; *) BRORAY_SYNC_RESUMED=false ;; esac
+    processed_count="$BRORAY_SYNC_RESUME_BASE"
+    case "$mode" in
+        install) progress_message="Установка маршрутов в Keenetic." ;;
+        update) progress_message="Обновление маршрутов в Keenetic." ;;
+        restore) progress_message="Восстановление маршрутов в Keenetic." ;;
+        *) mode="install"; progress_message="Установка маршрутов в Keenetic." ;;
+    esac
+    BRORAY_SYNC_PROGRESS_CURRENT=0
+    BRORAY_SYNC_PROGRESS_TOTAL="$progress_total"
+    broray_routes_sync_progress_begin \
+        "$bundle_id" "$mode" "$progress_total" \
+        "Подготовка операции: $processed_count из $progress_total." \
+        "$processed_count" "$BRORAY_SYNC_RESUMED" ||
+        broray_routes_sync_abort "Не удалось создать состояние прогресса операции."
+    broray_routes_sync_progress_update \
+        "applying" "$processed_count" "$progress_total" "$progress_message" "" ||
+        broray_routes_sync_abort "Не удалось обновить состояние прогресса операции."
 
     BRORAY_SYNC_ROUTER_CHANGED=true
     tab="$(printf '\t')"
 
-    while IFS="$tab" read -r key network prefix mask interface metric; do
+    while IFS="$tab" read -r kind key network prefix mask interface metric; do
         [ -n "$network" ] || continue
         out="$BRORAY_SYNC_WORK/add.out"
         err="$BRORAY_SYNC_WORK/add.err"
@@ -899,9 +1280,16 @@ broray_routes_sync_apply()
         grep -Eiq 'Io::Netlink error|system failed|invalid command|unknown command' "$out" "$err" 2>/dev/null && broray_routes_sync_abort "Keenetic вернул ошибку при добавлении $network/$prefix."
         grep -Fq "Added static route: $network/$prefix via $interface." "$out" || broray_routes_sync_abort "Keenetic не подтвердил создание $network/$prefix."
         printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$key" "$network" "$prefix" "$mask" "$interface" "$metric" >>"$BRORAY_SYNC_ADDED_FILE"
+        processed_count=$((processed_count + 1))
+        BRORAY_SYNC_PROGRESS_CURRENT="$processed_count"
+        current_route="$network/$prefix"
+        broray_routes_sync_progress_tick \
+            "$processed_count" "$current_route" ||
+            broray_routes_sync_abort "Не удалось записать прогресс установки маршрутов."
+        broray_routes_sync_stop_if_requested "$sync_plan"
     done <"$BRORAY_SYNC_WORK/to-create.tsv"
 
-    while IFS="$tab" read -r key network prefix mask interface metric; do
+    while IFS="$tab" read -r kind key network prefix mask interface metric; do
         [ -n "$network" ] || continue
         out="$BRORAY_SYNC_WORK/delete.out"
         err="$BRORAY_SYNC_WORK/delete.err"
@@ -914,9 +1302,21 @@ broray_routes_sync_apply()
         elif cat "$out" "$err" 2>/dev/null | grep -Fq 'No such route:'; then
             :
         else
-            broray_routes_sync_abort "Не удалось удалить устаревший маршрут $network/$prefix."
+            broray_routes_sync_route_failure "$sync_plan" "Не удалось удалить устаревший маршрут $network/$prefix." "$network/$prefix"
         fi
+        processed_count=$((processed_count + 1))
+        BRORAY_SYNC_PROGRESS_CURRENT="$processed_count"
+        current_route="$network/$prefix"
+        broray_routes_sync_progress_tick \
+            "$processed_count" "$current_route" ||
+            broray_routes_sync_abort "Не удалось записать прогресс обновления маршрутов."
+        broray_routes_sync_stop_if_requested "$sync_plan"
     done <"$BRORAY_SYNC_WORK/to-delete.tsv"
+
+    broray_routes_sync_progress_update \
+        "verifying" "$processed_count" "$progress_total" \
+        "Проверка маршрутов в Keenetic." "" ||
+        broray_routes_sync_abort "Не удалось записать этап проверки маршрутов."
 
     actual_after="$BRORAY_SYNC_WORK/running-config-after.json"
     BRORAY_ROUTES_CONFIG_NDMC="$BRORAY_SYNC_NDMC"
@@ -979,9 +1379,16 @@ broray_routes_sync_apply()
     broray_routes_sync_transaction_write "local_committed" "Локальные реестры обновлены." ||
         broray_routes_sync_abort "Не удалось обновить журнал транзакции."
 
+    broray_routes_sync_progress_update \
+        "saving" "$processed_count" "$progress_total" \
+        "Сохранение конфигурации Keenetic." "" ||
+        broray_routes_sync_abort "Не удалось записать этап сохранения конфигурации."
     broray_routes_sync_save_config || broray_routes_sync_abort "Не удалось сохранить конфигурацию Keenetic."
     broray_routes_sync_transaction_write "committed" "Маршруты применены, проверены и сохранены." ||
         broray_routes_sync_abort "Не удалось завершить журнал транзакции."
+
+    broray_routes_sync_progress_complete \
+        "$progress_message Выполнено $progress_total из $progress_total." || true
 
     added_count="$(wc -l <"$BRORAY_SYNC_ADDED_FILE" | tr -d ' ')"
     deleted_count="$(wc -l <"$BRORAY_SYNC_DELETED_FILE" | tr -d ' ')"

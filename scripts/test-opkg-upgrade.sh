@@ -137,11 +137,13 @@ jq -e \
     "$UPGRADE_ROOT/opt/broray/routes/state/upgrade-user.json" >/dev/null ||
     fail "route state was lost"
 
-[ "$(sed -n '1p' "$UPGRADE_ROOT/opt/broray/config/version")" = "2.1.0" ] ||
-    fail "version was not upgraded"
+EXPECTED_APP_VERSION="$(sed -n '1p' "$NEW_ROOT/data/opt/broray/config/version")"
+[ -n "$EXPECTED_APP_VERSION" ] || fail "new package app version is empty"
+[ "$(sed -n '1p' "$UPGRADE_ROOT/opt/broray/config/version")" = "$EXPECTED_APP_VERSION" ] ||
+    fail "version was not upgraded to $EXPECTED_APP_VERSION"
 
 [ -f "$UPGRADE_ROOT/opt/broray/web-new/index.html" ] ||
-    fail "WebUI 2.1.0 is missing"
+    fail "WebUI $EXPECTED_APP_VERSION is missing"
 
 [ "$(
     sha256sum "$UPGRADE_ROOT/opt/broray/bin/xray" |

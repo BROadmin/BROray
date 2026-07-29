@@ -6,7 +6,7 @@ PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
 PRODUCT="BROray"
-VERSION="2.1.1"
+VERSION="2.2.0"
 TARGET="/opt/broray"
 LIGHTTPD=""
 LAN_IP=""

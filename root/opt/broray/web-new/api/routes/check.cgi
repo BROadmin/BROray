@@ -6,6 +6,7 @@ PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
 AUTH_COMMON="/opt/broray/web-new/api/auth-common.sh"
+API_LOCK_LIBRARY="/opt/broray/lib/routes-api-operation.sh"
 CLI="/opt/broray/bin/broray-routes"
 BUNDLES="/opt/broray/routes/bundles.json"
 CONFIG="/opt/broray/routes/config.json"
@@ -18,6 +19,8 @@ ERROR_FILE="/tmp/broray-routes-check-$$.err"
 cleanup()
 {
     rm -f "$OUTPUT_FILE" "$ERROR_FILE"
+    command -v broray_routes_api_lock_release >/dev/null 2>&1 &&
+        broray_routes_api_lock_release
 }
 
 trap cleanup EXIT HUP INT TERM
@@ -89,6 +92,20 @@ then
         "ROUTES_BUNDLE_NOT_FOUND" \
         "Набор маршрутов не найден."
 fi
+
+[ -r "$API_LOCK_LIBRARY" ] || broray_api_error \
+    "500 Internal Server Error" "ROUTES_API_LOCK_UNAVAILABLE" \
+    "Модуль блокировки операций недоступен."
+. "$API_LOCK_LIBRARY"
+lock_rc=0
+broray_routes_api_lock_acquire "check" "$bundle_id" || lock_rc=$?
+case "$lock_rc" in
+    0) ;;
+    2) broray_api_error "409 Conflict" "ROUTES_OPERATION_BUSY" \
+        "Другая конфликтующая операция уже выполняется." ;;
+    *) broray_api_error "500 Internal Server Error" "ROUTES_API_LOCK_FAILED" \
+        "Не удалось установить блокировку операции." ;;
+esac
 
 managed_interface="$(
     jq -r '.managedInterface // empty' \
@@ -183,14 +200,14 @@ if [ "$command_ok" != true ]; then
             broray_api_error \
                 "409 Conflict" \
                 "ROUTES_OPERATION_BUSY" \
-                "Другая операция с маршрутами уже выполняется." \
+                "Другая конфликтующая операция уже выполняется." \
                 "$details"
             ;;
         *)
             broray_api_error \
                 "502 Bad Gateway" \
                 "ROUTES_CHECK_FAILED" \
-                "Не удалось выполнить поиск обновлений маршрутов." \
+                "Не удалось проверить обновление маршрутов." \
                 "$details"
             ;;
     esac

@@ -43,7 +43,8 @@ mkdir -p "$TMP" || fail "не удалось создать временный �
 # Final CSS contract: exactly one physical stylesheet and no page styles.
 css_count="$(find "$OUT/assets/css" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')"
 [ "$css_count" = "1" ] || fail "в assets/css должно быть ровно 1 файл, найдено: $css_count"
-[ "$(find "$OUT/assets/css" -maxdepth 1 -type f -printf '%f\n')" = "allpage.css" ] ||
+css_name="$(find "$OUT/assets/css" -maxdepth 1 -type f 2>/dev/null | sed 's#^.*/##')"
+[ "$css_name" = "allpage.css" ] ||
     fail "единственным CSS должен быть allpage.css"
 jq -e 'all(.pages[]; (((.styles // []) | length) == 0))' "$SRC/pages.json" >/dev/null ||
     fail "pages.json содержит локальные CSS страниц"
@@ -184,6 +185,21 @@ grep -Fq 'host.className = "icon-sprite-host"' "$OUT/assets/js/icons.js" ||
     fail "theme-init.js записывает inline color-scheme"
 ! grep -Fq 'document.documentElement.style.colorScheme' "$OUT/assets/js/theme.js" ||
     fail "theme.js записывает inline color-scheme"
+
+
+# Support project entry is present in the shared menu and the BROray page.
+for file in $PAGES; do
+    grep -Fq 'id="support-button"' "$OUT/$file.html" ||
+        fail "в $file отсутствует пункт поддержки проекта"
+    grep -Fq '/assets/images/support/cloudtips-qr.svg?v=' "$OUT/$file.html" ||
+        fail "в $file отсутствует QR-код поддержки"
+done
+grep -Fq 'id="donate-link"' "$OUT/broray.html" ||
+    fail "на странице BROray отсутствует блок поддержки"
+grep -Fq 'https://pay.cloudtips.ru/p/09b23d0a' "$OUT/broray.html" ||
+    fail "на странице BROray отсутствует ссылка CloudTips"
+grep -Fq 'function openSupport()' "$OUT/assets/js/app-shell.js" ||
+    fail "app-shell.js не открывает окно поддержки"
 
 # Shared dialogs are present on every page that modifies system state.
 for dialog_page in servers subscriptions routes keenetic xray broray; do

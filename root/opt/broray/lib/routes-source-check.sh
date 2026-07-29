@@ -494,9 +494,18 @@ broray_routes_check_create_state()
   "installedVersion": null,
   "routeCount": null,
   "lastCheckedAt": null,
+  "lastVerifiedAt": null,
   "lastDownloadedAt": null,
   "lastExportedAt": null,
+  "lastDeletedAt": null,
   "lastError": null,
+  "checkResult": null,
+  "verifyResult": null,
+  "downloadResult": null,
+  "exportBuild": null,
+  "preflight": null,
+  "exportResult": null,
+  "deleteResult": null,
   "updatedAt": "$now"
 }
 STATE_JSON

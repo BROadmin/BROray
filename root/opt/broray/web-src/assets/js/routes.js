@@ -2,8 +2,13 @@
     "use strict";
 
     var REQUEST_TIMEOUT_MS = 180000;
+    var LONG_OPERATION_TIMEOUT_MS = 8 * 60 * 60 * 1000;
+    var PROGRESS_POLL_INTERVAL_MS = 750;
     var states = Object.create(null);
     var operationRunning = false;
+    var globalOperation = null;
+    var progressWatchers = Object.create(null);
+    var longOperationRequests = Object.create(null);
     var expandedBundles = Object.create(null);
 
     var ROUTE_LOGOS = {
@@ -230,6 +235,47 @@
         return Boolean(state && state.downloadedVersion && downloadRequired(state));
     }
 
+    function verificationResult(state) {
+        return state && state.verifyResult && typeof state.verifyResult === "object"
+            ? state.verifyResult
+            : null;
+    }
+
+    function localSetInvalid(state) {
+        var result = verificationResult(state);
+        return Boolean(result && result.local && result.local.valid === false &&
+            state && state.downloadedVersion &&
+            String(result.contentSha256 || "") === String(state.downloadedVersion.contentSha256 || ""));
+    }
+
+    function verificationCurrent(state) {
+        var result = verificationResult(state);
+        if (!state || !state.downloadedVersion || !result || !result.local) return false;
+        return result.local.valid === true &&
+            String(result.contentSha256 || "") === String(state.downloadedVersion.contentSha256 || "");
+    }
+
+    function verificationRequired(state) {
+        return Boolean(state && state.downloadedVersion &&
+            !localSetInvalid(state) && !verificationCurrent(state));
+    }
+
+    function verificationConflict(state) {
+        var result = verificationResult(state);
+        return Boolean(verificationCurrent(state) && result && result.keenetic &&
+            result.keenetic.status === "conflict");
+    }
+
+    function verificationRetryRequired(state) {
+        var result = verificationResult(state);
+        return Boolean(verificationCurrent(state) && result && result.keenetic &&
+            (result.keenetic.available === false || result.keenetic.status === "unavailable"));
+    }
+
+    function downloadActionRequired(state) {
+        return downloadRequired(state) || localSetInvalid(state);
+    }
+
     function keeneticAction(state) {
         if (!state || !state.downloadedVersion) return null;
         if (hasRouterDrift(state)) {
@@ -246,21 +292,38 @@
 
     function nextAction(state) {
         var keenetic = keeneticAction(state);
-        if (hasRouterDrift(state) && keenetic) return "export";
+        var progress = operationProgress(state);
+        if (progress && progress.resumable && !progress.running) return "resume";
         if (!state || !state.availableVersion) return "check";
-        if (downloadRequired(state)) return "download";
+        if (downloadActionRequired(state)) return "download";
+        if (verificationRequired(state) || verificationRetryRequired(state)) return "verify";
+        if (verificationConflict(state)) return null;
+        if (hasRouterDrift(state) && keenetic) return "export";
         if (keenetic) return "export";
-        return null;
+        return "check";
     }
 
-    function checkLabel(state) {
-        return state && state.lastCheckedAt ? "Проверить обновления" : "Найти маршруты";
+    function checkLabel() {
+        return "Проверить обновление";
     }
 
     function statusPresentation(state) {
         var action;
+        var progress = operationProgress(state);
+        if (progress && progress.resumable && !progress.running) {
+            return {text: progress.stoppedByUser ? "Остановлено" : "Можно продолжить", className: "status-badge-warning", icon: "restore"};
+        }
+        if (localSetInvalid(state)) {
+            return {text: "Набор повреждён", className: "status-badge-danger", icon: "status"};
+        }
+        if (verificationRetryRequired(state)) {
+            return {text: "Проверка не завершена", className: "status-badge-warning", icon: "status"};
+        }
         if (state && state.lastError) {
             return {text: "Ошибка", className: "status-badge-danger", icon: "status"};
+        }
+        if (verificationConflict(state)) {
+            return {text: "Обнаружен конфликт", className: "status-badge-danger", icon: "status"};
         }
         if (hasRouterDrift(state)) {
             return {text: "Требуется восстановление", className: "status-badge-warning", icon: "restore"};
@@ -271,6 +334,10 @@
             }
             return {text: "Доступно обновление", className: "status-badge-warning", icon: "update"};
         }
+        if (verificationRequired(state)) {
+            return {text: "Требуется проверка", className: "status-badge-warning", icon: "status"};
+        }
+
         action = keeneticAction(state);
         if (action && action.mode === "update") {
             return {text: "Готово обновление", className: "status-badge-warning", icon: "update"};
@@ -309,11 +376,21 @@
         var lastError;
         var parts = [];
 
+        if (localSetInvalid(state)) {
+            return verificationResult(state).message ||
+                "Локальный набор не прошёл проверку. Скачайте файлы заново.";
+        }
+
         if (state && state.lastError) {
             lastError = typeof state.lastError === "string"
                 ? state.lastError
                 : state.lastError.message;
             return lastError || "Последняя операция завершилась ошибкой.";
+        }
+
+        if (verificationConflict(state)) {
+            return verificationResult(state).message ||
+                "Локальный набор исправен, но в Keenetic обнаружен конфликт.";
         }
 
         if (hasRouterDrift(state)) {
@@ -324,7 +401,10 @@
                 ". Нажмите «Восстановить в Keenetic».";
         }
 
-        if (downloadRequired(state)) {
+        if (downloadActionRequired(state)) {
+            if (localSetInvalid(state)) {
+                return "Локальный набор повреждён. Нажмите «Скачать заново».";
+            }
             if (state.checkResult && state.checkResult.sourceChanged) parts.push(fileChangeText(state));
             if (state.checkResult && state.checkResult.routesChanged) parts.push(routeChangeText(state));
             if (state.checkResult && state.checkResult.routesChanged === false && state.downloadedVersion) {
@@ -337,6 +417,10 @@
             return parts.filter(Boolean).join(" ");
         }
 
+        if (verificationRequired(state)) {
+            return "Файлы загружены. Нажмите «Проверить набор», чтобы проверить локальные данные и их фактическое состояние в Keenetic.";
+        }
+
         action = keeneticAction(state);
         if (action && action.mode === "update") {
             parts.push("Новая версия файлов загружена.");
@@ -345,7 +429,9 @@
             return parts.filter(Boolean).join(" ");
         }
         if (action && action.mode === "install") {
-            return "Маршруты загружены. Нажмите «Установить в Keenetic».";
+            return (verificationResult(state) && verificationResult(state).message
+                ? verificationResult(state).message + " "
+                : "") + "Нажмите «Установить в Keenetic».";
         }
         if (isActuallyInstalled(state)) {
             if (state.checkResult && state.checkResult.result === "source_changed_routes_unchanged") {
@@ -359,7 +445,7 @@
         if (state && state.availableVersion) {
             return "Источник проверен. Нажмите «Скачать».";
         }
-        return "Нажмите «Найти маршруты», чтобы BROray нашёл и проверил все доступные BAT-файлы этого ресурса.";
+        return "Нажмите «Проверить обновление», чтобы BROray проверил источник и нашёл доступные BAT-файлы этого ресурса.";
     }
 
     function button(bundleId, action, text, variant, icon) {
@@ -392,6 +478,12 @@
         var status = create("span", "status-badge status-loading", "Загрузка…");
         var metrics = create("div", "route-card-metrics");
         var notice = create("div", "route-card-notice status-neutral");
+        var progressBox = create("section", "route-card-progress");
+        var progressHeader = create("div", "route-card-progress-header");
+        var progressBar = create("progress", "route-card-progress-bar");
+        var progressMessage = create("p", "route-card-progress-message", "Подготовка операции…");
+        var progressRoute = create("span", "route-card-progress-route", "");
+        var progressControls = create("div", "route-card-progress-controls");
         var actions = create("div", "route-card-actions");
         var details = create("div", "route-card-details");
         var detailsGrid = create("div", "route-details-grid");
@@ -442,12 +534,34 @@
         notice.firstChild.setAttribute("data-icon", "status");
         notice.lastChild.setAttribute("data-field", "message");
 
+        progressBox.hidden = true;
+        progressBox.setAttribute("data-field", "operation-progress");
+        progressBox.setAttribute("role", "status");
+        progressBox.setAttribute("aria-live", "polite");
+        progressHeader.append(
+            create("strong", "route-card-progress-title", "Операция с маршрутами"),
+            create("span", "route-card-progress-counter", "0 из 0")
+        );
+        progressHeader.firstChild.setAttribute("data-field", "operation-progress-title");
+        progressHeader.lastChild.setAttribute("data-field", "operation-progress-counter");
+        progressBar.max = 1;
+        progressBar.value = 0;
+        progressBar.setAttribute("data-field", "operation-progress-bar");
+        progressMessage.setAttribute("data-field", "operation-progress-message");
+        progressRoute.setAttribute("data-field", "operation-progress-route");
+        progressControls.append(
+            button(bundle.id, "stop", "Остановить после текущего маршрута", "button-secondary", "stop"),
+            button(bundle.id, "resume", "Продолжить", "button-primary", "restore")
+        );
+        progressBox.append(progressHeader, progressBar, progressMessage, progressRoute, progressControls);
+
         detailsButton = button(bundle.id, "toggle-details", "Подробнее", "button-secondary", "chevron");
         detailsButton.setAttribute("aria-expanded", "false");
         detailsButton.setAttribute("aria-controls", "route-details-" + bundle.id);
         actions.append(
-            button(bundle.id, "check", "Найти маршруты", "button-secondary", "search"),
+            button(bundle.id, "check", "Проверить обновление", "button-secondary", "update"),
             button(bundle.id, "download", "Скачать", "button-secondary", "backup"),
+            button(bundle.id, "verify", "Проверить набор", "button-secondary", "status"),
             button(bundle.id, "export", "Установить в Keenetic", "button-secondary", "routes"),
             detailsButton
         );
@@ -457,7 +571,10 @@
         detailsGrid.append(
             dataRow("Установленная версия", "installed-version"),
             dataRow("Доступная версия", "available-version"),
-            dataRow("Последняя проверка", "last-checked"),
+            dataRow("Проверка обновления", "last-checked"),
+            dataRow("Проверка набора", "last-verified"),
+            dataRow("Локальный набор", "local-verification"),
+            dataRow("Состояние в Keenetic", "keenetic-verification"),
             dataRow("Добавлено файлов", "files-added"),
             dataRow("Изменено файлов", "files-changed"),
             dataRow("Удалено файлов", "files-removed"),
@@ -479,7 +596,7 @@
         danger.append(create("div", "route-danger-copy"), button(bundle.id, "delete", "Удалить из Keenetic", "button-danger-outline", "delete"));
         danger.firstChild.append(create("strong", "", "Удаление набора"), create("p", "", "Общие маршруты, принадлежащие другим установленным наборам, будут сохранены."));
         details.append(detailsGrid, sourceBlock, technical, danger);
-        card.append(summary, metrics, notice, actions, details);
+        card.append(summary, metrics, notice, progressBox, actions, details);
         return card;
     }
 
@@ -503,6 +620,8 @@
         if (!node) return;
         node.classList.remove("button-primary", "button-secondary");
         node.classList.add(primary ? "button-primary" : "button-secondary");
+        if (primary) node.setAttribute("data-recommended-action", "true");
+        else node.removeAttribute("data-recommended-action");
     }
 
     function setStatus(card, presentation) {
@@ -512,6 +631,44 @@
         node.textContent = presentation.text;
         node.setAttribute("data-icon", presentation.icon);
         if (window.BROrayIcons) window.BROrayIcons.scan(node);
+    }
+
+    function bundleName(bundleId) {
+        var match = BUNDLES.filter(function (item) { return item.id === bundleId; })[0];
+        return match ? match.name : bundleId;
+    }
+
+    function globalOperationMessage(operation) {
+        var action;
+        var name;
+        if (!operation || operation.active !== true) return "";
+        action = String(operation.action || "operation");
+        name = operation.bundleId ? " «" + bundleName(operation.bundleId) + "»" : "";
+        if (operation.scope === "system") {
+            if (action === "update") return "Сейчас выполняется обновление BROray. Операции с маршрутами временно недоступны.";
+            if (action === "restore") return "Сейчас выполняется восстановление BROray. Операции с маршрутами временно недоступны.";
+            if (action === "uninstall") return "Сейчас выполняется удаление BROray. Операции с маршрутами временно недоступны.";
+            if (action === "cleanup") return "Сейчас выполняется очистка BROray. Операции с маршрутами временно недоступны.";
+            if (action === "reinstall") return "Сейчас выполняется переустановка BROray. Операции с маршрутами временно недоступны.";
+            return "Сейчас выполняется системная операция BROray. Операции с маршрутами временно недоступны.";
+        }
+        if (action.indexOf("preflight:") === 0) return "Выполняется предварительная проверка" + name + ". Остальные действия временно заблокированы.";
+        if (action.indexOf("custom:") === 0) return "Выполняется операция с пользовательскими маршрутами. Остальные действия временно заблокированы.";
+        if (action === "check") return "Проверяется обновление" + name + ". Остальные действия временно заблокированы.";
+        if (action === "download") return "Загружаются маршруты" + name + ". Остальные действия временно заблокированы.";
+        if (action === "verify" || action === "plan") return "Проверяется набор" + name + ". Остальные действия временно заблокированы.";
+        if (action === "delete") return "Удаляются маршруты" + name + ". Остальные действия временно заблокированы.";
+        if (action === "resume") return "Продолжается операция" + name + ". Остальные действия временно заблокированы.";
+        return "Выполняется операция с маршрутами" + name + ". Остальные действия временно заблокированы.";
+    }
+
+    function setGlobalOperationNotice(card, operation) {
+        var box = card.querySelector('[data-field="notice-box"]');
+        if (!box) return;
+        box.className = "route-card-notice status-warning";
+        box.firstChild.setAttribute("data-icon", "status");
+        setField(card, "message", globalOperationMessage(operation));
+        if (window.BROrayIcons) window.BROrayIcons.scan(box);
     }
 
     function setNotice(card, state) {
@@ -528,13 +685,112 @@
         if (window.BROrayIcons) window.BROrayIcons.scan(box);
     }
 
+    function operationProgress(state) {
+        return state && state.operationProgress && typeof state.operationProgress === "object"
+            ? state.operationProgress
+            : null;
+    }
+
+    function operationProgressTitle(progress) {
+        if (!progress) return "Операция с маршрутами";
+        if (progress.operation === "delete") return "Удаление маршрутов из Keenetic";
+        if (progress.operation === "update") return "Обновление маршрутов в Keenetic";
+        if (progress.operation === "restore") return "Восстановление маршрутов в Keenetic";
+        return "Установка маршрутов в Keenetic";
+    }
+
+    function initialOperationProgress(bundleId, action) {
+        var state = states[bundleId] || {};
+        var existing = operationProgress(state);
+        var keenetic = keeneticAction(state);
+        var operation = action === "delete" ? "delete" :
+            action === "resume" && existing && existing.operation ? existing.operation :
+            (keenetic && keenetic.mode ? keenetic.mode : "install");
+        return {
+            schemaVersion: 2,
+            kind: "routes",
+            bundleId: bundleId,
+            operation: operation,
+            phase: "preparing",
+            current: action === "resume" && existing ? Number(existing.current || 0) : 0,
+            total: action === "resume" && existing ? Number(existing.total || 0) : 0,
+            percent: action === "resume" && existing ? Number(existing.percent || 0) : 0,
+            currentRoute: null,
+            message: "Подготовка безопасного плана операции.",
+            running: true,
+            success: null,
+            rolledBack: false,
+            resumable: false,
+            stopRequested: false,
+            stoppedByUser: false,
+            resumed: action === "resume"
+        };
+    }
+
+    function renderOperationProgress(card, progress) {
+        var box = card ? card.querySelector('[data-field="operation-progress"]') : null;
+        var bar;
+        var current;
+        var total;
+        var route;
+        if (!box) return;
+        if (!progress || progress.phase === "idle") {
+            box.hidden = true;
+            box.className = "route-card-progress";
+            return;
+        }
+
+        current = Math.max(0, Number(progress.current || 0));
+        total = Math.max(0, Number(progress.total || 0));
+        if (total > 0 && current > total) current = total;
+        box.hidden = false;
+        box.className = "route-card-progress";
+        if (progress.running) box.classList.add("is-running");
+        else if (progress.resumable) box.classList.add("is-paused");
+        else if (progress.success === true) box.classList.add("is-success");
+        else if (progress.success === false) box.classList.add("is-error");
+
+        setField(card, "operation-progress-title", operationProgressTitle(progress));
+        setField(card, "operation-progress-counter", current + " из " + total);
+        setField(card, "operation-progress-message", progress.message || "Операция выполняется.");
+        route = progress.currentRoute ? "Текущий маршрут: " + progress.currentRoute : "";
+        var routeNode = card.querySelector('[data-field="operation-progress-route"]');
+        if (routeNode) {
+            routeNode.textContent = route;
+            routeNode.hidden = !route;
+        }
+        bar = card.querySelector('[data-field="operation-progress-bar"]');
+        if (bar) {
+            if (total > 0) {
+                bar.max = total;
+                bar.value = current;
+            } else {
+                bar.max = 1;
+                bar.removeAttribute("value");
+            }
+            bar.setAttribute("aria-label", operationProgressTitle(progress) + ": " + current + " из " + total);
+        }
+        var stopButton = card.querySelector('[data-action="stop"]');
+        var resumeButton = card.querySelector('[data-action="resume"]');
+        if (stopButton) {
+            stopButton.hidden = !progress.running;
+            stopButton.disabled = Boolean(progress.stopRequested);
+            setButtonLabel(stopButton, progress.stopRequested ? "Остановка запрошена…" : "Остановить после текущего маршрута", "stop");
+        }
+        if (resumeButton) {
+            resumeButton.hidden = !(progress.resumable && !progress.running);
+            resumeButton.disabled = progress.running;
+            setButtonVariant(resumeButton, progress.resumable && !progress.running);
+        }
+    }
+
     function renderSourceFiles(card, state) {
         var list = card.querySelector('[data-field="source-files"]');
         var files = sourceFiles(state);
         if (!list) return;
         list.textContent = "";
         if (!files.length) {
-            list.appendChild(create("li", "route-source-empty", "Список ещё не получен. Нажмите «Найти маршруты»."));
+            list.appendChild(create("li", "route-source-empty", "Список ещё не получен. Нажмите «Проверить обновление»."));
             return;
         }
         files.forEach(function (file) {
@@ -564,8 +820,9 @@
             return output || "Последняя операция завершилась ошибкой.";
         }
         if (state && state.exportResult) return "Последняя установка: " + (state.exportResult.message || "завершена") + ".";
+        if (state && state.verifyResult) return state.verifyResult.message || "Проверка набора завершена.";
         if (state && state.downloadResult) return state.downloadResult.message || "Файлы маршрутов загружены.";
-        if (state && state.checkResult) return state.checkResult.message || "Поиск обновлений завершён.";
+        if (state && state.checkResult) return state.checkResult.message || "Проверка обновления завершена.";
         if (state && state.deleteResult) return "Последнее удаление: " + (state.deleteResult.message || "завершено") + ".";
         return "Нет данных о выполненных операциях.";
     }
@@ -581,12 +838,19 @@
         var keenetic = keeneticAction(state);
         var checkButton;
         var downloadButton;
+        var verifyButton;
         var keeneticButton;
         var deleteButton;
+        var stopButton;
+        var resumeButton;
         var detailsButton;
         var actions;
         var orderedButtons;
-        var busy = Boolean(busyBundles[bundleId]);
+        var progress = operationProgress(state);
+        var progressRunning = Boolean(progress && progress.running);
+        var progressResumable = Boolean(progress && progress.resumable && !progress.running);
+        var globalBusy = Boolean(globalOperation && globalOperation.active && !progressRunning);
+        var busy;
         var expected = presence && presence.registered ? Number(presence.expectedRouteCount || 0) : 0;
         var present = presence && presence.registered ? Number(presence.presentRouteCount || 0) : 0;
         var targetInterface = (state.exportBuild && state.exportBuild.targetInterface) ||
@@ -597,14 +861,39 @@
 
         if (!card) return;
         states[bundleId] = state;
-        setStatus(card, statusPresentation(state));
+        if (progressRunning) {
+            operationRunning = bundleId;
+            busyBundles[bundleId] = progress.operation || "export";
+        }
+        busy = Boolean(busyBundles[bundleId]) || Boolean(operationRunning) || Boolean(globalOperation && globalOperation.active) || progressResumable;
+        setStatus(card, progressRunning
+            ? {text: progress && progress.stopRequested ? "Останавливается" : "Выполняется", className: "status-badge-warning", icon: "update"}
+            : globalBusy
+                ? {text: "Операция выполняется", className: "status-badge-warning", icon: "status"}
+                : statusPresentation(state));
         setNotice(card, state);
+        if (globalBusy) setGlobalOperationNotice(card, globalOperation);
+        renderOperationProgress(card, progress);
         setField(card, "route-count", state.routeCount || 0);
         setField(card, "source-count", files.length);
         setField(card, "presence-count", presence && presence.registered ? present + "/" + expected : "—");
         setField(card, "installed-version", formatVersion(state.installedVersion, "Не установлено"));
         setField(card, "available-version", formatVersion(state.availableVersion, "Не проверялась"));
         setField(card, "last-checked", formatDate(state.lastCheckedAt));
+        setField(card, "last-verified", formatDate(state.lastVerifiedAt));
+        setField(card, "local-verification", localSetInvalid(state)
+            ? "Повреждён"
+            : verificationCurrent(state) ? "Исправен" : "Не проверен");
+        setField(card, "keenetic-verification", verificationCurrent(state) && verificationResult(state).keenetic
+            ? ({
+                complete: "Соответствует",
+                not_installed: "Не установлен",
+                update_pending: "Ожидает обновления",
+                restore_required: "Требуется восстановление",
+                conflict: "Конфликт",
+                unavailable: "Недоступен"
+            }[verificationResult(state).keenetic.status] || "Проверен")
+            : "Не проверен");
         setField(card, "files-added", (fileChanges.addedFiles || []).length || 0);
         setField(card, "files-changed", (fileChanges.changedFiles || []).length || 0);
         setField(card, "files-removed", (fileChanges.removedFiles || []).length || 0);
@@ -618,19 +907,29 @@
 
         checkButton = card.querySelector('[data-action="check"]');
         downloadButton = card.querySelector('[data-action="download"]');
+        verifyButton = card.querySelector('[data-action="verify"]');
         keeneticButton = card.querySelector('[data-action="export"]');
         deleteButton = card.querySelector('[data-action="delete"]');
+        stopButton = card.querySelector('[data-action="stop"]');
+        resumeButton = card.querySelector('[data-action="resume"]');
         detailsButton = card.querySelector('[data-action="toggle-details"]');
 
-        setButtonLabel(checkButton, busyBundles[bundleId] === "check" ? "Поиск обновлений…" : checkLabel(state), "search");
+        setButtonLabel(checkButton, busyBundles[bundleId] === "check" ? "Проверка обновления…" : checkLabel(state), "update");
         checkButton.disabled = busy;
         checkButton.hidden = false;
         setButtonVariant(checkButton, next === "check");
 
-        setButtonLabel(downloadButton, state.downloadedVersion ? "Обновить файлы" : "Скачать", state.downloadedVersion ? "update" : "backup");
-        downloadButton.disabled = busy || !downloadRequired(state);
-        downloadButton.hidden = !downloadRequired(state);
+        setButtonLabel(downloadButton,
+            localSetInvalid(state) ? "Скачать заново" : state.downloadedVersion ? "Обновить файлы" : "Скачать",
+            state.downloadedVersion ? "update" : "backup");
+        downloadButton.disabled = busy || !downloadActionRequired(state);
+        downloadButton.hidden = !downloadActionRequired(state);
         setButtonVariant(downloadButton, next === "download");
+
+        setButtonLabel(verifyButton, busyBundles[bundleId] === "verify" ? "Проверка набора…" : "Проверить набор", "status");
+        verifyButton.disabled = busy || !state.downloadedVersion;
+        verifyButton.hidden = !state.downloadedVersion;
+        setButtonVariant(verifyButton, next === "verify");
 
         if (keenetic) {
             setButtonLabel(keeneticButton, keenetic.text, keenetic.icon);
@@ -643,21 +942,33 @@
             setButtonVariant(keeneticButton, false);
         }
 
-        deleteButton.disabled = busy || !state.installedVersion;
+        deleteButton.disabled = busy || progressResumable || !state.installedVersion;
+        if (stopButton) {
+            stopButton.hidden = !progressRunning;
+            stopButton.disabled = Boolean(progress && progress.stopRequested);
+        }
+        if (resumeButton) {
+            resumeButton.hidden = !progressResumable;
+            resumeButton.disabled = progressRunning;
+            setButtonVariant(resumeButton, progressResumable);
+        }
         detailsButton.disabled = false;
 
         actions = checkButton.parentElement;
         orderedButtons = next === "export"
-            ? [keeneticButton, checkButton, downloadButton, detailsButton]
-            : next === "download"
-                ? [downloadButton, checkButton, keeneticButton, detailsButton]
-                : [checkButton, downloadButton, keeneticButton, detailsButton];
+            ? [keeneticButton, verifyButton, checkButton, downloadButton, detailsButton]
+            : next === "verify"
+                ? [verifyButton, checkButton, downloadButton, keeneticButton, detailsButton]
+                : next === "download"
+                    ? [downloadButton, checkButton, verifyButton, keeneticButton, detailsButton]
+                    : [checkButton, verifyButton, downloadButton, keeneticButton, detailsButton];
         orderedButtons.forEach(function (node) {
             if (node && node.parentElement === actions) actions.appendChild(node);
         });
 
         card.classList.toggle("has-warning", hasRouterDrift(state));
-        card.classList.toggle("has-error", Boolean(state.lastError));
+        card.classList.toggle("has-error", Boolean(state.lastError) && !progressResumable);
+        card.classList.toggle("is-paused", progressResumable);
     }
 
     function renderLoadError(bundleId, error) {
@@ -672,7 +983,7 @@
         });
         checkButton = card.querySelector('[data-action="check"]');
         if (checkButton) {
-            setButtonLabel(checkButton, "Найти маршруты", "search");
+            setButtonLabel(checkButton, "Проверить обновление", "update");
             setButtonVariant(checkButton, true);
             checkButton.disabled = false;
         }
@@ -700,7 +1011,9 @@
         byId("routes-total-count").textContent = String(BUNDLES.length);
 
         if (message) {
-            message.textContent = loaded < BUNDLES.length
+            message.textContent = globalOperation && globalOperation.active
+                ? globalOperationMessage(globalOperation)
+                : loaded < BUNDLES.length
                 ? "Загружено " + loaded + " из " + BUNDLES.length + " наборов."
                 : actions > 0
                     ? "Некоторые наборы требуют действия. Подробная причина показана в карточке."
@@ -710,7 +1023,10 @@
         }
 
         if (status) {
-            if (loaded < BUNDLES.length) {
+            if (globalOperation && globalOperation.active) {
+                status.className = "status-badge status-badge-warning";
+                status.textContent = "Операция выполняется";
+            } else if (loaded < BUNDLES.length) {
                 status.className = "status-badge status-loading";
                 status.textContent = "Загрузка…";
             } else if (actions > 0) {
@@ -735,10 +1051,71 @@
         renderSummary();
     }
 
-    function loadState(bundleId) {
-        return request("/api/routes/status.cgi?bundleId=" + encodeURIComponent(bundleId), {method: "GET", credentials: "same-origin"}).then(function (state) {
+    function loadProgress(bundleId) {
+        return request("/api/routes/progress.cgi?bundleId=" + encodeURIComponent(bundleId), {
+            method: "GET",
+            credentials: "same-origin"
+        }).then(function (progress) {
+            var state = states[bundleId] || {bundleId: bundleId};
+            state.operationProgress = progress;
+            states[bundleId] = state;
+            if (progress && progress.running) {
+                operationRunning = bundleId;
+                busyBundles[bundleId] = progress.operation || "export";
+            }
             renderCard(bundleId, state);
             renderSummary();
+            return progress;
+        });
+    }
+
+    function stopProgressWatcher(bundleId) {
+        if (progressWatchers[bundleId]) {
+            window.clearTimeout(progressWatchers[bundleId]);
+            delete progressWatchers[bundleId];
+        }
+    }
+
+    function watchProgress(bundleId) {
+        function poll() {
+            delete progressWatchers[bundleId];
+            loadProgress(bundleId).then(function (progress) {
+                if ((progress && progress.running) || longOperationRequests[bundleId]) {
+                    progressWatchers[bundleId] = window.setTimeout(poll, PROGRESS_POLL_INTERVAL_MS);
+                    return;
+                }
+                delete busyBundles[bundleId];
+                if (operationRunning === bundleId) operationRunning = false;
+                renderAll();
+                loadState(bundleId).catch(function (error) {
+                    renderLoadError(bundleId, error);
+                });
+            }).catch(function (error) {
+                if (error && error.status === 401) {
+                    window.BROrayUI.redirectToLogin();
+                    return;
+                }
+                if (longOperationRequests[bundleId] || operationRunning === bundleId) {
+                    progressWatchers[bundleId] = window.setTimeout(poll, PROGRESS_POLL_INTERVAL_MS);
+                }
+            });
+        }
+
+        if (progressWatchers[bundleId]) return;
+        progressWatchers[bundleId] = window.setTimeout(poll, 150);
+    }
+
+    function loadState(bundleId) {
+        return request("/api/routes/status.cgi?bundleId=" + encodeURIComponent(bundleId), {method: "GET", credentials: "same-origin"}).then(function (state) {
+            var progress = operationProgress(state);
+            if (state && state.globalOperation && state.globalOperation.active) {
+                globalOperation = state.globalOperation;
+            } else if (!operationRunning && !Object.keys(longOperationRequests).length) {
+                globalOperation = null;
+            }
+            renderCard(bundleId, state);
+            renderSummary();
+            if (progress && progress.running) watchProgress(bundleId);
             return state;
         });
     }
@@ -758,21 +1135,25 @@
     }
 
     function operationText(action, bundleId) {
-        if (action === "check") return "Поиск обновлений…";
+        if (action === "check") return "Проверка обновления…";
+        if (action === "verify") return "Проверка набора…";
         if (action === "download") return "Загрузка…";
         if (action === "export") {
             return hasRouterDrift(states[bundleId]) ? "Восстановление…" :
                 states[bundleId] && states[bundleId].installedVersion ? "Обновление…" : "Установка…";
         }
         if (action === "delete") return "Удаление…";
+        if (action === "resume") return "Продолжение…";
         return "Выполнение…";
     }
 
     function successMessage(action, bundle) {
-        if (action === "check") return "Поиск обновлений «" + bundle.name + "» завершён.";
+        if (action === "check") return "Проверка обновления «" + bundle.name + "» завершена.";
+        if (action === "verify") return "Проверка набора «" + bundle.name + "» завершена.";
         if (action === "download") return "Файлы маршрутов «" + bundle.name + "» загружены.";
         if (action === "export") return "Маршруты «" + bundle.name + "» применены в Keenetic.";
         if (action === "delete") return "Маршруты «" + bundle.name + "» удалены.";
+        if (action === "resume") return "Операция «" + bundle.name + "» продолжена.";
         return "Операция завершена.";
     }
 
@@ -789,65 +1170,110 @@
         card.classList.toggle("is-expanded", !expanded);
     }
 
-    function confirmDelete(bundle) {
+    function formatKilobytes(value) {
+        var number = Number(value || 0);
+        if (number >= 1024) return (number / 1024).toFixed(number >= 10240 ? 0 : 1) + " МБ";
+        return number + " КБ";
+    }
+
+    function preflightTitle(bundle, preflight) {
+        var operation = preflight && preflight.operation;
+        if (operation === "delete") return "Удалить «" + bundle.name + "» из Keenetic";
+        if (operation === "update") return "Обновить «" + bundle.name + "» в Keenetic";
+        if (operation === "restore") return "Восстановить «" + bundle.name + "» в Keenetic";
+        return "Установить «" + bundle.name + "» в Keenetic";
+    }
+
+    function preflightMessage(preflight) {
+        var checks = preflight && preflight.checks ? preflight.checks : {};
+        var summary = preflight && preflight.summary ? preflight.summary : {};
+        var storage = checks.storage || {};
+        var keenetic = checks.keenetic || {};
+        var localSet = checks.localSet || {};
+        var lines = [];
+        lines.push(preflight && preflight.message ? preflight.message : "Предварительная проверка завершена.");
+        lines.push("");
+        lines.push((checks.operationLock && checks.operationLock.ok ? "✓" : "✕") + " Конфликтующих операций нет");
+        lines.push((checks.ndmc && checks.ndmc.ok ? "✓" : "✕") + " Команда ndmc доступна");
+        lines.push((keenetic.ok ? "✓" : "✕") + " Keenetic: " +
+            (keenetic.ok ? String(keenetic.interface || "ProxyN") + " подключён и находится в состоянии up" : "интерфейс недоступен"));
+        lines.push((storage.ok ? "✓" : "✕") + " Свободное место: " + formatKilobytes(storage.freeKb) +
+            "; требуется не менее " + formatKilobytes(storage.requiredKb));
+        lines.push((localSet.ok ? "✓" : "✕") + " Локальный набор: " + Number(localSet.routeCount || 0) +
+            " маршрутов; ошибок " + Number(localSet.invalidRouteCount || 0) +
+            ", дубликатов " + Number(localSet.duplicateRouteCount || 0));
+        lines.push("");
+        lines.push("Всего в наборе: " + Number(summary.total || 0));
+        if (Number(summary.alreadyPresent || 0) > 0) lines.push("Уже присутствует в Keenetic: " + Number(summary.alreadyPresent || 0));
+        if (Number(summary.toCreate || 0) > 0) lines.push("Будет добавлено: " + Number(summary.toCreate || 0));
+        if (Number(summary.toDelete || 0) > 0) lines.push("Будет удалено: " + Number(summary.toDelete || 0));
+        if (Number(summary.sharedKept || 0) > 0) lines.push("Общие маршруты будут сохранены: " + Number(summary.sharedKept || 0));
+        if (Number(summary.alreadyAbsent || 0) > 0) lines.push("Уже отсутствует: " + Number(summary.alreadyAbsent || 0));
+        if (Number(summary.externalKept || 0) > 0) lines.push("Внешние маршруты не затрагиваются: " + Number(summary.externalKept || 0));
+        lines.push("Конфликты: " + Number(summary.conflicts || 0));
+        if (preflight && preflight.requestedAction === "resume" && preflight.resume) {
+            lines.push("Продолжение с позиции: " + Number(preflight.resume.current || 0) + " из " + Number(preflight.resume.total || 0));
+        }
+        return lines.join("\n");
+    }
+
+    function confirmPreflight(bundle, preflight) {
+        var danger = preflight && preflight.operation === "delete";
+        if (!preflight || preflight.ready !== true) {
+            return Promise.reject(new Error(preflightMessage(preflight)));
+        }
         if (!window.BROrayDialogs || typeof window.BROrayDialogs.confirm !== "function") {
             return Promise.reject(new Error("Фирменное окно подтверждения недоступно."));
         }
         return window.BROrayDialogs.confirm({
-            eyebrow: "Опасное действие",
-            title: "Удаление маршрутов",
-            message: "Удалить набор «" + bundle.name + "» из Keenetic? Общие маршруты других установленных наборов будут сохранены.",
-            confirmText: "Удалить",
+            eyebrow: "Предварительная проверка",
+            title: preflightTitle(bundle, preflight),
+            message: preflightMessage(preflight),
+            confirmText: preflight.requestedAction === "resume" ? "Продолжить" :
+                (danger ? "Удалить" : (preflight.operation === "update" ? "Обновить" :
+                    (preflight.operation === "restore" ? "Восстановить" : "Установить"))),
             cancelText: "Отмена",
-            variant: "danger"
+            variant: danger ? "danger" : "primary",
+            icon: danger ? "delete" : "security"
         });
     }
 
-    function syncPlanMessage(plan) {
-        var summary = plan.summary || {};
-        if (plan.mode === "update") {
-            return "Новая версия: добавлено " + Number(summary.addedRoutes || 0) +
-                ", удалено " + Number(summary.removedRoutes || 0) +
-                ", без изменений " + Number(summary.unchangedRoutes || 0) +
-                ". Из Keenetic будут удалены " + Number(summary.toDelete || 0) +
-                " маршрутов. Ещё " + Number(summary.sharedKept || 0) +
-                " используются другими наборами и сохранятся.";
-        }
-        if (plan.mode === "restore") {
-            return "В Keenetic будут восстановлены " +
-                Number(summary.toCreate || 0) + " маршрутов.";
-        }
-        return "В Keenetic будут установлены " + Number(summary.total || 0) + " маршрутов.";
-    }
+    function executeOperation(bundle, action, buttonNode, preflightToken) {
+        var isLongOperation = action === "export" || action === "delete" || action === "resume";
+        var timeout = isLongOperation ? LONG_OPERATION_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+        var state = states[bundle.id] || {bundleId: bundle.id};
+        var url = "/api/routes/" + action + ".cgi?bundleId=" + encodeURIComponent(bundle.id);
 
-    function confirmSync(bundle, plan) {
-        var state = states[bundle.id];
-        var action = keeneticAction(state);
-        if (!plan.canApply) return Promise.reject(new Error(plan.message || "План содержит конфликты."));
-        if (plan.mode === "none") return Promise.resolve(false);
-        if (!window.BROrayDialogs || typeof window.BROrayDialogs.confirm !== "function") {
-            return Promise.reject(new Error("Фирменное окно подтверждения недоступно."));
+        if (isLongOperation) {
+            url += "&preflightToken=" + encodeURIComponent(preflightToken || "");
         }
-        return window.BROrayDialogs.confirm({
-            eyebrow: "Маршруты Keenetic",
-            title: action ? action.text : "Применить маршруты",
-            message: syncPlanMessage(plan),
-            confirmText: action ? action.text : "Продолжить",
-            cancelText: "Отмена"
-        });
-    }
-
-    function executeOperation(bundle, action, buttonNode) {
         busyBundles[bundle.id] = action;
-        renderCard(bundle.id, states[bundle.id] || {});
+        operationRunning = bundle.id;
+        globalOperation = {active:true, bundleId:bundle.id, action:action};
+        if (isLongOperation) {
+            longOperationRequests[bundle.id] = true;
+            state.operationProgress = initialOperationProgress(bundle.id, action);
+            states[bundle.id] = state;
+            watchProgress(bundle.id);
+        }
+        renderAll();
         setButtonLabel(buttonNode, operationText(action, bundle.id), buttonNode.getAttribute("data-icon"));
         buttonNode.setAttribute("aria-busy", "true");
 
-        return withTimeout(request("/api/routes/" + action + ".cgi?bundleId=" + encodeURIComponent(bundle.id), {
+        return withTimeout(request(url, {
             method: "POST", credentials: "same-origin", headers: {"Accept": "application/json"}
-        }), REQUEST_TIMEOUT_MS).then(function (state) {
-            states[bundle.id] = state;
-            window.BROrayUI.toast(successMessage(action, bundle), "success");
+        }), timeout).then(function (newState) {
+            if (states[bundle.id] && states[bundle.id].operationProgress && !newState.operationProgress) {
+                newState.operationProgress = states[bundle.id].operationProgress;
+            }
+            states[bundle.id] = newState;
+            if (newState.operationProgress && newState.operationProgress.resumable) {
+                window.BROrayUI.toast(newState.operationProgress.message || "Операция приостановлена и может быть продолжена.", "warning");
+            } else if (action === "verify" && newState.verifyResult && newState.verifyResult.success === false) {
+                window.BROrayUI.toast(newState.verifyResult.message || "Проверка набора выявила проблему.", "warning");
+            } else {
+                window.BROrayUI.toast(successMessage(action, bundle), "success");
+            }
         }).catch(function (error) {
             if (error && (error.status === 401 || error.code === "AUTH_REQUIRED" || error.code === "SESSION_REQUIRED")) {
                 window.BROrayUI.redirectToLogin();
@@ -855,32 +1281,74 @@
             }
             window.BROrayUI.toast(error && error.message ? error.message : "Операция с маршрутами завершилась ошибкой.", "error");
         }).then(function () {
+            delete longOperationRequests[bundle.id];
             delete busyBundles[bundle.id];
+            if (operationRunning === bundle.id) operationRunning = false;
+            globalOperation = null;
             buttonNode.removeAttribute("aria-busy");
+            if (isLongOperation) {
+                return loadProgress(bundle.id).catch(function () { return null; }).then(function () {
+                    return loadState(bundle.id).catch(function (error) { renderLoadError(bundle.id, error); });
+                });
+            }
             return loadState(bundle.id).catch(function (error) { renderLoadError(bundle.id, error); });
         });
     }
 
-    function prepareSync(bundle, buttonNode) {
-        busyBundles[bundle.id] = "plan";
-        renderCard(bundle.id, states[bundle.id] || {});
-        return withTimeout(request("/api/routes/plan.cgi?bundleId=" + encodeURIComponent(bundle.id), {
+    function prepareLongOperation(bundle, action, buttonNode) {
+        var originalIcon = buttonNode.getAttribute("data-icon");
+        busyBundles[bundle.id] = "preflight";
+        operationRunning = bundle.id;
+        globalOperation = {active:true, bundleId:bundle.id, action:"preflight"};
+        renderAll();
+        setButtonLabel(buttonNode, "Предварительная проверка…", "security");
+        buttonNode.setAttribute("aria-busy", "true");
+
+        return withTimeout(request("/api/routes/preflight.cgi?bundleId=" + encodeURIComponent(bundle.id) +
+            "&action=" + encodeURIComponent(action), {
             method: "POST", credentials: "same-origin", headers: {"Accept": "application/json"}
-        }), REQUEST_TIMEOUT_MS).then(function (plan) {
+        }), REQUEST_TIMEOUT_MS).then(function (preflight) {
             delete busyBundles[bundle.id];
-            renderCard(bundle.id, states[bundle.id] || {});
-            if (plan.mode === "none") {
-                window.BROrayUI.toast("Изменения в Keenetic не требуются.", "success");
-                return false;
-            }
-            return confirmSync(bundle, plan);
-        }).then(function (confirmed) {
-            if (confirmed) return executeOperation(bundle, "export", buttonNode);
-            return null;
+            if (operationRunning === bundle.id) operationRunning = false;
+            globalOperation = null;
+            buttonNode.removeAttribute("aria-busy");
+            renderAll();
+            return confirmPreflight(bundle, preflight).then(function (confirmed) {
+                if (!confirmed) return null;
+                return executeOperation(bundle, action, buttonNode, preflight.token);
+            });
         }).catch(function (error) {
             delete busyBundles[bundle.id];
-            renderCard(bundle.id, states[bundle.id] || {});
-            window.BROrayUI.toast(error && error.message ? error.message : "Не удалось подготовить план установки.", "error");
+            if (operationRunning === bundle.id) operationRunning = false;
+            globalOperation = null;
+            buttonNode.removeAttribute("aria-busy");
+            setButtonLabel(buttonNode, operationText(action, bundle.id).replace("…", ""), originalIcon);
+            renderAll();
+            window.BROrayUI.toast(error && error.message ? error.message : "Предварительная проверка не завершена.", "error");
+            return null;
+        });
+    }
+
+    function requestStop(bundle) {
+        var state = states[bundle.id] || {bundleId: bundle.id};
+        var progress = operationProgress(state);
+        if (!progress || !progress.running || progress.stopRequested) return;
+        progress.stopRequested = true;
+        progress.phase = "stopping";
+        progress.message = "Остановка запрошена. Текущий маршрут будет завершён.";
+        renderCard(bundle.id, state);
+        request("/api/routes/stop.cgi?bundleId=" + encodeURIComponent(bundle.id), {
+            method: "POST", credentials: "same-origin", headers: {"Accept": "application/json"}
+        }).then(function (newProgress) {
+            state.operationProgress = newProgress;
+            states[bundle.id] = state;
+            renderCard(bundle.id, state);
+            watchProgress(bundle.id);
+            window.BROrayUI.toast("Остановка будет выполнена после текущего маршрута.", "warning");
+        }).catch(function (error) {
+            progress.stopRequested = false;
+            renderCard(bundle.id, state);
+            window.BROrayUI.toast(error && error.message ? error.message : "Не удалось запросить остановку.", "error");
         });
     }
 
@@ -895,18 +1363,16 @@
             return;
         }
         autoCheckCancelled = true;
+        if (action === "stop") {
+            requestStop(bundle);
+            return;
+        }
         if (busyBundles[bundleId]) return;
-        if (action === "delete") {
-            confirmDelete(bundle).then(function (confirmed) {
-                if (confirmed) executeOperation(bundle, action, buttonNode);
-            }).catch(function (error) { window.BROrayUI.toast(error.message, "error"); });
+        if (action === "resume" || action === "delete" || action === "export") {
+            prepareLongOperation(bundle, action, buttonNode);
             return;
         }
-        if (action === "export") {
-            prepareSync(bundle, buttonNode);
-            return;
-        }
-        executeOperation(bundle, action, buttonNode);
+        executeOperation(bundle, action, buttonNode, null);
     }
 
     function staleForAutomaticCheck(state) {
@@ -921,7 +1387,9 @@
         if (autoCheckCancelled || index >= queue.length) return Promise.resolve();
         bundle = queue[index];
         busyBundles[bundle.id] = "check";
-        renderCard(bundle.id, states[bundle.id] || {});
+        operationRunning = bundle.id;
+        globalOperation = {active:true, bundleId:bundle.id, action:"check"};
+        renderAll();
         return withTimeout(request("/api/routes/check.cgi?bundleId=" + encodeURIComponent(bundle.id), {
             method: "POST", credentials: "same-origin", headers: {"Accept": "application/json"}
         }), REQUEST_TIMEOUT_MS).then(function (state) {
@@ -933,6 +1401,8 @@
             }
         }).then(function () {
             delete busyBundles[bundle.id];
+            if (operationRunning === bundle.id) operationRunning = false;
+            globalOperation = null;
             if (states[bundle.id]) renderCard(bundle.id, states[bundle.id]);
             renderSummary();
             return runAutomaticChecks(queue, index + 1);
@@ -940,7 +1410,9 @@
     }
 
     function startAutomaticChecks() {
-        var queue = BUNDLES.filter(function (bundle) { return staleForAutomaticCheck(states[bundle.id]); });
+        var queue;
+        if (operationRunning) return;
+        queue = BUNDLES.filter(function (bundle) { return staleForAutomaticCheck(states[bundle.id]); });
         if (queue.length) runAutomaticChecks(queue, 0);
     }
 
@@ -962,6 +1434,7 @@
             revealApplication(session);
             return loadAllStates();
         }).then(function () {
+            renderAll();
             startAutomaticChecks();
         }).catch(function (error) {
             if (error && error.status === 401) {
@@ -971,6 +1444,28 @@
             revealApplication(null);
             window.BROrayUI.toast(error && error.message ? error.message : "Не удалось открыть страницу маршрутов.", "error");
         });
+    }
+
+    if (window.BROrayTestMode === true) {
+        window.BROrayRoutesTestHooks = {
+            sameRouteVersion: sameRouteVersion,
+            sameSourceVersion: sameSourceVersion,
+            downloadRequired: downloadRequired,
+            downloadActionRequired: downloadActionRequired,
+            localSetInvalid: localSetInvalid,
+            verificationCurrent: verificationCurrent,
+            verificationRequired: verificationRequired,
+            verificationConflict: verificationConflict,
+            verificationRetryRequired: verificationRetryRequired,
+            keeneticAction: keeneticAction,
+            nextAction: nextAction,
+            statusPresentation: statusPresentation,
+            messageFor: messageFor,
+            checkLabel: checkLabel,
+            preflightMessage: preflightMessage,
+            preflightTitle: preflightTitle,
+            globalOperationMessage: globalOperationMessage
+        };
     }
 
     if (document.readyState === "loading") {

@@ -2,6 +2,8 @@
 
 . /opt/broray/web-new/api/auth-common.sh
 
+BRORAY_CUSTOM_ROUTES_API_LOCK_LIBRARY="/opt/broray/lib/routes-api-operation.sh"
+
 BRORAY_CUSTOM_ROUTES_CLI="/opt/broray/bin/broray-routes-user"
 BRORAY_CUSTOM_ROUTES_BODY_LIMIT=4194304
 BRORAY_CUSTOM_BUNDLE_ID=""
@@ -98,6 +100,22 @@ broray_custom_routes_run()
 {
     output_file="/opt/broray/tmp/custom-routes-api-output.$$.json"
     error_file="/opt/broray/tmp/custom-routes-api-error.$$"
+    custom_action="${2:-custom}"
+    custom_bundle="${3:-}"
+
+    [ -r "$BRORAY_CUSTOM_ROUTES_API_LOCK_LIBRARY" ] || broray_api_error \
+        "500 Internal Server Error" "ROUTES_API_LOCK_UNAVAILABLE" \
+        "Модуль блокировки операций недоступен."
+    . "$BRORAY_CUSTOM_ROUTES_API_LOCK_LIBRARY"
+    custom_lock_rc=0
+    broray_routes_api_lock_acquire "custom:$custom_action" "$custom_bundle" || custom_lock_rc=$?
+    case "$custom_lock_rc" in
+        0) ;;
+        2) broray_api_error "409 Conflict" "ROUTES_OPERATION_BUSY" \
+            "Другая конфликтующая операция уже выполняется." ;;
+        *) broray_api_error "500 Internal Server Error" "ROUTES_API_LOCK_FAILED" \
+            "Не удалось установить блокировку операции." ;;
+    esac
 
     mkdir -p /opt/broray/tmp
 
@@ -105,6 +123,7 @@ broray_custom_routes_run()
         if ! jq -e 'type == "object"' "$output_file" >/dev/null 2>&1; then
             details="$(cat "$output_file" 2>/dev/null)"
             rm -f "$output_file" "$error_file"
+            broray_routes_api_lock_release
             broray_api_error \
                 "500 Internal Server Error" \
                 "CUSTOM_ROUTES_RESPONSE_INVALID" \
@@ -114,6 +133,7 @@ broray_custom_routes_run()
 
         data_json="$(jq -c . "$output_file")"
         rm -f "$output_file" "$error_file"
+        broray_routes_api_lock_release
         broray_api_success "$data_json"
         exit 0
     fi
@@ -147,6 +167,7 @@ $details}"
     esac
 
     rm -f "$output_file" "$error_file"
+    broray_routes_api_lock_release
     broray_api_error \
         "$http_status" \
         "$error_code" \

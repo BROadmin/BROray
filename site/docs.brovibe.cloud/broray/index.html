@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>BROray — установка и настройка</title>
-    <meta name="description" content="Установка, безопасное обновление и настройка BROray 2.1.1-2 на Keenetic и Netcraze с Entware.">
+    <meta name="description" content="Установка, безопасное обновление и настройка BROray 2.2.0-1 на Keenetic и Netcraze с Entware.">
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -31,7 +31,8 @@
     <a href="#update">Обновление</a>
     <a href="#diagnostics">Диагностика</a>
     <a href="#uninstall">Удаление</a>
-    <a href="#support">Поддержка</a>
+    <a href="#donate">Поддержать проект</a>
+    <a href="#support">Обсуждение</a>
 </aside>
 <main class="content">
 <section id="about">
@@ -39,8 +40,8 @@
     <h1>BROray</h1>
     <p class="lead">Менеджер Xray для Keenetic и Netcraze с WebUI, подписками, выбором серверов и управляемыми маршрутами.</p>
     <div class="meta">
-        <span class="badge accent">BROray 2.1.1</span>
-        <span class="badge">OPKG 2.1.1-2</span>
+        <span class="badge accent">BROray 2.2.0</span>
+        <span class="badge">OPKG 2.2.0-1</span>
         <span class="badge">aarch64 / arm64</span>
         <span class="badge">BusyBox / ash</span>
     </div>
@@ -70,10 +71,10 @@
     <p>Для чистой установки выполните один блок целиком:</p>
     <pre><button class="copy" type="button">Копировать</button><code>opkg update &amp;&amp;
 opkg install ca-bundle ca-certificates wget-ssl &amp;&amp;
-TARGET="/tmp/broray-install-2.1.1-2.sh" &amp;&amp;
+TARGET="/tmp/broray-install-2.2.0-1.sh" &amp;&amp;
 /opt/bin/wget -qO "$TARGET.part" \
-    "https://api.brovibe.cloud/releases/broray-install-2.1.1-2.sh?v=$(date +%s)" &amp;&amp;
-echo "f14a86fc481d1a5c5c294635fe79031f71aa999d432b48be00c3a137ab7b8396  $TARGET.part" | sha256sum -c - &amp;&amp;
+    "https://api.brovibe.cloud/releases/broray-install-2.2.0-1.sh?v=$(date +%s)" &amp;&amp;
+echo "af5db97667fe93b344651d928ba36a0010b93f27507aa6c5030c26cb5269f57a  $TARGET.part" | sha256sum -c - &amp;&amp;
 mv "$TARGET.part" "$TARGET" &amp;&amp;
 /opt/bin/ash "$TARGET"</code></pre>
 </section>
@@ -112,13 +113,13 @@ mv "$TARGET.part" "$TARGET" &amp;&amp;
     <p>Обновление работает для любой установленной версии BROray. Выполните один блок целиком:</p>
     <pre><button class="copy" type="button">Копировать</button><code>opkg update &amp;&amp;
 opkg install ca-bundle ca-certificates wget-ssl &amp;&amp;
-TARGET="/tmp/broray-safe-upgrade-2.1.1-2.sh" &amp;&amp;
+TARGET="/tmp/broray-safe-upgrade-2.2.0-1.sh" &amp;&amp;
 /opt/bin/wget -qO "$TARGET.part" \
-    "https://api.brovibe.cloud/releases/broray-safe-upgrade-2.1.1-2.sh?v=$(date +%s)" &amp;&amp;
-echo "1cfcc536215825a29f087582483297baaecabb68fe641dd4ddc960f7146e9504  $TARGET.part" | sha256sum -c - &amp;&amp;
+    "https://api.brovibe.cloud/releases/broray-safe-upgrade-2.2.0-1.sh?v=$(date +%s)" &amp;&amp;
+echo "a3af58edbb46e8d3f39d09f514a18ebe4905cfa66a95bda684d4e4a5547c7ba3  $TARGET.part" | sha256sum -c - &amp;&amp;
 mv "$TARGET.part" "$TARGET" &amp;&amp;
 /opt/bin/ash "$TARGET"</code></pre>
-    <p>Обновитель очищает старые резервные копии, временные файлы, журналы и OPKG-кэш до резервного копирования. Проверенная резервная копия создаётся в /tmp. При ошибке выполняется автоматический откат.</p>
+    <p>Обновитель сохраняет пользовательские и последние безопасные резервные копии, очищает только управляемые временные файлы и кэш, создаёт проверенную копию перед изменениями и выполняет автоматический откат при ошибке.</p>
 </section>
 <section id="diagnostics">
     <h2>9. Проверка и диагностика</h2>
@@ -135,8 +136,21 @@ mv "$TARGET.part" "$TARGET" &amp;&amp;
     <h2>10. Удаление</h2>
     <pre><button class="copy" type="button">Копировать</button><code>opkg remove broray</code></pre>
 </section>
+<section id="donate">
+    <h2>Поддержать проект</h2>
+    <div class="support-card">
+        <a class="support-qr" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer" aria-label="Открыть CloudTips для поддержки BROray">
+            <img src="/assets/cloudtips-qr.svg" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
+        </a>
+        <div>
+            <p>BROray развивается как открытый проект. Поддержка помогает оплачивать инфраструктуру, тестирование и выпуск обновлений.</p>
+            <p><a class="support-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Открыть CloudTips</a></p>
+            <p><code>https://pay.cloudtips.ru/p/09b23d0a</code></p>
+        </div>
+    </div>
+</section>
 <section id="support">
-    <h2>Обсуждение и поддержка</h2>
+    <h2>Обсуждение</h2>
     <p><a href="https://t.me/BROvibe_vpn" target="_blank" rel="noopener noreferrer">https://t.me/BROvibe_vpn</a></p>
 </section>
 </main>

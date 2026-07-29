@@ -1,0 +1,13 @@
+#!/opt/bin/ash
+set -u
+ROOT="${BRORAY_ROOT:-/opt/broray}"
+LIB="$ROOT/lib/routes-dot.sh"
+[ -r "$LIB" ] || { echo 'BRORAY_ERROR:MODULE_UNAVAILABLE:Модуль DNS-over-TLS недоступен.' >&2; exit 1; }
+. "$LIB"
+case "${1:-}" in
+  status) broray_dot_status ;;
+  test) [ -n "${2:-}" ] || broray_dot_error REQUEST_INVALID "Не указан файл запроса."; broray_dot_test "$2" ;;
+  apply) [ -n "${2:-}" ] || broray_dot_error REQUEST_INVALID "Не указан файл запроса."; broray_dot_apply "$2" ;;
+  delete) broray_dot_delete ;;
+  *) echo 'Использование: broray-routes-dot {status|test REQUEST.json|apply REQUEST.json|delete}' >&2; exit 2 ;;
+esac
