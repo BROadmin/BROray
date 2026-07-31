@@ -2,7 +2,7 @@
 set -u
 
 BUILDER="/root/BROray-2.2.6-release-candidate-builder.sh"
-EXPECTED="23e3bda0edbfc754544f6bd89c772c5aea50afe003a767b118d7e373b0a66597"
+EXPECTED="888502163d790b62ce9a9e76adf3212f802309492da89a32f997732a1cf22858"
 READY=yes
 
 printf '%s\n' "=================================================="
