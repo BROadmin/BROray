@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -u
 
-BUILDER="/root/BROray-2.2.6-release-candidate-builder-r10.sh"
-EXPECTED="30b68b51e44faf536109c4eae23fae5a730cf923ec4d4740aa5eab0b5d57d5ff"
+BUILDER="/root/BROray-2.2.6-release-candidate-builder-r11.sh"
+EXPECTED="851cf1bd62e67fb05dcbf2350302405947737d498a801b8ced7c9cf4e7dae67a"
 READY=yes
 
 printf '%s\n' "=================================================="
-printf '%s\n' "BROray 2.2.6 — запуск проверенного candidate builder r10"
+printf '%s\n' "BROray 2.2.6 — запуск universal candidate builder r11"
 printf '%s\n' "=================================================="
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -41,7 +41,8 @@ fi
 echo
 echo "Код завершения: $RESULT"
 echo "Публичный stable-канал не изменяется при сборке кандидата."
-echo "Candidate r10 использует потоковую low-RAM переустановку, старое дерево для отката, прямой снимок в /opt и требует двух физических переустановок через WebUI до продвижения."
+echo "Candidate r11 определяет исходную версию динамически, не требует прежний IPK и выполняет локальный rollback дерева, OPKG metadata, внешних файлов и служб."
+echo "Продвижение запрещено до физической матрицы 2.1.1-2, 2.2.0-2, 2.2.4, 2.2.5, принудительного rollback и повторного обновления."
 echo "Терминал остаётся открытым."
 echo "=================================================="
 exit "$RESULT"
