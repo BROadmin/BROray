@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -u
 
-BUILDER="/root/BROray-2.2.6-release-candidate-builder-r12.sh"
-EXPECTED="203b9e52b37f18f81d76514bbfafa6be8e4b8cef4e012acbad75fe6a8d7ab5bc"
+BUILDER="/root/BROray-2.2.6-release-candidate-builder-r13.sh"
+EXPECTED="3a6925cb2451b86904b68445b5cdcdb18e1326b8db99d3437c035420ada5baab"
 READY=yes
 
 printf '%s\n' "=================================================="
-printf '%s\n' "BROray 2.2.6 — запуск universal candidate builder r12"
+printf '%s\n' "BROray 2.2.6 — запуск проверенного universal candidate builder r13"
 printf '%s\n' "=================================================="
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -41,9 +41,10 @@ fi
 echo
 echo "Код завершения: $RESULT"
 echo "Публичный stable-канал не изменяется при сборке кандидата."
-echo "Candidate r12 определяет исходную версию динамически, не требует прежний IPK, сохраняет все непакетные пользовательские файлы и выполняет локальный rollback дерева, OPKG metadata, внешних файлов и служб."
-echo "Публикатор r12 нормализует каталоги staging в 0755 и файлы в 0644."
-echo "Продвижение запрещено до физической матрицы, принудительного rollback, проверки backup/logs/quality/custom и двух повторных переустановок."
+echo "Candidate r13 определяет исходную версию динамически, не требует прежний IPK и сохраняет все непакетные пользовательские файлы."
+echo "Обязательный транзакционный rollback действует всегда; постоянная пользовательская копия выбирается отдельно: keep или skip."
+echo "Keep рекомендован для USB/достаточного накопителя; skip допускается при ограниченной внутренней памяти после preflight."
+echo "Продвижение запрещено до staging, физической матрицы исходных версий, forced rollback, keep/skip и двух повторных переустановок."
 echo "Терминал остаётся открытым."
 echo "=================================================="
 exit "$RESULT"
