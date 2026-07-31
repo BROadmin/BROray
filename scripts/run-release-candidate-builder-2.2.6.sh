@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -u
 
-BUILDER="/root/BROray-2.2.6-release-candidate-builder-r11.sh"
-EXPECTED="851cf1bd62e67fb05dcbf2350302405947737d498a801b8ced7c9cf4e7dae67a"
+BUILDER="/root/BROray-2.2.6-release-candidate-builder-r12.sh"
+EXPECTED="203b9e52b37f18f81d76514bbfafa6be8e4b8cef4e012acbad75fe6a8d7ab5bc"
 READY=yes
 
 printf '%s\n' "=================================================="
-printf '%s\n' "BROray 2.2.6 — запуск universal candidate builder r11"
+printf '%s\n' "BROray 2.2.6 — запуск universal candidate builder r12"
 printf '%s\n' "=================================================="
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -41,8 +41,9 @@ fi
 echo
 echo "Код завершения: $RESULT"
 echo "Публичный stable-канал не изменяется при сборке кандидата."
-echo "Candidate r11 определяет исходную версию динамически, не требует прежний IPK и выполняет локальный rollback дерева, OPKG metadata, внешних файлов и служб."
-echo "Продвижение запрещено до физической матрицы 2.1.1-2, 2.2.0-2, 2.2.4, 2.2.5, принудительного rollback и повторного обновления."
+echo "Candidate r12 определяет исходную версию динамически, не требует прежний IPK, сохраняет все непакетные пользовательские файлы и выполняет локальный rollback дерева, OPKG metadata, внешних файлов и служб."
+echo "Публикатор r12 нормализует каталоги staging в 0755 и файлы в 0644."
+echo "Продвижение запрещено до физической матрицы, принудительного rollback, проверки backup/logs/quality/custom и двух повторных переустановок."
 echo "Терминал остаётся открытым."
 echo "=================================================="
 exit "$RESULT"
