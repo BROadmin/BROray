@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -u
 
-BUILDER="/root/BROray-2.2.6-release-candidate-builder-r9.sh"
-EXPECTED="eb73a5acd050570b72f1da234eea199e9fa1501a1cc27f6789347550ef0af82e"
+BUILDER="/root/BROray-2.2.6-release-candidate-builder-r10.sh"
+EXPECTED="30b68b51e44faf536109c4eae23fae5a730cf923ec4d4740aa5eab0b5d57d5ff"
 READY=yes
 
 printf '%s\n' "=================================================="
-printf '%s\n' "BROray 2.2.6 — запуск проверенного candidate builder r9"
+printf '%s\n' "BROray 2.2.6 — запуск проверенного candidate builder r10"
 printf '%s\n' "=================================================="
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -41,7 +41,7 @@ fi
 echo
 echo "Код завершения: $RESULT"
 echo "Публичный stable-канал не изменяется при сборке кандидата."
-echo "Candidate r9 требует проверки singleton S28, пустого error при успехе и двух переустановок через WebUI до продвижения."
+echo "Candidate r10 использует потоковую low-RAM переустановку, старое дерево для отката, прямой снимок в /opt и требует двух физических переустановок через WebUI до продвижения."
 echo "Терминал остаётся открытым."
 echo "=================================================="
 exit "$RESULT"
