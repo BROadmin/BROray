@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -u
 
-BUILDER="/root/BROray-2.2.6-release-candidate-builder.sh"
-EXPECTED="888502163d790b62ce9a9e76adf3212f802309492da89a32f997732a1cf22858"
+BUILDER="/root/BROray-2.2.6-release-candidate-builder-r2.sh"
+EXPECTED="759386247553adc0d1ee64e43bc53c8606c5aa88a5d0c6a72a9674e09660c0c3"
 READY=yes
 
 printf '%s\n' "=================================================="
-printf '%s\n' "BROray 2.2.6 — запуск проверенного candidate builder"
+printf '%s\n' "BROray 2.2.6 — запуск проверенного candidate builder r2"
 printf '%s\n' "=================================================="
 
 if [ "$(id -u)" -ne 0 ]; then
