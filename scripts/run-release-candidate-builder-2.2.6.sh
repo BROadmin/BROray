@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -u
 
-BUILDER="/root/BROray-2.2.6-release-candidate-builder-r7.sh"
-EXPECTED="df7d5f2afa2645e369b5cdd5f74cff4dd3781da2f2e6dc2faf1cc91e398c24f5"
+BUILDER="/root/BROray-2.2.6-release-candidate-builder-r8.sh"
+EXPECTED="6f65c7b81a690c50bf6cd2856f52dcf05e4b0ef759e01a913452aca5e0d81a27"
 READY=yes
 
 printf '%s\n' "=================================================="
-printf '%s\n' "BROray 2.2.6 — запуск проверенного candidate builder r7"
+printf '%s\n' "BROray 2.2.6 — запуск проверенного candidate builder r8"
 printf '%s\n' "=================================================="
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -41,7 +41,7 @@ fi
 echo
 echo "Код завершения: $RESULT"
 echo "Публичный stable-канал не изменяется при сборке кандидата."
-echo "Candidate r7 требует обновления, проверки непрерывного прогресса и двух переустановок через WebUI до продвижения."
+echo "Candidate r8 требует проверки расположения карточки, непрерывного прогресса и двух переустановок через WebUI до продвижения."
 echo "Терминал остаётся открытым."
 echo "=================================================="
 exit "$RESULT"
