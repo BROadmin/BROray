@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -u
 
-BUILDER="/root/BROray-2.2.6-release-candidate-builder-r14.sh"
-EXPECTED="295e074bedd22465686c2031915ee2cdf044a850bf6d931a9cf9bea708dcef19"
+BUILDER="/root/BROray-2.2.6-release-candidate-builder-r15.sh"
+EXPECTED="851f9c1f44e97271bf626421bc93b53bb0f06008a90ac23c803f5aaf4251b045"
+EXPECTED_SIZE="198955"
 READY=yes
 
 printf '%s\n' "=================================================="
-printf '%s\n' "BROray 2.2.6 — запуск проверенного universal candidate builder r14"
+printf '%s\n' "BROray 2.2.6 — запуск проверенного universal candidate builder r15"
 printf '%s\n' "=================================================="
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -27,7 +28,7 @@ if [ "$READY" = yes ]; then
     if [ "$ACTUAL" != "$EXPECTED" ]; then
         echo "ОШИБКА: SHA-256 builder не совпадает"
         READY=no
-    elif [ "$SIZE" != "173401" ]; then
+    elif [ "$SIZE" != "$EXPECTED_SIZE" ]; then
         echo "ОШИБКА: размер builder не совпадает"
         READY=no
     elif ! bash -n "$BUILDER"; then
@@ -54,9 +55,11 @@ fi
 echo
 echo "Код завершения: $RESULT"
 echo "Публичный stable-канал не изменяется при сборке кандидата."
-echo "Candidate r14 определяет исходную версию динамически и не требует прежний IPK."
-echo "Обязательный транзакционный rollback действует всегда; постоянная копия выбирается отдельно: keep или skip."
-echo "Exact preinst-модель использует явно проверенный tar и не зависит от постороннего /opt/bin/tar release-сервера."
+echo "Candidate r15 определяет исходную версию динамически и не требует прежний IPK."
+echo "Перед измерением удаляются только временные транзакции; постоянные архивы не удаляются, access.log ограничивается 16 МиБ."
+echo "Место обязательной транзакции и keep рассчитывается отдельно; skip не вызывает оценку постоянной копии."
+echo "Размер определяется через wc/readlink без stat, с тремя попытками и точным путём ошибки."
+echo "Любой preflight-stop автоматически снимает compatibility overlay и возвращает исходные backend, JavaScript, CGI и wrapper."
 echo "Продвижение запрещено до staging, физической матрицы исходных версий, forced rollback, keep/skip и двух повторных переустановок."
 echo "Терминал остаётся открытым."
 echo "=================================================="
