@@ -1,0 +1,29 @@
+name: Apply BROray 2.2.5 source overlay
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-source-overlay:
+    if: github.head_ref == 'release/2.2.5-source-final'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release branch
+        uses: actions/checkout@v4
+        with:
+          ref: release/2.2.5-source-final
+          fetch-depth: 0
+
+      - name: Install verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y busybox jq rsync
+
+      - name: Apply and verify exact source overlay
+        run: bash scripts/sync-broray-2.2.5-source.sh

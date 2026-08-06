@@ -1,0 +1,261 @@
+name: Sync BROray 2.2.5 source
+
+on:
+  push:
+    branches:
+      - release/2.2.5-source-final
+    paths:
+      - .github/workflows/sync-broray-2.2.5-source.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release branch
+        uses: actions/checkout@v4
+        with:
+          ref: release/2.2.5-source-final
+          fetch-depth: 0
+
+      - name: Install verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y busybox jq rsync
+
+      - name: Download and verify published source overlay
+        env:
+          SOURCE_URL: https://api.brovibe.cloud/releases/BROray-2.2.5-source-overlay.tar.gz
+          SOURCE_SHA256: a22988dae62b32e2d52002c4bda6a088a41e310245d0c27983157235c8054402
+        run: |
+          set -Eeuo pipefail
+          work="$RUNNER_TEMP/broray-2.2.5-source"
+          rm -rf "$work"
+          mkdir -p "$work"
+          curl -fL --retry 5 --retry-delay 2 \
+            -H 'Accept-Encoding: identity' \
+            -H 'Cache-Control: no-cache, no-store' \
+            -o "$work/source-overlay.tar.gz" \
+            "$SOURCE_URL?run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "$SOURCE_SHA256  $work/source-overlay.tar.gz" | sha256sum -c -
+          tar -tzf "$work/source-overlay.tar.gz" > "$work/members.txt"
+          if grep -Eq '(^/|(^|/)\.\.(/|$))' "$work/members.txt"; then
+            echo 'Unsafe path in source overlay' >&2
+            exit 1
+          fi
+          mkdir -p "$work/overlay"
+          tar -xzf "$work/source-overlay.tar.gz" -C "$work/overlay"
+          printf '%s\n' "$work" > "$RUNNER_TEMP/broray-work-path"
+
+      - name: Synchronize exact 2.2.5 source
+        run: |
+          set -Eeuo pipefail
+          work="$(cat "$RUNNER_TEMP/broray-work-path")"
+          overlay="$work/overlay"
+          data="$overlay/package/data"
+
+          test -f "$overlay/documentation/README.md"
+          test -f "$data/opt/broray/config/version"
+          test -f "$overlay/package/control/preinst"
+          test "$(cat "$data/opt/broray/config/version")" = '2.2.5'
+
+          install -m 0644 "$overlay/documentation/README.md" README.md
+          install -m 0644 "$overlay/documentation/CHANGELOG.md" CHANGELOG.md
+          mkdir -p docs site/docs.brovibe.cloud
+          rsync -a --delete "$overlay/documentation/docs/" docs/
+          rsync -a --delete "$overlay/documentation/site/docs.brovibe.cloud/" site/docs.brovibe.cloud/
+
+          mkdir -p root/opt/broray root/opt/etc/init.d
+          for section in bin config lib routes share web-new; do
+            rm -rf "root/opt/broray/$section"
+            mkdir -p "root/opt/broray/$section"
+            rsync -a "$data/opt/broray/$section/" "root/opt/broray/$section/"
+          done
+          rm -f root/opt/broray/bin/xray
+          rm -rf \
+            root/opt/broray/backup \
+            root/opt/broray/backups \
+            root/opt/broray/data \
+            root/opt/broray/deleted-subscriptions \
+            root/opt/broray/logs \
+            root/opt/broray/run \
+            root/opt/broray/servers \
+            root/opt/broray/subscriptions \
+            root/opt/broray/tmp \
+            root/opt/broray/update \
+            root/opt/broray/config/disabled-subscription-servers \
+            root/opt/broray/config/subscriptions \
+            root/opt/broray/routes/backup \
+            root/opt/broray/routes/catalog \
+            root/opt/broray/routes/installed \
+            root/opt/broray/routes/locks \
+            root/opt/broray/routes/operations \
+            root/opt/broray/routes/preflight \
+            root/opt/broray/routes/state \
+            root/opt/broray/routes/tmp \
+            root/opt/broray/routes/transactions
+
+          rsync -a --delete "$data/opt/etc/init.d/" root/opt/etc/init.d/
+
+          rm -rf root/opt/broray/web-src
+          cp -a root/opt/broray/web-new root/opt/broray/web-src
+          printf '%s\n' 'WebUI-2.2.0-r3' > root/opt/broray/web-src/BUILD
+          cat > root/opt/broray/web-src/SOURCE-MIRROR.md <<'EOF'
+          # WebUI source mirror
+
+          For BROray 2.2.5, `web-src` is an exact source mirror of the field-tested
+          and published `web-new` tree. Run `scripts/build-webui.sh` to reproduce
+          `web-new` byte-for-byte from this directory.
+          EOF
+
+          cat > scripts/build-webui.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+          source_root="$repo_root/root/opt/broray/web-src"
+          output_root="$repo_root/root/opt/broray/web-new"
+          test -d "$source_root"
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          rsync -a --exclude BUILD --exclude SOURCE-MIRROR.md "$source_root/" "$tmp/"
+          rm -rf "$output_root"
+          mkdir -p "$output_root"
+          rsync -a "$tmp/" "$output_root/"
+          EOF
+          chmod 755 scripts/build-webui.sh
+
+          mkdir -p packaging/opkg
+          for file in conffiles preinst postinst prerm postrm; do
+            install -m 0644 "$overlay/package/control/$file" "packaging/opkg/$file"
+          done
+          chmod 755 packaging/opkg/preinst packaging/opkg/postinst packaging/opkg/prerm packaging/opkg/postrm
+          install -m 0644 "$overlay/package/control/control" packaging/opkg/control.release-2.2.5
+          sed \
+            -e 's/^Version: .*/Version: @PACKAGE_VERSION@/' \
+            -e 's/^Installed-Size: .*/Installed-Size: @INSTALLED_SIZE@/' \
+            "$overlay/package/control/control" > packaging/opkg/control.in
+
+          mkdir -p scripts release/2.2.5
+          for file in \
+            broray-install-2.2.5.sh \
+            broray-safe-upgrade-2.2.5.sh \
+            broray-update-compat-2.2.5.sh; do
+            curl -fL --retry 5 --retry-delay 2 \
+              -H 'Accept-Encoding: identity' \
+              -H 'Cache-Control: no-cache, no-store' \
+              -o "scripts/$file" \
+              "https://api.brovibe.cloud/releases/$file?run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            chmod 755 "scripts/$file"
+          done
+          echo '1b5d74a31c78556abd7341b100e7e961d3884c52b7e6b275724b7ed48e3a0ea2  scripts/broray-install-2.2.5.sh' | sha256sum -c -
+          echo 'dc2f417c40c47d50aa4e9ad29eaf6ea993e5b5e125f91b12a99ac4d75379417d  scripts/broray-safe-upgrade-2.2.5.sh' | sha256sum -c -
+          echo '90e8ddd9d384af43796df73348de95eae0a0ab43a280caaaf71c2e6339bfbf73  scripts/broray-update-compat-2.2.5.sh' | sha256sum -c -
+
+          install -m 0644 "$overlay/documentation/VALIDATION.txt" release/2.2.5/SOURCE-OVERLAY-VALIDATION.txt
+          install -m 0644 "$overlay/documentation/docs/RELEASE-2.2.5.md" release/2.2.5/RELEASE-NOTES.md
+          install -m 0644 "$overlay/documentation/docs/RELEASE-REQUIREMENTS.md" release/2.2.5/RELEASE-REQUIREMENTS.md
+          curl -fL --retry 5 --retry-delay 2 \
+            -H 'Accept-Encoding: identity' \
+            -H 'Cache-Control: no-cache, no-store' \
+            -o release/2.2.5/release-manifest.json \
+            "https://api.brovibe.cloud/releases/BROray-2.2.5-release-manifest.json?run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo 'adb588f91c8e7f583e3437f9743029957b49e9c993cd6126243cfceecb307ba7  release/2.2.5/release-manifest.json' | sha256sum -c -
+
+          cat > release/2.2.5/SHA256SUMS <<'EOF'
+          8a2255e2c181a5f88438673c186da4f89870cb54bc01e656d57671d46cae9adc  broray_2.2.5_aarch64-3.10.ipk
+          1b5d74a31c78556abd7341b100e7e961d3884c52b7e6b275724b7ed48e3a0ea2  broray-install-2.2.5.sh
+          dc2f417c40c47d50aa4e9ad29eaf6ea993e5b5e125f91b12a99ac4d75379417d  broray-safe-upgrade-2.2.5.sh
+          90e8ddd9d384af43796df73348de95eae0a0ab43a280caaaf71c2e6339bfbf73  broray-update-compat-2.2.5.sh
+          a22988dae62b32e2d52002c4bda6a088a41e310245d0c27983157235c8054402  BROray-2.2.5-source-overlay.tar.gz
+          f5224e57c93085bc39138dac705eec8e7c6144a468062ab3c9e0bf34d7105aa2  BROray-2.2.5-technical-documentation.tar.gz
+          cf6bb54324cbc31439ff6fa3697e81166a1e8f9d247e7247b561df1da95d2571  BROray-2.2.5-site-documentation.tar.gz
+          EOF
+
+          cat > docs/SOURCE-INTEGRITY-2.2.5.md <<'EOF'
+          # Целостность исходного кода BROray 2.2.5
+
+          Ветка релиза синхронизирована с точным source overlay опубликованного
+          и установленного пакета BROray 2.2.5. Бинарный файл Xray намеренно не
+          хранится в Git: он загружается из официального Xray-core и проверяется
+          по закреплённой SHA-256.
+
+          `root/opt/broray/web-new` содержит точный WebUI `WebUI-2.2.0-r3`.
+          `root/opt/broray/web-src` является его воспроизводимым исходным зеркалом;
+          `scripts/build-webui.sh` пересоздаёт `web-new` без изменения байтов.
+
+          Релизный IPK:
+
+          - файл: `broray_2.2.5_aarch64-3.10.ipk`;
+          - размер: 13 995 075 байт;
+          - SHA-256: `8a2255e2c181a5f88438673c186da4f89870cb54bc01e656d57671d46cae9adc`.
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('README.md')
+          text = path.read_text()
+          marker = '## Состояние исходного дерева GitHub'
+          if marker in text:
+              text = text.split(marker, 1)[0].rstrip() + '\n\n## Исходный код релиза\n\nТочный source overlay BROray 2.2.5 перенесён в `main`. WebUI `WebUI-2.2.0-r3` хранится в `web-new` и воспроизводимом зеркале `web-src`. Подробности: [`docs/SOURCE-INTEGRITY-2.2.5.md`](docs/SOURCE-INTEGRITY-2.2.5.md).\n'
+          path.write_text(text)
+
+          path = Path('docs/RELEASE-2.2.5.md')
+          text = path.read_text()
+          text = text.replace('Релиз-кандидат для обязательной полевой проверки через WebUI.', 'Финальный опубликованный релиз, успешно установленный через WebUI на реальном Keenetic.')
+          path.write_text(text)
+          PY
+
+          rm -f .github/workflows/sync-broray-2.2.5-source.yml
+
+      - name: Verify source tree
+        run: |
+          set -Eeuo pipefail
+          test "$(cat root/opt/broray/config/version)" = '2.2.5'
+          test ! -e root/opt/broray/bin/xray
+          grep -q 'BRORAY_OPKG_LISTS_DIR="${BRORAY_OPKG_LISTS_DIR:-/opt/var/opkg-lists}"' root/opt/broray/lib/broray-page.sh
+          grep -q 'WebUI-2.2.0-r3' root/opt/broray/web-new/build.json
+          grep -q 'X-BROray-Required-Opt-KB: 42000' packaging/opkg/control.in
+          grep -q 'X-BROray-Package-Revision: 1' packaging/opkg/control.in
+
+          while IFS= read -r file; do
+            busybox ash -n "$file"
+          done < <(find root/opt/broray root/opt/etc/init.d packaging/opkg -type f \( -name '*.sh' -o -name '*.cgi' -o -path '*/bin/*' -o -path '*/init.d/*' -o -name preinst -o -name postinst -o -name prerm -o -name postrm \) ! -name '*.json' ! -name '*.html' ! -name '*.js' ! -name '*.css' ! -name '*.svg' | sort)
+
+          while IFS= read -r file; do
+            jq -e . "$file" >/dev/null
+          done < <(find root/opt/broray -type f -name '*.json' | sort)
+
+          while IFS= read -r file; do
+            node --check "$file" >/dev/null
+          done < <(find root/opt/broray/web-new/assets/js root/opt/broray/web-src/assets/js -type f -name '*.js' | sort)
+
+          scripts/build-webui.sh
+          diff -qr \
+            --exclude BUILD \
+            --exclude SOURCE-MIRROR.md \
+            root/opt/broray/web-src \
+            root/opt/broray/web-new
+
+          if grep -RInE '(vless|vmess|trojan|hysteria2)://|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}' \
+            root docs release scripts packaging --exclude='*.svg'; then
+            echo 'Potential user secret found' >&2
+            exit 1
+          fi
+
+          git diff --check
+          git status --short
+
+      - name: Commit exact source sync
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'BROadmin Release Bot'
+          git config user.email '307129396+BROadmin@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit'
+            exit 1
+          fi
+          git commit -m 'Sync exact BROray 2.2.5 source tree'
+          git push origin HEAD:release/2.2.5-source-final
