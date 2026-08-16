@@ -43,8 +43,8 @@ jobs:
           printf '%s\n' "BUILDER_B64_BYTES=$BUILDER_B64_BYTES" "BUILDER_B64_SHA256=$BUILDER_B64_SHA"
           [ "$BUILDER_B64_BYTES" = 15688 ]
           [ "$BUILDER_B64_SHA" = 6b531a8c150e3c8b69362a9ee993672064c773673e247932c2e767d6bf7979c7 ]
-          base64 -d /tmp/build_r14c10.py.gz.b64 | gzip -d > tools/r14c10/build_r14c10.py
-          BUILDER_SHA="$(sha256sum tools/r14c10/build_r14c10.py | awk 'NR==1{print $1;exit}')"
+          base64 -d /tmp/build_r14c10.py.gz.b64 | gzip -d > tools/r14c10/build_candidate.py
+          BUILDER_SHA="$(sha256sum tools/r14c10/build_candidate.py | awk 'NR==1{print $1;exit}')"
           echo "BUILDER_SHA256=$BUILDER_SHA"
           [ "$BUILDER_SHA" = 32397a2a5dddf0b5d083e023638e1f3d71e39b641a3730db212e9e874b386bfa ]
 
@@ -59,9 +59,9 @@ jobs:
           echo "CI_SHA256=$CI_SHA"
           [ "$CI_SHA" = bfddedb37190ec1021c52f02edcf93498cceea7b115a1765eff3db2c66770572 ]
 
-          chmod 0700 tools/r14c10/build_r14c10.py tools/r14c10/ci-build-r14c10.sh
+          chmod 0700 tools/r14c10/build_candidate.py tools/r14c10/ci-build-r14c10.sh
           echo 'PYTHON_COMPILE=START'
-          python3 -m py_compile tools/r14c10/build_r14c10.py
+          python3 -m py_compile tools/r14c10/build_candidate.py
           echo 'PYTHON_COMPILE=PASS'
           echo 'BASH_SYNTAX=START'
           bash -n tools/r14c10/ci-build-r14c10.sh
