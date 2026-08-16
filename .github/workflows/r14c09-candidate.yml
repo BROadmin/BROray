@@ -31,7 +31,11 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          base64 -d tools/r14c09/build_candidate.py.gz.b64 | gzip -d > tools/r14c09/build_candidate.py
+          cat tools/r14c09/builder-v3.part-* > /tmp/build_candidate.py.gz.b64
+          [ "$(wc -c </tmp/build_candidate.py.gz.b64 | tr -d ' ')" = 15300 ]
+          [ "$(sha256sum /tmp/build_candidate.py.gz.b64 | awk 'NR==1{print $1;exit}')" = 34cd36d5b2e6ec3fd7f17c088dcac63dfc0b056aa18821f2987023f6008e8aca ]
+          base64 -d /tmp/build_candidate.py.gz.b64 | gzip -d > tools/r14c09/build_candidate.py
+          [ "$(sha256sum tools/r14c09/build_candidate.py | awk 'NR==1{print $1;exit}')" = f930f95b0730e68ace57310582c2b52b9dc2c89f59ab795beaec24d48d2e9b8b ]
           base64 -d tools/r14c09/ci-build.sh.gz.b64 | gzip -d > tools/r14c09/ci-build.sh
           chmod 0700 tools/r14c09/ci-build.sh tools/r14c09/build_candidate.py
           python3 -m py_compile tools/r14c09/build_candidate.py
