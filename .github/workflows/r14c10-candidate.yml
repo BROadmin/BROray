@@ -38,20 +38,34 @@ jobs:
           set -Eeuo pipefail
 
           cat tools/r14c10/builder.part-* > /tmp/build_r14c10.py.gz.b64
-          [ "$(wc -c </tmp/build_r14c10.py.gz.b64 | tr -d ' ')" = 15688 ]
-          [ "$(sha256sum /tmp/build_r14c10.py.gz.b64 | awk 'NR==1{print $1;exit}')" = 6b531a8c150e3c8b69362a9ee993672064c773673e247932c2e767d6bf7979c7 ]
+          BUILDER_B64_BYTES="$(wc -c </tmp/build_r14c10.py.gz.b64 | tr -d ' ')"
+          BUILDER_B64_SHA="$(sha256sum /tmp/build_r14c10.py.gz.b64 | awk 'NR==1{print $1;exit}')"
+          printf '%s\n' "BUILDER_B64_BYTES=$BUILDER_B64_BYTES" "BUILDER_B64_SHA256=$BUILDER_B64_SHA"
+          [ "$BUILDER_B64_BYTES" = 15688 ]
+          [ "$BUILDER_B64_SHA" = 6b531a8c150e3c8b69362a9ee993672064c773673e247932c2e767d6bf7979c7 ]
           base64 -d /tmp/build_r14c10.py.gz.b64 | gzip -d > tools/r14c10/build_r14c10.py
-          [ "$(sha256sum tools/r14c10/build_r14c10.py | awk 'NR==1{print $1;exit}')" = 32397a2a5dddf0b5d083e023638e1f3d71e39b641a3730db212e9e874b386bfa ]
+          BUILDER_SHA="$(sha256sum tools/r14c10/build_r14c10.py | awk 'NR==1{print $1;exit}')"
+          echo "BUILDER_SHA256=$BUILDER_SHA"
+          [ "$BUILDER_SHA" = 32397a2a5dddf0b5d083e023638e1f3d71e39b641a3730db212e9e874b386bfa ]
 
           cat tools/r14c10/ci.part-* > /tmp/ci-build-r14c10.sh.gz.b64
-          [ "$(wc -c </tmp/ci-build-r14c10.sh.gz.b64 | tr -d ' ')" = 8332 ]
-          [ "$(sha256sum /tmp/ci-build-r14c10.sh.gz.b64 | awk 'NR==1{print $1;exit}')" = e03120ecafc3040f497850399f104d7ee75df499edb0d96277193688dbef9478 ]
+          CI_B64_BYTES="$(wc -c </tmp/ci-build-r14c10.sh.gz.b64 | tr -d ' ')"
+          CI_B64_SHA="$(sha256sum /tmp/ci-build-r14c10.sh.gz.b64 | awk 'NR==1{print $1;exit}')"
+          printf '%s\n' "CI_B64_BYTES=$CI_B64_BYTES" "CI_B64_SHA256=$CI_B64_SHA"
+          [ "$CI_B64_BYTES" = 8332 ]
+          [ "$CI_B64_SHA" = e03120ecafc3040f497850399f104d7ee75df499edb0d96277193688dbef9478 ]
           base64 -d /tmp/ci-build-r14c10.sh.gz.b64 | gzip -d > tools/r14c10/ci-build-r14c10.sh
-          [ "$(sha256sum tools/r14c10/ci-build-r14c10.sh | awk 'NR==1{print $1;exit}')" = bfddedb37190ec1021c52f02edcf93498cceea7b115a1765eff3db2c66770572 ]
+          CI_SHA="$(sha256sum tools/r14c10/ci-build-r14c10.sh | awk 'NR==1{print $1;exit}')"
+          echo "CI_SHA256=$CI_SHA"
+          [ "$CI_SHA" = bfddedb37190ec1021c52f02edcf93498cceea7b115a1765eff3db2c66770572 ]
 
           chmod 0700 tools/r14c10/build_r14c10.py tools/r14c10/ci-build-r14c10.sh
+          echo 'PYTHON_COMPILE=START'
           python3 -m py_compile tools/r14c10/build_r14c10.py
+          echo 'PYTHON_COMPILE=PASS'
+          echo 'BASH_SYNTAX=START'
           bash -n tools/r14c10/ci-build-r14c10.sh
+          echo 'BASH_SYNTAX=PASS'
 
       - name: Build and validate r14c10
         shell: bash
