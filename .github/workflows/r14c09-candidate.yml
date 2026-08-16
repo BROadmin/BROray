@@ -1,0 +1,53 @@
+name: Build BROray 3.0.0-r14c09 candidate
+
+on:
+  push:
+    branches:
+      - automation/r14c09-build-20260816
+    paths:
+      - 'tools/r14c09/**'
+      - '.github/workflows/r14c09-candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v4
+
+      - name: Install target-shell test tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends busybox jq
+
+      - name: Restore exact build tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          base64 -d tools/r14c09/build_candidate.py.gz.b64 | gzip -d > tools/r14c09/build_candidate.py
+          base64 -d tools/r14c09/ci-build.sh.gz.b64 | gzip -d > tools/r14c09/ci-build.sh
+          chmod 0700 tools/r14c09/ci-build.sh tools/r14c09/build_candidate.py
+          python3 -m py_compile tools/r14c09/build_candidate.py
+          bash -n tools/r14c09/ci-build.sh
+
+      - name: Build and validate r14c09
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash tools/r14c09/ci-build.sh
+
+      - name: Upload exact deliverables
+        uses: actions/upload-artifact@v4
+        with:
+          name: BROray-3.0.0-r14c09-deliverables
+          path: dist/r14c09/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
