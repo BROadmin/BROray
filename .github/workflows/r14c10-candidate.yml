@@ -1,0 +1,69 @@
+name: Build BROray 3.0.0-r14c10 candidate
+
+on:
+  push:
+    branches:
+      - automation/r14c10-build-20260816
+    paths:
+      - 'tools/r14c10/**'
+      - '.github/workflows/r14c10-candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v4
+
+      - name: Verify runner prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          command -v python3
+          command -v busybox
+          command -v jq
+          command -v tar
+          command -v gzip
+          command -v base64
+          command -v sha256sum
+
+      - name: Restore exact build tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cat tools/r14c10/builder.part-* > /tmp/build_r14c10.py.gz.b64
+          [ "$(wc -c </tmp/build_r14c10.py.gz.b64 | tr -d ' ')" = 15688 ]
+          [ "$(sha256sum /tmp/build_r14c10.py.gz.b64 | awk 'NR==1{print $1;exit}')" = 6b531a8c150e3c8b69362a9ee993672064c773673e247932c2e767d6bf7979c7 ]
+          base64 -d /tmp/build_r14c10.py.gz.b64 | gzip -d > tools/r14c10/build_r14c10.py
+          [ "$(sha256sum tools/r14c10/build_r14c10.py | awk 'NR==1{print $1;exit}')" = 32397a2a5dddf0b5d083e023638e1f3d71e39b641a3730db212e9e874b386bfa ]
+
+          cat tools/r14c10/ci.part-* > /tmp/ci-build-r14c10.sh.gz.b64
+          [ "$(wc -c </tmp/ci-build-r14c10.sh.gz.b64 | tr -d ' ')" = 8332 ]
+          [ "$(sha256sum /tmp/ci-build-r14c10.sh.gz.b64 | awk 'NR==1{print $1;exit}')" = e03120ecafc3040f497850399f104d7ee75df499edb0d96277193688dbef9478 ]
+          base64 -d /tmp/ci-build-r14c10.sh.gz.b64 | gzip -d > tools/r14c10/ci-build-r14c10.sh
+          [ "$(sha256sum tools/r14c10/ci-build-r14c10.sh | awk 'NR==1{print $1;exit}')" = bfddedb37190ec1021c52f02edcf93498cceea7b115a1765eff3db2c66770572 ]
+
+          chmod 0700 tools/r14c10/build_r14c10.py tools/r14c10/ci-build-r14c10.sh
+          python3 -m py_compile tools/r14c10/build_r14c10.py
+          bash -n tools/r14c10/ci-build-r14c10.sh
+
+      - name: Build and validate r14c10
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash tools/r14c10/ci-build-r14c10.sh
+
+      - name: Upload exact deliverables
+        uses: actions/upload-artifact@v4
+        with:
+          name: BROray-3.0.0-r14c10-deliverables
+          path: dist/r14c10/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
