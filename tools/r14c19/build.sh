@@ -6,13 +6,13 @@ export LC_ALL=C TZ=UTC
 MODE="${1:-diagnostic}"
 OUT="${2:-$PWD/out}"
 BASE='https://api.brovibe.cloud/releases/staging/broray/3.0.0-r14c18'
-R26_BASE='https://api.brovibe.cloud/releases/staging/broray/2.2.7-r26'
+R26_SOURCE_BASE='https://api.brovibe.cloud/releases/staging/broray/3.0.0-r1'
 EXPECTED_PUBLIC_MANIFEST='46ae4a8fd09eddf8aaea1b7f31c041642545bd45b169d2d1c52f8742d89e3c7e'
 EXPECTED_APP='40db147e707b3cc929b8ff221413fbc587fdef4adcf108eea070b5c0c7af5ec1'
 EXPECTED_IPK='d5e873d121a69be5882330a85b0c4644d79d84c715d563d382637f19535f0a9a'
 EXPECTED_RELEASE='992536fb50a37f0023f72b39b44ea1aa2d74bed2c8e5a9add224f68c6c3c2d67'
 EXPECTED_R26_IPK='0709fa8bd371afa75b19e9a34c895fb9f7dd260851ae7bc2f882da3bd12329a0'
-EXPECTED_R26_RELEASE='776b477a76a6795ec1c057991ca073b1d29ccae3c8f611c7d9290f92b84992c5'
+EXPECTED_R26_SOURCE_RELEASE='51bc50ea57308577524a75271592a1aa64471873959b6fcb303a29de5da790d5'
 
 fail(){ printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 sha(){ sha256sum "$1" | awk 'NR==1{print $1;exit}'; }
@@ -70,13 +70,18 @@ else
   tar -xf "$IPK" --no-same-owner -C "$OUT/extracted/ipk"
 fi
 
-# Exact field-proven 2.2.7-r26 functional baseline.
+# Exact field-proven 2.2.7-r26 functional baseline, retained inside the
+# immutable 3.0.0-r1 publication after the original r26 staging was retired.
 R26_IPK="$OUT/r26/publication/broray_2.2.7-r26_aarch64-3.10.ipk"
-R26_REL="$OUT/r26/publication/release.json"
-fetch_url "$R26_BASE/packages/broray_2.2.7-r26_aarch64-3.10.ipk?build=r14c19" "$R26_IPK"
-fetch_url "$R26_BASE/release.json?build=r14c19" "$R26_REL"
+R26_REL="$OUT/r26/publication/source-release-3.0.0-r1.json"
+fetch_url "$R26_SOURCE_BASE/packages/broray_2.2.7-r26_aarch64-3.10.ipk?build=r14c19" "$R26_IPK"
+fetch_url "$R26_SOURCE_BASE/release.json?build=r14c19" "$R26_REL"
 [[ "$(sha "$R26_IPK")" == "$EXPECTED_R26_IPK" ]] || fail 'r26 IPK identity mismatch'
-[[ "$(sha "$R26_REL")" == "$EXPECTED_R26_RELEASE" ]] || fail 'r26 release identity mismatch'
+[[ "$(sha "$R26_REL")" == "$EXPECTED_R26_SOURCE_RELEASE" ]] || fail 'r26 source release identity mismatch'
+jq -e --arg h "$EXPECTED_R26_IPK" '
+  .minimumSource.packageVersion == "2.2.7-r26" and
+  any(.packages[]; .packageVersion == "2.2.7-r26" and .sha256 == $h)
+' "$R26_REL" >/dev/null || fail 'r26 IPK not bound by preserved source release'
 
 if ar t "$R26_IPK" >/dev/null 2>&1; then
   (cd "$OUT/r26/outer" && ar x "$OLDPWD/$R26_IPK")
@@ -132,7 +137,7 @@ PY
   echo 'R14C18_IPK_SHA256='"$(sha "$IPK")"
   echo 'R14C18_RELEASE_SHA256='"$(sha "$REL")"
   echo 'R26_IPK_SHA256='"$(sha "$R26_IPK")"
-  echo 'R26_RELEASE_SHA256='"$(sha "$R26_REL")"
+  echo 'R26_SOURCE_RELEASE_SHA256='"$(sha "$R26_REL")"
   echo 'PRODUCTION_CGI_DEV_STDIN_OCCURRENCES='"$(wc -l < "$OUT/evidence/dev-stdin-occurrences.txt" | tr -d ' ')"
   echo 'DIAGNOSTIC_EXTRACTION=PASS'
 } | tee "$OUT/BUILD-RESULT.txt"
