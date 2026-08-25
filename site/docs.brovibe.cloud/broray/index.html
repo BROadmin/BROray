@@ -58,14 +58,14 @@
     <div class="meta" aria-label="Версии компонентов">
         <span class="badge accent">BROray 3.0.0</span>
         <span class="badge">OPKG 3.0.0-r14</span>
-        <span class="badge">WebUI-3.0.0-r14c67</span>
+        <span class="badge">WebUI-3.0.0-r14c68</span>
         <span class="badge">Updater v5</span>
         <span class="badge">aarch64-3.10</span>
         <span class="badge">Xray 26.7.28</span>
     </div>
 
     <p>
-        Технический идентификатор проверенных байтов — <code>3.0.0-r14c67</code>.
+        Технический идентификатор проверенных байтов — <code>3.0.0-r14c68</code>.
         Пользовательская версия приложения — <code>3.0.0</code>, версия пакета —
         <code>3.0.0-r14</code>. Stable опубликован из физически проверенного кандидата
         без пересборки под тем же идентификатором.
@@ -143,7 +143,7 @@ trap '"$BB" rm -f "$T"' EXIT
   -o "$T"
 
 [ "$("$BB" sha256sum "$T" | "$BB" awk 'NR==1{print $1}')" = \
-  'b80bf61758201d34b32638b9184147367f91e74635be045d680214b4cc632f1d' ]
+  '06a0f631269f175bc02469856733020a713f1eaed13ac047abd111519cf92967' ]
 
 "$BB" sh "$T"
 )</code></pre>
@@ -152,7 +152,7 @@ trap '"$BB" rm -f "$T"' EXIT
     <pre><code>BRORAY_INSTALL=PASS
 BRORAY_STABLE_INSTALL=PASS
 RELEASE=3.0.0-r14
-CANDIDATE=3.0.0-r14c67
+CANDIDATE=3.0.0-r14c68
 STABLE=YES</code></pre>
 
     <div class="note warning">
@@ -259,6 +259,7 @@ STABLE=YES</code></pre>
         <li>Безопасное управление DoT, не затрагивающее внешние записи.</li>
         <li>Динамический расчёт места для обновления и переустановки Xray.</li>
         <li>Ускоренные сводки, ограниченный polling и единая блокировка конфликтующих операций.</li>
+        <li>Корректная подпись канала: WebUI показывает фактический Stable-канал updater-v5 независимо от legacy OPKG feed.</li>
     </ul>
 </section>
 
@@ -287,7 +288,7 @@ STABLE=YES</code></pre>
 /opt/etc/init.d/S25broray-web status</code></pre>
     <p>
         Для текущего Stable ожидаются пакет <code>3.0.0-r14</code>, кандидат
-        <code>3.0.0-r14c67</code>, <code>broray-updater/5</code>, исправная
+        <code>3.0.0-r14c68</code>, <code>broray-updater/5</code>, исправная
         OPKG-регистрация и отсутствие доступного обновления.
     </p>
 </section>
