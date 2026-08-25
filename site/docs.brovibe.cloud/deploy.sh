@@ -14,7 +14,7 @@ SERVICE_PATH="/etc/systemd/system/brovibe-docs-deploy.service"
 TIMER_PATH="/etc/systemd/system/brovibe-docs-deploy.timer"
 LOCK_FILE="${BROVIBE_DOCS_LOCK_FILE:-/run/lock/brovibe-docs-deploy.lock}"
 SITE_OWNER="${BROVIBE_DOCS_OWNER-www-data:www-data}"
-FILES="index.html styles.css broray/index.html favicon.svg favicon.ico favicon-16x16.png favicon-32x32.png apple-touch-icon.png icon-192.png icon-512.png site.webmanifest"
+FILES="index.html styles.css broray/index.html favicon.svg favicon.ico favicon-16x16.png favicon-32x32.png apple-touch-icon.png icon-192.png icon-512.png site-manifest.json"
 
 fail()
 {
