@@ -5,7 +5,10 @@ set -eu
 SITE_ROOT="${BROVIBE_DOCS_ROOT:-/var/www/docs.brovibe.cloud}"
 STATE_ROOT="${BROVIBE_DOCS_STATE_ROOT:-/var/lib/brovibe-docs-deploy}"
 BACKUP_ROOT="${BROVIBE_DOCS_BACKUP_ROOT:-/var/backups/brovibe-docs}"
-BASE_URL="${BROVIBE_DOCS_BASE_URL:-https://raw.githubusercontent.com/BROadmin/BROray/main/site/docs.brovibe.cloud}"
+BASE_URL="${BROVIBE_DOCS_BASE_URL:-}"
+GITHUB_API="${BROVIBE_DOCS_GITHUB_API:-https://api.github.com}"
+GITHUB_REPOSITORY="${BROVIBE_DOCS_GITHUB_REPOSITORY:-BROadmin/BROray}"
+SOURCE_REF="${BROVIBE_DOCS_SOURCE_REF:-main}"
 INSTALL_PATH="/usr/local/sbin/deploy-brovibe-docs"
 SERVICE_PATH="/etc/systemd/system/brovibe-docs-deploy.service"
 TIMER_PATH="/etc/systemd/system/brovibe-docs-deploy.timer"
@@ -23,6 +26,55 @@ require_command()
 {
     command -v "$1" >/dev/null 2>&1 ||
         fail "не найдена команда $1"
+}
+
+resolve_source()
+{
+    work_root="$1"
+    source_url_file="$work_root/source-url"
+    source_commit_file="$work_root/source-commit"
+
+    if [ -n "$BASE_URL" ]; then
+        printf '%s\n' "$BASE_URL" >"$source_url_file"
+        printf '%s\n' 'custom-base-url' >"$source_commit_file"
+        return 0
+    fi
+
+    metadata="$work_root/source.json"
+
+    curl \
+        --proto '=https' \
+        --tlsv1.2 \
+        -fsSL \
+        --connect-timeout 15 \
+        --max-time 120 \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'User-Agent: brovibe-docs-deploy' \
+        -o "$metadata" \
+        "$GITHUB_API/repos/$GITHUB_REPOSITORY/commits/$SOURCE_REF"
+
+    source_commit="$(
+        awk -F '"' '
+            /^[[:space:]]*"sha"[[:space:]]*:/ {
+                print $4
+                exit
+            }
+        ' "$metadata"
+    )"
+
+    [ "${#source_commit}" = "40" ] ||
+        fail "GitHub вернул некорректный commit SHA"
+
+    case "$source_commit" in
+        *[!0-9a-f]*)
+            fail "GitHub вернул некорректный commit SHA"
+            ;;
+    esac
+
+    printf '%s\n' \
+        "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$source_commit/site/docs.brovibe.cloud" \
+        >"$source_url_file"
+    printf '%s\n' "$source_commit" >"$source_commit_file"
 }
 
 validate_manifest()
@@ -86,6 +138,8 @@ download_site()
     payload="$work_root/site"
 
     mkdir -p "$payload/broray"
+    resolve_source "$work_root"
+    source_url="$(cat "$work_root/source-url")"
 
     curl \
         --proto '=https' \
@@ -94,7 +148,7 @@ download_site()
         --connect-timeout 15 \
         --max-time 120 \
         -o "$manifest" \
-        "$BASE_URL/SHA256SUMS"
+        "$source_url/SHA256SUMS"
 
     validate_manifest "$manifest"
 
@@ -107,13 +161,15 @@ download_site()
             --connect-timeout 15 \
             --max-time 120 \
             -o "$payload/$file" \
-            "$BASE_URL/$file"
+            "$source_url/$file"
     done
 
     (
         cd "$payload"
         sha256sum -c "$manifest"
     )
+
+    echo "Источник GitHub: $(cat "$work_root/source-commit")"
 }
 
 backup_site()
@@ -198,6 +254,9 @@ deploy_site()
     install -m 0644 \
         "$work_root/SHA256SUMS" \
         "$STATE_ROOT/SHA256SUMS"
+    install -m 0644 \
+        "$work_root/source-commit" \
+        "$STATE_ROOT/SOURCE_COMMIT"
 
     echo "BROvibe Docs обновлён: OK"
 }
