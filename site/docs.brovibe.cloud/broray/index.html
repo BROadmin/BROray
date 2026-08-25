@@ -3,11 +3,14 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>BROray — установка и настройка</title>
-    <meta name="description" content="Установка, безопасное обновление и настройка BROray 2.1.1-2 на Keenetic и Netcraze с Entware.">
+    <title>BROray 3.0.0 — установка и руководство</title>
+    <meta name="description" content="Официальное руководство BROray 3.0.0: требования, проверенная установка, обновление, WebUI, KeenDNS, маршруты, DNS-over-TLS и диагностика на Keenetic.">
+    <link rel="canonical" href="https://docs.brovibe.cloud/broray/">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23123b38'/%3E%3Cpath d='M18 16h17c9 0 14 4 14 11 0 4-2 7-6 9 5 2 7 5 7 10 0 8-6 12-16 12H18V16zm10 9v8h7c3 0 5-1 5-4s-2-4-5-4h-7zm0 16v9h8c4 0 6-1 6-4s-2-5-6-5h-8z' fill='%2336d6c2'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
 <header class="site-header">
     <div class="header-inner">
         <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
@@ -17,130 +20,318 @@
         </nav>
     </div>
 </header>
+
 <div class="layout">
-<aside class="sidebar">
+<aside class="sidebar" aria-label="Разделы страницы">
     <p class="sidebar-title">На этой странице</p>
+    <a href="#status">Статус релиза</a>
     <a href="#about">О BROray</a>
     <a href="#requirements">Требования</a>
     <a href="#install">Установка</a>
-    <a href="#webui">Открытие WebUI</a>
-    <a href="#subscription">Подписка</a>
-    <a href="#server">Выбор сервера</a>
-    <a href="#interface">Интерфейс Keenetic</a>
-    <a href="#routes">Маршруты</a>
+    <a href="#webui">Вход в WebUI</a>
+    <a href="#first-steps">Начало работы</a>
+    <a href="#pages">Страницы WebUI</a>
     <a href="#update">Обновление</a>
+    <a href="#new">Что нового</a>
+    <a href="#safety">Безопасность</a>
     <a href="#diagnostics">Диагностика</a>
     <a href="#uninstall">Удаление</a>
     <a href="#support">Поддержка</a>
+    <a href="#license">Лицензия</a>
 </aside>
-<main class="content">
-<section id="about">
-    <p class="eyebrow">Keenetic / Netcraze · Entware · Xray</p>
-    <h1>BROray</h1>
-    <p class="lead">Менеджер Xray для Keenetic и Netcraze с WebUI, подписками, выбором серверов и управляемыми маршрутами.</p>
-    <div class="meta">
-        <span class="badge accent">BROray 2.1.1</span>
-        <span class="badge">OPKG 2.1.1-2</span>
-        <span class="badge">aarch64 / arm64</span>
-        <span class="badge">BusyBox / ash</span>
+
+<main class="content" id="content">
+<section id="status" class="release-banner">
+    <div>
+        <p class="eyebrow">Публичный релиз</p>
+        <h1>BROray 3.0.0</h1>
+        <p class="lead">Локальный клиент Xray и менеджер сетевых политик для совместимых маршрутизаторов Keenetic.</p>
     </div>
-    <div class="note">
-        <span class="note-title">Проверено на реальных устройствах</span>
-        Обновление успешно проверено на Keenetic Peak (KN-2710) EAEU и Keenetic Hopper (KN-3811) EAEU. Обновление и чистая установка успешно проверены на Keenetic Ultra (KN-1811) EAEU. Чистая установка успешно проверена на Keenetic Peak (KN-2710) EAEU и Netcraze Ultra (NC-1812) EAEU.
+    <div class="release-state">
+        <span class="status-dot" aria-hidden="true"></span>
+        Stable · опубликован 25 августа 2026
     </div>
-    <div class="note">
-        <span class="note-title">Keenetic и Netcraze</span>
-        В странах ЕАЭС часть новых устройств выпускается под брендом Netcraze и получает индексы моделей <code>NC-xxxx</code>. Netcraze — новый бренд компании, ранее представлявшей продукцию Keenetic в ЕАЭС; поэтому в списке совместимости BROray встречаются устройства обоих брендов.
-    </div>
-    <p>Исходный код: <a href="https://github.com/BROadmin/BROray" target="_blank" rel="noopener noreferrer">GitHub BROadmin/BROray</a>.</p>
-    <p>Обсуждение и поддержка: <a href="https://t.me/BROvibe_vpn" target="_blank" rel="noopener noreferrer">Telegram-канал BROvibe</a>.</p>
 </section>
+
+<section id="about">
+    <h2>Статус и состав релиза</h2>
+    <div class="meta" aria-label="Версии компонентов">
+        <span class="badge accent">BROray 3.0.0</span>
+        <span class="badge">OPKG 3.0.0-r14</span>
+        <span class="badge">WebUI-3.0.0-r14c67</span>
+        <span class="badge">Updater v5</span>
+        <span class="badge">aarch64-3.10</span>
+        <span class="badge">Xray 26.7.28</span>
+    </div>
+
+    <p>
+        Технический идентификатор проверенных байтов — <code>3.0.0-r14c67</code>.
+        Пользовательская версия приложения — <code>3.0.0</code>, версия пакета —
+        <code>3.0.0-r14</code>. Stable опубликован из физически проверенного кандидата
+        без пересборки под тем же идентификатором.
+    </p>
+
+    <div class="fact-grid">
+        <div class="fact"><strong>12 из 12</strong><span>страниц WebUI проверено</span></div>
+        <div class="fact"><strong>162 из 162</strong><span>кнопок и действий проверено</span></div>
+        <div class="fact"><strong>9 из 9</strong><span>проверок Keenetic пройдено</span></div>
+        <div class="fact"><strong>PASS</strong><span>обновление, переустановка и откат</span></div>
+    </div>
+
+    <div class="note">
+        <span class="note-title">Что делает BROray</span>
+        BROray устанавливает и обслуживает Xray на роутере, принимает отдельные
+        подключения и подписки, создаёт штатный прокси-интерфейс Keenetic,
+        управляет маршрутами и DNS-over-TLS через авторизованный WebUI.
+    </div>
+</section>
+
 <section id="requirements">
-    <h2>1. Требования</h2>
-    <ul>
-        <li>Keenetic или Netcraze с архитектурой aarch64/arm64;</li>
-        <li>установленный Entware;</li>
-        <li>доступ к терминалу Entware под root;</li>
-        <li>доступ роутера в интернет;</li>
-        <li>достаточно свободного места в /opt.</li>
+    <h2>Требования к роутеру</h2>
+    <div class="table-wrap" tabindex="0" aria-label="Требования к ресурсам">
+    <table>
+        <thead>
+            <tr><th>Компонент</th><th>Обязательное условие</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Архитектура</td><td><code>aarch64</code> и Entware <code>aarch64-3.10</code></td></tr>
+            <tr><td>Open Package</td><td>Один записываемый накопитель, подключённый как <code>/opt</code></td></tr>
+            <tr><td>Компоненты Keenetic</td><td><code>proxy</code>, <code>opkg</code> и <code>ndns</code></td></tr>
+            <tr><td>Entware shell</td><td>Доступ <code>root</code>, <code>/opt/bin/ash</code>, BusyBox, <code>curl</code>, <code>jq</code> и <code>ndmc</code></td></tr>
+            <tr><td>Место на <code>/opt</code></td><td>Не менее 64 МиБ; рекомендуется от 100 МиБ</td></tr>
+            <tr><td>Место в <code>/tmp</code></td><td>Не менее 75 МиБ; рекомендуется от 128 МиБ</td></tr>
+            <tr><td>Временные файлы</td><td>Возможность создать 4096 файлов в <code>/tmp</code></td></tr>
+            <tr><td>Сеть</td><td>Рабочие DNS, HTTPS и правильное системное время</td></tr>
+        </tbody>
+    </table>
+    </div>
+    <p class="muted">
+        Совместимость определяется фактическими возможностями устройства во время
+        предварительной проверки. Релиз физически проверен на Keenetic KN-2710 с
+        KeeneticOS 5.1.4, но не привязан к конкретному роутеру, серийному номеру
+        или SSH-ключу.
+    </p>
+</section>
+
+<section id="install">
+    <h2>Установка с нуля</h2>
+    <p>Все команды выполняются в Entware shell от <code>root</code>. Сначала подготовьте зависимости:</p>
+    <pre><button class="copy" type="button" aria-label="Копировать команду подготовки">Копировать</button><code>opkg update &amp;&amp;
+opkg install ca-bundle ca-certificates curl jq</code></pre>
+
+    <p>Затем выполните весь проверяемый блок целиком:</p>
+    <pre><button class="copy" type="button" aria-label="Копировать команду установки">Копировать</button><code>(
+set -eu
+BB="$(command -v busybox)"
+CURL="$(command -v curl)"
+[ -n "$BB" ] &amp;&amp; [ -n "$CURL" ]
+
+T="$("$BB" mktemp /tmp/broray-stable.XXXXXX)"
+trap '"$BB" rm -f "$T"' EXIT
+
+"$CURL" -q \
+  --proto '=https' \
+  --proto-redir '=https' \
+  --tlsv1.2 \
+  --connect-timeout 15 \
+  --max-time 600 \
+  --retry 3 \
+  -fsSL \
+  -H 'Cache-Control: no-cache, no-store' \
+  -H 'Accept-Encoding: identity' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r14/COPY-PASTE-ON-ROUTER.txt' \
+  -o "$T"
+
+[ "$("$BB" sha256sum "$T" | "$BB" awk 'NR==1{print $1}')" = \
+  'b80bf61758201d34b32638b9184147367f91e74635be045d680214b4cc632f1d' ]
+
+"$BB" sh "$T"
+)</code></pre>
+
+    <p>Успешное завершение содержит:</p>
+    <pre><code>BRORAY_INSTALL=PASS
+BRORAY_STABLE_INSTALL=PASS
+RELEASE=3.0.0-r14
+CANDIDATE=3.0.0-r14c67
+STABLE=YES</code></pre>
+
+    <div class="note warning">
+        <span class="note-title">Переход с BROray 2.x</span>
+        Прямое обновление с 2.x не поддерживается. Сохраните нужные данные,
+        завершите штатное удаление старой ветки и выполните чистую установку 3.0.0.
+        Не используйте <code>opkg upgrade</code>, <code>opkg --force-reinstall</code>
+        или ручную замену файлов приложения.
+    </div>
+</section>
+
+<section id="webui">
+    <h2>Вход в WebUI</h2>
+    <h3>Прямой адрес в локальной сети</h3>
+    <pre><code>http://&lt;LAN-IP-роутера&gt;:8080/</code></pre>
+
+    <h3>Адрес через KeenDNS</h3>
+    <p>Если на роутере настроен KeenDNS, BROray создаёт отдельный HTTP Proxy с поддоменом <code>broray</code>:</p>
+    <pre><code>http://broray.&lt;KeenDNS-домен-роутера&gt;/</code></pre>
+    <p>
+        HTTP автоматически перенаправляется на
+        <code>https://broray.&lt;KeenDNS-домен-роутера&gt;/</code>.
+        Например, домен роутера <code>myrouter.keenetic.link</code> даёт адрес
+        <code>https://broray.myrouter.keenetic.link/</code>. Порт <code>8080</code>
+        в KeenDNS-адресе не указывается. Доступ из Интернета зависит от режима
+        KeenDNS и настроек роутера.
+    </p>
+    <p>Для входа используется учётная запись Keenetic. Не публикуйте пароль и данные сессии в обращениях поддержки.</p>
+</section>
+
+<section id="first-steps">
+    <h2>Начало работы</h2>
+    <ol class="steps">
+        <li><strong>Добавьте сервер или подписку.</strong> BROray проверит формат до сохранения.</li>
+        <li><strong>Проверьте и подключите сервер.</strong> Конфигурация Xray тестируется до перезапуска.</li>
+        <li><strong>Проверьте страницу Keenetic.</strong> Управляемый ProxyN должен быть подключён и соответствовать активному серверу.</li>
+        <li><strong>Настройте DNS-over-TLS.</strong> Сначала выполните свежую TLS/SNI-проверку, затем примените выбранные записи.</li>
+        <li><strong>Установите маршруты.</strong> Готовые и пользовательские наборы применяются транзакционно с проверкой владельцев.</li>
+    </ol>
+</section>
+
+<section id="pages">
+    <h2>Возможности и страницы WebUI</h2>
+    <div class="feature-grid">
+        <article class="feature"><h3>Вход</h3><p>Авторизация учётной записью Keenetic, создание локальной сессии и безопасный выход.</p></article>
+        <article class="feature"><h3>Главная</h3><p>Быстрый сводный статус серверов, подписок, маршрутов, Keenetic, Xray и BROray без запуска тяжёлых проверок.</p></article>
+        <article class="feature"><h3>Серверы</h3><p>Импорт VLESS, VMess, Trojan и Hysteria2, проверка доступности, подключение, отключение, удаление и автоматический выбор резервного сервера.</p></article>
+        <article class="feature"><h3>Подписки</h3><p>Добавление, обновление и удаление подписок, просмотр серверов и безопасное обновление списка без потери активного подключения.</p></article>
+        <article class="feature"><h3>DNS-over-TLS</h3><p>Выбор до восьми серверов, TLS/SNI-проверка, применение в Keenetic и удаление только подтверждённых записей BROray.</p></article>
+        <article class="feature"><h3>Маршруты — Обзор</h3><p>Сводка готовых и пользовательских наборов, состояние установки, обновления и конфликты владельцев.</p></article>
+        <article class="feature"><h3>Свои маршруты</h3><p>Безопасный импорт BAT как данных, нормализация, удаление дублей, предварительная проверка и транзакционное применение.</p></article>
+        <article class="feature"><h3>Готовые маршруты</h3><p>Наборы для Telegram, WhatsApp, YouTube, ChatGPT/OpenAI, Instagram, Facebook, Meta, TikTok и Speedtest.</p></article>
+        <article class="feature"><h3>Keenetic</h3><p>Диагностика ProxyN, создание и восстановление после удаления, синхронизация имени <code>BROray - &lt;активный сервер&gt;</code> и проверка связи с Xray.</p></article>
+        <article class="feature"><h3>Xray</h3><p>Состояние процесса и конфигурации, запуск, остановка, перезапуск, диагностика, обновление и безопасная переустановка.</p></article>
+        <article class="feature"><h3>BROray</h3><p>Версии, компоненты, обновление, переустановка, восстановление, журнал операции, очистка и авторизованное удаление.</p></article>
+        <article class="feature"><h3>Совместимость</h3><p>Служебная страница переводит старые закладки на актуальные разделы и не выполняет сетевых изменений.</p></article>
+    </div>
+</section>
+
+<section id="update">
+    <h2>Обновление и переустановка</h2>
+    <h3>Обычное обновление</h3>
+    <p>В WebUI откройте:</p>
+    <pre><code>BROray → Проверить обновление → Установить обновление</code></pre>
+    <p>
+        Updater-v5 проверяет Stable index и SHA-256, создаёт резервную копию,
+        готовит новый app-slot и переключает его только после предварительной
+        проверки. Ошибка после переключения запускает откат.
+    </p>
+
+    <h3>Переустановка текущей версии</h3>
+    <p>
+        На странице <strong>BROray</strong> выберите переустановку. Серверы,
+        подписки, пользовательские маршруты, DNS-настройки и общий Xray runtime
+        находятся вне сменяемого app-slot и сохраняются.
+    </p>
+
+    <h3>Аварийное административное обновление</h3>
+    <p>
+        Если WebUI не открывается, но Entware shell доступен, повторите
+        проверяемый Stable-блок из раздела «Установка с нуля». Он автоматически
+        выбирает чистую установку, обновление или переустановку и не обходит
+        защитные проверки.
+    </p>
+    <p>Если updater-v5 исправен, можно отправить административный запрос:</p>
+    <pre><button class="copy" type="button" aria-label="Копировать команды обновителя">Копировать</button><code>/opt/bin/broray-updaterctl check &amp;&amp;
+/opt/bin/broray-updaterctl request update
+/opt/bin/broray-updaterctl status</code></pre>
+    <p>Для переустановки текущего кандидата:</p>
+    <pre><button class="copy" type="button" aria-label="Копировать команду переустановки">Копировать</button><code>/opt/bin/broray-updaterctl request reinstall</code></pre>
+    <p class="muted">Не удаляйте lock-файлы вручную и не запускайте новую операцию, пока предыдущая имеет состояние <code>running</code> или <code>recovery-required</code>.</p>
+</section>
+
+<section id="new">
+    <h2>Что нового в BROray 3.0.0</h2>
+    <ul class="check-list">
+        <li>Updater-v5 с отдельными app-slot, проверяемым переключением и точным откатом.</li>
+        <li>Полностью переработанный авторизованный WebUI и согласованные состояния всех страниц.</li>
+        <li>Быстрая Главная на фоновых снимках без каскада тяжёлых запросов.</li>
+        <li>Импорт VLESS, VMess, Trojan и Hysteria2 с корректным разбором Reality, TCP и Hysteria2.</li>
+        <li>Проверка серверов через изолированный Xray и реальный HTTPS-запрос.</li>
+        <li>Управляемый ProxyN с восстановлением после ручного удаления и возвратом подтверждённых маршрутов.</li>
+        <li>Транзакционная обработка больших маршрутных наборов с rollback при ошибке в середине импорта.</li>
+        <li>Безопасное управление DoT, не затрагивающее внешние записи.</li>
+        <li>Динамический расчёт места для обновления и переустановки Xray.</li>
+        <li>Ускоренные сводки, ограниченный polling и единая блокировка конфликтующих операций.</li>
     </ul>
 </section>
-<section id="install">
-    <h2>2. Установка BROray</h2>
-    <p>Для чистой установки выполните один блок целиком:</p>
-    <pre><button class="copy" type="button">Копировать</button><code>opkg update &amp;&amp;
-opkg install ca-bundle ca-certificates wget-ssl &amp;&amp;
-TARGET="/tmp/broray-install-2.1.1-2.sh" &amp;&amp;
-/opt/bin/wget -qO "$TARGET.part" \
-    "https://api.brovibe.cloud/releases/broray-install-2.1.1-2.sh?v=$(date +%s)" &amp;&amp;
-echo "f14a86fc481d1a5c5c294635fe79031f71aa999d432b48be00c3a137ab7b8396  $TARGET.part" | sha256sum -c - &amp;&amp;
-mv "$TARGET.part" "$TARGET" &amp;&amp;
-/opt/bin/ash "$TARGET"</code></pre>
+
+<section id="safety">
+    <h2>Безопасность операций</h2>
+    <ul>
+        <li>релизные файлы проверяются по SHA-256;</li>
+        <li>конфигурация Xray тестируется до перезапуска;</li>
+        <li>обновление BROray использует резервную копию и postcheck;</li>
+        <li>ProxyN, маршруты, DoT и KeenDNS HTTP Proxy изменяются только при подтверждённом владении;</li>
+        <li>внешние объекты Keenetic и пользовательские файлы не удаляются;</li>
+        <li>BAT-файлы разбираются как данные и не исполняются;</li>
+        <li>конфликтующие операции сериализуются общим контролем.</li>
+    </ul>
 </section>
-<section id="webui">
-    <h2>3. Открытие WebUI</h2>
-    <p>Стандартный локальный адрес: <code>http://192.168.1.1:8080/</code>. Фактический LAN-адрес определяется автоматически.</p>
-</section>
-<section id="subscription">
-    <h2>4. Добавление подписки</h2>
-    <ol class="steps">
-        <li>Откройте страницу «Подписки».</li>
-        <li>Укажите название и вставьте полную ссылку подписки.</li>
-        <li>Добавьте подписку и импортируйте нужные серверы.</li>
-    </ol>
-</section>
-<section id="server">
-    <h2>5. Выбор сервера</h2>
-    <ol class="steps">
-        <li>Откройте страницу «Серверы».</li>
-        <li>Проверьте нужную конфигурацию и активируйте сервер.</li>
-        <li>Дождитесь проверки Xray и отметки активного сервера.</li>
-    </ol>
-</section>
-<section id="interface">
-    <h2>6. Интерфейс Keenetic</h2>
-    <p>BROray создаёт и обслуживает штатный прокси-интерфейс KeeneticOS. Состояние, адрес Xray, связь и подключение отображаются на странице «Keenetic».</p>
-</section>
-<section id="routes">
-    <h2>7. Маршруты</h2>
-    <p>Встроены девять независимых наборов: Telegram, WhatsApp, YouTube, ChatGPT, Facebook, Instagram, Meta, TikTok и Speedtest.</p>
-    <p>BROray умеет находить все BAT-файлы источника, определять добавленные, изменённые и удалённые файлы, скачивать новую версию, устанавливать, обновлять и восстанавливать маршруты. Общие маршруты других наборов сохраняются.</p>
-    <p>Также поддерживается безопасная загрузка собственных BAT-файлов без выполнения содержащихся в них команд.</p>
-</section>
-<section id="update">
-    <h2>8. Обновление BROray</h2>
-    <p>Обновление работает для любой установленной версии BROray. Выполните один блок целиком:</p>
-    <pre><button class="copy" type="button">Копировать</button><code>opkg update &amp;&amp;
-opkg install ca-bundle ca-certificates wget-ssl &amp;&amp;
-TARGET="/tmp/broray-safe-upgrade-2.1.1-2.sh" &amp;&amp;
-/opt/bin/wget -qO "$TARGET.part" \
-    "https://api.brovibe.cloud/releases/broray-safe-upgrade-2.1.1-2.sh?v=$(date +%s)" &amp;&amp;
-echo "1cfcc536215825a29f087582483297baaecabb68fe641dd4ddc960f7146e9504  $TARGET.part" | sha256sum -c - &amp;&amp;
-mv "$TARGET.part" "$TARGET" &amp;&amp;
-/opt/bin/ash "$TARGET"</code></pre>
-    <p>Обновитель очищает старые резервные копии, временные файлы, журналы и OPKG-кэш до резервного копирования. Проверенная резервная копия создаётся в /tmp. При ошибке выполняется автоматический откат.</p>
-</section>
+
 <section id="diagnostics">
-    <h2>9. Проверка и диагностика</h2>
-    <pre><button class="copy" type="button">Копировать</button><code>/opt/broray/bin/broray version
-/opt/broray/bin/broray status
-/opt/broray/bin/broray test
+    <h2>Проверка и диагностика</h2>
+    <pre><button class="copy" type="button" aria-label="Копировать команды диагностики">Копировать</button><code>/opt/broray/bin/broray-system info
+/opt/bin/broray-updaterctl version
+/opt/bin/broray-updaterctl check
+/opt/bin/broray-updaterctl status
+/opt/etc/init.d/S22broray-updater status
 /opt/etc/init.d/S23broray-monitor status
 /opt/etc/init.d/S24broray status
-/opt/etc/init.d/S25broray-web status
-/opt/etc/init.d/S27broray-auto-switch status
-/opt/etc/init.d/S28broray-subscriptions status</code></pre>
+/opt/etc/init.d/S25broray-web status</code></pre>
+    <p>
+        Для текущего Stable ожидаются пакет <code>3.0.0-r14</code>, кандидат
+        <code>3.0.0-r14c67</code>, <code>broray-updater/5</code>, исправная
+        OPKG-регистрация и отсутствие доступного обновления.
+    </p>
 </section>
+
 <section id="uninstall">
-    <h2>10. Удаление</h2>
-    <pre><button class="copy" type="button">Копировать</button><code>opkg remove broray</code></pre>
+    <h2>Удаление</h2>
+    <p>
+        Используйте раздел удаления на странице <strong>BROray</strong>.
+        Обычное удаление и полное удаление показывают точный план и требуют
+        авторизованного подтверждения. Ручное удаление файлов не заменяет
+        штатную операцию и может оставить объекты Keenetic без receipt.
+    </p>
 </section>
+
 <section id="support">
-    <h2>Обсуждение и поддержка</h2>
-    <p><a href="https://t.me/BROvibe_vpn" target="_blank" rel="noopener noreferrer">https://t.me/BROvibe_vpn</a></p>
+    <h2>Поддержка</h2>
+    <div class="link-list">
+        <a href="https://t.me/BROvibe_vpn" target="_blank" rel="noopener noreferrer">Telegram BROvibe</a>
+        <a href="https://github.com/BROadmin/BROray" target="_blank" rel="noopener noreferrer">Исходный код на GitHub</a>
+        <a href="https://github.com/BROadmin/BROray/issues" target="_blank" rel="noopener noreferrer">Сообщить об ошибке</a>
+        <a href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Поддержать проект</a>
+    </div>
+    <p class="muted">В обращении укажите модель, версию KeeneticOS, версию BROray и текст ошибки. Удалите пароли, токены подписок, UUID серверов, приватные ключи и данные сессии.</p>
+</section>
+
+<section id="license">
+    <h2>Лицензия</h2>
+    <p>
+        Исходный код BROray распространяется по лицензии
+        <a href="https://github.com/BROadmin/BROray/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GNU General Public License v3.0</a>.
+        Xray-core является отдельным сторонним компонентом и распространяется
+        по <a href="https://github.com/XTLS/Xray-core/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Mozilla Public License 2.0</a>.
+    </p>
 </section>
 </main>
 </div>
+
+<footer class="site-footer">
+    <div class="footer-inner">
+        <span>BROvibe Docs · BROray 3.0.0</span>
+        <a href="#content">Наверх ↑</a>
+    </div>
+</footer>
+
 <script>
 document.querySelectorAll('button.copy').forEach(function (button) {
     button.addEventListener('click', function () {

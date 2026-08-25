@@ -3,11 +3,14 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>BROvibe Docs</title>
-    <meta name="description" content="Проверенные сетевые решения и документация BROvibe.">
+    <title>BROvibe Docs — проверенная документация</title>
+    <meta name="description" content="Официальная документация BROvibe: установка, настройка и безопасное обслуживание BROray 3.0.0 на совместимых роутерах Keenetic.">
+    <link rel="canonical" href="https://docs.brovibe.cloud/">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23123b38'/%3E%3Cpath d='M18 16h17c9 0 14 4 14 11 0 4-2 7-6 9 5 2 7 5 7 10 0 8-6 12-16 12H18V16zm10 9v8h7c3 0 5-1 5-4s-2-4-5-4h-7zm0 16v9h8c4 0 6-1 6-4s-2-5-6-5h-8z' fill='%2336d6c2'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
 <header class="site-header">
     <div class="header-inner">
         <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
@@ -18,37 +21,44 @@
     </div>
 </header>
 
-<main class="hero-home">
-    <p class="eyebrow">BROvibe Docs</p>
+<main class="hero-home" id="content">
+    <p class="eyebrow">Официальная документация</p>
     <h1>Проверенные сетевые решения</h1>
     <p class="lead">
-        Инструкции, конфигурации и практические материалы BROvibe.
-        Основные действия проверяются в реальном окружении до публикации.
+        Инструкции BROvibe основаны на опубликованных контрольных суммах
+        и физических проверках перед выпуском.
     </p>
 
     <div class="home-grid">
         <a class="home-card" href="/broray/">
-            <p class="eyebrow">Keenetic · Xray</p>
+            <div class="card-topline">
+                <p class="eyebrow">Keenetic · Entware · Xray</p>
+                <span class="badge accent">Stable 3.0.0</span>
+            </div>
             <h2>BROray</h2>
             <p>
-                Установка BROray 2.1.0 через OPKG, переход с ручной
-                установки, обновление и диагностика на роутерах Keenetic.
+                Установка с нуля, обновление и переустановка, адреса WebUI,
+                настройка серверов, маршрутов и DNS-over-TLS.
             </p>
+            <span class="card-link">Открыть документацию →</span>
         </a>
 
-        <div class="home-card disabled">
+        <div class="home-card disabled" aria-disabled="true">
             <p class="eyebrow">Скоро</p>
             <h2>Новые решения</h2>
             <p>
-                Каталог будет дополняться проверенными материалами
-                BROvibe.
+                Каталог будет дополняться только после проверки материалов
+                в реальном окружении.
             </p>
         </div>
     </div>
 </main>
 
 <footer class="site-footer">
-    <div class="footer-inner">BROvibe Docs</div>
+    <div class="footer-inner">
+        <span>BROvibe Docs</span>
+        <a href="https://github.com/BROadmin/BROray" target="_blank" rel="noopener noreferrer">GitHub BROray</a>
+    </div>
 </footer>
 </body>
 </html>
