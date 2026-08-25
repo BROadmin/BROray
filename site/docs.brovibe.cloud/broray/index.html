@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>BROray 3.0.0 — установка и руководство</title>
-    <meta name="description" content="Официальное руководство BROray 3.0.0: требования, проверенная установка, обновление, WebUI, KeenDNS, маршруты, DNS-over-TLS и диагностика на Keenetic.">
+    <meta name="description" content="Официальное руководство BROray 3.0.0: требования, проверенная установка, подписанный bootstrap Keenetic, обновление, WebUI, KeenDNS, маршруты, DNS-over-TLS и диагностика.">
     <link rel="canonical" href="https://docs.brovibe.cloud/broray/">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23123b38'/%3E%3Cpath d='M18 16h17c9 0 14 4 14 11 0 4-2 7-6 9 5 2 7 5 7 10 0 8-6 12-16 12H18V16zm10 9v8h7c3 0 5-1 5-4s-2-4-5-4h-7zm0 16v9h8c4 0 6-1 6-4s-2-5-6-5h-8z' fill='%2336d6c2'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="/styles.css">
@@ -28,6 +28,7 @@
     <a href="#about">О BROray</a>
     <a href="#requirements">Требования</a>
     <a href="#install">Установка</a>
+    <a href="#keenetic-bootstrap">Bootstrap Keenetic</a>
     <a href="#webui">Вход в WebUI</a>
     <a href="#first-steps">Начало работы</a>
     <a href="#pages">Страницы WebUI</a>
@@ -162,6 +163,49 @@ STABLE=YES</code></pre>
         Не используйте <code>opkg upgrade</code>, <code>opkg --force-reinstall</code>
         или ручную замену файлов приложения.
     </div>
+</section>
+
+<section id="keenetic-bootstrap">
+    <h2>Подписанная установка через штатный механизм Keenetic</h2>
+    <p>
+        Для каталога <code>/opt/install/*.tgz</code> опубликован отдельный bootstrap
+        <code>broray-webcli-bootstrap-3.0.0-r14c68-b1</code>. Это не новый релиз и
+        не другой канал обновлений: после проверки подписи он устанавливает точный
+        Stable <code>3.0.0-r14c68</code>. Физическая проверка на Keenetic aarch64 —
+        <strong>PASS</strong>.
+    </p>
+
+    <div class="note warning">
+        <span class="note-title">Что умеет Web CLI</span>
+        Web CLI принимает команды KeeneticOS, но не является Linux shell и не
+        загружает файлы. Архив сначала копируется в <code>/opt/install/</code>
+        через SFTP или USB, после чего выполняется штатная перезагрузка роутера.
+    </div>
+
+    <h3>1. Скачайте и проверьте</h3>
+    <ul>
+        <li><a href="https://api.brovibe.cloud/releases/bootstrap/broray/3.0.0-r14c68-b1/broray-webcli-bootstrap-3.0.0-r14c68-b1.tgz">архив bootstrap</a>;</li>
+        <li><a href="https://api.brovibe.cloud/releases/bootstrap/broray/3.0.0-r14c68-b1/broray-webcli-bootstrap-3.0.0-r14c68-b1.tgz.sig">внешняя подпись</a>;</li>
+        <li><a href="https://api.brovibe.cloud/releases/bootstrap/broray/3.0.0-r14c68-b1/broray-bootstrap-rsa3072-v1-public.pem">публичный ключ</a>;</li>
+        <li><a href="https://api.brovibe.cloud/releases/bootstrap/broray/3.0.0-r14c68-b1/VERIFY-WINDOWS.ps1">проверка Windows</a> или <a href="https://api.brovibe.cloud/releases/bootstrap/broray/3.0.0-r14c68-b1/VERIFY-LINUX.sh">проверка Linux</a>.</li>
+    </ul>
+    <pre><code>Архив SHA-256: 50904456e998dc501ee534efca5eccc47b997f9986bf5aef3f959d468ad66dd7
+Key ID:         aaac0ea3b4a6334c
+SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a</code></pre>
+    <p>Проверка должна завершиться строкой <code>SIGNED_BOOTSTRAP=ACCEPTED</code>.</p>
+
+    <h3>2. Скопируйте и перезагрузите</h3>
+    <ol class="steps">
+        <li>Скопируйте только принятый <code>.tgz</code> в <code>/opt/install/</code>.</li>
+        <li>Выполните штатную перезагрузку через WebUI Keenetic или командой KeeneticOS на вкладке <strong>Parse</strong>.</li>
+        <li>После загрузки откройте BROray и проверьте Stable-канал, Xray и Keenetic.</li>
+    </ol>
+    <p>
+        Bootstrap повторно проверяет встроенную подпись до сети, затем точные SHA-256
+        Stable-объектов. Успешная повторная загрузка идемпотентна. При отказе ручной
+        повтор разрешён только из Entware shell после устранения причины.
+    </p>
+    <p><a class="button" href="https://github.com/BROadmin/BROray/blob/main/docs/keenetic-web-cli-install.md">Полная инструкция на GitHub</a></p>
 </section>
 
 <section id="webui">
