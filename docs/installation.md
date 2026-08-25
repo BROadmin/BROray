@@ -1,141 +1,137 @@
-# Установка и обслуживание BROray 2.1.0
+# Установка и обслуживание BROray 3.0.0
 
-## Требования
+## Перед началом
 
-- Keenetic с установленным Entware;
-- терминал с правами `root`;
-- доступ в интернет;
-- поддерживаемая архитектура пакета: `aarch64-3.10`.
+Убедитесь, что роутер соответствует [требованиям](requirements.md). Все команды ниже выполняются в Entware shell от `root`.
 
-Проверка среды:
-
-```sh
-command -v opkg
-df -h /opt
-```
-
-## Чистая установка
-
-Сначала установите поддержку HTTPS:
+Подготовьте HTTPS-клиент и JSON-проверку:
 
 ```sh
 opkg update &&
-opkg install ca-bundle ca-certificates wget-ssl
+opkg install ca-bundle ca-certificates curl jq
 ```
 
-Затем подключите репозиторий и установите BROray:
+## Установка с нуля
+
+Загрузите опубликованный Stable-установщик, проверьте его SHA-256 и запустите:
 
 ```sh
-wget -qO /tmp/broray-opkg.sh \
-    https://api.brovibe.cloud/releases/opkg.sh &&
-ash /tmp/broray-opkg.sh
+(
+set -eu
+BB="$(command -v busybox)"
+CURL="$(command -v curl)"
+[ -n "$BB" ] && [ -n "$CURL" ]
+
+T="$("$BB" mktemp /tmp/broray-stable.XXXXXX)"
+trap '"$BB" rm -f "$T"' EXIT
+
+"$CURL" -q \
+  --proto '=https' \
+  --proto-redir '=https' \
+  --tlsv1.2 \
+  --connect-timeout 15 \
+  --max-time 600 \
+  --retry 3 \
+  -fsSL \
+  -H 'Cache-Control: no-cache, no-store' \
+  -H 'Accept-Encoding: identity' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r14/COPY-PASTE-ON-ROUTER.txt' \
+  -o "$T"
+
+[ "$("$BB" sha256sum "$T" | "$BB" awk 'NR==1{print $1}')" = \
+  'b80bf61758201d34b32638b9184147367f91e74635be045d680214b4cc632f1d' ]
+
+"$BB" sh "$T"
+)
 ```
 
-Сценарий подключает OPKG-репозиторий, устанавливает зависимости, определяет LAN-адрес, настраивает HTTP Proxy Keenetic и запускает службы BROray.
+Успешное завершение содержит:
 
-## Проверка
+```text
+BRORAY_INSTALL=PASS
+BRORAY_STABLE_INSTALL=PASS
+RELEASE=3.0.0-r14
+CANDIDATE=3.0.0-r14c67
+STABLE=YES
+```
+
+## Вход в WebUI
+
+Откройте:
+
+```text
+http://<LAN-IP-роутера>:8080/
+```
+
+LAN-адрес определяется при установке. Авторизуйтесь учётной записью Keenetic; не публикуйте пароль и данные сессии в Issue.
+
+## Проверка установки
 
 ```sh
-opkg list-installed broray
-broray version
-broray status
+/opt/broray/bin/broray-system info
+/opt/bin/broray-updaterctl version
+/opt/bin/broray-updaterctl check
+/opt/etc/init.d/S22broray-updater status
 ```
 
-Для версии 2.1.0 ожидается пакет `2.1.0-2` или новее:
+Для текущего релиза ожидаются `3.0.0-r14`, кандидат `3.0.0-r14c67`, `broray-updater/5`, исправная OPKG-регистрация и отсутствие доступного обновления.
+
+## Обычное обновление
+
+В WebUI откройте:
+
+```text
+BROray → Проверить обновление → Установить обновление
+```
+
+Операция получает отдельный идентификатор, проверяет Stable index и архивы, готовит новый app-slot и переключает его только после preflight. После переключения проверяются версия, OPKG-регистрация, backend WebUI, Xray и ранее работавшие службы. Ошибка после переключения запускает откат к предыдущему app-slot.
+
+## Переустановка текущей версии
+
+На странице **BROray** выберите переустановку. Updater-v5 использует текущий кандидат и тот же транзакционный путь, что и обновление. Пользовательское состояние и общий Xray runtime не входят в сменяемый app-slot.
+
+Повторный запуск Stable-команды из раздела «Установка с нуля» также определит уже установленный текущий кандидат и выберет `reinstall`.
+
+## Аварийное административное обновление
+
+Если WebUI не открывается, но Entware shell доступен, выполните ту же проверяемую Stable-команду из раздела «Установка с нуля». Она автоматически выбирает `clean`, `update` или `reinstall` и затем проверяет состояние установленной системы.
+
+Если updater-v5 и приложение исправны, но требуется только отправить административный запрос на доступное обновление:
 
 ```sh
-opkg list-installed broray
-broray version
+/opt/bin/broray-updaterctl check &&
+/opt/bin/broray-updaterctl request update
 ```
 
-## Переход с ручной установки 2.1.0
-
-Для существующей ручной BROray `2.1.0` на Entware `aarch64-3.10`
-используется одноразовый мигратор. Обычный `opkg install broray` поверх
-ручной установки не поддерживается.
+Состояние операции:
 
 ```sh
-opkg update &&
-opkg install ca-bundle ca-certificates wget-ssl
-
-MIGRATOR="/tmp/broray-manual-to-opkg-2.1.0-2.sh"
-EXPECTED_SHA256="6c976a0b3958a8ad1b78584ff54874f283b8218c9c97dd57937ea0b86c214518"
-
-/opt/bin/wget -qO "$MIGRATOR.part" \
-    https://api.brovibe.cloud/releases/broray-manual-to-opkg-2.1.0-2.sh &&
-ACTUAL_SHA256="$(
-    sha256sum "$MIGRATOR.part" |
-        awk '{print $1}'
-)" &&
-if [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ]; then
-    mv "$MIGRATOR.part" "$MIGRATOR" &&
-    ash "$MIGRATOR"
-else
-    echo "ОШИБКА: SHA-256 мигратора не совпала"
-    rm -f "$MIGRATOR.part"
-    false
-fi
+/opt/bin/broray-updaterctl status
 ```
 
-До изменения установки мигратор проверяет архитектуру, версию BROray,
-зависимости, свободное место, Xray, WebUI и пять служб. Резервная копия
-создаётся автоматически и сохраняется в `/opt/broray/backups`.
-
-## Обновление
-
-Переход с `2.1.0-1` на `2.1.0-2` выполняется безопасным сценарием:
+Для переустановки уже текущего кандидата:
 
 ```sh
-wget -qO /tmp/broray-safe-upgrade-2.1.0-2.sh \
-    https://api.brovibe.cloud/releases/broray-safe-upgrade-2.1.0-2.sh &&
-ash /tmp/broray-safe-upgrade-2.1.0-2.sh
+/opt/bin/broray-updaterctl request reinstall
 ```
 
-Сценарий заранее загружает предыдущий пакет, проверяет новый пакет по
-индексу OPKG и при любой ошибке возвращает версию OPKG, файлы и все пять
-служб в предыдущее состояние.
+Не удаляйте lock-файлы вручную и не запускайте новую операцию, пока предыдущая имеет состояние `running` или `recovery-required`.
 
-Для последующих обновлений:
+## Что сохраняется
 
-```sh
-opkg update &&
-opkg upgrade broray
-```
+При штатном обновлении или переустановке сохраняются:
 
-Пакет сохраняет активную конфигурацию Xray, серверы и подписки. Перед заменой программных файлов создаётся локальная резервная копия в `/opt/broray/backups`.
+- сохранённые серверы и активный выбор;
+- подписки;
+- пользовательские маршруты и их исходные файлы;
+- управляемые receipts и чужие маршруты Keenetic;
+- DNS-over-TLS записи вне области владения BROray;
+- общий Xray runtime и рабочая конфигурация.
 
-Если OPKG сообщает о файлах с суффиксом `-opkg`, локально изменённая конфигурация сохранена, а новый шаблон помещён рядом. Основные пользовательские настройки можно сравнить командами:
+## Переход с 2.x
 
-```sh
-diff -u \
-    /opt/broray/config/system/settings.json \
-    /opt/broray/config/system/settings.json-opkg
+Встроенного обновления `2.x → 3.0.0` нет. Сохраните нужные данные, выполните штатное удаление 2.x и установите 3.0.0 с нуля. Не используйте `opkg upgrade broray` поверх старой ветки.
 
-diff -u \
-    /opt/broray/routes/config.json \
-    /opt/broray/routes/config.json-opkg
-```
+## Если проверка остановилась
 
-## Удаление
-
-Удалите пакет штатно:
-
-```sh
-opkg remove broray
-```
-
-После удаления проверьте, остались ли пользовательские данные:
-
-```sh
-ls -la /opt/broray
-```
-
-Не удаляйте оставшиеся данные, пока не сохраните нужные подписки, серверы и резервные копии.
-
-## Совместимость BusyBox
-
-Все shell-файлы проверяются командой:
-
-```sh
-ash -n /путь/к/файлу.sh
-```
+Остановка до мутации обычно означает несовместимую архитектуру, отсутствие компонента, недостаток места, конфликтующую операцию или неоднозначную старую установку. Скопируйте только обезличенный текст ошибки и обратитесь в [поддержку](../README.md#поддержка). Не публикуйте подписки, UUID, ключи и полные конфигурации.
