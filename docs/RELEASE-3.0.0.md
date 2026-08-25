@@ -3,21 +3,21 @@
 - Дата публикации: **25 августа 2026 года**
 - Публичная версия: **3.0.0**
 - Пакет: **3.0.0-r14**
-- Исходный кандидат: **3.0.0-r14c67**
+- Исходный кандидат: **3.0.0-r14c68**
 - Канал: **Stable**
 
 ## Результат выпуска
 
-`r14c67` опубликован в Stable без изменения application payload или updater platform. Публичный Stable-установщик затем скачан по HTTPS, проверен по SHA-256 и выполнен на физическом Keenetic. Установка завершилась как штатная переустановка уже проверенного кандидата; перезагрузка не потребовалась.
+`r14c68` опубликован в Stable из байтов, прошедших воспроизводимую сборку A–D, физическое обновление и same-candidate reinstall. Единственное изменение относительно `r14c67` исправляет подпись активного канала: backend и WebUI используют фактический URL updater-v5; legacy OPKG feed не изменяется. После атомарной публикации публичные объекты повторно скачаны по HTTPS и проверены по SHA-256, а updater на физическом Keenetic подтвердил `currentCandidate=r14c68`, канал `stable` и отсутствие доступного обновления. Повторный полный reinstall после продвижения не запускался.
 
 ## Идентичности
 
 | Объект | SHA-256 |
 | --- | --- |
-| Candidate carrier | `1baf9c678fe533c74aa3f08786bc3c3e612e75fd5b2ed61b21aee0df5823a0eb` |
-| Stable `release.json` | `cc0f73b150ccad00dbac16acf1bdf0c2ae4af11ed49b7e8879254536e6180e09` |
-| Stable `COPY-PASTE-ON-ROUTER.txt` | `b80bf61758201d34b32638b9184147367f91e74635be045d680214b4cc632f1d` |
-| Application archive | `a882a8362915cbcf6ff0b2d78357d13939f3aff021b581af2738732cd7d51867` |
+| Candidate carrier | `8ccb49508292b8d2b04c76ea06189b07471aeeb4ffba0255b3fbc4f69d882f39` |
+| Stable `release.json` | `0740557b08c90fe07d51afd3d99d1c6947fdd082cca0c191369af03116995a4c` |
+| Stable `COPY-PASTE-ON-ROUTER.txt` | `06a0f631269f175bc02469856733020a713f1eaed13ac047abd111519cf92967` |
+| Application archive | `314be910e180d5bbac4677a9483e17f18406c8a4339a849edb2c1c8d7de4e382` |
 | Updater platform archive | `40b71cf3a5be9697d19989bac4baee6023692b7cced32ba8b888e4331ae5272f` |
 | Xray 26.7.28 | `4b8af237444801bf17b3dc10a1c5c24581fbe3d433eba3d78c6c3a0da1df56fc` |
 
@@ -89,10 +89,10 @@ Stable index: <https://api.brovibe.cloud/releases/stable/broray/release.json>
 - Keenetic: 9/9 PASS;
 - все семь тестовых серверов доступны;
 - DNS-over-TLS: 8/8 установлены и проверены;
-- состояние маршрутов после тестов: 53 управляемых + 999 внешних;
+- состояние маршрутов после тестов: 101 управляемый + 999 внешних;
 - принудительный midpoint rollback: PASS;
 - конфликтующие lock: 0;
-- публичная Stable-переустановка: PASS.
+- публичная Stable-проверка updater-v5: PASS, кандидат текущий, обновление отсутствует.
 
 Числа серверов, DNS и маршрутов относятся к физическому тестовому состоянию и не являются встроенными пользовательскими данными релиза.
 

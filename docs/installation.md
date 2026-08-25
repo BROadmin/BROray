@@ -39,7 +39,7 @@ trap '"$BB" rm -f "$T"' EXIT
   -o "$T"
 
 [ "$("$BB" sha256sum "$T" | "$BB" awk 'NR==1{print $1}')" = \
-  'b80bf61758201d34b32638b9184147367f91e74635be045d680214b4cc632f1d' ]
+  '06a0f631269f175bc02469856733020a713f1eaed13ac047abd111519cf92967' ]
 
 "$BB" sh "$T"
 )
@@ -51,7 +51,7 @@ trap '"$BB" rm -f "$T"' EXIT
 BRORAY_INSTALL=PASS
 BRORAY_STABLE_INSTALL=PASS
 RELEASE=3.0.0-r14
-CANDIDATE=3.0.0-r14c67
+CANDIDATE=3.0.0-r14c68
 STABLE=YES
 ```
 
@@ -90,7 +90,7 @@ https://broray.myrouter.keenetic.link/
 /opt/etc/init.d/S22broray-updater status
 ```
 
-Для текущего релиза ожидаются `3.0.0-r14`, кандидат `3.0.0-r14c67`, `broray-updater/5`, исправная OPKG-регистрация и отсутствие доступного обновления.
+Для текущего релиза ожидаются `3.0.0-r14`, кандидат `3.0.0-r14c68`, `broray-updater/5`, канал `stable`, исправная OPKG-регистрация и отсутствие доступного обновления.
 
 ## Обычное обновление
 
