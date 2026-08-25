@@ -55,9 +55,13 @@ resolve_source()
 
     source_commit="$(
         awk -F '"' '
-            /^[[:space:]]*"sha"[[:space:]]*:/ {
-                print $4
-                exit
+            /"sha"[[:space:]]*:/ {
+                for (field = 2; field <= NF; field++) {
+                    if ($field == "sha") {
+                        print $(field + 2)
+                        exit
+                    }
+                }
             }
         ' "$metadata"
     )"
