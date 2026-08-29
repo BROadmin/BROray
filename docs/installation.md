@@ -51,11 +51,11 @@ curl -q \
   -fsSL \
   -H 'Cache-Control: no-cache, no-store' \
   -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r16/INSTALL-ON-ROUTER.sh' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r17/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 
 [ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
-  '359c52e8a7ef4ffd7594517ac2a073aa10cf72921c3cd06afe9279da0def8c04' ]
+  'bb4ec91923dc41931ef7da4167393dfbfb348bfb5ba7802063e7b1a2839519ac' ]
 
 sh "$T"
 )
@@ -65,9 +65,10 @@ sh "$T"
 
 ```text
 UPDATE_DECISION=already-current
-INSTALLED_RELEASE=3.0.0-r16
-CURRENT_RELEASE=3.0.0-r16
-MUTATION=NONE
+INSTALLED_RELEASE=3.0.0-r17
+CURRENT_RELEASE=3.0.0-r17
+RELEASE_MUTATION=NONE
+ENVIRONMENT_RECONCILED=YES
 ```
 
 ## Установка с нуля
@@ -102,7 +103,7 @@ sh "$T"
 
 ## Альтернативная установка через штатный механизм Keenetic
 
-Отдельный подписанный bootstrap позволяет поставить проверенную базовую версию `r14c68` через каталог `/opt/install/*.tgz`. Этот вариант полезен, когда архив удобнее перенести на накопитель роутера через SFTP или USB, а запуск выполнить штатной перезагрузкой Keenetic. После загрузки выполните обычное обновление через WebUI до текущего Stable `r16`.
+Отдельный подписанный bootstrap позволяет поставить проверенную базовую версию `r14c68` через каталог `/opt/install/*.tgz`. Этот вариант полезен, когда архив удобнее перенести на накопитель роутера через SFTP или USB, а запуск выполнить штатной перезагрузкой Keenetic. После загрузки выполните обычное обновление через WebUI до текущего Stable `r17`.
 
 Bootstrap не меняет Stable-канал, updater-v5 или байты `r14c68`. Перед любым сетевым запросом он проверяет встроенную подпись и затем принимает только закреплённые SHA-256 Stable-объектов.
 
@@ -151,7 +152,9 @@ https://broray.myrouter.keenetic.link/
 /opt/etc/init.d/S22broray-updater status
 ```
 
-Для текущего релиза ожидаются release `3.0.0-r16`, кандидат `3.0.0-r16c03`, WebUI `WebUI-3.0.0-r16c03`, пакет OPKG `3.0.0-r14`, `broray-updater/5`, канал `stable` и отсутствие доступного обновления.
+Для текущего релиза ожидаются release `3.0.0-r17`, кандидат `3.0.0-r17c01`, WebUI `WebUI-3.0.0-r17c01`, пакет OPKG `3.0.0-r14`, `broray-updater/5`, канал `stable` и отсутствие доступного обновления.
+
+Чистый физический контур для этого релиза проверен полностью: удаление BROray, установка точного `r14c68`, автоматический переход на `r17c01`, сохранение Stable-канала, удаление устаревшего BROray OPKG-feed и повторный запуск публичного установщика без мутации.
 
 ## Обычное обновление
 

@@ -1,29 +1,30 @@
-# BROray 3.0.0-r16 — Stable
+# BROray 3.0.0-r17 — Stable
 
 - Дата публикации: **29 августа 2026 года**
-- Публичный release: **3.0.0-r16**
+- Публичный release: **3.0.0-r17**
 - Пакет: **3.0.0-r14**
-- Технический кандидат: **3.0.0-r16c03**
-- WebUI: **WebUI-3.0.0-r16c03**
+- Технический кандидат: **3.0.0-r17c01**
+- WebUI: **WebUI-3.0.0-r17c01**
 - Канал: **Stable**
 
 ## Результат выпуска
 
-`r16c03` опубликован в Stable из тех же application и updater-platform байтов, которые прошли локальный, staging и физический gate. Решение универсального обновителя не содержит веток для r14 или r15: сравниваются только установленный и текущий подписанный `releaseId`. Более старая версия обновляется, равная завершается без изменений, более новая не понижается. Обязательный диапазон источников — от `3.0.0-r1` до текущего release.
+`r17c01` опубликован в Stable из тех же application и updater-platform байтов, которые прошли локальный, staging и физический gate. Решение универсального обновителя не содержит веток для r14, r15 или отдельных кандидатов: сравниваются только установленный и текущий подписанный `releaseId`. Более старая версия обновляется, равная завершается без замены релиза, более новая не понижается. Обязательный диапазон источников — от `3.0.0-r1` до текущего release.
 
-Физический контур начат с чистого `r14c68`, затем проверил универсальную цепочку, обновление на `r16c03`, явную переустановку и автоматический откат. После атомарной Stable-публикации тестовый Keenetic переключён с staging на публичный Stable: updater-v5 и кнопка WebUI независимо подтвердили `currentCandidate=3.0.0-r16c03`, `releaseRelation=same`, `updateAvailable=false` и отсутствие мутации пользовательских данных.
+Физический контур начат с полного удаления BROray, затем установил чистый `r14c68` и без ручного ремонта выполнил универсальный переход на `r17c01`. Проверены исполняемые права всей updater platform, сохранение выбранного подписанного канала, удаление устаревшего BROray OPKG-feed, OPKG health, WebUI и службы. После атомарной Stable-публикации тестовый Keenetic переключён на публичный Stable: updater-v5 и кнопка WebUI подтвердили `currentCandidate=3.0.0-r17c01`, `releaseRelation=same`, `updateAvailable=false`.
 
-Точный публичный административный блок обновления также выполнен на уже актуальном Keenetic. Он вернул `UPDATE_DECISION=already-current` и `MUTATION=NONE`; контрольные хеши пользовательских данных и Xray остались неизменными.
+Точный публичный административный блок обновления также выполнен на уже актуальном Keenetic. Он вернул `UPDATE_DECISION=already-current`, `RELEASE_MUTATION=NONE` и `ENVIRONMENT_RECONCILED=YES`; контрольные хеши app-slot и установленного release index не изменились.
 
 ## Идентичности
 
 | Объект | SHA-256 |
 | --- | --- |
-| Stable `release.json` | `4f3131f22c551599ed2cbb9ca2e6d4b49a19f317903f563e95dfbde691fc8ce9` |
-| Stable `release.json.minisig` | `eb66072dec14ffa161289d26d42da8645e643c84b86d5ca1173575b8396629da` |
-| Stable `INSTALL-ON-ROUTER.sh` | `359c52e8a7ef4ffd7594517ac2a073aa10cf72921c3cd06afe9279da0def8c04` |
-| Application archive | `94792105f8a9356aaae101a670ca5208b322d6a23d92a62f95aa7ea8bea47d3f` |
-| Updater platform archive | `680b516e5a40f8a753ec75e79beb5bc0eb6ff02d42e6664b04ccaac672450d7b` |
+| Stable `release.json` | `432d1ae97cec76abd7913cb20187eaad1a34b52b0fe098e667efe1b67a99b20a` |
+| Stable `release.json.minisig` | `9d75422230dbcc5429a3d3257a430ae13bee1cca9bd950c9b7a8bde3391fdc89` |
+| Stable `INSTALL-ON-ROUTER.sh` | `bb4ec91923dc41931ef7da4167393dfbfb348bfb5ba7802063e7b1a2839519ac` |
+| Application archive | `e19b21953c204c6172ce8bca7c9538a0e650dbbc4fb0767800a14c840f5c46e1` |
+| Updater platform archive | `eaf2eafb62d1b108fe576d1fda09ae7a5d15ad90f71272abc23f321d397611b0` |
+| Stable root `SHA256SUMS` | `9a0eb0a966a5b8383820a522f35713bbc424345f78c87f0c7ad4b0c7fad53784` |
 | Xray 26.7.28 | `4b8af237444801bf17b3dc10a1c5c24581fbe3d433eba3d78c6c3a0da1df56fc` |
 
 Stable index: <https://api.brovibe.cloud/releases/stable/broray/release.json>
@@ -38,6 +39,8 @@ Stable index: <https://api.brovibe.cloud/releases/stable/broray/release.json>
 - проверка версии, OPKG, backend, Xray и служб после переключения;
 - автоматический возврат предыдущего slot при проверяемой ошибке;
 - fail-closed состояние `recovery-required`, если безопасный автоматический откат доказать нельзя.
+
+В `r17c01` закрыты три дефекта чистого перехода предыдущего Stable: Minisign verifier теперь устанавливается исполняемым; выбранный HTTPS-канал сохраняется атомарно и при равной версии; точный устаревший BROray feed семейства `r14cNN` удаляется, а неизвестные feed-файлы сохраняются и отклоняются fail-closed.
 
 ## WebUI и производительность
 
@@ -89,20 +92,20 @@ Stable index: <https://api.brovibe.cloud/releases/stable/broray/release.json>
 
 ## Физическая приёмка
 
-- update: PASS;
-- явный same-candidate reinstall: PASS;
-- автоматический rollback после контролируемой ошибки: PASS;
-- приложение: 283 из 283 файлов exact;
-- updater platform: 7 из 7 файлов exact;
-- серверы: 7, подписка: 1 из 1 с 7 серверами;
-- маршруты: 29, сохранены exact;
-- DNS-over-TLS: 8 выбрано, 3 эффективных управляемых записи сохранены;
-- Proxy0 подключён и исправен;
-- Xray 26.7.28, конфигурация и SOCKS: PASS;
-- конфликтующие lock: 0;
-- публичная Stable-проверка updater-v5 и кнопки WebUI: PASS, кандидат текущий, обновление отсутствует, мутация не запускалась.
+- полное удаление BROray штатной операцией: PASS;
+- чистая установка точного `r14c68`: PASS;
+- универсальный переход `r14c68 → r17c01`: PASS, ручной ремонт не требовался;
+- updater platform: 7 из 7 файлов exact и с режимом `0755`;
+- подпись release index и SHA-256 application/platform: PASS;
+- Stable-канал сохранён, устаревший BROray feed отсутствует, `opkg update`: PASS;
+- application slot и его `SHA256SUMS`: PASS;
+- один updater, monitor, Xray и WebUI: PASS;
+- восемь авторизованных страниц WebUI: HTTP 200;
+- backend кнопки проверки обновления: PASS, `releaseRelation=same`, обновление отсутствует;
+- повторный публичный Stable-установщик: `already-current`, без замены app-slot;
+- конфликтующие operation lock: 0.
 
-Числа серверов, DNS и маршрутов относятся к физическому тестовому состоянию и не являются встроенными пользовательскими данными релиза.
+Чистая приёмка намеренно началась без серверов, подписок, маршрутов и управляемых DoT-записей. Их отсутствие является состоянием тестовой установки, а не встроенным ограничением релиза; контракт сохранения этих данных при обновлении не изменялся.
 
 ## Обновление
 
