@@ -55,26 +55,26 @@
     </div>
     <div class="release-state">
         <span class="status-dot" aria-hidden="true"></span>
-        Stable · опубликован 25 августа 2026
+        Stable · опубликован 29 августа 2026
     </div>
 </section>
 
 <section id="about">
     <h2>Статус и состав релиза</h2>
     <div class="meta" aria-label="Версии компонентов">
-        <span class="badge accent">BROray 3.0.0</span>
+        <span class="badge accent">BROray 3.0.0-r16</span>
         <span class="badge">OPKG 3.0.0-r14</span>
-        <span class="badge">WebUI-3.0.0-r14c68</span>
+        <span class="badge">WebUI-3.0.0-r16c03</span>
         <span class="badge">Updater v5</span>
         <span class="badge">aarch64-3.10</span>
         <span class="badge">Xray 26.7.28</span>
     </div>
 
     <p>
-        Технический идентификатор проверенных байтов — <code>3.0.0-r14c68</code>.
-        Пользовательская версия приложения — <code>3.0.0</code>, версия пакета —
-        <code>3.0.0-r14</code>. Stable опубликован из физически проверенного кандидата
-        без пересборки под тем же идентификатором.
+        Технический кандидат текущего Stable — <code>3.0.0-r16c03</code>, release —
+        <code>3.0.0-r16</code>. Пакет OPKG остаётся <code>3.0.0-r14</code> и не
+        участвует в выборе обновления. Stable опубликован из физически проверенных
+        application и updater-platform байтов без их пересборки.
     </p>
 
     <div class="fact-grid">
@@ -120,22 +120,36 @@
 </section>
 
 <section id="install">
-    <h2>Установка с нуля</h2>
-    <p>Все команды выполняются в Entware shell от <code>root</code>. Сначала подготовьте зависимости:</p>
-    <pre><button class="copy" type="button" aria-label="Копировать команду подготовки">Копировать</button><code>opkg update &amp;&amp;
-opkg install ca-bundle ca-certificates curl jq</code></pre>
+    <h2>Обновление любой установленной версии 3.0.0</h2>
+    <p>
+        Рекомендуемый путь: <strong>BROray → Проверить обновление → Установить обновление</strong>.
+        Поддерживается любая исправная версия от <code>3.0.0-r1</code>. Более старый
+        release обновляется, равный завершается без изменений, более новый не понижается.
+    </p>
+    <p>
+        Для обычного обновления не запускайте <code>opkg update</code>: установленный
+        BROray уже содержит необходимые зависимости. Для административного запуска
+        достаточно проверить <code>curl</code>, <code>jq</code>, <code>mktemp</code>,
+        <code>sha256sum</code>, <code>awk</code> и <code>sh</code>.
+    </p>
+    <pre><button class="copy" type="button" aria-label="Копировать проверку инструментов">Копировать</button><code>command -v curl
+command -v jq
+command -v mktemp
+command -v sha256sum
+command -v awk
+command -v sh</code></pre>
 
     <p>Затем выполните весь проверяемый блок целиком:</p>
     <pre><button class="copy" type="button" aria-label="Копировать команду установки">Копировать</button><code>(
 set -eu
-BB="$(command -v busybox)"
-CURL="$(command -v curl)"
-[ -n "$BB" ] &amp;&amp; [ -n "$CURL" ]
+PATH=/opt/broray/bin:/opt/sbin:/opt/bin:/opt/usr/bin:/opt/usr/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+for cmd in curl jq mktemp sha256sum awk sh rm; do command -v "$cmd" &gt;/dev/null; done
 
-T="$("$BB" mktemp /tmp/broray-stable.XXXXXX)"
-trap '"$BB" rm -f "$T"' EXIT
+T="$(mktemp /tmp/broray-stable-update.XXXXXX)"
+trap 'rm -f "$T"' EXIT
 
-"$CURL" -q \
+curl -q \
   --proto '=https' \
   --proto-redir '=https' \
   --tlsv1.2 \
@@ -145,21 +159,28 @@ trap '"$BB" rm -f "$T"' EXIT
   -fsSL \
   -H 'Cache-Control: no-cache, no-store' \
   -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r14/COPY-PASTE-ON-ROUTER.txt' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r16/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 
-[ "$("$BB" sha256sum "$T" | "$BB" awk 'NR==1{print $1}')" = \
-  '06a0f631269f175bc02469856733020a713f1eaed13ac047abd111519cf92967' ]
+[ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
+  '359c52e8a7ef4ffd7594517ac2a073aa10cf72921c3cd06afe9279da0def8c04' ]
 
-"$BB" sh "$T"
+sh "$T"
 )</code></pre>
 
-    <p>Успешное завершение содержит:</p>
-    <pre><code>BRORAY_INSTALL=PASS
-BRORAY_STABLE_INSTALL=PASS
-RELEASE=3.0.0-r14
-CANDIDATE=3.0.0-r14c68
-STABLE=YES</code></pre>
+    <p>Если текущий Stable уже установлен, завершение содержит:</p>
+    <pre><code>UPDATE_DECISION=already-current
+INSTALLED_RELEASE=3.0.0-r16
+CURRENT_RELEASE=3.0.0-r16
+MUTATION=NONE</code></pre>
+
+    <div class="note">
+        <span class="note-title">Чистая установка</span>
+        На пустом совместимом Entware сначала установите проверенный bootstrap
+        <code>r14c68</code>, затем сразу выполните обновление через WebUI до текущего
+        Stable. Полный проверяемый блок приведён в
+        <a href="https://github.com/BROadmin/BROray/blob/main/docs/installation.md">инструкции по установке</a>.
+    </div>
 
     <div class="note warning">
         <span class="note-title">Переход с BROray 2.x</span>
@@ -174,9 +195,10 @@ STABLE=YES</code></pre>
     <h2>Подписанная установка через штатный механизм Keenetic</h2>
     <p>
         Для каталога <code>/opt/install/*.tgz</code> опубликован отдельный bootstrap
-        <code>broray-webcli-bootstrap-3.0.0-r14c68-b1</code>. Это не новый релиз и
-        не другой канал обновлений: после проверки подписи он устанавливает точный
-        Stable <code>3.0.0-r14c68</code>. Физическая проверка на Keenetic aarch64 —
+        <code>broray-webcli-bootstrap-3.0.0-r14c68-b1</code>. После проверки подписи
+        он устанавливает точную базовую версию <code>3.0.0-r14c68</code>. Затем
+        выполните обычное обновление через WebUI до текущего Stable
+        <code>3.0.0-r16</code>. Физическая проверка на Keenetic aarch64 —
         <strong>PASS</strong>.
     </p>
 
@@ -282,9 +304,8 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
     <h3>Аварийное административное обновление</h3>
     <p>
         Если WebUI не открывается, но Entware shell доступен, повторите
-        проверяемый Stable-блок из раздела «Установка с нуля». Он автоматически
-        выбирает чистую установку, обновление или переустановку и не обходит
-        защитные проверки.
+        проверяемый Stable-блок из раздела обновления. Он обновляет более старый
+        release, ничего не меняет при равном и отказывается понижать более новый.
     </p>
     <p>Если updater-v5 исправен, можно отправить административный запрос:</p>
     <pre><button class="copy" type="button" aria-label="Копировать команды обновителя">Копировать</button><code>/opt/bin/broray-updaterctl check &amp;&amp;
@@ -298,6 +319,8 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 <section id="new">
     <h2>Что нового в BROray 3.0.0</h2>
     <ul class="check-list">
+        <li>Один универсальный переход с любой версии от 3.0.0-r1 без веток под r14/r15.</li>
+        <li>Решение только по releaseId: update, no-op или отказ от downgrade.</li>
         <li>Updater-v5 с отдельными app-slot, проверяемым переключением и точным откатом.</li>
         <li>Полностью переработанный авторизованный WebUI и согласованные состояния всех страниц.</li>
         <li>Быстрая Главная на фоновых снимках без каскада тяжёлых запросов.</li>
@@ -336,9 +359,10 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 /opt/etc/init.d/S24broray status
 /opt/etc/init.d/S25broray-web status</code></pre>
     <p>
-        Для текущего Stable ожидаются пакет <code>3.0.0-r14</code>, кандидат
-        <code>3.0.0-r14c68</code>, <code>broray-updater/5</code>, исправная
-        OPKG-регистрация и отсутствие доступного обновления.
+        Для текущего Stable ожидаются release <code>3.0.0-r16</code>, кандидат
+        <code>3.0.0-r16c03</code>, WebUI <code>WebUI-3.0.0-r16c03</code>, пакет
+        <code>3.0.0-r14</code>, <code>broray-updater/5</code>, канал Stable и
+        отсутствие доступного обновления.
     </p>
 </section>
 
