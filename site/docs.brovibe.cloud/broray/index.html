@@ -62,20 +62,28 @@
 <section id="about">
     <h2>Статус и состав релиза</h2>
     <div class="meta" aria-label="Версии компонентов">
-        <span class="badge accent">BROray 3.0.0-r16</span>
+        <span class="badge accent">BROray 3.0.0-r17</span>
         <span class="badge">OPKG 3.0.0-r14</span>
-        <span class="badge">WebUI-3.0.0-r16c03</span>
+        <span class="badge">WebUI-3.0.0-r17c01</span>
         <span class="badge">Updater v5</span>
         <span class="badge">aarch64-3.10</span>
         <span class="badge">Xray 26.7.28</span>
     </div>
 
     <p>
-        Технический кандидат текущего Stable — <code>3.0.0-r16c03</code>, release —
-        <code>3.0.0-r16</code>. Пакет OPKG остаётся <code>3.0.0-r14</code> и не
+        Технический кандидат текущего Stable — <code>3.0.0-r17c01</code>, release —
+        <code>3.0.0-r17</code>. Пакет OPKG остаётся <code>3.0.0-r14</code> и не
         участвует в выборе обновления. Stable опубликован из физически проверенных
         application и updater-platform байтов без их пересборки.
     </p>
+
+    <div class="note">
+        <span class="note-title">Чистый переход проверен</span>
+        Полное удаление, чистая установка <code>r14c68</code> и автоматическое
+        обновление до <code>r17c01</code> прошли на физическом Keenetic без ручного
+        исправления прав, OPKG-feed или канала. Обновитель использует один алгоритм
+        для всех исправных выпусков от <code>3.0.0-r1</code>.
+    </div>
 
     <div class="fact-grid">
         <div class="fact"><strong>12 из 12</strong><span>страниц WebUI проверено</span></div>
@@ -159,20 +167,21 @@ curl -q \
   -fsSL \
   -H 'Cache-Control: no-cache, no-store' \
   -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r16/INSTALL-ON-ROUTER.sh' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r17/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 
 [ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
-  '359c52e8a7ef4ffd7594517ac2a073aa10cf72921c3cd06afe9279da0def8c04' ]
+  'bb4ec91923dc41931ef7da4167393dfbfb348bfb5ba7802063e7b1a2839519ac' ]
 
 sh "$T"
 )</code></pre>
 
     <p>Если текущий Stable уже установлен, завершение содержит:</p>
     <pre><code>UPDATE_DECISION=already-current
-INSTALLED_RELEASE=3.0.0-r16
-CURRENT_RELEASE=3.0.0-r16
-MUTATION=NONE</code></pre>
+INSTALLED_RELEASE=3.0.0-r17
+CURRENT_RELEASE=3.0.0-r17
+RELEASE_MUTATION=NONE
+ENVIRONMENT_RECONCILED=YES</code></pre>
 
     <div class="note">
         <span class="note-title">Чистая установка</span>
@@ -198,7 +207,7 @@ MUTATION=NONE</code></pre>
         <code>broray-webcli-bootstrap-3.0.0-r14c68-b1</code>. После проверки подписи
         он устанавливает точную базовую версию <code>3.0.0-r14c68</code>. Затем
         выполните обычное обновление через WebUI до текущего Stable
-        <code>3.0.0-r16</code>. Физическая проверка на Keenetic aarch64 —
+        <code>3.0.0-r17</code>. Физическая проверка этого полного пути на Keenetic aarch64 —
         <strong>PASS</strong>.
     </p>
 
@@ -359,8 +368,8 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 /opt/etc/init.d/S24broray status
 /opt/etc/init.d/S25broray-web status</code></pre>
     <p>
-        Для текущего Stable ожидаются release <code>3.0.0-r16</code>, кандидат
-        <code>3.0.0-r16c03</code>, WebUI <code>WebUI-3.0.0-r16c03</code>, пакет
+        Для текущего Stable ожидаются release <code>3.0.0-r17</code>, кандидат
+        <code>3.0.0-r17c01</code>, WebUI <code>WebUI-3.0.0-r17c01</code>, пакет
         <code>3.0.0-r14</code>, <code>broray-updater/5</code>, канал Stable и
         отсутствие доступного обновления.
     </p>
