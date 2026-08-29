@@ -2,30 +2,46 @@
 
 ## Перед началом
 
-Убедитесь, что роутер соответствует [требованиям](requirements.md). Все команды ниже выполняются в Entware shell от `root`.
+Убедитесь, что роутер соответствует [требованиям](requirements.md). Все команды ниже выполняются в Entware shell от `root`. Для обычного обновления уже установленной ветки 3.0.0 не запускайте `opkg update`: универсальный updater использует установленные зависимости и подписанный HTTPS-канал напрямую.
 
-Подготовьте HTTPS-клиент и JSON-проверку:
+Проверить наличие нужных инструментов можно без изменения системы:
 
 ```sh
-opkg update &&
-opkg install ca-bundle ca-certificates curl jq
+command -v curl
+command -v jq
+command -v mktemp
+command -v sha256sum
+command -v awk
+command -v sh
 ```
 
-## Установка с нуля
+## Обновление любой установленной версии 3.0.0
 
-Загрузите опубликованный Stable-установщик, проверьте его SHA-256 и запустите:
+Для обычного обновления используйте WebUI:
+
+```text
+BROray → Проверить обновление → Установить обновление
+```
+
+Текущий Stable поддерживает единый переход с любой исправной версии, начиная с `3.0.0-r1`. Кандидат и версия OPKG не выбирают отдельный сценарий: сравниваются только установленный и текущий подписанный `releaseId`.
+
+- установленная версия старее — обновление;
+- версии равны — успешное завершение без изменений;
+- установленная версия новее — отказ от понижения без изменений.
+
+Если WebUI недоступен, загрузите универсальный Stable-установщик, проверьте его SHA-256 и запустите:
 
 ```sh
 (
 set -eu
-BB="$(command -v busybox)"
-CURL="$(command -v curl)"
-[ -n "$BB" ] && [ -n "$CURL" ]
+PATH=/opt/broray/bin:/opt/sbin:/opt/bin:/opt/usr/bin:/opt/usr/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+for cmd in curl jq mktemp sha256sum awk sh rm; do command -v "$cmd" >/dev/null; done
 
-T="$("$BB" mktemp /tmp/broray-stable.XXXXXX)"
-trap '"$BB" rm -f "$T"' EXIT
+T="$(mktemp /tmp/broray-stable-update.XXXXXX)"
+trap 'rm -f "$T"' EXIT
 
-"$CURL" -q \
+curl -q \
   --proto '=https' \
   --proto-redir '=https' \
   --tlsv1.2 \
@@ -35,29 +51,58 @@ trap '"$BB" rm -f "$T"' EXIT
   -fsSL \
   -H 'Cache-Control: no-cache, no-store' \
   -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r14/COPY-PASTE-ON-ROUTER.txt' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r16/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 
-[ "$("$BB" sha256sum "$T" | "$BB" awk 'NR==1{print $1}')" = \
-  '06a0f631269f175bc02469856733020a713f1eaed13ac047abd111519cf92967' ]
+[ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
+  '359c52e8a7ef4ffd7594517ac2a073aa10cf72921c3cd06afe9279da0def8c04' ]
 
-"$BB" sh "$T"
+sh "$T"
 )
 ```
 
-Успешное завершение содержит:
+Для уже актуального Stable ожидается:
 
 ```text
-BRORAY_INSTALL=PASS
-BRORAY_STABLE_INSTALL=PASS
-RELEASE=3.0.0-r14
-CANDIDATE=3.0.0-r14c68
-STABLE=YES
+UPDATE_DECISION=already-current
+INSTALLED_RELEASE=3.0.0-r16
+CURRENT_RELEASE=3.0.0-r16
+MUTATION=NONE
+```
+
+## Установка с нуля
+
+Текущий универсальный установщик предназначен для перехода уже установленной ветки 3.0.0. Для чистого окружения используйте проверенный bootstrap `r14c68`, после чего сразу выполните обычное обновление через WebUI до текущего Stable:
+
+Сначала подготовьте HTTPS-клиент и JSON-проверку:
+
+```sh
+opkg update &&
+opkg install ca-bundle ca-certificates curl jq
+```
+
+```sh
+(
+set -eu
+PATH=/opt/broray/bin:/opt/sbin:/opt/bin:/opt/usr/bin:/opt/usr/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+for cmd in curl jq mktemp sha256sum awk sh rm; do command -v "$cmd" >/dev/null; done
+T="$(mktemp /tmp/broray-bootstrap.XXXXXX)"
+trap 'rm -f "$T"' EXIT
+curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 \
+  --connect-timeout 15 --max-time 600 --retry 3 -fsSL \
+  -H 'Cache-Control: no-cache, no-store' -H 'Accept-Encoding: identity' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r14/COPY-PASTE-ON-ROUTER.txt' \
+  -o "$T"
+[ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
+  '06a0f631269f175bc02469856733020a713f1eaed13ac047abd111519cf92967' ]
+sh "$T"
+)
 ```
 
 ## Альтернативная установка через штатный механизм Keenetic
 
-Отдельный подписанный bootstrap позволяет доставить тот же Stable через каталог `/opt/install/*.tgz`. Этот вариант полезен, когда архив удобнее перенести на накопитель роутера через SFTP или USB, а запуск выполнить штатной перезагрузкой Keenetic.
+Отдельный подписанный bootstrap позволяет поставить проверенную базовую версию `r14c68` через каталог `/opt/install/*.tgz`. Этот вариант полезен, когда архив удобнее перенести на накопитель роутера через SFTP или USB, а запуск выполнить штатной перезагрузкой Keenetic. После загрузки выполните обычное обновление через WebUI до текущего Stable `r16`.
 
 Bootstrap не меняет Stable-канал, updater-v5 или байты `r14c68`. Перед любым сетевым запросом он проверяет встроенную подпись и затем принимает только закреплённые SHA-256 Stable-объектов.
 
@@ -106,7 +151,7 @@ https://broray.myrouter.keenetic.link/
 /opt/etc/init.d/S22broray-updater status
 ```
 
-Для текущего релиза ожидаются `3.0.0-r14`, кандидат `3.0.0-r14c68`, `broray-updater/5`, канал `stable`, исправная OPKG-регистрация и отсутствие доступного обновления.
+Для текущего релиза ожидаются release `3.0.0-r16`, кандидат `3.0.0-r16c03`, WebUI `WebUI-3.0.0-r16c03`, пакет OPKG `3.0.0-r14`, `broray-updater/5`, канал `stable` и отсутствие доступного обновления.
 
 ## Обычное обновление
 
@@ -122,11 +167,11 @@ BROray → Проверить обновление → Установить об
 
 На странице **BROray** выберите переустановку. Updater-v5 использует текущий кандидат и тот же транзакционный путь, что и обновление. Пользовательское состояние и общий Xray runtime не входят в сменяемый app-slot.
 
-Повторный запуск Stable-команды из раздела «Установка с нуля» также определит уже установленный текущий кандидат и выберет `reinstall`.
+Переустановка запускается только отдельной кнопкой или явным запросом `reinstall`. Повторный запуск универсальной Stable-команды при равном release завершится без изменений.
 
 ## Аварийное административное обновление
 
-Если WebUI не открывается, но Entware shell доступен, выполните ту же проверяемую Stable-команду из раздела «Установка с нуля». Она автоматически выбирает `clean`, `update` или `reinstall` и затем проверяет состояние установленной системы.
+Если WebUI не открывается, но Entware shell доступен, выполните проверяемую Stable-команду из раздела «Обновление любой установленной версии 3.0.0». Она обновляет только более старый release, ничего не меняет при равном и отказывается понижать более новый.
 
 Если updater-v5 и приложение исправны, но требуется только отправить административный запрос на доступное обновление:
 
@@ -157,7 +202,8 @@ BROray → Проверить обновление → Установить об
 - подписки;
 - пользовательские маршруты и их исходные файлы;
 - управляемые receipts и чужие маршруты Keenetic;
-- DNS-over-TLS записи вне области владения BROray;
+- выбранные и установленные DNS-over-TLS записи;
+- управляемый интерфейс Keenetic;
 - общий Xray runtime и рабочая конфигурация.
 
 ## Переход с 2.x
