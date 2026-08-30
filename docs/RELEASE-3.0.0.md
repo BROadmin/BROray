@@ -99,6 +99,7 @@ Stable index: <https://api.brovibe.cloud/releases/stable/broray/release.json>
 - универсальный переход `r14c68 → r20c01` через терминал и WebUI: PASS, ручной ремонт не требовался;
 - полное удаление через терминал и WebUI с точным восстановлением Lighttpd: PASS;
 - DoT, переустановка, все страницы WebUI и проверка после перезагрузки: PASS;
+- пользовательская проверка установки и обновления: `KN-2710`, `KN-3812`, `KN-3811`, `KN-1812`, `KN-1811`, `KN-1012` — PASS по подтверждению владельца проекта;
 - updater platform: 7 из 7 файлов exact и с режимом `0755`;
 - подпись release index и SHA-256 application/platform: PASS;
 - Stable-канал сохранён, устаревший BROray feed отсутствует, `opkg update`: PASS;
