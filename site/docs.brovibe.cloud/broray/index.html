@@ -62,27 +62,28 @@
 <section id="about">
     <h2>Статус и состав релиза</h2>
     <div class="meta" aria-label="Версии компонентов">
-        <span class="badge accent">BROray 3.0.0-r20</span>
+        <span class="badge accent">BROray 3.0.0-r23</span>
         <span class="badge">OPKG 3.0.0-r14</span>
-        <span class="badge">WebUI-3.0.0-r20c01</span>
+        <span class="badge">WebUI-3.0.0-r23c02</span>
         <span class="badge">Updater v5</span>
         <span class="badge">aarch64-3.10</span>
         <span class="badge">Xray 26.7.28</span>
     </div>
 
     <p>
-        Технический кандидат текущего Stable — <code>3.0.0-r20c01</code>, release —
-        <code>3.0.0-r20</code>. Пакет OPKG остаётся <code>3.0.0-r14</code> и не
+        Технический кандидат текущего Stable — <code>3.0.0-r23c02</code>, release —
+        <code>3.0.0-r23</code>. Пакет OPKG остаётся <code>3.0.0-r14</code> и не
         участвует в выборе обновления. Stable опубликован из физически проверенных
         application и updater-platform байтов без их пересборки.
     </p>
 
     <div class="note">
-        <span class="note-title">Чистый переход проверен</span>
-        Полное удаление через терминал и WebUI, чистая установка, отдельная
-        <code>r14c68</code> и автоматическое обновление до <code>r20c01</code>
-        прошли на физическом Keenetic без ручного ремонта. Обновитель не менялся
-        и использует один алгоритм для всех исправных выпусков от <code>3.0.0-r1</code>.
+        <span class="note-title">Новый выпуск проверен</span>
+        Обычное WebUI-обновление <code>r22c01 → r23c02</code>, расписание проверки
+        качества семи серверов, сохранение активного выбора, DoT, подписки, Xray,
+        перезагрузка и публичный Stable installer прошли на физическом Keenetic.
+        Ранее проверенный чистый путь через <code>r14c68</code> сохранён: updater-v5
+        не менялся и использует один алгоритм для всех исправных выпусков от <code>3.0.0-r1</code>.
     </div>
 
     <div class="fact-grid">
@@ -168,19 +169,19 @@ curl -q \
   -fsSL \
   -H 'Cache-Control: no-cache, no-store' \
   -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r20/INSTALL-ON-ROUTER.sh' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r23/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 
 [ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
-  '3c3faa352ef78821de791a3e932602b88efadf9b82fecde39c535a67bfbb14c0' ]
+  '12f9d9edace123c1137d6143210af7c1e7157109859efbc0e75c02fdc53cec21' ]
 
 sh "$T"
 )</code></pre>
 
     <p>Если текущий Stable уже установлен, завершение содержит:</p>
     <pre><code>UPDATE_DECISION=already-current
-INSTALLED_RELEASE=3.0.0-r20
-CURRENT_RELEASE=3.0.0-r20
+INSTALLED_RELEASE=3.0.0-r23
+CURRENT_RELEASE=3.0.0-r23
 RELEASE_MUTATION=NONE
 ENVIRONMENT_RECONCILED=YES</code></pre>
 
@@ -208,7 +209,7 @@ ENVIRONMENT_RECONCILED=YES</code></pre>
         <code>broray-webcli-bootstrap-3.0.0-r14c68-b1</code>. После проверки подписи
         он устанавливает точную базовую версию <code>3.0.0-r14c68</code>. Затем
         выполните обычное обновление через WebUI до текущего Stable
-        <code>3.0.0-r20</code>. Физическая проверка этого полного пути на Keenetic aarch64 —
+        <code>3.0.0-r23</code>. Физическая проверка базового пути на Keenetic aarch64 —
         <strong>PASS</strong>.
     </p>
 
@@ -280,7 +281,7 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
     <div class="feature-grid">
         <article class="feature"><h3>Вход</h3><p>Авторизация учётной записью Keenetic, создание локальной сессии и безопасный выход.</p></article>
         <article class="feature"><h3>Главная</h3><p>Быстрый сводный статус серверов, подписок, маршрутов, Keenetic, Xray и BROray без запуска тяжёлых проверок.</p></article>
-        <article class="feature"><h3>Серверы</h3><p>Импорт VLESS, VMess, Trojan и Hysteria2, проверка доступности, подключение, отключение, удаление и автоматический выбор резервного сервера.</p></article>
+        <article class="feature"><h3>Серверы</h3><p>Импорт VLESS, VMess, Trojan и Hysteria2, ручная и автоматическая проверка качества, подключение, отключение, удаление и автоматический выбор резервного сервера.</p></article>
         <article class="feature"><h3>Подписки</h3><p>Добавление, обновление и удаление подписок, просмотр серверов и безопасное обновление списка без потери активного подключения.</p></article>
         <article class="feature"><h3>DNS-over-TLS</h3><p>Выбор до восьми серверов, TLS/SNI-проверка, применение в Keenetic и удаление только подтверждённых записей BROray.</p></article>
         <article class="feature"><h3>Маршруты — Обзор</h3><p>Сводка готовых и пользовательских наборов, состояние установки, обновления и конфликты владельцев.</p></article>
@@ -329,6 +330,12 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 <section id="new">
     <h2>Что нового в BROray 3.0.0</h2>
     <ul class="check-list">
+        <li>В r23 добавлена автоматическая проверка качества всех сохранённых серверов: выключена, каждые 30, 60, 180 или 360 минут.</li>
+        <li>Проверка выполняется последовательно существующим изолированным HTTPS+Xray/ICMP-механизмом, обновляет метрики и не переключает активный сервер.</li>
+        <li>На странице «Серверы» появилась полноширинная раскрывающаяся карточка перед списком серверов; по умолчанию она свёрнута как «Автовыбор».</li>
+        <li>Карточка показывает состояние службы, последний и следующий запуск, доступные и недоступные серверы и итог последнего цикла.</li>
+        <li>Status API совместим со штатным Entware jq без ONIGURUMA.</li>
+        <li>Исправлена проверка принадлежности интерфейса Keenetic при выборе конкретного подключения.</li>
         <li>Один универсальный переход с любой версии от 3.0.0-r1 без веток под r14/r15.</li>
         <li>Решение только по releaseId: update, no-op или отказ от downgrade.</li>
         <li>В r20 полное удаление чистой r14c68 точно восстанавливает исходные файлы Lighttpd и режим init-скрипта; updater-v5 не изменён.</li>
@@ -370,8 +377,8 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 /opt/etc/init.d/S24broray status
 /opt/etc/init.d/S25broray-web status</code></pre>
     <p>
-        Для текущего Stable ожидаются release <code>3.0.0-r20</code>, кандидат
-        <code>3.0.0-r20c01</code>, WebUI <code>WebUI-3.0.0-r20c01</code>, пакет
+        Для текущего Stable ожидаются release <code>3.0.0-r23</code>, кандидат
+        <code>3.0.0-r23c02</code>, WebUI <code>WebUI-3.0.0-r23c02</code>, пакет
         <code>3.0.0-r14</code>, <code>broray-updater/5</code>, канал Stable и
         отсутствие доступного обновления.
     </p>
