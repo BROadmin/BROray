@@ -1,17 +1,17 @@
-# BROray 3.0.0-r17 — Stable
+# BROray 3.0.0-r20 — Stable
 
-- Дата публикации: **29 августа 2026 года**
-- Публичный release: **3.0.0-r17**
+- Дата публикации: **30 августа 2026 года**
+- Публичный release: **3.0.0-r20**
 - Пакет: **3.0.0-r14**
-- Технический кандидат: **3.0.0-r17c01**
-- WebUI: **WebUI-3.0.0-r17c01**
+- Технический кандидат: **3.0.0-r20c01**
+- WebUI: **WebUI-3.0.0-r20c01**
 - Канал: **Stable**
 
 ## Результат выпуска
 
-`r17c01` опубликован в Stable из тех же application и updater-platform байтов, которые прошли локальный, staging и физический gate. Решение универсального обновителя не содержит веток для r14, r15 или отдельных кандидатов: сравниваются только установленный и текущий подписанный `releaseId`. Более старая версия обновляется, равная завершается без замены релиза, более новая не понижается. Обязательный диапазон источников — от `3.0.0-r1` до текущего release.
+`r20c01` опубликован в Stable из тех же application-байтов, которые прошли локальный, staging и физический gate. Updater platform не изменялась. Решение универсального обновителя не содержит веток для r14, r15 или отдельных кандидатов: сравниваются только установленный и текущий подписанный `releaseId`. Более старая версия обновляется, равная завершается без замены релиза, более новая не понижается. Обязательный диапазон источников — от `3.0.0-r1` до текущего release.
 
-Физический контур начат с полного удаления BROray, затем установил чистый `r14c68` и без ручного ремонта выполнил универсальный переход на `r17c01`. Проверены исполняемые права всей updater platform, сохранение выбранного подписанного канала, удаление устаревшего BROray OPKG-feed, OPKG health, WebUI и службы. После атомарной Stable-публикации тестовый Keenetic переключён на публичный Stable: updater-v5 и кнопка WebUI подтвердили `currentCandidate=3.0.0-r17c01`, `releaseRelation=same`, `updateAvailable=false`.
+Физический контур включал обновление через WebUI, полное удаление через терминал и WebUI, чистую установку, переход с отдельной `r14c68`, повторную установку текущего кандидата, DoT, все страницы, перезагрузку и повторную проверку. Исправление полного удаления восстанавливает только точные известные исходные файлы Lighttpd и режим init-скрипта `0755`; чужие или неоднозначные файлы не подменяются. После атомарной Stable-публикации тестовый Keenetic переключён на публичный Stable: updater-v5 и кнопка WebUI подтвердили `currentCandidate=3.0.0-r20c01`, `releaseRelation=same`, `updateAvailable=false`.
 
 Точный публичный административный блок обновления также выполнен на уже актуальном Keenetic. Он вернул `UPDATE_DECISION=already-current`, `RELEASE_MUTATION=NONE` и `ENVIRONMENT_RECONCILED=YES`; контрольные хеши app-slot и установленного release index не изменились.
 
@@ -19,12 +19,14 @@
 
 | Объект | SHA-256 |
 | --- | --- |
-| Stable `release.json` | `432d1ae97cec76abd7913cb20187eaad1a34b52b0fe098e667efe1b67a99b20a` |
-| Stable `release.json.minisig` | `9d75422230dbcc5429a3d3257a430ae13bee1cca9bd950c9b7a8bde3391fdc89` |
-| Stable `INSTALL-ON-ROUTER.sh` | `bb4ec91923dc41931ef7da4167393dfbfb348bfb5ba7802063e7b1a2839519ac` |
-| Application archive | `e19b21953c204c6172ce8bca7c9538a0e650dbbc4fb0767800a14c840f5c46e1` |
+| Stable `release.json` | `b87deb3cca0eb01b1632aa8ceb1bcb81de6972bee5b7925e694088cffa9a2ebd` |
+| Stable `release.json.minisig` | `031973bdd3eb309251e8955f0d4a341ec8d166222dd65ad905541e87487cec61` |
+| Stable `INSTALL-ON-ROUTER.sh` | `3c3faa352ef78821de791a3e932602b88efadf9b82fecde39c535a67bfbb14c0` |
+| Application archive | `ad231c899e0a93f90f65489b8b6588aa09ae94b43c1d838e13e4458079c862bd` |
+| Clean bootstrap | `fb4943e3d336d091b16e6cf436e2a7eefe7274422246c8038a7eea2e6c0d79a0` |
 | Updater platform archive | `eaf2eafb62d1b108fe576d1fda09ae7a5d15ad90f71272abc23f321d397611b0` |
-| Stable root `SHA256SUMS` | `9a0eb0a966a5b8383820a522f35713bbc424345f78c87f0c7ad4b0c7fad53784` |
+| Stable versioned `SHA256SUMS` | `be64a51d359149652fbeebc91ae27219eab9e5028dc00d349eae5fdcf619793e` |
+| Stable root `SHA256SUMS` | `39ae7ed45d7bece1e00dc238e96ff4181544d5206e3d58c4e9cf2ba346a7145f` |
 | Xray 26.7.28 | `4b8af237444801bf17b3dc10a1c5c24581fbe3d433eba3d78c6c3a0da1df56fc` |
 
 Stable index: <https://api.brovibe.cloud/releases/stable/broray/release.json>
@@ -40,7 +42,7 @@ Stable index: <https://api.brovibe.cloud/releases/stable/broray/release.json>
 - автоматический возврат предыдущего slot при проверяемой ошибке;
 - fail-closed состояние `recovery-required`, если безопасный автоматический откат доказать нельзя.
 
-В `r17c01` закрыты три дефекта чистого перехода предыдущего Stable: Minisign verifier теперь устанавливается исполняемым; выбранный HTTPS-канал сохраняется атомарно и при равной версии; точный устаревший BROray feed семейства `r14cNN` удаляется, а неизвестные feed-файлы сохраняются и отклоняются fail-closed.
+В `r20c01` закрыт воспроизводимый дефект полного удаления чистой `r14c68`: старая установка могла не иметь receipt исходных файлов Lighttpd. Новый путь принимает только точные опубликованные исходные хеши, восстанавливает конфигурацию и init-скрипт с режимом `0755`, а неоднозначное состояние отклоняет. Updater-v5 и остальные функциональные модули не менялись.
 
 ## WebUI и производительность
 
@@ -94,7 +96,9 @@ Stable index: <https://api.brovibe.cloud/releases/stable/broray/release.json>
 
 - полное удаление BROray штатной операцией: PASS;
 - чистая установка точного `r14c68`: PASS;
-- универсальный переход `r14c68 → r17c01`: PASS, ручной ремонт не требовался;
+- универсальный переход `r14c68 → r20c01` через терминал и WebUI: PASS, ручной ремонт не требовался;
+- полное удаление через терминал и WebUI с точным восстановлением Lighttpd: PASS;
+- DoT, переустановка, все страницы WebUI и проверка после перезагрузки: PASS;
 - updater platform: 7 из 7 файлов exact и с режимом `0755`;
 - подпись release index и SHA-256 application/platform: PASS;
 - Stable-канал сохранён, устаревший BROray feed отсутствует, `opkg update`: PASS;
