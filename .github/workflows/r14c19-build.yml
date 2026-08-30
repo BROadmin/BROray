@@ -1,0 +1,36 @@
+name: BROray r14c19 exact build
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-r14c19:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install deterministic build dependencies
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends jq nodejs shellcheck
+
+      - name: Materialize exact functional baselines
+        run: |
+          set -Eeuo pipefail
+          bash tools/r14c19/fetch-baselines.sh "$GITHUB_WORKSPACE/out"
+
+      - name: Upload exact baseline bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: broray-r14c19-build-output
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
