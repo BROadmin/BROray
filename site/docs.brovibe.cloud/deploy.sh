@@ -14,7 +14,7 @@ SERVICE_PATH="/etc/systemd/system/brovibe-docs-deploy.service"
 TIMER_PATH="/etc/systemd/system/brovibe-docs-deploy.timer"
 LOCK_FILE="${BROVIBE_DOCS_LOCK_FILE:-/run/lock/brovibe-docs-deploy.lock}"
 SITE_OWNER="${BROVIBE_DOCS_OWNER-www-data:www-data}"
-FILES="index.html styles.css broray/index.html favicon.ico favicon-16x16.png favicon-32x32.png apple-touch-icon.png icon-192.png icon-512.png site-manifest.json"
+FILES="index.html styles.css broray/index.html broray-light/index.html favicon.ico favicon-16x16.png favicon-32x32.png apple-touch-icon.png icon-192.png icon-512.png site-manifest.json"
 
 fail()
 {
@@ -85,8 +85,8 @@ validate_manifest()
 {
     manifest="$1"
 
-    [ "$(wc -l <"$manifest" | tr -d ' ')" = "10" ] ||
-        fail "манифест должен содержать ровно 10 файлов"
+    [ "$(wc -l <"$manifest" | tr -d ' ')" = "11" ] ||
+        fail "манифест должен содержать ровно 11 файлов"
 
     for file in $FILES
     do
@@ -141,7 +141,7 @@ download_site()
     manifest="$work_root/SHA256SUMS"
     payload="$work_root/site"
 
-    mkdir -p "$payload/broray"
+    mkdir -p "$payload/broray" "$payload/broray-light"
     resolve_source "$work_root"
     source_url="$(cat "$work_root/source-url")"
 

@@ -74,6 +74,10 @@ a:hover {
     margin: 0 auto;
 }
 
+.footer-links {
+    margin: 0;
+}
+
 .header-inner {
     min-height: 68px;
     display: flex;
@@ -205,6 +209,10 @@ h3 {
 
 .release-banner h1 {
     margin-bottom: 14px;
+}
+
+.release-id {
+    white-space: nowrap;
 }
 
 .release-banner .lead {
