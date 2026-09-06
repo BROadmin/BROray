@@ -73,7 +73,7 @@ ENVIRONMENT_RECONCILED=YES
 
 ## Установка с нуля
 
-Текущий универсальный установщик предназначен для перехода уже установленной ветки 3.0.0. Для чистого окружения используйте проверенный bootstrap `r14c68`, после чего сразу выполните обычное обновление через WebUI до текущего Stable:
+Текущий универсальный Stable-установщик обслуживает и обновление, и чистую установку. На пустом совместимом Entware он проверяет границу чистого состояния, получает подписанный release index, устанавливает закреплённый bootstrap `r14c68` и в том же запуске автоматически доводит систему до текущего Stable `3.0.1-r01`. Ручное промежуточное обновление через WebUI не требуется.
 
 Сначала подготовьте HTTPS-клиент и JSON-проверку:
 
@@ -88,22 +88,24 @@ set -eu
 PATH=/opt/broray/bin:/opt/sbin:/opt/bin:/opt/usr/bin:/opt/usr/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 for cmd in curl jq mktemp sha256sum awk sh rm; do command -v "$cmd" >/dev/null; done
-T="$(mktemp /tmp/broray-bootstrap.XXXXXX)"
+T="$(mktemp /tmp/broray-clean-current.XXXXXX)"
 trap 'rm -f "$T"' EXIT
 curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 \
   --connect-timeout 15 --max-time 600 --retry 3 -fsSL \
   -H 'Cache-Control: no-cache, no-store' -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.0.0-r14/COPY-PASTE-ON-ROUTER.txt' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.1-r01/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 [ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
-  '06a0f631269f175bc02469856733020a713f1eaed13ac047abd111519cf92967' ]
+  '92b53af2c0ca282ecced0fdf6f39ce4e9a845b41dcfc3659724cc86dc804571c' ]
 sh "$T"
 )
 ```
 
+Успешная чистая установка содержит `UPDATE_DECISION=clean-install`, `CLEAN_BOOTSTRAP=PASS` и завершается строкой `BRORAY_INSTALL=PASS` с кандидатом `3.0.1-r01c03`. Внутренняя установка `r14c68` является автоматическим переходным этапом одного запуска, а не отдельным действием пользователя. Частично установленное или неоднозначное состояние отклоняется без изменений.
+
 ## Альтернативная установка через штатный механизм Keenetic
 
-Отдельный подписанный bootstrap позволяет поставить проверенную базовую версию `r14c68` через каталог `/opt/install/*.tgz`. Этот вариант полезен, когда архив удобнее перенести на накопитель роутера через SFTP или USB, а запуск выполнить штатной перезагрузкой Keenetic. После загрузки выполните обычное обновление через WebUI до текущего Stable `3.0.1-r01`.
+Отдельный подписанный bootstrap позволяет поставить проверенную базовую версию `r14c68` через каталог `/opt/install/*.tgz`. Это альтернативный вариант, когда архив удобнее перенести на накопитель роутера через SFTP или USB, а запуск выполнить штатной перезагрузкой Keenetic. В отличие от обычной терминальной установки, после загрузки этого отдельного архива требуется обновление через WebUI до текущего Stable `3.0.1-r01`.
 
 Bootstrap не меняет Stable-канал, updater-v5 или байты `r14c68`. Перед любым сетевым запросом он проверяет встроенную подпись и затем принимает только закреплённые SHA-256 Stable-объектов.
 
