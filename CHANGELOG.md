@@ -1,5 +1,22 @@
 # История изменений
 
+## 3.0.1-r02 / OPKG 3.0.0-r14 — Stable — 2026-09-07
+
+- опубликован Stable из технического кандидата `3.0.1-r02c05`, WebUI `WebUI-3.0.1-r02c05`;
+- чистая терминальная установка теперь сразу разворачивает целевое приложение `r02c05`, без установки и запуска промежуточного приложения `r14c68`;
+- пакет OPKG `3.0.0-r14` сохранён только как регистрационный и lifecycle-якорь компактной архитектуры;
+- updater-v5 не изменён и не используется для дополнительного перехода во время чистой установки;
+- универсальное обновление любой исправной версии от `3.0.0-r1`, переустановка и откат не изменены;
+- полное штатное удаление без архива и чистая установка публичным Stable-установщиком физически пройдены на `KN-2710` с KeeneticOS `5.1.4`;
+- после установки подтверждены OPKG-регистрация, Xray, управляемый `Proxy0`, updater, монитор, WebUI, восемь страниц и отсутствие промежуточного app-slot;
+- повторный запуск публичного Stable installer завершился `UPDATE_DECISION=already-current`, `RELEASE_MUTATION=NONE`, `ENVIRONMENT_RECONCILED=YES`;
+- Stable `release.json`: `39c46dce2c7e3d869e8378db90becf93fdce5bb89e490077838435eec1391be2`;
+- Stable signature: `db3505e0585b4d7a14fab5bae34c44ab72c7c16dc9d442db838369afa87eedb7`;
+- Stable installer: `05c2de3d1776d344eb42c8a7ce3e9008e1aca5e03eec5292e512a64c53596103`;
+- direct OPKG package: `e8de2f6fe749cb257b13eb68dd09a92e72e478123a0bec6da283c02fd05d3377`;
+- application archive: `49358847bee8caef8774f31f4a41246030e5b402892cc2e06a80bc7a470e03db`;
+- updater platform: `eaf2eafb62d1b108fe576d1fda09ae7a5d15ad90f71272abc23f321d397611b0`.
+
 ## 3.0.1-r01 / OPKG 3.0.0-r14 — Stable — 2026-09-07
 
 - опубликован Stable из byte-exact технического кандидата `3.0.1-r01c03`, WebUI `WebUI-3.0.1-r01c03`;
