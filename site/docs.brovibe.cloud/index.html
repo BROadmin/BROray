@@ -35,6 +35,22 @@
         и физических проверках перед выпуском.
     </p>
 
+    <section class="note" aria-labelledby="broray-first-install">
+        <span class="note-title" id="broray-first-install">BROray ещё не установлен?</span>
+        <p>Только перед первой установкой:</p>
+        <ol>
+            <li>Откройте терминал Entware на роутере.</li>
+            <li>Войдите как <code>root</code>.</li>
+            <li>Один раз выполните команду ниже.</li>
+        </ol>
+        <pre><button class="copy" type="button" aria-label="Копировать команду подготовки">Копировать</button><code>opkg update &amp;&amp;
+opkg install ca-bundle ca-certificates curl jq</code></pre>
+        <p><strong>Если BROray уже установлен и вы его обновляете, пропустите этот шаг.</strong></p>
+        <div class="link-list">
+            <a href="/broray/#install">Открыть полную инструкцию →</a>
+        </div>
+    </section>
+
     <div class="home-grid">
         <a class="home-card" href="/broray/">
             <div class="card-topline">
@@ -73,5 +89,18 @@
         </div>
     </div>
 </footer>
+<script>
+document.querySelectorAll('button.copy').forEach(function (button) {
+    button.addEventListener('click', function () {
+        var code = button.parentElement.querySelector('code');
+        if (!code) return;
+        navigator.clipboard.writeText(code.textContent).then(function () {
+            var old = button.textContent;
+            button.textContent = 'Скопировано';
+            setTimeout(function () { button.textContent = old; }, 1200);
+        });
+    });
+});
+</script>
 </body>
 </html>
