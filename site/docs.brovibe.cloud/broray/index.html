@@ -154,11 +154,17 @@ command -v awk
 command -v sh</code></pre>
 
     <div class="note">
-        <span class="note-title">Перед чистой установкой</span>
-        На пустом Entware один раз подготовьте HTTPS-клиент и JSON-проверку:
-        <code>opkg update &amp;&amp; opkg install ca-bundle ca-certificates curl jq</code>.
-        При обычном обновлении уже установленного BROray этот шаг не нужен.
+        <span class="note-title">BROray ещё не установлен?</span>
+        <p>Только перед первой установкой:</p>
+        <ol>
+            <li>Откройте терминал Entware на роутере.</li>
+            <li>Войдите как <code>root</code>.</li>
+            <li>Один раз выполните команду ниже.</li>
+        </ol>
+        <p><strong>Если BROray уже установлен и вы его обновляете, пропустите этот шаг.</strong></p>
     </div>
+    <pre><button class="copy" type="button" aria-label="Копировать команду подготовки">Копировать</button><code>opkg update &amp;&amp;
+opkg install ca-bundle ca-certificates curl jq</code></pre>
 
     <p>Для чистой установки или терминального обновления выполните один и тот же проверяемый блок целиком:</p>
     <pre><button class="copy" type="button" aria-label="Копировать команду установки">Копировать</button><code>(
