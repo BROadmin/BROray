@@ -51,11 +51,11 @@ curl -q \
   -fsSL \
   -H 'Cache-Control: no-cache, no-store' \
   -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.0.1-r05/INSTALL-ON-ROUTER.sh' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.1-r07/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 
 [ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
-  '53665e09bd7f14fd9e2764d2f55f0db649bc47995e2fee17cdd88304bd8af226' ]
+  '82d102e227fdaef2ea94708de8c540314e8c6b2cd89ab5a188cfcc771c37ff5d' ]
 
 sh "$T"
 )
@@ -65,15 +65,15 @@ sh "$T"
 
 ```text
 UPDATE_DECISION=already-current
-INSTALLED_RELEASE=3.0.1-r05
-CURRENT_RELEASE=3.0.1-r05
+INSTALLED_RELEASE=3.0.1-r07
+CURRENT_RELEASE=3.0.1-r07
 RELEASE_MUTATION=NONE
 ENVIRONMENT_RECONCILED=YES
 ```
 
 ## Установка с нуля
 
-Текущий универсальный Stable-установщик обслуживает и обновление, и чистую установку. При первой установке он проверяет состояние Entware, получает подписанный release index и сразу разворачивает целевое приложение `3.0.1-r05c01`. Пакет OPKG `3.0.0-r14` используется только как регистрационный и lifecycle-якорь: приложение `r14c68` не устанавливается и не запускается, updater-v5 не выполняет внутренний переход.
+Текущий универсальный Stable-установщик обслуживает и обновление, и чистую установку. При первой установке он проверяет состояние Entware, получает подписанный release index и сразу разворачивает целевое приложение `3.0.1-r07c01`. Пакет OPKG `3.0.0-r14` используется только как регистрационный и lifecycle-якорь: приложение `r14c68` не устанавливается и не запускается, updater-v5 не выполняет внутренний переход.
 
 Если BROray на роутере ещё не установлен:
 
@@ -99,19 +99,19 @@ trap 'rm -f "$T"' EXIT
 curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 \
   --connect-timeout 15 --max-time 600 --retry 3 -fsSL \
   -H 'Cache-Control: no-cache, no-store' -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.0.1-r05/INSTALL-ON-ROUTER.sh' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.1-r07/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 [ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
-  '53665e09bd7f14fd9e2764d2f55f0db649bc47995e2fee17cdd88304bd8af226' ]
+  '82d102e227fdaef2ea94708de8c540314e8c6b2cd89ab5a188cfcc771c37ff5d' ]
 sh "$T"
 )
 ```
 
-Успешная чистая установка содержит `UPDATE_DECISION=clean-install`, `CLEAN_BOOTSTRAP=PASS`, `INTERMEDIATE_APPLICATION_RELEASE=NONE` и завершается строками `BRORAY_INSTALL=PASS`, `CANDIDATE=3.0.1-r05c01`, `STABLE=YES`. Частично установленное или неоднозначное состояние отклоняется без обхода защитных проверок.
+Успешная чистая установка содержит `UPDATE_DECISION=clean-install`, `CLEAN_BOOTSTRAP=PASS`, `INTERMEDIATE_APPLICATION_RELEASE=NONE` и завершается строками `BRORAY_INSTALL=PASS`, `CANDIDATE=3.0.1-r07c01`, `STABLE=YES`. Частично установленное или неоднозначное состояние отклоняется без обхода защитных проверок.
 
 ## Альтернативная установка через штатный механизм Keenetic
 
-Отдельный подписанный bootstrap позволяет поставить проверенную базовую версию `r14c68` через каталог `/opt/install/*.tgz`. Это альтернативный вариант, когда архив удобнее перенести на накопитель роутера через SFTP или USB, а запуск выполнить штатной перезагрузкой Keenetic. В отличие от обычной терминальной установки, после загрузки этого отдельного архива требуется обновление через WebUI до текущего Stable `3.0.1-r05`.
+Отдельный подписанный bootstrap позволяет поставить проверенную базовую версию `r14c68` через каталог `/opt/install/*.tgz`. Это альтернативный вариант, когда архив удобнее перенести на накопитель роутера через SFTP или USB, а запуск выполнить штатной перезагрузкой Keenetic. В отличие от обычной терминальной установки, после загрузки этого отдельного архива требуется обновление через WebUI до текущего Stable `3.0.1-r07`.
 
 Bootstrap не меняет Stable-канал, updater-v5 или байты `r14c68`. Перед любым сетевым запросом он проверяет встроенную подпись и затем принимает только закреплённые SHA-256 Stable-объектов.
 
@@ -160,9 +160,9 @@ https://broray.myrouter.keenetic.link/
 /opt/etc/init.d/S22broray-updater status
 ```
 
-Для текущего релиза ожидаются release `3.0.1-r05`, кандидат `3.0.1-r05c01`, WebUI `WebUI-3.0.1-r05c01`, пакет OPKG `3.0.0-r14`, `broray-updater/5`, канал `stable` и отсутствие доступного обновления.
+Для текущего релиза ожидаются release `3.0.1-r07`, кандидат `3.0.1-r07c01`, WebUI `WebUI-3.0.1-r07c01`, пакет OPKG `3.0.0-r14`, `broray-updater/5`, канал `stable` и отсутствие доступного обновления.
 
-Прямая чистая установка и отсутствие промежуточного приложения подтверждены для архитектуры текущего Stable. Для `r05c01` физически проверены WebUI-обновление, все обязательные службы, Xray, семь серверов, автоматическое обновление подписки, три DNS-over-TLS-записи, 12 маршрутов Wikipedia, KeenDNS и все страницы WebUI. Повторный запуск публичного Stable-установщика завершился без мутации. Универсальный переход от `3.0.0-r1` и updater-v5 не изменялись.
+Прямая чистая установка и отсутствие промежуточного приложения подтверждены для архитектуры текущего Stable. Для `r07c01` физически проверены все обязательные службы, Xray, семь серверов, повторное обновление подписки с точной синхронизацией имени активного сервера и ProxyN, три DNS-over-TLS-записи, 12 маршрутов Wikipedia, KeenDNS, все страницы и кнопки WebUI. Повторный запуск публичного Stable-установщика завершился без мутации. Универсальный переход от `3.0.0-r1` и updater-v5 не изменялись.
 
 ## Обычное обновление
 
