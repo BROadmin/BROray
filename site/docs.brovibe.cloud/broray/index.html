@@ -71,37 +71,36 @@
 <section id="about">
     <h2>Статус и состав релиза</h2>
     <div class="meta" aria-label="Версии компонентов">
-        <span class="badge accent">BROray 3.0.1-r08</span>
+        <span class="badge accent">BROray 3.0.1-r09</span>
         <span class="badge">OPKG 3.0.0-r14</span>
-        <span class="badge">WebUI-3.0.1-r08c01</span>
+        <span class="badge">WebUI-3.0.1-r09c05</span>
         <span class="badge">Updater v5</span>
         <span class="badge">aarch64-3.10</span>
         <span class="badge">Xray 26.7.28</span>
     </div>
 
     <p>
-        Технический кандидат текущего Stable — <code>3.0.1-r08c01</code>, release —
-        <code>3.0.1-r08</code>. Пакет OPKG остаётся <code>3.0.0-r14</code> и не
+        Технический кандидат текущего Stable — <code>3.0.1-r09c05</code>, release —
+        <code>3.0.1-r09</code>. Пакет OPKG остаётся <code>3.0.0-r14</code> и не
         участвует в выборе обновления. Stable опубликован из физически проверенных
         application и updater-platform байтов без их пересборки.
     </p>
 
     <div class="note">
         <span class="note-title">Новый выпуск проверен</span>
-        Безопасная синхронизация только отображаемого имени собственного ProxyN при запуске,
-        синхронизация имени активного сервера при обновлении подписки,
-        установка Wikipedia, DNS-over-TLS, автоматическое обновление подписок,
-        Xray, страницы и кнопки WebUI прошли проверку на физическом Keenetic.
-        Чистая установка сразу разворачивает целевое приложение <code>r08c01</code>; OPKG
+        Строгая синхронная коррекция только имени собственного ProxyN, длинные UTF-8-имена,
+        точное восстановление владения legacy Lighttpd, защищённое восстановление данных,
+        Wikipedia, DNS-over-TLS, подписки, Xray, страницы и кнопки WebUI прошли проверку
+        на физическом Keenetic. Чистая установка сразу разворачивает целевое приложение <code>r09c05</code>; OPKG
         <code>3.0.0-r14</code> служит только регистрационным якорем, а промежуточное
         приложение <code>r14c68</code> не устанавливается и не запускается.
     </div>
 
     <div class="fact-grid">
-        <div class="fact"><strong>12 из 12</strong><span>страниц WebUI проверено</span></div>
-        <div class="fact"><strong>162 из 162</strong><span>кнопок и действий проверено</span></div>
-        <div class="fact"><strong>9 из 9</strong><span>проверок Keenetic пройдено</span></div>
-        <div class="fact"><strong>PASS</strong><span>обновление, переустановка и откат</span></div>
+        <div class="fact"><strong>8 из 8</strong><span>пользовательских страниц проверено</span></div>
+        <div class="fact"><strong>PASS</strong><span>безопасные действия WebUI</span></div>
+        <div class="fact"><strong>4 из 4</strong><span>сборки побайтно совпали</span></div>
+        <div class="fact"><strong>PASS</strong><span>установка и переустановка</span></div>
     </div>
 
     <div class="note">
@@ -194,26 +193,26 @@ curl -q \
   -fsSL \
   -H 'Cache-Control: no-cache, no-store' \
   -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.0.1-r08/INSTALL-ON-ROUTER.sh' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.1-r09/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 
 [ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
-  '7d6bb83747f21417ade49cd02ee734d875db2f8ed9f73ea5dded9432c4db33bb' ]
+  'b04b7e07ea349fd6182535083e4cc43ddcf81ff9f35497bf9475a90b118c0c2a' ]
 
 sh "$T"
 )</code></pre>
 
     <p>Если текущий Stable уже установлен, завершение содержит:</p>
     <pre><code>UPDATE_DECISION=already-current
-INSTALLED_RELEASE=3.0.1-r08
-CURRENT_RELEASE=3.0.1-r08
+INSTALLED_RELEASE=3.0.1-r09
+CURRENT_RELEASE=3.0.1-r09
 RELEASE_MUTATION=NONE
 ENVIRONMENT_RECONCILED=YES</code></pre>
 
     <div class="note">
         <span class="note-title">Чистая установка</span>
         Stable-установщик сам проверяет чистое состояние и сразу разворачивает
-        <code>3.0.1-r08c01</code>. OPKG <code>3.0.0-r14</code> используется только
+        <code>3.0.1-r09c05</code>. OPKG <code>3.0.0-r14</code> используется только
         как регистрационный якорь; промежуточное приложение <code>r14c68</code>
         не устанавливается и не запускается.
         Полный проверяемый блок приведён в
@@ -237,7 +236,7 @@ ENVIRONMENT_RECONCILED=YES</code></pre>
         <code>broray-webcli-bootstrap-3.0.0-r14c68-b1</code>. После проверки подписи
         он устанавливает точную базовую версию <code>3.0.0-r14c68</code>. Затем
         только для этого варианта выполните обычное обновление через WebUI до текущего Stable
-        <code>3.0.1-r08</code>. Физическая проверка базового пути на Keenetic aarch64 —
+        <code>3.0.1-r09</code>. Физическая проверка базового пути на Keenetic aarch64 —
         <strong>PASS</strong>.
     </p>
 
@@ -364,6 +363,10 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 <section id="new">
     <h2>Что нового в BROray 3.0.1</h2>
     <ul class="check-list">
+        <li>Запуск служб при обновлении синхронно завершает строго доказанную рассинхронизацию только имени собственного ProxyN и повторно проверяет весь интерфейс.</li>
+        <li>Длинные UTF-8-имена сервера читаются из канонической конфигурации Keenetic без обрезания переносами вывода.</li>
+        <li>Известная неизменённая legacy-установка Lighttpd без прежней квитанции принимается только через строгую проверку точных хешей; неоднозначные файлы отклоняются.</li>
+        <li>Чистое восстановление принимает только структурные родительские каталоги уже разрешённых пользовательских путей и не расширяет список сохраняемых данных.</li>
         <li>Монитор соединения автоматически восстанавливается после неожиданной остановки, проверяет PID и атомарно публикует состояние.</li>
         <li>После завершения ручной или плановой пакетной проверки Главная получает единый итоговый снимок без ложного предупреждения об устаревшем качестве.</li>
         <li>На странице Keenetic добавлено безопасное управление адресом <code>https://broray.&lt;KeenDNS-домен&gt;/</code>: состояние, включение, отключение, открытие и копирование.</li>
@@ -389,7 +392,7 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
     <h2>История версий</h2>
 
     <h3>3.0.1</h3>
-    <p><strong>Исправлено:</strong> восстановление и атомарное состояние монитора соединения, установка Wikipedia, повторяющийся статус DNS-over-TLS, свежесть качества, запуск служб при обновлении, восстановление планировщика подписок, синхронизация имени активного сервера с ProxyN, безопасное обновление при рассинхронизации только отображаемого имени интерфейса и кэширование внутренних страниц WebUI.</p>
+    <p><strong>Исправлено:</strong> восстановление и атомарное состояние монитора соединения, установка Wikipedia, повторяющийся статус DNS-over-TLS, свежесть качества, запуск служб при обновлении, восстановление планировщика подписок, синхронизация имени активного сервера с ProxyN, длинные UTF-8-имена, точное восстановление владения legacy Lighttpd, безопасное восстановление разрешённых пользовательских путей и кэширование внутренних страниц WebUI.</p>
     <p><strong>Добавлено:</strong> маршрут Wikipedia, управление адресом WebUI через KeenDNS и прямая чистая установка текущего приложения без промежуточного <code>r14c68</code>.</p>
 
     <h3>3.0.0</h3>
@@ -445,8 +448,8 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 /opt/etc/init.d/S24broray status
 /opt/etc/init.d/S25broray-web status</code></pre>
     <p>
-        Для текущего Stable ожидаются release <code>3.0.1-r08</code>, кандидат
-        <code>3.0.1-r08c01</code>, WebUI <code>WebUI-3.0.1-r08c01</code>, пакет
+        Для текущего Stable ожидаются release <code>3.0.1-r09</code>, кандидат
+        <code>3.0.1-r09c05</code>, WebUI <code>WebUI-3.0.1-r09c05</code>, пакет
         <code>3.0.0-r14</code>, <code>broray-updater/5</code>, канал Stable и
         отсутствие доступного обновления.
     </p>

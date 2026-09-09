@@ -50,7 +50,7 @@
     </div>
     <div class="release-state">
         <span class="status-dot" aria-hidden="true"></span>
-        Для Stable 3.0.1-r08
+        Для Stable 3.0.1-r09
     </div>
 </section>
 
@@ -174,11 +174,11 @@ curl -q \
   -fsSL \
   -H 'Cache-Control: no-cache, no-store' \
   -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.0.1-r08/INSTALL-ON-ROUTER.sh' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.0.1-r09/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 
 [ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
-  '7d6bb83747f21417ade49cd02ee734d875db2f8ed9f73ea5dded9432c4db33bb' ]
+  'b04b7e07ea349fd6182535083e4cc43ddcf81ff9f35497bf9475a90b118c0c2a' ]
 
 sh "$T"
 )</code></pre>
@@ -186,7 +186,7 @@ sh "$T"
 
     <h3>Шаг 3. Проверьте результат</h3>
     <pre><code>BRORAY_INSTALL=PASS
-CANDIDATE=3.0.1-r08c01
+CANDIDATE=3.0.1-r09c05
 STABLE=YES</code></pre>
     <p>Если появилась строка <code>FAIL</code>, сохраните текст ошибки, но удалите из него пароли, ссылки подписок, UUID и приватные ключи.</p>
 
@@ -223,8 +223,8 @@ STABLE=YES</code></pre>
     <p>Если WebUI недоступен, используйте проверяемый установочный блок из раздела 3. При обычном обновлении уже установленного BROray повторно выполнять <code>opkg update</code> не нужно.</p>
     <p>Для уже актуального Stable нормальный результат выглядит так:</p>
     <pre><code>UPDATE_DECISION=already-current
-INSTALLED_RELEASE=3.0.1-r08
-CURRENT_RELEASE=3.0.1-r08
+INSTALLED_RELEASE=3.0.1-r09
+CURRENT_RELEASE=3.0.1-r09
 RELEASE_MUTATION=NONE
 ENVIRONMENT_RECONCILED=YES</code></pre>
 </section>
