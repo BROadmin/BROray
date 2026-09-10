@@ -50,7 +50,7 @@
     </div>
     <div class="release-state">
         <span class="status-dot" aria-hidden="true"></span>
-        Для Stable 3.0.1-r09
+        Для Stable 3.1.0-r09
     </div>
 </section>
 
@@ -174,11 +174,11 @@ curl -q \
   -fsSL \
   -H 'Cache-Control: no-cache, no-store' \
   -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.0.1-r09/INSTALL-ON-ROUTER.sh' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.1.0-r09/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 
 [ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
-  'b04b7e07ea349fd6182535083e4cc43ddcf81ff9f35497bf9475a90b118c0c2a' ]
+  'ac334c4f3ce16e9119dcc3b84e21bd076ba5fce5252cf0f6aef2df5510edba1a' ]
 
 sh "$T"
 )</code></pre>
@@ -186,11 +186,12 @@ sh "$T"
 
     <h3>Шаг 3. Проверьте результат</h3>
     <pre><code>BRORAY_INSTALL=PASS
-CANDIDATE=3.0.1-r09c05
+CANDIDATE=3.1.0-r09c02
 STABLE=YES</code></pre>
     <p>Если появилась строка <code>FAIL</code>, сохраните текст ошибки, но удалите из него пароли, ссылки подписок, UUID и приватные ключи.</p>
 
     <h3>Шаг 4. Откройте WebUI</h3>
+    <p>При установке с нуля автоматически устанавливается <strong>Xray 26.9.9</strong>. До добавления и активации сервера VPN ещё не настроен — это следующий шаг.</p>
     <pre><code>http://192.168.1.1:8080/</code></pre>
     <p>Если LAN-адрес роутера другой, подставьте его. При настроенном KeenDNS также может работать <code>https://broray.&lt;KeenDNS-домен-роутера&gt;/</code> без порта <code>8080</code>.</p>
 
@@ -206,6 +207,8 @@ STABLE=YES</code></pre>
 
 <section id="update">
     <h2>4. Обновление BROray</h2>
+    <p><strong>Обновление BROray не заменяет установленный Xray.</strong> Для отдельного перехода на 26.9.9 откройте <strong>Xray → Проверить версии</strong>, выберите <strong>26.9.9</strong>, нажмите <strong>Установить</strong> и дождитесь результата. Если эта версия уже установлена, ничего делать не нужно.</p>
+    <p>Статус рядом с версией показывает совместимость с текущей сборкой BROray, без привязки к модели роутера. Непроверенная или предварительная версия требует подтверждения; понижение подтверждается отдельно. <strong>26.2.6 несовместима — установить её нельзя.</strong></p>
     <p>Обновление поддерживается с любой исправной версии BROray, начиная с <code>3.0.0-r1</code>. Серверы, подписки, маршруты, DNS-over-TLS, управляемый интерфейс и установленный Xray сохраняются.</p>
 
     <h3>Рекомендуемый способ через WebUI</h3>
@@ -223,8 +226,8 @@ STABLE=YES</code></pre>
     <p>Если WebUI недоступен, используйте проверяемый установочный блок из раздела 3. При обычном обновлении уже установленного BROray повторно выполнять <code>opkg update</code> не нужно.</p>
     <p>Для уже актуального Stable нормальный результат выглядит так:</p>
     <pre><code>UPDATE_DECISION=already-current
-INSTALLED_RELEASE=3.0.1-r09
-CURRENT_RELEASE=3.0.1-r09
+INSTALLED_RELEASE=3.1.0-r09
+CURRENT_RELEASE=3.1.0-r09
 RELEASE_MUTATION=NONE
 ENVIRONMENT_RECONCILED=YES</code></pre>
 </section>
