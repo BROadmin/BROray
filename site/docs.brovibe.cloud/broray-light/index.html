@@ -13,6 +13,11 @@
     <link rel="manifest" href="/site-manifest.json">
     <meta name="theme-color" content="#081016">
     <link rel="stylesheet" href="/styles.css?v=20260903-light-r1">
+<style>
+.light-code-block { overflow: hidden; margin: 18px 0; border: 1px solid var(--line); border-radius: 14px; background: #080c0d; }
+.light-code-block > .copy { float: none; display: block; position: relative; min-height: 44px; margin: 12px 12px 0 auto; }
+.light-code-block > pre { margin: 0; border: 0; border-radius: 0; }
+</style>
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
@@ -70,21 +75,21 @@
 <p>Используйте <a href="https://termius.com/">Termius</a>, <a href="https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html">PuTTY</a> или встроенный SSH-клиент.</p>
 <p>В Termius создайте <strong>New Host</strong>, в PuTTY заполните <strong>Host Name</strong>. Укажите LAN-IP роутера, SSH-порт <strong>Entware</strong>, пользователя <code>root</code> и свой пароль Entware. Сверьте ключ сервера при первом подключении. Пароль WebUI Keenetic и пароль root Entware могут различаться.</p>
 <p>Во встроенном терминале:</p>
-<pre><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><code class="language-sh">ssh root@192.168.1.1
-</code></pre>
+<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">ssh root@192.168.1.1
+</code></pre></div>
 <p>Для другого SSH-порта: <code>ssh -p НОМЕР_ПОРТА root@IP_РОУТЕРА</code>. Если приглашение выглядит как <code>(config)&gt;</code>, это KeeneticOS CLI, а не Entware. Откройте правильный SSH-порт. При вводе пароля символы могут не отображаться — это нормально.</p>
 <p>Проверьте окружение:</p>
-<pre><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><code class="language-sh">opkg --version
+<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">opkg --version
 opkg print-architecture
 ls -ld /opt
 df -h /opt /tmp
 test -x /opt/bin/ash &amp;&amp; echo &quot;Entware shell: OK&quot;
-</code></pre>
+</code></pre></div>
 <p>Архитектура должна включать <code>aarch64-3.10</code>. При ошибке остановитесь и устраните её до следующего шага.</p>
 <h2 id="guide-4">4. Чистая установка 2.0.0</h2>
 <p>Этот путь — <strong>только для отсутствующей установки Light</strong>. Если Light уже установлен, используйте раздел 8.</p>
 <p>Скопируйте весь блок в Entware shell от root. Он устанавливает зависимости, скачивает точный установщик в оперативную память и проверяет его SHA-256 до запуска:</p>
-<pre><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><code class="language-sh">(
+<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">(
 set -eu
 PATH=/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin
 export PATH
@@ -106,14 +111,14 @@ curl -q --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --tlsv1.2 \
   &#39;d7d1a709621f3154c0f5b5892a98bddd3f3f782b57d01eb15025e739abcd44f2&#39; ]
 /opt/bin/ash &quot;$D/install.sh&quot;
 )
-</code></pre>
+</code></pre></div>
 <p>Не используйте <code>curl -k</code>, <code>opkg --force-reinstall</code> или ручную распаковку вместо отказавшего установщика. Не запускайте тот же блок бесконечно при ошибке: сохраните сообщение, выясните причину и только затем повторите установку. Если аварийное завершение OPKG оставило файлы, удаляйте только каталог <code>/tmp/broray-light-guide.XXXXXX</code>, созданный этой попыткой, после проверки его точного имени и содержимого; не очищайте весь <code>/tmp</code>.</p>
 <p>Проверка результата:</p>
-<pre><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><code class="language-sh">/opt/etc/init.d/S23broray-light-updater status &amp;&amp; echo &quot;Updater: OK&quot;
+<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">/opt/etc/init.d/S23broray-light-updater status &amp;&amp; echo &quot;Updater: OK&quot;
 /opt/etc/init.d/S24broray-light status &amp;&amp; echo &quot;BROray-Light: OK&quot;
 /opt/broray-light/runtime/xray version
 /opt/bin/broray-light-web-publishctl status
-</code></pre>
+</code></pre></div>
 <p>При чистой установке используется Xray <strong>26.9.9</strong>. Это предварительный выпуск самого Xray, отдельно проверенный в рамках Light; слово Stable относится к релизу приложения, а не меняет статус upstream-ядра. Пока сервер не выбран, Xray может быть остановлен — добавьте и активируйте рабочий VLESS-сервер.</p>
 <h2 id="guide-5">5. Откройте WebUI и войдите</h2>
 <p>Локально: <code>http://LAN-IP-РОУТЕРА:8080/</code>.</p>
@@ -160,10 +165,10 @@ curl -q --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --tlsv1.2 \
 </ol>
 <p>Переход с проверенного <code>1.0.0-r1</code> сохраняет пользовательское состояние и установленный Xray. Равная версия — успешная операция без переустановки приложения; downgrade запрещён. При ошибке проверки здоровья обновитель возвращает предыдущий рабочий слот. <code>2.0.0-r1</code> в техническом индексе — внутренний идентификатор релиза <strong>2.0.0</strong>, а не другая пользовательская версия.</p>
 <p>Если WebUI недоступен, после резервного копирования можно запустить тот же подписанный обновитель из Entware shell:</p>
-<pre><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><code class="language-sh">/opt/libexec/broray-light-updater/broray-light-updater.sh check
+<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">/opt/libexec/broray-light-updater/broray-light-updater.sh check
 /opt/libexec/broray-light-updater/broray-light-updater.sh update
 /opt/libexec/broray-light-updater/broray-light-updater.sh status
-</code></pre>
+</code></pre></div>
 <p>Не запускайте чистый IPK поверх имеющегося Light. Исторический <code>1.0.0-r2</code> опубликован, но не является текущей рекомендованной базой: проверенный переход этого выпуска начинается с r1. Для иной или вручную изменённой установки сначала запросите диагностику.</p>
 <h3>Xray</h3>
 <ol>
@@ -235,7 +240,7 @@ curl -q --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --tlsv1.2 \
 <script>
 document.querySelectorAll('button.copy').forEach(function (button) {
     button.addEventListener('click', function () {
-        var code = button.parentElement.querySelector('code');
+        var code = button.closest('.light-code-block').querySelector('code');
         if (!code) return;
         navigator.clipboard.writeText(code.textContent).then(function () {
             var old = button.textContent;
