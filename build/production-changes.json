@@ -35,6 +35,8 @@
     "init/S27broray-auto-switch",
     "init/S28broray-subscriptions",
     "init/S23broray-monitor",
-    "app/bin/broray-connection-monitor"
+    "app/bin/broray-connection-monitor",
+    "init/S24broray",
+    "app/bin/broray-home-snapshotd"
   ]
 }

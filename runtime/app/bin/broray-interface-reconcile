@@ -1,0 +1,51 @@
+#!/opt/bin/ash
+# Finite startup reconciliation. A current mutation completes before stop.
+BRORAY_ROOT="${BRORAY_ROOT:-/opt/broray}"
+PATH="$BRORAY_ROOT/bin:/opt/bin:/opt/sbin:/usr/bin:/bin:/sbin"
+export BRORAY_ROOT PATH
+. "$BRORAY_ROOT/lib/service-lifecycle.sh" || exit 74
+. "$BRORAY_ROOT/lib/operation-client.sh" || exit 74
+INTERFACE_SCRIPT="${BRORAY_RECONCILE_INTERFACE:-$BRORAY_ROOT/lib/interface.sh}"
+STATUS_FILE="$BRORAY_ROOT/run/interface-reconcile.status"
+[ -f "$INTERFACE_SCRIPT" ] && [ ! -L "$INTERFACE_SCRIPT" ] || exit 74
+broray_service_daemon_enter interface-reconcile || exit $?
+trap 'broray_service_daemon_exit' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+status_write()
+{
+    local temporary
+    temporary="$STATUS_FILE.pending"
+    [ ! -L "$temporary" ] && [ ! -L "$STATUS_FILE" ] || return 74
+    printf 'state=%s\nattempt=%s\nmethod=%s\n' "$1" "$2" "$3" >"$temporary" || return 74
+    "$SVC_GUARD" --replace-file "$temporary" "$STATUS_FILE"
+}
+attempt=1
+while [ "$attempt" -le 10 ]; do
+    broray_service_sleep 3 || exit 0
+    if ! broray_ops_begin system keenetic:reconcile '' SYSTEM_RECOVERY protected; then
+        status_write deferred "$attempt" admission || exit 74
+        attempt=$((attempt+1)); continue
+    fi
+    # Side effects stay under the protected operation. An interrupted or failed
+    # mutation retains the fence for domain recovery; it cannot be guessed safe.
+    broray_ops_tick committing || exit 74
+    if BRORAY_BASE="$BRORAY_ROOT" "$SVC_ASH" "$INTERFACE_SCRIPT" check >/dev/null 2>&1 &&
+       BRORAY_BASE="$BRORAY_ROOT" "$SVC_ASH" "$INTERFACE_SCRIPT" sync-name >/dev/null 2>&1 &&
+       BRORAY_BASE="$BRORAY_ROOT" "$SVC_ASH" "$INTERFACE_SCRIPT" check >/dev/null 2>&1; then
+        status_write success "$attempt" sync-name || exit 74
+        broray_ops_finish completed || exit 74
+        exit 0
+    fi
+    if BRORAY_BASE="$BRORAY_ROOT" "$SVC_ASH" "$INTERFACE_SCRIPT" repair >/dev/null 2>&1 &&
+       BRORAY_BASE="$BRORAY_ROOT" "$SVC_ASH" "$INTERFACE_SCRIPT" check >/dev/null 2>&1; then
+        status_write success "$attempt" repair || exit 74
+        broray_ops_finish completed || exit 74
+        exit 0
+    fi
+    status_write error "$attempt" recovery-required || exit 74
+    exit 75
+done
+status_write deferred 10 admission || exit 74
+exit 75

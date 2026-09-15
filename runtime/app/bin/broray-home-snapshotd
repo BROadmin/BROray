@@ -1,6 +1,9 @@
 #!/opt/bin/ash
 
 ROOT="${BRORAY_ROOT:-/opt/broray}"
+BRORAY_ROOT="$ROOT"
+export BRORAY_ROOT
+. "$ROOT/lib/service-lifecycle.sh" || exit 74
 REFRESH="${BRORAY_HOME_SNAPSHOT_REFRESH:-$ROOT/current/app/bin/broray-home-snapshot}"
 INTERVAL="${BRORAY_HOME_SNAPSHOT_INTERVAL:-30}"
 LOG="${BRORAY_HOME_SNAPSHOT_LOG:-$ROOT/logs/home-snapshots.log}"
@@ -20,14 +23,14 @@ case "$MONITOR_RECOVERY_MAX" in ''|*[!0-9]*) MONITOR_RECOVERY_MAX=300 ;; esac
 [ -x "$REFRESH" ] || exit 1
 mkdir -p "${LOG%/*}" || exit 1
 
+broray_service_daemon_enter home-snapshot || exit $?
+trap 'broray_service_daemon_exit' EXIT
 snapshot_daemon_stop=false
-snapshot_child_pid=''
 monitor_recovery_delay="$MONITOR_RECOVERY_MIN"
 monitor_recovery_next=0
 snapshot_daemon_request_stop()
 {
     snapshot_daemon_stop=true
-    case "$snapshot_child_pid" in ''|*[!0-9]*) ;; *) kill "$snapshot_child_pid" 2>/dev/null || true ;; esac
 }
 trap snapshot_daemon_request_stop HUP INT TERM
 
@@ -49,7 +52,7 @@ monitor_recover_if_needed()
     printf '%s MONITOR_AUTO_RECOVERY=ATTEMPT BACKOFF=%s\n' \
         "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$monitor_recovery_delay" >>"$LOG"
     if [ -x "$MONITOR_SERVICE" ] &&
-       "$MONITOR_SERVICE" start >>"$LOG" 2>&1 &&
+       broray_service_run_job "$MONITOR_SERVICE" start >>"$LOG" 2>&1 &&
        "$MONITOR_SERVICE" check >/dev/null 2>&1
     then
         printf '%s MONITOR_AUTO_RECOVERY=PASS\n' \
@@ -70,6 +73,7 @@ monitor_recover_if_needed()
 }
 
 while [ "$snapshot_daemon_stop" = false ]; do
+    broray_service_stop_requested && break
     snapshot_cycle_started="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     snapshot_cycle_failed=false
     monitor_recover_if_needed
@@ -81,15 +85,13 @@ while [ "$snapshot_daemon_stop" = false ]; do
     fi
     for snapshot_module in xray keenetic servers subscriptions dns routes broray; do
         [ "$snapshot_daemon_stop" = false ] || break
-        "$REFRESH" refresh "$snapshot_module" >>"$LOG" 2>&1 &
-        snapshot_child_pid=$!
-        if wait "$snapshot_child_pid"; then
+        broray_service_stop_requested && break
+        if "$REFRESH" refresh "$snapshot_module" >>"$LOG" 2>&1; then
             printf '%s HOME_SNAPSHOT_REFRESH=%s:PASS\n' "$snapshot_cycle_started" "$snapshot_module" >>"$LOG"
         else
             printf '%s HOME_SNAPSHOT_REFRESH=%s:FAIL\n' "$snapshot_cycle_started" "$snapshot_module" >>"$LOG"
             snapshot_cycle_failed=true
         fi
-        snapshot_child_pid=''
     done
     if [ "$snapshot_cycle_failed" = false ] && [ "$snapshot_daemon_stop" = false ]; then
         printf '%s HOME_SNAPSHOT_CYCLE=PASS\n' "$snapshot_cycle_started" >>"$LOG"
@@ -97,11 +99,7 @@ while [ "$snapshot_daemon_stop" = false ]; do
         printf '%s HOME_SNAPSHOT_CYCLE=PARTIAL\n' "$snapshot_cycle_started" >>"$LOG"
     fi
     [ "$snapshot_daemon_stop" = false ] || break
-    sleep "$INTERVAL" &
-    snapshot_sleep_pid=$!
-    snapshot_child_pid="$snapshot_sleep_pid"
-    wait "$snapshot_sleep_pid" 2>/dev/null || true
-    snapshot_child_pid=''
+    broray_service_sleep "$INTERVAL" || break
 done
 
 exit 0

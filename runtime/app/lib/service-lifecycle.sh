@@ -18,6 +18,14 @@ broray_service_setup()
         SVC_DAEMON="$SVC_APP/bin/broray-connection-monitor"
         SVC_PIDFILE="$SVC_APP/run/connection-monitor.pid"
         SVC_LOG="$SVC_APP/logs/connection-monitor.log" ;;
+      home-snapshot)
+        SVC_DAEMON="$SVC_APP/bin/broray-home-snapshotd"
+        SVC_PIDFILE="$SVC_APP/run/home-snapshotd.pid"
+        SVC_LOG="$SVC_APP/logs/home-snapshotd-service.log" ;;
+      interface-reconcile)
+        SVC_DAEMON="$SVC_APP/bin/broray-interface-reconcile"
+        SVC_PIDFILE="$SVC_APP/run/interface-reconcile.pid"
+        SVC_LOG="$SVC_APP/logs/interface-reconcile.log" ;;
       subscriptions)
         SVC_DAEMON="$SVC_APP/bin/broray-subscription-scheduler"
         SVC_PIDFILE="$SVC_APP/run/subscription-scheduler.pid"
