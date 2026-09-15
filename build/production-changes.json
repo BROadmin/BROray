@@ -32,6 +32,8 @@
     "app/web-new/assets/js/servers-quality-refresh.js",
     "app/web-new/broray.html",
     "init/S27broray-auto-switch",
-    "init/S28broray-subscriptions"
+    "init/S28broray-subscriptions",
+    "init/S23broray-monitor",
+    "app/bin/broray-connection-monitor"
   ]
 }

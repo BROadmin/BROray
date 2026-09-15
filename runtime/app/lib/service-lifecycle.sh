@@ -14,6 +14,10 @@ broray_service_setup()
         SVC_DAEMON="$SVC_APP/bin/broray-server-auto-switch"
         SVC_PIDFILE="$SVC_APP/run/server-auto-switch.pid"
         SVC_LOG="$SVC_APP/logs/server-auto-switch.log" ;;
+      connection-monitor)
+        SVC_DAEMON="$SVC_APP/bin/broray-connection-monitor"
+        SVC_PIDFILE="$SVC_APP/run/connection-monitor.pid"
+        SVC_LOG="$SVC_APP/logs/connection-monitor.log" ;;
       subscriptions)
         SVC_DAEMON="$SVC_APP/bin/broray-subscription-scheduler"
         SVC_PIDFILE="$SVC_APP/run/subscription-scheduler.pid"

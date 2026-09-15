@@ -3,7 +3,10 @@
 PATH="${BRORAY_MONITOR_PATH:-/opt/bin:/opt/sbin:/bin:/sbin}"
 export PATH
 
-BASE="${BRORAY_MONITOR_ROOT:-/opt/broray}"
+BASE="${BRORAY_MONITOR_ROOT:-${BRORAY_ROOT:-/opt/broray}}"
+BRORAY_ROOT="$BASE"
+export BRORAY_ROOT
+. "$BASE/lib/service-lifecycle.sh" || exit 74
 BRORAY="${BRORAY_MONITOR_BRORAY:-$BASE/bin/broray}"
 RUN="${BRORAY_MONITOR_RUN_DIR:-$BASE/run}"
 
@@ -149,12 +152,11 @@ quality_label()
     fi
 }
 
-monitor_exit()
-{
-    monitor_log "MONITOR_EXIT=SIGNALLED PID=$$"
-    rm -f "$TEMP_FILE"
-    exit 0
-}
+broray_service_daemon_enter connection-monitor || exit $?
+trap 'broray_service_daemon_exit' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 mkdir -p "$RUN" "${LOGFILE%/*}" || exit 1
 
@@ -163,10 +165,10 @@ if ! status_document_valid "$STATUS_FILE"; then
     write_empty_status || exit 1
 fi
 
-trap monitor_exit INT TERM HUP
 monitor_log "MONITOR_PROCESS=START PID=$$"
 
 while :; do
+    broray_service_stop_requested && break
     now="$(date +%s)"
     run_maintenance_if_due "$now"
 
@@ -188,7 +190,7 @@ while :; do
             --argjson breaks "$breaks" \
             '{available:false,up:false,address:"",ping_ms:null,jitter_ms:null,packet_loss_percent:null,quality_score:0,quality:"Нет сервера",checked_at:$checked_at,breaks:$breaks}' \
             >"$TEMP_FILE" && publish_status
-        sleep "$INTERVAL"
+        broray_service_sleep "$INTERVAL" || break
         continue
     fi
 
@@ -224,5 +226,6 @@ while :; do
             >"$TEMP_FILE" && publish_status
     fi
 
-    sleep "$INTERVAL"
+    broray_service_sleep "$INTERVAL" || break
 done
+exit 0
