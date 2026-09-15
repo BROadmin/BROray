@@ -16,6 +16,7 @@ OPS_RAM="${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}"
 . "$OPS_APP/lib/operation-owner.sh"
 . "$OPS_APP/lib/operation-journal.sh"
 . "$OPS_APP/lib/operation-report.sh"
+. "$OPS_APP/lib/operation-publication.sh"
 
 ops_error()
 {
@@ -442,6 +443,7 @@ ops_recover_global()
     id="$(jq -er '.operationId' "$OPS_GLOBAL/owner.json" 2>/dev/null)" || { OPS_RECOVERY_RESULT=invalid_owner; return 2; }
     ops_load "$id" && ops_global_matches || { OPS_RECOVERY_RESULT=owner_changed; return 2; }
     if jq -e '.running==false' "$OPS_CURRENT/state.json" >/dev/null 2>&1; then
+        ops_publication_ready || { OPS_RECOVERY_RESULT=publication_unconfirmed; return 2; }
         ops_children_absent || { OPS_RECOVERY_RESULT=children_unconfirmed; return 2; }
         ops_retire_global || return 1
         OPS_RECOVERY_RESULT=terminal_lock_retired
@@ -452,6 +454,7 @@ ops_recover_global()
     status="$OPS_OWNER_STATUS"; reason="$OPS_OWNER_REASON"
     if [ "$status" != STALE ]; then OPS_RECOVERY_RESULT="$status"; return 2; fi
     ops_children_absent || { OPS_RECOVERY_RESULT=children_unconfirmed; return 2; }
+    ops_publication_recover || { OPS_RECOVERY_RESULT=publication_unconfirmed; return 2; }
     # Absence of an executor is not proof that a protected domain commit can
     # be discarded. Route/updater/Xray state stays under its original owner.
     cancelability="$(jq -r '.cancelability' "$OPS_CURRENT/state.json")"
@@ -700,6 +703,7 @@ case "$verb" in
         ops_global_matches || ops_error OWNER_CHANGED
         jq -e '.acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error NOT_ACKNOWLEDGED
         printf '%s\n' '{"ok":true}' ;;
+    publish-json) [ "$#" = 8 ] || ops_error INVALID_REQUEST 1; ops_publish_json "$@" ;;
     supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" ;;
     handoff) [ "$#" = 5 ] || ops_error INVALID_REQUEST 1; ops_handoff "$@" ;;
     accept-handoff) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_accept_handoff "$@" ;;
@@ -713,6 +717,7 @@ case "$verb" in
         [ "$#" = 4 ] || ops_error INVALID_REQUEST 1
         ops_load "$1" || ops_error STATE_UNAVAILABLE 1
         [ "$(jq -r '.token' "$OPS_EXECUTOR")" = "$2" ] || ops_error OWNER_CHANGED
+        ops_publication_ready || ops_error PUBLICATION_UNCONFIRMED 75
         case "$3" in completed|failed|aborted) ;; *) ops_error INVALID_STATE 1 ;; esac
         case "$4" in ''|CANCELLED|OPERATION_FAILED) ;; *) ops_error INVALID_ERROR_CODE 1 ;; esac
         ops_children_absent || ops_error CHILDREN_UNCONFIRMED
@@ -727,6 +732,7 @@ case "$verb" in
     tick)
         [ "$#" = 3 ] || ops_error INVALID_REQUEST 1
         ops_authorize "$1" "$2"
+        ops_publication_ready || ops_error PUBLICATION_UNCONFIRMED 75
         case "$3" in working|checking|fetching|parsing|committing|switching|waiting) ;; *) ops_error INVALID_PHASE 1 ;; esac
         ops_global_matches || ops_error OWNER_CHANGED
         jq -e '.acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error NOT_ACKNOWLEDGED

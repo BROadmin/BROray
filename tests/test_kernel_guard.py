@@ -95,6 +95,16 @@ class Guard(unittest.TestCase):
         source=self.private_file('record','{"sequence":2}\n');target=self.private_file('events','{"sequence":1}\n')
         self.assertEqual(self.append(source,target).returncode,0)
         self.assertEqual(target.read_text(),'{"sequence":1}\n{"sequence":2}\n')
+    def test_sync_state_confirms_existing_file_or_absence(self):
+        target=self.private_file('sync-state','KEEP')
+        self.assertEqual(subprocess.run([str(GUARD),'--sync-state',str(target)]).returncode,0)
+        self.assertEqual(target.read_text(),'KEEP');target.unlink()
+        self.assertEqual(subprocess.run([str(GUARD),'--sync-state',str(target)]).returncode,0);self.assertFalse(target.exists())
+    def test_sync_state_rejects_ambiguous_target(self):
+        foreign=self.private_file('foreign','KEEP');target=self.temp/'sync-state';target.symlink_to(foreign)
+        self.assertEqual(subprocess.run([str(GUARD),'--sync-state',str(target)]).returncode,74)
+        target.unlink();os.link(foreign,target)
+        self.assertEqual(subprocess.run([str(GUARD),'--sync-state',str(target)]).returncode,74);self.assertEqual(foreign.read_text(),'KEEP')
     def test_durable_append_rejects_unsafe_target_without_writing(self):
         source=self.private_file('record','{}\n');foreign=self.private_file('foreign','KEEP')
         target=self.temp/'events';target.symlink_to(foreign)

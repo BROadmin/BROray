@@ -80,6 +80,24 @@ static int replace_file(const char *temporary,const char *target) {
     return sync_path(to_parent,1)?74:0;
 }
 
+/* Confirm an observed old/new publication after an interrupted rename/fsync.
+ * Absence is also persisted through the containing directory. The coordinator
+ * authorizes the fixed resource and checks its hash under the same flock.
+ */
+static int sync_state(const char *target) {
+    struct stat st;
+    char parent[PATH_MAX];
+    if (target[0]!='/' || strlen(target)>=sizeof parent) return 64;
+    strcpy(parent,target);char *slash=strrchr(parent,'/');
+    if (!slash || slash==parent || !slash[1]) return 64;
+    *slash=0;
+    if (lstat(target,&st)==0) {
+        if (!S_ISREG(st.st_mode) || st.st_uid!=geteuid() || st.st_nlink!=1 ||
+            (st.st_mode&0077) || sync_path(target,0)) return 74;
+    } else if (errno!=ENOENT) return 74;
+    return sync_path(parent,1)?74:0;
+}
+
 /* A single bounded JSONL record. Caller holds the inherited coordinator flock.
  * Its sequence reservation has already been persisted before entering here.
  * Partial writes and failed fsync therefore leave detectable pending evidence.
@@ -128,11 +146,12 @@ int main(int argc, char **argv) {
     struct stat before, after;
     struct timespec pause = {0, 10000000};
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-        puts("broray-ops-guard/5 flock-fork-exec atomic-fence durable-state durable-append");
+        puts("broray-ops-guard/6 flock-fork-exec atomic-fence durable-state durable-append sync-state");
         return 0;
     }
     if (argc==4 && strcmp(argv[1],"--publish-fence")==0) return publish_fence(argv[2],argv[3]);
     if (argc==4 && strcmp(argv[1],"--replace-file")==0) return replace_file(argv[2],argv[3]);
+    if (argc==3 && strcmp(argv[1],"--sync-state")==0) return sync_state(argv[2]);
     if (argc==4 && strcmp(argv[1],"--append-file")==0) return append_file(argv[2],argv[3]);
     if (argc < 3 || argv[1][0] != '/' || argv[2][0] != '/') return 64;
     umask(077);

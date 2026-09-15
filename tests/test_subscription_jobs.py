@@ -5,6 +5,7 @@ ROOT=Path(__file__).resolve().parents[2]
 class SubscriptionJobs(unittest.TestCase):
     def setUp(self):
         self.temp=Path(tempfile.mkdtemp(prefix='subscription-jobs-'))
+        self.addCleanup(SubscriptionJobs.clean_fixture,self)
         self.app=self.temp/'app';shutil.copytree(ROOT/'implementation/runtime/app',self.app)
         self.state=self.temp/'state';self.state.mkdir()
         self.env=os.environ|{'BRORAY_ROOT':str(self.app),'BRORAY_BASE':str(self.app),
@@ -34,6 +35,18 @@ printf 'HTTP/1.1 200 OK\\r\\nContent-Type: text/plain\\r\\n\\r\\n' >"$headers"
 cp "$TEST_PAYLOAD" "$body"
 printf 200
 ''');curl.chmod(0o755)
+    def clean_fixture(self):
+        # Never delete a fixture while any test-owned or adopted child lives.
+        # This process is a subreaper; waitpid cannot target unrelated PIDs.
+        end=time.monotonic()+10
+        while True:
+            try:pid,_=os.waitpid(-1,os.WNOHANG)
+            except ChildProcessError:break
+            if not pid:
+                self.assertLess(time.monotonic(),end,'Child still live: preserve its fixture')
+                time.sleep(.05)
+        assert self.temp.resolve().parent==Path('/tmp') and self.temp.name.startswith('subscription-jobs-')
+        shutil.rmtree(self.temp)
     def record(self,**extra):
         record={'schemaVersion':1,'id':'test','name':'Test','url':'https://93.184.216.34/sub/PRIVATE_CANARY',
           'clientHwid':'broray-1234567890abcdef1234567890abcdef',

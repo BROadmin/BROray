@@ -34,7 +34,7 @@ begin() {
 finish() { ops finish "$ID" "$TOKEN" "${1:-completed}" "${2:-}" >/dev/null; }
 
 [ "$(uname -m)" = aarch64 ]
-[ "$("$G" --version)" = 'broray-ops-guard/5 flock-fork-exec atomic-fence durable-state durable-append' ]
+[ "$("$G" --version)" = 'broray-ops-guard/6 flock-fork-exec atomic-fence durable-state durable-append sync-state' ]
 pass arm64_static_execution
 
 case_dir kernel

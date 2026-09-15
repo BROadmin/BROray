@@ -4,7 +4,7 @@
 
 broray_server_check()
 {
-    local job_server job_source job_dir job_rc job_quality job_target job_candidate
+    local job_server job_source job_dir job_rc job_quality job_target job_publish_rc
     broray_job_require_owner || return $?
     job_server="$1"; job_source="${2:-manual}"
     case "$job_source" in manual|auto-switch|scheduled) ;; *) return 64 ;; esac
@@ -43,14 +43,10 @@ broray_server_check()
           type=="number" and .>=0 and floor==.)' "$job_dir/result.json" >/dev/null; then
         rm -rf "$job_dir"; return 1
     fi
-    broray_job_checkpoint committing || { job_rc=$?; rm -rf "$job_dir"; return "$job_rc"; }
-    job_candidate="$(mktemp "$BRORAY_QUALITY_DIR/.quality-$job_server-XXXXXX")" || { rm -rf "$job_dir"; return 1; }
-    if ! cp "$job_quality" "$job_candidate" || ! chmod 600 "$job_candidate" ||
-      ! "${BRORAY_OPS_GUARD:-$BRORAY_BASE/bin/broray-ops-guard}" --replace-file "$job_candidate" "$job_target"; then
-        # Directory fsync can fail after rename. Preserve evidence and fence.
-        BRORAY_JOB_UNRESOLVED=true
-        return 75
-    fi
+    chmod 600 "$job_quality" || return 1
+    job_publish_rc=0
+    broray_job_publish_json server-quality "$job_server" "$job_quality" || job_publish_rc=$?
+    [ "$job_publish_rc" = 0 ] || return "$job_publish_rc"
     cat "$job_dir/result.json"
     rm -rf "$job_dir" || return 1
     return "$job_rc"

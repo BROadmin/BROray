@@ -511,11 +511,8 @@ save_state()
     }
 
     chmod 0600 "$TMP" || exit 1
-    broray_job_checkpoint committing || exit $?
-    if ! "${BRORAY_OPS_GUARD:-$ROOT/bin/broray-ops-guard}" --replace-file "$TMP" "$STATE"; then
-        BRORAY_JOB_UNRESOLVED=true; exit 75
-    fi
-    broray_job_checkpoint working || exit $?
+    broray_job_publish_json auto-state '' "$TMP" || exit $?
+    rm -f "$TMP" || exit 1
     S_LOADED_SIGNATURE="$CURRENT_SIGNATURE"
 }
 
