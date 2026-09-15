@@ -29,6 +29,71 @@ ops_file_safe() { [ -f "$1" ] && [ ! -L "$1" ] && [ "$(wc -c <"$1")" -le "${2:-3
 ops_now() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
 ops_monotonic() { awk 'NR==1{print $1;exit}' "$OPS_PROC/uptime" 2>/dev/null; }
 
+ops_launch_test_point()
+{
+    # Only the isolated test root can inject a crash of this coordinator.
+    if [ "${BRORAY_OPS_TEST:-0}" = 1 ] && [ "$OPS_APP" != /opt/broray ] &&
+       [ "${BRORAY_OPS_TEST_LAUNCH_CRASH:-}" = "$1" ]; then kill -KILL "$$"; fi
+    return 0
+}
+
+ops_discard_launch_stage()
+{
+    local dir entry nested name suffix pid nonce
+    dir="$1"; ops_dir_safe "$dir" || return 1
+    case "$dir" in "$OPS_ROOT/.launch-"*) ;; *) return 1 ;; esac
+    name="${dir##*/}"; name="${name#.launch-}"; pid="${name%%-*}"; nonce="${name#*-}"
+    case "$pid" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    ops_nonce_valid "$nonce" || return 1
+    # Hidden launch directories cannot be operation IDs, and this function
+    # runs under the exclusive coordinator guard. No child can have been
+    # admitted from this staging namespace. Preserve every unknown object.
+    [ ! -L "$OPS_GLOBAL" ] || [ "$(readlink "$OPS_GLOBAL")" != "$dir/fence" ] || return 1
+    if [ -e "$dir/owner.json" ] || [ -L "$dir/owner.json" ]; then
+        ops_file_safe "$dir/owner.json" 4096 && jq -e --arg pid "$pid" --arg nonce "$nonce" \
+          '.schemaVersion==2 and .launchNonce==$nonce and (.owner.pid|tostring)==$pid' "$dir/owner.json" >/dev/null || return 1
+        jq -c '.owner' "$dir/owner.json" | broray_ops_owner_valid || return 1
+    fi
+    if [ -e "$dir/state.json" ] || [ -L "$dir/state.json" ]; then
+        ops_file_safe "$dir/owner.json" 4096 && ops_file_safe "$dir/state.json" && jq -e \
+          '.schemaVersion==2 and .kind=="background" and .state=="starting" and .running==true and .acknowledged==false' "$dir/state.json" >/dev/null || return 1
+    fi
+    for entry in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        name="${entry##*/}"
+        if [ "$name" = fence ]; then
+            ops_dir_safe "$entry" || return 1
+            for nested in "$entry"/* "$entry"/.[!.]* "$entry"/..?*; do
+                [ -e "$nested" ] || [ -L "$nested" ] || continue
+                case "${nested##*/}" in pid|scope|action|bundle|startedAt|owner.json) ;; owner.json.tmp.*)
+                    suffix="${nested##*.}"; case "$suffix" in ''|*[!0-9]*) return 1 ;; esac ;; *) return 1 ;; esac
+                ops_file_safe "$nested" 4096 && [ "$(find "$nested" -maxdepth 0 -type f -links 1 -print)" = "$nested" ] || return 1
+            done
+        else
+            case "$name" in owner.json|state.json) ;; owner.json.tmp.*|state.json.tmp.*)
+                suffix="${name##*.}"; case "$suffix" in ''|*[!0-9]*) return 1 ;; esac ;; *) return 1 ;; esac
+            ops_file_safe "$entry" && [ "$(find "$entry" -maxdepth 0 -type f -links 1 -print)" = "$entry" ] || return 1
+        fi
+    done
+    # The entire directory passed the allowlist before the first unlink.
+    if [ -d "$dir/fence" ]; then rm -f "$dir/fence"/*; rmdir "$dir/fence" || return 1; fi
+    rm -f "$dir"/*; rmdir "$dir"
+}
+
+ops_prune_launch_stages()
+{
+    local dir name pid nonce count
+    count=0
+    for dir in "$OPS_ROOT"/.launch-*; do
+        [ -e "$dir" ] || [ -L "$dir" ] || continue
+        count=$((count+1)); [ "$count" -le 128 ] || break
+        name="${dir##*/}"; name="${name#.launch-}"; pid="${name%%-*}"; nonce="${name#*-}"
+        case "$pid" in ''|*[!0-9]*|0|1) continue ;; esac
+        ops_nonce_valid "$nonce" || continue
+        ops_discard_launch_stage "$dir" || continue
+    done
+}
+
 ops_write()
 {
     local path json tmp
@@ -403,7 +468,7 @@ ops_recover_global()
 
 ops_begin()
 {
-    local scope action bundle source pid cancelability owner nonce id dir record state rc fence launch file count
+    local scope action bundle source pid cancelability owner nonce id dir final_dir record state rc fence launch file count
     scope="$1"; action="$2"; bundle="$3"; source="$4"; pid="$5"; cancelability="$6"
     launch="$7"; ops_nonce_valid "$launch" || ops_error INVALID_LAUNCH_NONCE 1
     case "$scope" in routes|system) ;; *) ops_error INVALID_SCOPE 1 ;; esac
@@ -413,6 +478,7 @@ ops_begin()
     case "$source" in USER|SCHEDULER|SUBSCRIPTION_AUTO|SERVER_CHECK_AUTO|AUTO_SWITCH|UPDATER|SYSTEM_RECOVERY) ;; *) ops_error INVALID_SOURCE 1 ;; esac
     case "$cancelability" in cooperative|protected) ;; *) ops_error INVALID_CANCEL_MODE 1 ;; esac
     ops_prune || ops_error STATE_UNAVAILABLE 1
+    ops_prune_launch_stages
     owner="$(broray_ops_capture_owner "$pid")" || ops_error OWNER_UNCONFIRMED 1
     count=0
     for file in "$OPS_ROOT"/*/owner.json; do
@@ -448,16 +514,21 @@ ops_begin()
     case "$nonce" in *[!0-9a-f]*|'') ops_error RANDOM_UNAVAILABLE 1 ;; esac
     [ "${#nonce}" = 32 ] || ops_error RANDOM_UNAVAILABLE 1
     id="op-$(date -u '+%Y%m%d%H%M%S')-$pid-$(printf '%s' "$launch" | sha256sum | cut -c 1-12)"
-    dir="$OPS_ROOT/$id"
-    [ ! -e "$dir" ] && [ ! -L "$dir" ] || ops_error OPERATION_EXISTS
+    final_dir="$OPS_ROOT/$id"
+    [ ! -e "$final_dir" ] && [ ! -L "$final_dir" ] || ops_error OPERATION_EXISTS
+    dir="$OPS_ROOT/.launch-$pid-$launch"
+    [ ! -e "$dir" ] && [ ! -L "$dir" ] || ops_error STATE_UNAVAILABLE 1
     mkdir "$dir" || ops_error STATE_UNAVAILABLE 1
+    ops_launch_test_point directory
     record="$(jq -nc --arg id "$id" --arg token "$nonce" --arg launch "$launch" --argjson owner "$owner" '{schemaVersion:2,operationId:$id,token:$token,launchNonce:$launch,owner:$owner}')" || ops_error STATE_UNAVAILABLE 1
     state="$(jq -nc --arg id "$id" --arg action "$action" --arg source "$source" --arg scope "$scope" --arg bundle "$bundle" --arg now "$(ops_now)" --arg mono "$(ops_monotonic)" --arg mode "$cancelability" \
       '{schemaVersion:2,kind:"background",operationId:$id,operation:$action,type:$action,source:$source,scope:$scope,bundleId:$bundle,
         state:"starting",phase:"starting",running:true,revision:1,resourceLocks:["global"],cancelRequested:false,cancelability:$mode,initialCancelability:$mode,acknowledged:false,
         startedAt:$now,updatedAt:$now,startedMonotonic:$mono,finishedAt:null,errorCode:null}')" || ops_error STATE_UNAVAILABLE 1
-    ops_write "$dir/owner.json" "$record" && ops_write "$dir/state.json" "$state" || ops_error STATE_UNAVAILABLE 1
-    OPS_CURRENT="$dir"; OPS_ID="$id"; OPS_EXECUTOR="$dir/owner.json"
+    ops_write "$dir/owner.json" "$record" || ops_error STATE_UNAVAILABLE 1
+    ops_launch_test_point owner
+    ops_write "$dir/state.json" "$state" || ops_error STATE_UNAVAILABLE 1
+    ops_launch_test_point state
     mkdir -p "${OPS_GLOBAL%/*}" || ops_error STATE_UNAVAILABLE 1
     fence="$dir/fence"
     mkdir "$fence" || ops_error OWNER_PUBLICATION_FAILED 1
@@ -465,6 +536,13 @@ ops_begin()
     printf '%s\n' "$pid" >"$fence/pid" && printf '%s\n' "$scope" >"$fence/scope" &&
       printf '%s\n' "$action" >"$fence/action" && printf '%s\n' "$bundle" >"$fence/bundle" &&
       printf '%s\n' "$(ops_now)" >"$fence/startedAt" || ops_error OWNER_PUBLICATION_FAILED 1
+    ops_launch_test_point fence
+    # Only a complete prepared operation enters the public namespace. The
+    # native publisher fsyncs its files/directories before admitting any work.
+    mv "$dir" "$final_dir" || ops_error STATE_UNAVAILABLE 1
+    dir="$final_dir"; fence="$dir/fence"
+    OPS_CURRENT="$dir"; OPS_ID="$id"; OPS_EXECUTOR="$dir/owner.json"
+    ops_launch_test_point published_directory
     rc=0; "$OPS_GUARD" --publish-fence "$fence" "$OPS_GLOBAL" || rc=$?
     [ "$rc" = 0 ] || { ops_state_transition aborted finished OWNER_PUBLICATION_FAILED; ops_error OWNER_PUBLICATION_FAILED 1; }
     if ops_pending_domain; then

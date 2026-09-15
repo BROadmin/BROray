@@ -26,7 +26,7 @@ broray_ops_call()
 
 broray_ops_begin()
 {
-    local response rc attempt
+    local response rc attempt id token
     # Keep this private nonce until finish. Retrying a lost response must recover
     # the same launch, including across a date boundary, without another claim.
     if [ -z "${BRORAY_BACKGROUND_LAUNCH_NONCE:-}" ]; then
@@ -36,13 +36,16 @@ broray_ops_begin()
     while [ "$attempt" -lt 3 ]; do
         attempt=$((attempt+1)); rc=0
         response="$(broray_ops_call begin "$1" "$2" "${3:-}" "${4:-USER}" "$$" "${5:-protected}" "$BRORAY_BACKGROUND_LAUNCH_NONCE")" || rc=$?
-        [ "$rc" != 0 ] || break
+        if [ "$rc" = 0 ] && printf '%s\n' "$response" | broray_ops_response_valid token; then break; fi
         # A structured rejection is final. Retry only unavailable responses.
-        printf '%s\n' "$response" | jq -e '.ok==false' >/dev/null 2>&1 && break
+        [ "$rc" != 0 ] || rc=1
+        if printf '%s\n' "$response" | jq -e '.ok==false' >/dev/null 2>&1; then rc=2; break; fi
     done
     [ "$rc" = 0 ] || { BRORAY_OPS_LAST_ERROR="$response"; return "$rc"; }
-    BRORAY_BACKGROUND_OPERATION_ID="$(printf '%s\n' "$response" | jq -er '.operationId')" || return 1
-    BRORAY_BACKGROUND_OPERATION_TOKEN="$(printf '%s\n' "$response" | jq -er '.token')" || return 1
+    id="$(printf '%s\n' "$response" | jq -er '.operationId')" || return 1
+    token="$(printf '%s\n' "$response" | jq -er '.token')" || return 1
+    BRORAY_BACKGROUND_OPERATION_ID="$id"
+    BRORAY_BACKGROUND_OPERATION_TOKEN="$token"
     export BRORAY_BACKGROUND_OPERATION_ID BRORAY_BACKGROUND_OPERATION_TOKEN
     attempt=0
     while [ "$attempt" -lt 3 ]; do
@@ -51,6 +54,18 @@ broray_ops_begin()
     done
     # The caller must exit on failure; it has no permission to execute its job.
     return 1
+}
+
+broray_ops_response_valid()
+{
+    # A zero transport exit code with an empty/truncated body is still a lost
+    # response. Never install half an identity or open the worker gate for it.
+    jq -es --arg mode "$1" 'length==1 and (.[0] | type=="object" and .ok==true and
+      (if $mode=="transfer" then .transferred==true else
+        (.operationId|type)=="string" and (.operationId|startswith("op-")) and
+        (.operationId|length)<=96 and (.operationId|all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==45 or .==46 or .==95)) and
+        (.token|type)=="string" and (.token|length)==32 and
+        (.token|all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))) end))' >/dev/null 2>&1
 }
 
 broray_ops_finish()
@@ -111,12 +126,12 @@ broray_ops_handoff_to()
     while [ "$attempt" -lt 3 ]; do
         attempt=$((attempt+1)); rc=0
         response="$(broray_ops_call handoff "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "$$" "$1" "$2")" || rc=$?
-        if [ "$rc" = 0 ]; then
-            printf '%s\n' "$response" | jq -e '.ok==true and .transferred==true' >/dev/null || return 1
+        if [ "$rc" = 0 ] && printf '%s\n' "$response" | broray_ops_response_valid transfer; then
             unset BRORAY_BACKGROUND_OPERATION_ID BRORAY_BACKGROUND_OPERATION_TOKEN BRORAY_BACKGROUND_LAUNCH_NONCE
             return 0
         fi
-        printf '%s\n' "$response" | jq -e '.ok==false' >/dev/null 2>&1 && return "$rc"
+        [ "$rc" != 0 ] || rc=1
+        printf '%s\n' "$response" | jq -e '.ok==false' >/dev/null 2>&1 && return 2
     done
     return "$rc"
 }
@@ -129,13 +144,13 @@ broray_ops_accept_handoff()
     while [ "$attempt" -lt 10 ]; do
         attempt=$((attempt+1)); rc=0
         response="$(broray_ops_call accept-handoff "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "$$" "$1")" || rc=$?
-        if [ "$rc" = 0 ]; then
+        if [ "$rc" = 0 ] && printf '%s\n' "$response" | broray_ops_response_valid token; then
             token="$(printf '%s\n' "$response" | jq -er '.token')" || return 1
             BRORAY_BACKGROUND_OPERATION_TOKEN="$token"; export BRORAY_BACKGROUND_OPERATION_TOKEN
             return 0
         fi
         # Only an unpublished handoff or missing transport response is retried.
-        printf '%s\n' "$response" | jq -e '.ok==false and .errorCode!="HANDOFF_NOT_READY"' >/dev/null 2>&1 && return "$rc"
+        printf '%s\n' "$response" | jq -e '.ok==false and .errorCode!="HANDOFF_NOT_READY"' >/dev/null 2>&1 && return 2
         [ "$attempt" = 10 ] || sleep 1
     done
     return 1
