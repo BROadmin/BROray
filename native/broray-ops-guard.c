@@ -80,16 +80,60 @@ static int replace_file(const char *temporary,const char *target) {
     return sync_path(to_parent,1)?74:0;
 }
 
+/* A single bounded JSONL record. Caller holds the inherited coordinator flock.
+ * Its sequence reservation has already been persisted before entering here.
+ * Partial writes and failed fsync therefore leave detectable pending evidence.
+ */
+static int append_file(const char *source,const char *target) {
+    struct stat in,out,named;
+    char data[2049],parent[PATH_MAX];
+    int from=-1,to=-1,rc=74;
+    if (source[0]!='/' || target[0]!='/' || strlen(target)>=PATH_MAX || !strcmp(source,target)) return 64;
+    from=open(source,O_RDONLY|O_NOFOLLOW);
+    if (from<0 || fstat(from,&in) || !S_ISREG(in.st_mode) || in.st_nlink!=1 ||
+        in.st_uid!=geteuid() || (in.st_mode&0077) || in.st_size<2 || in.st_size>2048) goto done;
+    size_t size=(size_t)in.st_size,have=0;
+    while (have<size) {
+        ssize_t n=read(from,data+have,size-have);
+        if (n<0 && errno==EINTR) continue;
+        if (n<=0) goto done;
+        have+=(size_t)n;
+    }
+    if (data[size-1]!='\n' || memchr(data,'\n',size-1) || memchr(data,0,size)) goto done;
+    to=open(target,O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW,0600);
+    if (to<0 || fstat(to,&out) || !S_ISREG(out.st_mode) || out.st_nlink!=1 ||
+        out.st_uid!=geteuid() || (out.st_mode&0077) || out.st_size<0 || out.st_size>262144-(off_t)size ||
+        lstat(target,&named) || named.st_dev!=out.st_dev || named.st_ino!=out.st_ino) goto done;
+    have=0;
+    while (have<size) {
+        ssize_t n=write(to,data+have,size-have);
+        if (n<0 && errno==EINTR) continue;
+        if (n<=0) goto done;
+        have+=(size_t)n;
+    }
+    if (fsync(to)) goto done;
+    strcpy(parent,target);char *slash=strrchr(parent,'/');
+    if (!slash || slash==parent) goto done;
+    *slash=0;
+    if (sync_path(parent,1)) goto done;
+    rc=0;
+done:
+    if (from>=0) close(from);
+    if (to>=0) close(to);
+    return rc;
+}
+
 int main(int argc, char **argv) {
     int fd, flags, attempts = 0;
     struct stat before, after;
     struct timespec pause = {0, 10000000};
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-        puts("broray-ops-guard/4 flock-fork-exec atomic-fence durable-state");
+        puts("broray-ops-guard/5 flock-fork-exec atomic-fence durable-state durable-append");
         return 0;
     }
     if (argc==4 && strcmp(argv[1],"--publish-fence")==0) return publish_fence(argv[2],argv[3]);
     if (argc==4 && strcmp(argv[1],"--replace-file")==0) return replace_file(argv[2],argv[3]);
+    if (argc==4 && strcmp(argv[1],"--append-file")==0) return append_file(argv[2],argv[3]);
     if (argc < 3 || argv[1][0] != '/' || argv[2][0] != '/') return 64;
     umask(077);
     fd = open(argv[1], O_RDWR | O_CREAT | O_NOFOLLOW, 0600);

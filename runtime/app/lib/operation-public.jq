@@ -56,7 +56,8 @@ def event_message:
   else "Событие не распознано" end;
 def event_public:
   (.event|event_name) as $event |
-  {eventId:(if (.eventId|type)=="string" and (.eventId|length)==32 and (.eventId|ascii_hex) then .eventId else null end),
+  {sequence:(if (.sequence|type)=="number" and .sequence>0 and .sequence<=9007199254740991 and .sequence==(.sequence|floor) then .sequence else null end),
+   eventId:(if (.eventId|type)=="string" and (.eventId|length)==32 and (.eventId|ascii_hex) then .eventId else null end),
    timestamp:(.timestamp|timestamp),operationId:(.operationId|operation_id),
    operationType:(.operationType|operation_type),source:(.source|source),event:$event,
    pid:(if (.pid|type)=="number" and .pid>1 and .pid<=2147483647 and .pid==(.pid|floor) then .pid else null end),

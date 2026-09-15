@@ -89,6 +89,25 @@ class Guard(unittest.TestCase):
         a=self.private_file('state.tmp','NEW');a.chmod(0o644)
         b=self.private_file('state','KEEP')
         self.assertEqual(self.replace(a,b).returncode,74);self.assertEqual(b.read_text(),'KEEP')
+    def append(self,source,target):
+        return subprocess.run([str(GUARD),'--append-file',str(source),str(target)],capture_output=True,timeout=5)
+    def test_durable_append_preserves_existing_complete_records(self):
+        source=self.private_file('record','{"sequence":2}\n');target=self.private_file('events','{"sequence":1}\n')
+        self.assertEqual(self.append(source,target).returncode,0)
+        self.assertEqual(target.read_text(),'{"sequence":1}\n{"sequence":2}\n')
+    def test_durable_append_rejects_unsafe_target_without_writing(self):
+        source=self.private_file('record','{}\n');foreign=self.private_file('foreign','KEEP')
+        target=self.temp/'events';target.symlink_to(foreign)
+        self.assertEqual(self.append(source,target).returncode,74);self.assertEqual(foreign.read_text(),'KEEP')
+        target.unlink();os.link(foreign,target)
+        self.assertEqual(self.append(source,target).returncode,74);self.assertEqual(foreign.read_text(),'KEEP')
+    def test_durable_append_enforces_record_and_segment_limits(self):
+        source=self.private_file('record','x'*2049+'\n');target=self.private_file('events','KEEP\n')
+        self.assertEqual(self.append(source,target).returncode,74);self.assertEqual(target.read_text(),'KEEP\n')
+        source.write_text('{}\n{}\n')
+        self.assertEqual(self.append(source,target).returncode,74)
+        source.write_text('{}\n');target.write_text('x'*262143)
+        self.assertEqual(self.append(source,target).returncode,74);self.assertEqual(target.stat().st_size,262143)
 
 if __name__=='__main__':
     result=unittest.TextTestRunner(verbosity=2,failfast=True).run(unittest.defaultTestLoader.loadTestsFromTestCase(Guard))
