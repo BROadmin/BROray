@@ -695,6 +695,11 @@ for directory in "$OPS_STATE" "$OPS_ROOT"; do
 done
 verb="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$verb" in
+    initialize)
+        # Runtime preparation creates only the guarded directory skeleton.
+        # Existing operations, fences, pause state and recovery are untouched.
+        [ "$#" = 0 ] || ops_error INVALID_REQUEST 1
+        printf '%s\n' '{"ok":true}' ;;
     begin) [ "$#" = 7 ] || ops_error INVALID_REQUEST 1; ops_begin "$@" ;;
     ack) [ "$#" = 3 ] || ops_error INVALID_REQUEST 1; ops_ack "$@" ;;
     owner-check)

@@ -2,6 +2,7 @@
   "baseline": "3.1.0-r09c02",
   "producerIntegration": "IN PROGRESS: subscriptions, servers and auto-switch; other producers and full application acceptance pending",
   "changedBaselineFiles": [
+    "app/bin/broray-runtime-prepare",
     "app/bin/broray-server-auto-switch",
     "app/bin/broray-server-probe",
     "app/bin/broray-servers",

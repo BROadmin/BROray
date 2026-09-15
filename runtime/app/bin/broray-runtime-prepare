@@ -21,6 +21,12 @@ do
     fi
 done
 
+# The read-only HTTP endpoints must work before the first background job.
+# Creation belongs to runtime startup, never to status/report GET requests.
+[ -r "$BRORAY_ROOT/lib/operation-client.sh" ] || broray_prepare_fail operations-client-missing || exit 1
+. "$BRORAY_ROOT/lib/operation-client.sh"
+broray_ops_call initialize >/dev/null || broray_prepare_fail operations-initialize || exit 1
+
 [ -r "$BRORAY_ROOT/lib/routes-runtime-repair.sh" ] || broray_prepare_fail routes-repair-missing || exit 1
 . "$BRORAY_ROOT/lib/routes-runtime-repair.sh"
 broray_routes_runtime_prepare || broray_prepare_fail routes-repair || exit 1
