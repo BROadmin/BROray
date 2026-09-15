@@ -47,7 +47,8 @@ ops_load()
     jq -e --arg id "$id" 'type=="object" and .schemaVersion==2 and .kind=="background" and .operationId==$id and
       (.revision|type)=="number" and (.running|type)=="boolean" and (.resourceLocks|type)=="array"' "$dir/state.json" >/dev/null 2>&1 || return 1
     jq -e --arg id "$id" 'type=="object" and .schemaVersion==2 and .operationId==$id and
-      (.token|type)=="string" and (.token|test("^[0-9a-f]{32}$"))' "$dir/owner.json" >/dev/null 2>&1 || return 1
+      (.token|type)=="string" and (.token|length)==32 and
+      (.token|all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102)))' "$dir/owner.json" >/dev/null 2>&1 || return 1
     jq -c '.owner' "$dir/owner.json" | broray_ops_owner_valid || return 1
     OPS_CURRENT="$dir"; OPS_ID="$id"
 }
@@ -201,7 +202,7 @@ ops_begin()
     rc=0; ops_recover_global || rc=$?
     [ "$rc" = 0 ] || ops_error OPERATION_BUSY
     owner="$(broray_ops_capture_owner "$pid")" || ops_error OWNER_UNCONFIRMED 1
-    nonce="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
+    nonce="$(hexdump -n 16 -v -e '1/1 "%02x"' /dev/urandom 2>/dev/null)"
     if [ "${BRORAY_OPS_TEST:-0}" = 1 ] && [ "$OPS_APP" != /opt/broray ]; then nonce="${BRORAY_OPS_TEST_NONCE:-$nonce}"; fi
     case "$nonce" in *[!0-9a-f]*|'') ops_error RANDOM_UNAVAILABLE 1 ;; esac
     [ "${#nonce}" = 32 ] || ops_error RANDOM_UNAVAILABLE 1

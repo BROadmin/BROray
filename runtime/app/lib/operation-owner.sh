@@ -4,10 +4,11 @@
 broray_ops_owner_valid()
 {
     jq -e 'type=="object" and (.pid|type)=="number" and .pid>1 and
-      (.startTicks|type)=="string" and (.startTicks|test("^[0-9]+$")) and
+      (.startTicks|type)=="string" and (.startTicks|length)>0 and (.startTicks|all(explode[]; .>=48 and .<=57)) and
       (.bootId|type)=="string" and (.bootId|length)>0 and
       (.executable|type)=="string" and (.executable|startswith("/")) and
-      (.commandDigest|type)=="string" and (.commandDigest|test("^[a-f0-9]{64}$"))' >/dev/null 2>&1
+      (.commandDigest|type)=="string" and (.commandDigest|length)==64 and
+      (.commandDigest|all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102)))' >/dev/null 2>&1
 }
 
 broray_ops_start_ticks()

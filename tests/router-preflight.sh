@@ -10,7 +10,7 @@ test_mode=false; [ -z "$prefix" ] || test_mode=true
 proc="$prefix/proc"
 root="$prefix/opt/broray"
 flags='{}'
-for name in ash jq sha256sum readlink od ln stat; do
+for name in ash jq sha256sum readlink hexdump ln stat; do
     available=false; command -v "$name" >/dev/null 2>&1 && available=true
     flags="$(printf '%s\n' "$flags" | jq -c --arg name "$name" --argjson available "$available" '.[$name]=$available')"
 done

@@ -148,6 +148,12 @@ class Operations(unittest.TestCase):
         self.assertTrue(lock.is_symlink())
         self.assertEqual(lock.readlink(),self.opfile(a,'fence'))
         self.assertEqual({p.name for p in lock.iterdir()},{'pid','scope','action','bundle','startedAt','owner.json'})
+    def test_real_entropy_produces_distinct_private_tokens(self):
+        self.env.pop('BRORAY_OPS_TEST_NONCE')
+        a=self.begin();self.call('finish',a['operationId'],a['token'],'completed','')
+        b=self.begin()
+        self.assertRegex(a['token'],r'^[a-f0-9]{32}$');self.assertRegex(b['token'],r'^[a-f0-9]{32}$')
+        self.assertNotEqual(a['token'],b['token']);self.assertNotEqual(a['operationId'],b['operationId'])
     def test_old_updater_preserves_new_fence(self):
         self.begin();lock=self.temp/'global.lock';before=lock.readlink()
         src=(APP/'share/updater-platform/opt/libexec/broray-updater/broray-updater.sh').read_text()

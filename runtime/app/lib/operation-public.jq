@@ -1,7 +1,17 @@
 # One public projection for UI, journal and diagnostics. No raw text fallback.
 def enum($values; $fallback): . as $v | if $values|index($v) then $v else $fallback end;
-def timestamp: if type=="string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$") then . else null end;
-def operation_id: if type=="string" and test("^op-[0-9]{14}-[0-9]{1,10}-[a-f0-9]{12}$") then . else null end;
+def ascii_digits: type=="string" and length>0 and all(explode[]; .>=48 and .<=57);
+def ascii_hex: type=="string" and length>0 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102));
+# Entware jq may omit Oniguruma: keep strict formats without match/test/sub.
+def timestamp:
+  if type=="string" and length==20 and .[4:5]=="-" and .[7:8]=="-" and .[10:11]=="T" and
+    .[13:14]==":" and .[16:17]==":" and .[19:20]=="Z" and
+    ([.[0:4],.[5:7],.[8:10],.[11:13],.[14:16],.[17:19]] | all(.[]; ascii_digits)) then . else null end;
+def operation_id:
+  if type!="string" then null else . as $value | split("-") |
+    if length==4 and .[0]=="op" and (.[1]|length)==14 and (.[1]|ascii_digits) and
+      (.[2]|length)>0 and (.[2]|length)<=10 and (.[2]|ascii_digits) and
+      (.[3]|length)==12 and (.[3]|ascii_hex) then $value else null end end;
 def operation_type:
   if type!="string" then "unknown"
   elif startswith("subscriptions:") then "subscription_update"
