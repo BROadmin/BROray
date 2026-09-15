@@ -6,50 +6,11 @@ export PATH
 
 . "$ROOT/lib/subscription-service.sh"
 
-PID_FILE="${BRORAY_SUBSCRIPTION_PIDFILE:-$ROOT/run/subscription-scheduler.pid}"
-STARTTIME_FILE="${BRORAY_SUBSCRIPTION_STARTTIME_FILE:-$ROOT/run/subscription-scheduler.starttime}"
 LOG_FILE="${BRORAY_SUBSCRIPTION_LOG_FILE:-$ROOT/logs/subscription-scheduler.log}"
-PROC_ROOT="${BRORAY_SUBSCRIPTION_PROC_ROOT:-/proc}"
 INTERVAL_SECONDS="${BRORAY_SUB_SCHEDULER_INTERVAL:-60}"
 BRORAY_ROUTES_API_LOCK="${BRORAY_SUBSCRIPTION_GLOBAL_LOCK:-${BRORAY_ROUTES_API_LOCK:-/opt/var/lock/broray/global-operation.lock}}"
 export BRORAY_ROUTES_API_LOCK
-OWN_STARTTIME=""
-
-process_starttime()
-{
-    scheduler_pid="$1"
-    awk 'NR==1 { print $22; exit }' "$PROC_ROOT/$scheduler_pid/stat" 2>/dev/null
-}
-
-identity_matches()
-{
-    scheduler_pid="$1"
-    scheduler_start="$2"
-    case "$scheduler_pid:$scheduler_start" in
-        *[!0-9:]*|:|*:) return 1 ;;
-    esac
-    kill -0 "$scheduler_pid" 2>/dev/null || return 1
-    [ "$(process_starttime "$scheduler_pid")" = "$scheduler_start" ]
-}
-
-write_one()
-{
-    scheduler_path="$1"
-    scheduler_value="$2"
-    scheduler_temporary="$scheduler_path.new.$$"
-    printf '%s\n' "$scheduler_value" >"$scheduler_temporary" || return 1
-    chmod 600 "$scheduler_temporary" 2>/dev/null || true
-    mv -f "$scheduler_temporary" "$scheduler_path"
-}
-
-scheduler_cleanup()
-{
-    recorded_pid="$(sed -n '1p' "$PID_FILE" 2>/dev/null)"
-    recorded_start="$(sed -n '1p' "$STARTTIME_FILE" 2>/dev/null)"
-    if [ "$recorded_pid" = "$$" ] && [ -n "$OWN_STARTTIME" ] && [ "$recorded_start" = "$OWN_STARTTIME" ]; then
-        rm -f "$PID_FILE" "$STARTTIME_FILE"
-    fi
-}
+. "$ROOT/lib/service-lifecycle.sh"
 
 scheduler_cycle()
 {
@@ -61,7 +22,7 @@ scheduler_cycle()
           (.nextUpdateEpoch|type)=="number" and .nextUpdateEpoch>0 and .nextUpdateEpoch<=$now' "$due_file" >/dev/null 2>&1; then
             # A fresh exec has its own PID/birth identity and exit traps. The
             # daemon cannot be mistaken for a completed or hung update job.
-            "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$ROOT/bin/broray-subscription-scheduler" --job
+            broray_service_run_job "$ROOT/bin/broray-subscription-scheduler" --job
             return $?
         fi
     done
@@ -85,26 +46,19 @@ case "${1:-}" in
     *) exit 64 ;;
 esac
 
-mkdir -p "${PID_FILE%/*}" "${LOG_FILE%/*}"
-OWN_STARTTIME="$(process_starttime "$$")"
-[ -n "$OWN_STARTTIME" ] || exit 1
-existing_pid="$(sed -n '1p' "$PID_FILE" 2>/dev/null)"
-existing_start="$(sed -n '1p' "$STARTTIME_FILE" 2>/dev/null)"
-if [ "$existing_pid" != "$$" ] && identity_matches "$existing_pid" "$existing_start"; then
-    printf 'scheduler already running pid=%s starttime=%s\n' "$existing_pid" "$existing_start" >&2
-    exit 1
-fi
-write_one "$PID_FILE" "$$" || exit 1
-write_one "$STARTTIME_FILE" "$OWN_STARTTIME" || exit 1
-trap 'scheduler_cleanup' EXIT
+broray_service_daemon_enter subscriptions || exit $?
+mkdir -p "${LOG_FILE%/*}" || exit 74
+trap 'broray_service_daemon_exit' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
 while :; do
+    broray_service_stop_requested && break
     if ! scheduler_cycle >>"$LOG_FILE" 2>&1; then
         printf '%s scheduler cycle failed\n' \
             "$(broray_subscription_now_iso)" >>"$LOG_FILE"
     fi
-    sleep "$INTERVAL_SECONDS"
+    broray_service_sleep "$INTERVAL_SECONDS" || break
 done
+exit 0

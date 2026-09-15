@@ -29,14 +29,11 @@ else
     MONITOR_JSON='null'
 fi
 
-PID="$(cat "$PIDFILE" 2>/dev/null || true)"
+. "$ROOT/lib/service-lifecycle.sh"
+broray_service_setup auto-switch
+SERVICE_JSON="$(broray_service_status_json)"
 MONITOR_PID="$(cat "$MONITOR_PIDFILE" 2>/dev/null || true)"
-SERVICE_RUNNING=false
 MONITOR_RUNNING=false
-
-if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-    SERVICE_RUNNING=true
-fi
 
 if [ -n "$MONITOR_PID" ] && kill -0 "$MONITOR_PID" 2>/dev/null; then
     MONITOR_RUNNING=true
@@ -49,9 +46,8 @@ PAYLOAD="$(
         --argjson config "$CONFIG_JSON" \
         --argjson state "$STATE_JSON" \
         --argjson monitor "$MONITOR_JSON" \
-        --argjson serviceRunning "$SERVICE_RUNNING" \
+        --argjson service "$SERVICE_JSON" \
         --argjson monitorRunning "$MONITOR_RUNNING" \
-        --arg pid "$PID" \
         --arg monitorPid "$MONITOR_PID" \
         --arg logTail "$LOG_TAIL" \
         --arg checkedAt "$(date '+%Y-%m-%dT%H:%M:%S%z')" '
@@ -60,10 +56,7 @@ PAYLOAD="$(
             state: $state,
             monitor: $monitor,
 
-            service: {
-                running: $serviceRunning,
-                pid: (if $pid == "" then null else ($pid | tonumber) end)
-            },
+            service: $service,
 
             connectionMonitor: {
                 running: $monitorRunning,

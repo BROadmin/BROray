@@ -21,6 +21,7 @@ BRORAY_LEGACY_GLOBAL_LOCK="$SYSTEM_LOCK"
 BRORAY_SERVER_SKIP_KEENETIC_REFRESH=true
 export BRORAY_ROUTES_API_LOCK BRORAY_LEGACY_GLOBAL_LOCK BRORAY_SERVER_SKIP_KEENETIC_REFRESH
 . "$ROOT/lib/server-service.sh"
+. "$ROOT/lib/service-lifecycle.sh"
 umask 077
 
 routes_resumable_pending()
@@ -1214,7 +1215,7 @@ run_cycle()
         '.qualityRefresh.intervalMinutes==$interval and .qualityRefresh.nextCheckEpoch>$now and
          (.qualityRefresh.status=="success" or .qualityRefresh.status=="scheduled" or .qualityRefresh.status=="partial" or .qualityRefresh.status=="error")' "$STATE" >/dev/null 2>&1; then return 0; fi
     if [ "$DRY_RUN" = true ]; then job_mode=--job-dry-run; else job_mode=--job; fi
-    "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$ROOT/bin/broray-server-auto-switch" "$job_mode"
+    broray_service_run_job "$ROOT/bin/broray-server-auto-switch" "$job_mode"
 }
 
 if [ "$MODE" = job ]; then
@@ -1246,8 +1247,12 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 if [ "$MODE" = once ]; then run_cycle; exit $?; fi
+broray_service_daemon_enter auto-switch || exit $?
+trap 'broray_service_daemon_exit' EXIT
 log_message "Сервис автоматического выбора запущен"
 while :; do
+    broray_service_stop_requested && break
     run_cycle || log_message "Цикл завершился ошибкой"
-    sleep "$INTERVAL_SECONDS"
+    broray_service_sleep "$INTERVAL_SECONDS" || break
 done
+exit 0

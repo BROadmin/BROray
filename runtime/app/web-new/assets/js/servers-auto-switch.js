@@ -246,7 +246,13 @@
                 : "status-badge status-badge-neutral";
 
         element("auto-switch-service").textContent =
-            service.running ? "Работает" : "Остановлен";
+            service.complete === false || typeof service.running !== "boolean"
+                ? "Состояние не подтверждено"
+                : service.state === "stopping"
+                    ? "Останавливается"
+                    : service.state === "starting"
+                        ? "Запускается"
+                        : service.running ? "Работает" : "Остановлен";
 
         element("auto-switch-status").textContent =
             statusTitle(state.status);

@@ -120,9 +120,14 @@
         element("quality-refresh-badge").className = enabled
             ? "status-badge quality-refresh-badge-enabled"
             : "status-badge status-badge-neutral";
-        element("quality-refresh-service").textContent = service.running
-            ? "Работает"
-            : "Остановлена";
+        element("quality-refresh-service").textContent =
+            service.complete === false || typeof service.running !== "boolean"
+                ? "Состояние не подтверждено"
+                : service.state === "stopping"
+                    ? "Останавливается"
+                    : service.state === "starting"
+                        ? "Запускается"
+                        : service.running ? "Работает" : "Остановлена";
         element("quality-refresh-status").textContent = statusTitle(
             state.status || (enabled ? "scheduled" : "disabled")
         );

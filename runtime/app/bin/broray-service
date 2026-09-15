@@ -1,0 +1,47 @@
+#!/opt/bin/ash
+PATH="${BRORAY_ROOT:-/opt/broray}/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+. "${BRORAY_ROOT:-/opt/broray}/lib/service-lifecycle.sh" || exit 74
+broray_service_setup "${1:-}" || exit $?
+action="${2:-}"
+case "$action" in
+  status-json) broray_service_status_json ;;
+  status)
+    view="$(broray_service_status_json)" || exit 74
+    printf '%s\n' "$view"
+    printf '%s\n' "$view" | jq -e '.complete and .running==true' >/dev/null ;;
+  start)
+    view="$(broray_service_status_json)" || exit 74
+    printf '%s\n' "$view" | jq -e '.complete' >/dev/null || { printf '%s\n' "$view"; exit 75; }
+    if ! printf '%s\n' "$view" | jq -e '.running==true' >/dev/null; then
+        [ -f "$SVC_DAEMON" ] && [ ! -L "$SVC_DAEMON" ] || exit 74
+        mkdir -p "$SVC_APP/logs" || exit 74
+        "$SVC_ASH" "$SVC_DAEMON" >>"$SVC_LOG" 2>&1 </dev/null &
+    fi
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        view="$(broray_service_status_json)" || exit 74
+        if printf '%s\n' "$view" | jq -e '.complete and .ready' >/dev/null; then printf '%s\n' "$view"; exit 0; fi
+        sleep 1
+    done
+    printf '%s\n' "$view"; exit 75 ;;
+  stop)
+    broray_service_control stop || exit $?
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        view="$(broray_service_status_json)" || exit 74
+        if printf '%s\n' "$view" | jq -e '.complete and .running==false' >/dev/null; then
+            # Wait for inherited short-lived writers too. No success while an
+            # older lifetime lease can still inhibit a replacement daemon.
+            "$SVC_GUARD" "$SVC_DIR/lifetime.guard" "$SVC_ASH" "$SVC_APP/bin/broray-service" "$SVC_NAME" retire-dead || exit 75
+            printf '%s\n' "$view"; exit 0
+        fi
+        sleep 1
+    done
+    printf '%s\n' "$view"; exit 75 ;;
+  retire-dead)
+    broray_service_fd "$SVC_DIR/lifetime.guard" >/dev/null || exit 73
+    broray_service_control retire-dead ;;
+  restart)
+    "$SVC_ASH" "$SVC_APP/bin/broray-service" "$SVC_NAME" stop || exit $?
+    exec "$SVC_ASH" "$SVC_APP/bin/broray-service" "$SVC_NAME" start ;;
+  *) exit 64 ;;
+esac
