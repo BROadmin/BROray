@@ -1,9 +1,9 @@
 #!/opt/bin/ash
 # Physical prototype tests: private filesystem and self-signals only.
 set -eu
-T=/opt/tmp/broray-311-test-20260915
+T=/opt/tmp/broray-311-coordinator-20260915
 [ -d "$T" ] && [ ! -L "$T" ] && [ "$(readlink -f "$T")" = "$T" ] || exit 1
-[ "$(cat "$T/TEST-OWNER")" = BRORAY311-PHYSICAL-20260915 ]
+[ "$(cat "$T/TEST-OWNER")" = BRORAY311-COORDINATOR-20260915 ]
 PATH="$T/bin:/opt/bin:/opt/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH
 export LD_LIBRARY_PATH="$T/lib:/opt/lib"
@@ -12,6 +12,10 @@ sha256sum -c SHA256SUMS >/dev/null
 G="$T/bin/broray-ops-guard"
 export BRORAY_ROOT="$T/app" BRORAY_OPS_GUARD="$G"
 unset BRORAY_OPS_TEST BRORAY_OPS_TEST_IDENTITIES
+[ ! -e /tmp/broray-311-coordinator-20260915 ] && [ ! -L /tmp/broray-311-coordinator-20260915 ] || exit 1
+mkdir -m 700 /tmp/broray-311-coordinator-20260915
+printf '%s\n' BRORAY311-COORDINATOR-20260915 >/tmp/broray-311-coordinator-20260915/TEST-OWNER
+export BRORAY_OPS_RAM_ROOT=/tmp/broray-311-coordinator-20260915
 mkdir "$T/cases"
 : > "$T/passed.txt"
 pass() { printf '%s\n' "$1" >>"$T/passed.txt"; printf 'PASS %s\n' "$1"; }
@@ -22,13 +26,15 @@ case_dir() {
 }
 ops() { "$G" "$R/state/operations.guard" /opt/bin/ash "$T/app/lib/operation-coordinator.sh" "$@"; }
 begin() {
-  ops begin system subscriptions:scheduler subscriptions USER "$$" "${1:-cooperative}" >"$R/start.json"
+  NONCE="$(hexdump -n 16 -v -e '1/1 "%02x"' /dev/urandom)"
+  ops begin system subscriptions:scheduler subscriptions USER "$$" "${1:-cooperative}" "$NONCE" >"$R/start.json"
   ID="$(jq -er '.operationId' "$R/start.json")"; TOKEN="$(jq -er '.token' "$R/start.json")"
+  ops ack "$ID" "$TOKEN" "$$" >/dev/null
 }
 finish() { ops finish "$ID" "$TOKEN" "${1:-completed}" "${2:-}" >/dev/null; }
 
 [ "$(uname -m)" = aarch64 ]
-[ "$("$G" --version)" = 'broray-ops-guard/2 fcntl-exec atomic-fence' ]
+[ "$("$G" --version)" = 'broray-ops-guard/5 flock-fork-exec atomic-fence durable-state durable-append' ]
 pass arm64_static_execution
 
 case_dir kernel
@@ -75,7 +81,7 @@ rc=0; ops recover >/dev/null || rc=$?
 [ "$rc" = 2 ] && [ -L "$R/global.lock" ] || exit 1
 pass old_heartbeat_does_not_override_live_owner
 GLOBAL_OPERATION_LOCK="$R/global.lock"
-. "$T/old-updater-classifier.sh"
+. "$T/bin/old-updater-classifier.sh"
 rc=0; global_operation_lock_classify || rc=$?
 [ "$rc" = 1 ] && [ "$GLOBAL_OPERATION_LOCK_STATE" = unsafe-object ] || exit 1
 pass old_updater_rejects_new_active_fence
@@ -87,7 +93,7 @@ if grep -F "$TOKEN" "$R/public.json"; then exit 1; fi
 pass public_status_omits_private_token
 finish aborted CANCELLED
 [ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ] || exit 1
-ops events | jq -e '[.events[].event]==["started","lock_acquired","cancel_requested","aborted"]' >/dev/null
+ops events | jq -e '[.events[].event]==["lock_acquired","started","cancel_requested","aborted"]' >/dev/null
 global_operation_lock_classify
 [ "$GLOBAL_OPERATION_LOCK_STATE" = absent ]
 pass terminal_cleanup_and_old_updater_admission
@@ -99,7 +105,7 @@ case_dir crash
 export T
 rc=0
 /opt/bin/ash -c '
-  "$BRORAY_OPS_GUARD" "$BRORAY_STATE_ROOT/operations.guard" /opt/bin/ash "$BRORAY_ROOT/lib/operation-coordinator.sh" begin system subscriptions:scheduler subscriptions USER "$$" cooperative >"$BRORAY_STATE_ROOT/start.json" || exit 99
+  "$BRORAY_OPS_GUARD" "$BRORAY_STATE_ROOT/operations.guard" /opt/bin/ash "$BRORAY_ROOT/lib/operation-coordinator.sh" begin system subscriptions:scheduler subscriptions USER "$$" cooperative 01234567890123456789012345678901 >"$BRORAY_STATE_ROOT/start.json" || exit 99
   kill -KILL $$
 ' || rc=$?
 [ "$rc" = 137 ]
@@ -118,10 +124,48 @@ pass protected_operation_rejects_cancel
 
 case_dir pause
 ops pause >/dev/null
-rc=0; ops begin system subscriptions:scheduler subscriptions SUBSCRIPTION_AUTO "$$" cooperative >"$R/auto.json" || rc=$?
+rc=0; ops begin system subscriptions:scheduler subscriptions SUBSCRIPTION_AUTO "$$" cooperative 01234567890123456789012345678902 >"$R/auto.json" || rc=$?
 [ "$rc" = 2 ] && jq -e '.errorCode=="AUTOMATION_PAUSED"' "$R/auto.json" >/dev/null || exit 1
 begin; finish; ops resume >/dev/null
 pass paused_automation_still_allows_manual_operation
+
+
+case_dir durable
+begin
+ops begin system subscriptions:scheduler subscriptions USER "$$" cooperative "$NONCE" >"$R/retry.json"
+cmp -s "$R/start.json" "$R/retry.json"
+pass lost_begin_response_same_operation
+cp "$R/state/operations/$ID/state.json" "$R/before.json"
+ops ack "$ID" "$TOKEN" "$$" >/dev/null
+cmp -s "$R/before.json" "$R/state/operations/$ID/state.json"
+pass repeated_ack_does_not_restart
+ops tick "$ID" "$TOKEN" checking >/dev/null
+cp "$R/state/operations/$ID/state.json" "$R/before.json"
+ops tick "$ID" "$TOKEN" checking >/dev/null
+cmp -s "$R/before.json" "$R/state/operations/$ID/state.json"
+[ ! -e "$R/state/operations/$ID/heartbeat.json" ]
+[ -f "$BRORAY_OPS_RAM_ROOT/$ID.json" ]
+pass heartbeat_ram_without_flash_revision
+ops tick "$ID" "$TOKEN" committing >/dev/null
+rc=0; ops cancel "$ID" >/dev/null || rc=$?
+[ "$rc" = 2 ]
+pass commit_boundary_rejects_cancel
+ops tick "$ID" "$TOKEN" fetching >/dev/null
+ops cancel "$ID" >/dev/null
+rc=0; ops tick "$ID" "$TOKEN" committing >/dev/null || rc=$?
+[ "$rc" = 2 ]
+pass cancel_prevents_entering_commit
+ops report >"$R/report.json"
+jq -e '.reportKind=="broray-diagnostics" and .complete==false and .snapshotComplete==true' "$R/report.json" >/dev/null
+if grep -F "$TOKEN" "$R/report.json"; then exit 1; fi
+pass target_jq_report_excludes_private_token
+finish aborted CANCELLED
+OLD_ID="$ID"; OLD_TOKEN="$TOKEN"
+begin
+ops finish "$OLD_ID" "$OLD_TOKEN" completed '' | jq -e '.alreadyFinished==true' >/dev/null
+[ "$(readlink "$R/global.lock")" = "$R/state/operations/$ID/fence" ]
+pass repeated_finish_preserves_next_fence
+finish
 
 case_dir legacy
 mkdir "$R/global.lock"

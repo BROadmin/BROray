@@ -3,9 +3,9 @@ set -eu
 umask 077
 T=/opt/tmp/broray-311-journal-20260915
 RAM=/tmp/broray-311-journal-20260915
-[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ]
+[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ] || exit 1
 [ "$(cat "$T/TEST-OWNER")" = BRORAY311-JOURNAL-20260915 ]
-[ ! -e "$RAM" ] && [ ! -L "$RAM" ]
+[ ! -e "$RAM" ] && [ ! -L "$RAM" ] || exit 1
 mkdir -m 700 "$RAM"; echo BRORAY311-JOURNAL-20260915 >"$RAM/TEST-OWNER"
 PATH="$T/bin:/opt/bin:/opt/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH LD_LIBRARY_PATH="$T/lib:/opt/lib"
@@ -72,7 +72,7 @@ for point in reserved appended; do
   jq -e '.pending==true and .allocatedSequence==3' "$J/head.json" >/dev/null
   view; jq -e '.complete==false' "$R/events.json" >/dev/null
   broray_ops_finish completed
-  [ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ]
+  [ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ] || exit 1
   view; jq -e '.complete==false and .events[-1].sequence==4' "$R/events.json" >/dev/null
   pass "self_crash_${point}_keeps_gap_and_allows_safe_job_finish"
 done

@@ -4,9 +4,9 @@ set -eu
 umask 077
 T=/opt/tmp/broray-311-guard-writer-20260915
 RAM=/tmp/broray-311-guard-writer-20260915
-[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ]
+[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ] || exit 1
 [ "$(cat "$T/TEST-OWNER")" = BRORAY311-GUARD-WRITER-20260915 ]
-[ ! -e "$RAM" ] && [ ! -L "$RAM" ]
+[ ! -e "$RAM" ] && [ ! -L "$RAM" ] || exit 1
 mkdir -m 700 "$RAM"; printf '%s\n' BRORAY311-GUARD-WRITER-20260915 >"$RAM/TEST-OWNER"
 PATH="$T/bin:/opt/bin:/opt/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH LD_LIBRARY_PATH="$T/lib:/opt/lib"
@@ -41,11 +41,11 @@ for mode in replace-file publish-fence; do
   # Always release the bounded child before checking assertions.
   : >"$R/release"
   "$BRORAY_OPS_GUARD" "$R/guard" /opt/bin/busybox true
-  [ "$rc" = 137 ] && [ -s "$R/ready" ] && [ "$contender" = 75 ]
+  [ "$rc" = 137 ] && [ -s "$R/ready" ] && [ "$contender" = 75 ] || exit 1
   if [ "$mode" = replace-file ]; then
     jq -e '.complete==true' "$target" >/dev/null
   else
-    [ -L "$target" ] && [ "$(readlink "$target")" = "$source" ]
+    [ -L "$target" ] && [ "$(readlink "$target")" = "$source" ] || exit 1
   fi
   pass "orphan_${mode}_retains_exclusion_until_complete"
 done
@@ -62,7 +62,7 @@ done
 pass helper_registration_drain_no_descriptor_deadlock
 broray_ops_tick committing
 broray_ops_finish completed
-[ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ]
+[ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ] || exit 1
 pass commit_and_finish
 jq -Rn '[inputs|select(length>0)]|{status:"PASS",tests:.,routerAccessed:true,applicationInstalled:false}' <"$T/passed.txt" >"$T/RESULT.json"
 cat "$T/RESULT.json"

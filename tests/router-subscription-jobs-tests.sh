@@ -4,9 +4,9 @@ set -eu
 umask 077
 T=/opt/tmp/broray-311-subscription-jobs-20260915
 RAM=/tmp/broray-311-subscription-jobs-20260915
-[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ]
+[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ] || exit 1
 [ "$(cat "$T/TEST-OWNER")" = BRORAY311-SUBSCRIPTION-JOBS-20260915 ]
-[ ! -e "$RAM" ] && [ ! -L "$RAM" ]
+[ ! -e "$RAM" ] && [ ! -L "$RAM" ] || exit 1
 mkdir -m 700 "$RAM"; echo BRORAY311-SUBSCRIPTION-JOBS-20260915 >"$RAM/TEST-OWNER"
 PATH="$T/bin:/opt/bin:/opt/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH LD_LIBRARY_PATH="$T/lib:/opt/lib"
@@ -79,7 +79,7 @@ record
 jq -e '.lastUpdateStatus=="success" and .lastUpdateResult.accepted==1' "$R/result.json" >/dev/null
 count=0; for file in "$T/app/servers"/*.json; do [ -f "$file" ]; count=$((count+1)); done; [ "$count" = 1 ]
 for file in "$R/state/operations"/*/state.json; do jq -e '.state=="completed"' "$file" >/dev/null; done
-[ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ]
+[ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ] || exit 1
 pass actual_parser_and_catalog_commit
 
 case_dir inherited
@@ -107,10 +107,10 @@ broray_ops_call status >"$R/status.json"
 operation="$(jq -er '.operations[0].operationId' "$R/status.json")"
 broray_ops_call cancel "$operation" >"$R/cancel.json"
 rc=0; wait "$worker" || rc=$?
-[ "$rc" = 130 ] && [ "$(catalog_hash)" = "$before" ]
+[ "$rc" = 130 ] && [ "$(catalog_hash)" = "$before" ] || exit 1
 jq -e '.state=="aborted"' "$R/state/operations/$operation/state.json" >/dev/null
 jq -e '.supervisors==[]' "$R/state/operations/$operation/supervisors.json" >/dev/null
-[ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ]
+[ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ] || exit 1
 pass cancelled_tree_drained_before_fence_release
 cp "$T/app/config/subscriptions/test.json" "$R/cancelled-durable.json"
 broray_subscription_get test >"$R/public.json"
@@ -144,7 +144,7 @@ rc=0
 /opt/bin/ash "$T/app/bin/broray-subscriptions" refresh test >"$R/output" 2>"$R/error.txt" || rc=$?
 [ "$rc" = 1 ]
 for file in "$R/state/operations"/*/state.json; do jq -e '.state=="failed" and .source=="USER" and .operation=="subscriptions:refresh"' "$file" >/dev/null; done
-[ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ]
+[ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ] || exit 1
 pass cli_refresh_has_owned_lifecycle
 
 case_dir api_error

@@ -3,9 +3,9 @@
 set -eu
 T=/opt/tmp/broray-311-supervisor-20260915
 RAM=/tmp/broray-311-supervisor-20260915
-[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ]
+[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ] || exit 1
 [ "$(cat "$T/TEST-OWNER")" = BRORAY311-SUPERVISOR-20260915 ]
-[ ! -e "$RAM" ] && [ ! -L "$RAM" ]
+[ ! -e "$RAM" ] && [ ! -L "$RAM" ] || exit 1
 mkdir -m 700 "$RAM"
 printf '%s\n' BRORAY311-SUPERVISOR-20260915 >"$RAM/TEST-OWNER"
 PATH="$T/bin:/opt/bin:/opt/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -24,7 +24,7 @@ case_dir() {
   export BRORAY_OPS_UPDATER_ROOT="$R/updater" BRORAY_LEGACY_GLOBAL_LOCK="$R/legacy.lock"
 }
 begin() { broray_ops_begin system subscriptions:scheduler subscriptions USER cooperative; }
-finish() { broray_ops_finish "${1:-completed}" "${2:-}"; [ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ]; }
+finish() { broray_ops_finish "${1:-completed}" "${2:-}"; [ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ] || exit 1; }
 check_empty_registry() {
   jq -e '.supervisors==[]' "$R/state/operations/$BRORAY_BACKGROUND_OPERATION_ID/supervisors.json" >/dev/null
 }
@@ -49,7 +49,7 @@ pass normal_helper_drained_before_commit
 case_dir thread_exec
 begin
 rc=0; broray_ops_run_helper 10 -- "$T/bin/fixture" thread-exec >"$R/output" || rc=$?
-[ "$rc" = 19 ] && [ "$(cat "$R/output")" = thread-exec-ok ]
+[ "$rc" = 19 ] && [ "$(cat "$R/output")" = thread-exec-ok ] || exit 1
 check_empty_registry; finish failed OPERATION_FAILED
 pass nonleader_exec_retains_exit_status
 
@@ -93,7 +93,7 @@ begin
 cancel_when_ready & requester=$!
 rc=0; broray_ops_run_helper 20 -- /opt/bin/ash -c '"$BRORAY_SUPERVISOR_TEST_FIXTURE" session-wait & echo yes >"$R/ready"; wait' || rc=$?
 wait "$requester"; [ "$rc" = 130 ]; check_empty_registry
-[ -f "$R/sentinel-ready" ] && [ ! -f "$R/sentinel-finished" ]
+[ -f "$R/sentinel-ready" ] && [ ! -f "$R/sentinel-finished" ] || exit 1
 : >"$R/sentinel-stop"; wait "$sentinel"
 [ -f "$R/sentinel-finished" ]; finish aborted CANCELLED
 pass escaped_session_stopped_sentinel_untouched
@@ -102,7 +102,7 @@ case_dir protected
 begin
 broray_ops_tick committing
 rc=0; broray_ops_run_helper 10 -- /opt/bin/ash -c 'echo BAD >"$R/forbidden"' || rc=$?
-[ "$rc" = 74 ] && [ ! -f "$R/forbidden" ]; finish
+[ "$rc" = 74 ] && [ ! -f "$R/forbidden" ] || exit 1; finish
 pass protected_phase_never_opens_helper_gate
 
 case_dir repeat

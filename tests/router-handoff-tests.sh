@@ -2,9 +2,9 @@
 set -eu
 T=/opt/tmp/broray-311-handoff-20260915
 RAM=/tmp/broray-311-handoff-20260915
-[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ]
+[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ] || exit 1
 [ "$(cat "$T/TEST-OWNER")" = BRORAY311-HANDOFF-20260915 ]
-[ ! -e "$RAM" ] && [ ! -L "$RAM" ]
+[ ! -e "$RAM" ] && [ ! -L "$RAM" ] || exit 1
 mkdir -m 700 "$RAM"; printf '%s\n' BRORAY311-HANDOFF-20260915 >"$RAM/TEST-OWNER"
 PATH="$T/bin:/opt/bin:/opt/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH LD_LIBRARY_PATH="$T/lib:/opt/lib"
@@ -54,7 +54,7 @@ broray_ops_call status >"$R/status.json"
 jq -e '.operations[0].ownerStatus=="ACTIVE" and .globalFence=="managed_active"' "$R/status.json" >/dev/null
 pass status_uses_current_executor
 : >"$R/go"; wait "$worker"
-[ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ]; pass worker_helper_commit_finish
+[ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ] || exit 1; pass worker_helper_commit_finish
 broray_ops_call handoff "$ID" "$OLD_TOKEN" "$$" "$worker" "$HANDOFF_NONCE" >"$R/handoff-after-finish.json"
 cmp -s "$R/handoff.json" "$R/handoff-after-finish.json"; pass retry_after_worker_exit_is_read_only
 unset BRORAY_BACKGROUND_OPERATION_ID BRORAY_BACKGROUND_OPERATION_TOKEN BRORAY_BACKGROUND_LAUNCH_NONCE
@@ -64,11 +64,11 @@ broray_ops_begin routes xray:update xray USER cooperative
 HANDOFF_NONCE="$(hexdump -n 16 -v -e '1/1 "%02x"' /dev/urandom)"; export HANDOFF_NONCE
 /opt/bin/ash "$T/worker.sh" & worker=$!
 broray_ops_handoff_to "$worker" "$HANDOFF_NONCE"
-[ -z "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] && [ -z "${BRORAY_BACKGROUND_OPERATION_TOKEN:-}" ]
+[ -z "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] && [ -z "${BRORAY_BACKGROUND_OPERATION_TOKEN:-}" ] || exit 1
 broray_ops_finish completed
 [ -L "$R/global.lock" ]; pass parent_client_drops_old_authority
 wait_ready; : >"$R/go"; wait "$worker"
-[ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ]; pass production_clients_complete_transfer
+[ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ] || exit 1; pass production_clients_complete_transfer
 
 jq -Rn '[inputs|select(length>0)]|{status:"PASS",tests:.,routerAccessed:true,applicationInstalled:false}' <"$T/passed.txt" >"$T/RESULT.json"
 cat "$T/RESULT.json"

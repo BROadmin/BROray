@@ -2,9 +2,9 @@
 set -eu
 T=/opt/tmp/broray-311-launch-20260915
 RAM=/tmp/broray-311-launch-20260915
-[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ]
+[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ] || exit 1
 [ "$(cat "$T/TEST-OWNER")" = BRORAY311-LAUNCH-20260915 ]
-[ ! -e "$RAM" ] && [ ! -L "$RAM" ]
+[ ! -e "$RAM" ] && [ ! -L "$RAM" ] || exit 1
 mkdir -m 700 "$RAM"; printf '%s\n' BRORAY311-LAUNCH-20260915 >"$RAM/TEST-OWNER"
 PATH="$T/bin:/opt/bin:/opt/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH LD_LIBRARY_PATH="$T/lib:/opt/lib"
@@ -28,14 +28,14 @@ for point in directory owner state fence published_directory; do
     "$BRORAY_OPS_GUARD" "$R/state/operations.guard" /opt/bin/ash "$T/app/lib/operation-coordinator.sh" \
     begin system subscriptions:scheduler subscriptions USER "$$" cooperative "$launch" >"$R/crash.json" 2>"$R/crash.err" || rc=$?
   [ "$rc" = 137 ]
-  [ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ]
+  [ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ] || exit 1
   broray_ops_call status >"$R/status.json"
   count=0; [ "$point" != published_directory ] || count=1
   jq -e --argjson count "$count" '.ok==true and (.operations|length)==$count' "$R/status.json" >/dev/null
   BRORAY_BACKGROUND_LAUNCH_NONCE="$launch"
   broray_ops_begin system subscriptions:scheduler subscriptions USER cooperative
   [ -L "$R/global.lock" ]
-  for stage in "$R/state/operations"/.launch-*; do [ ! -e "$stage" ] && [ ! -L "$stage" ]; done
+  for stage in "$R/state/operations"/.launch-*; do [ ! -e "$stage" ] && [ ! -L "$stage" ] || exit 1; done
   broray_ops_finish completed
   pass "self_crash_after_$point"
 done
@@ -49,14 +49,14 @@ case_dir symlink
 mkdir "$R/foreign"; echo KEEP >"$R/foreign/KEEP"
 stage="$R/state/operations/.launch-$$-$(nonce)"; ln -s "$R/foreign" "$stage"
 broray_ops_begin system subscriptions:scheduler subscriptions USER cooperative
-[ -L "$stage" ] && [ "$(cat "$R/foreign/KEEP")" = KEEP ]
+[ -L "$stage" ] && [ "$(cat "$R/foreign/KEEP")" = KEEP ] || exit 1
 broray_ops_finish completed; pass symlink_never_followed
 
 case_dir hardlink
 stage="$R/state/operations/.launch-$$-$(nonce)"; mkdir "$stage"; echo KEEP >"$R/KEEP"
 ln "$R/KEEP" "$stage/state.json.tmp.$$"
 broray_ops_begin system subscriptions:scheduler subscriptions USER cooperative
-[ "$(find "$R/KEEP" -maxdepth 0 -type f -links 2 -print)" = "$R/KEEP" ] && [ "$(cat "$stage/state.json.tmp.$$")" = KEEP ]
+[ "$(find "$R/KEEP" -maxdepth 0 -type f -links 2 -print)" = "$R/KEEP" ] && [ "$(cat "$stage/state.json.tmp.$$")" = KEEP ] || exit 1
 broray_ops_finish completed; pass hardlink_preserved
 
 cat >"$T/response-shim.sh" <<'SHIM'
@@ -104,14 +104,14 @@ for DROP_METHOD in handoff accept-handoff; do
     broray_ops_handoff_to "$worker" "$HANDOFF_NONCE"
     [ -z "${BRORAY_BACKGROUND_OPERATION_TOKEN:-}" ]
     wait "$worker"
-    [ -f "$R/accepted" ] && [ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ]
+    [ -f "$R/accepted" ] && [ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ] || exit 1
     pass "response_${DROP_METHOD}_$DROP_KIND"
   done
 done
 case_dir response_always_lost
 DROP_METHOD=begin; DROP_KIND=always; rc=0
 broray_ops_begin system subscriptions:scheduler subscriptions USER cooperative || rc=$?
-[ "$rc" = 1 ] && [ -z "${BRORAY_BACKGROUND_OPERATION_TOKEN:-}" ]
+[ "$rc" = 1 ] && [ -z "${BRORAY_BACKGROUND_OPERATION_TOKEN:-}" ] || exit 1
 for dir in "$R/state/operations"/op-*; do jq -e '.state=="starting" and .acknowledged==false' "$dir/state.json" >/dev/null; done
 pass all_responses_lost_never_opens_work_gate
 # The only remaining fence was never acknowledged; its caller is this test.

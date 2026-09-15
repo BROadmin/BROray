@@ -4,9 +4,9 @@ set -eu
 umask 077
 T=/opt/tmp/broray-311-auto-jobs-20260915
 RAM=/tmp/broray-311-auto-jobs-20260915
-[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ]
+[ "$(readlink -f "$T")" = "$T" ] && [ ! -L "$T" ] || exit 1
 [ "$(cat "$T/TEST-OWNER")" = BRORAY311-AUTO-JOBS-20260915 ]
-[ ! -e "$RAM" ] && [ ! -L "$RAM" ]
+[ ! -e "$RAM" ] && [ ! -L "$RAM" ] || exit 1
 mkdir -m 700 "$RAM"; echo BRORAY311-AUTO-JOBS-20260915 >"$RAM/TEST-OWNER"
 PATH="$T/bin:/opt/bin:/opt/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH LD_LIBRARY_PATH="$T/lib:/opt/lib"
@@ -72,7 +72,7 @@ old_quality() {
   cp "$QUALITY" "$R/before.json"
 }
 terminal() {
-  [ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ]
+  [ ! -e "$R/global.lock" ] && [ ! -L "$R/global.lock" ] || exit 1
   for file in "$R/state/operations/"*/state.json; do jq -e --arg state "$1" '.state==$state' "$file" >/dev/null; done
   for file in "$R/state/operations/"*/supervisors.json; do [ ! -e "$file" ] || jq -e '.supervisors==[]' "$file" >/dev/null; done
 }
