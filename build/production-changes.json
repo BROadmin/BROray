@@ -37,6 +37,7 @@
     "init/S23broray-monitor",
     "app/bin/broray-connection-monitor",
     "init/S24broray",
-    "app/bin/broray-home-snapshotd"
+    "app/bin/broray-home-snapshotd",
+    "app/web-new/assets/js/subscriptions.js"
   ]
 }

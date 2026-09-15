@@ -184,7 +184,8 @@
         }
         if (result.errorCode) {
             return "Код: " + escapeHtml(result.errorCode) +
-                " · длительность: " + escapeHtml(result.durationMs || 0) + " мс";
+                (typeof result.durationMs === "number" && Number.isFinite(result.durationMs) && result.durationMs >= 0
+                    ? " · длительность: " + escapeHtml(result.durationMs) + " мс" : "");
         }
         return [
             "получено " + (result.received || 0),

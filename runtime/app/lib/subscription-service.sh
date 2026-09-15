@@ -328,7 +328,30 @@ broray_subscription_mask_url()
 
 broray_subscription_ip_is_public()
 {
-    public_ip="$1"
+    public_ip="$(printf '%s' "$1" | tr 'A-F' 'a-f')"
+    # curl --resolve needs a literal address, never nslookup's reverse name.
+    # Reject ambiguous IPv4 forms and non-global/mapped IPv6 addresses.
+    printf '%s\n' "$public_ip" | awk '
+      /:/ {
+        if ($0 ~ /[^0-9a-f:]/ || $0 ~ /:::/) exit 1
+        text=$0; compressed=sub(/::/, "@", text)
+        if (text ~ /::/ || $0 ~ /^:[^:]/ || $0 ~ /[^:]:$/) exit 1
+        n=split($0,a,":"); groups=0
+        for (i=1;i<=n;i++) {
+          if (length(a[i])>4) exit 1
+          if (a[i]!="") groups++
+        }
+        if ((compressed && groups>=8) || (!compressed && groups!=8)) exit 1
+        if (length(a[1])!=4 || a[1]!~/^[23]/) exit 1
+        sub(/^0+/, "", a[2])
+        if (a[1]=="2001" && a[2]=="db8") exit 1
+        exit 0
+      }
+      {
+        if (split($0,a,".")!=4) exit 1
+        for (i=1;i<=4;i++)
+          if (a[i]!~/^[0-9]+$/ || a[i]>255 || (length(a[i])>1 && a[i]~/^0/)) exit 1
+      }' || return 1
     case "$public_ip" in
         ''|0.*|10.*|127.*|169.254.*|192.168.*|224.*|225.*|226.*|227.*|228.*|229.*|230.*|231.*|232.*|233.*|234.*|235.*|236.*|237.*|238.*|239.*|24[0-9].*|25[0-9].*)
             return 1
@@ -355,6 +378,17 @@ broray_subscription_ip_is_public()
             ;;
     esac
     return 0
+}
+
+broray_subscription_nslookup_addresses()
+{
+    # BusyBox prints "Address 1: IP reverse.name"; other variants use
+    # "Address: IP#53". Only fields after Name belong to the answer.
+    awk '
+      /^Name:/ {answer=1; next}
+      answer && /^Address [0-9]+:/ {print $3; next}
+      answer && /^Address:/ {print $2}
+    ' | sed 's/#.*//' | sort -u
 }
 
 broray_subscription_parse_url()
@@ -500,13 +534,7 @@ broray_subscription_resolve_public_ip()
             sort -u > "$resolve_file"
     elif command -v nslookup >/dev/null 2>&1; then
         nslookup "$resolve_host" 2>/dev/null |
-            awk '
-                /^Name:/ {answer=1; next}
-                answer && /^Address [0-9]*:/ {print $NF}
-                answer && /^Address:/ {print $2}
-            ' |
-            sed 's/#.*//' |
-            sort -u > "$resolve_file"
+            broray_subscription_nslookup_addresses > "$resolve_file"
     else
         rm -f "$resolve_file"
         broray_subscription_set_error \
@@ -1049,6 +1077,8 @@ broray_subscription_effective_status()
     local effective_id effective_state
     BRORAY_SUB_EFFECTIVE_STATUS="$(jq -r '.lastUpdateStatus // "never"' "$1")"
     BRORAY_SUB_EFFECTIVE_ERROR=""
+    BRORAY_SUB_EFFECTIVE_CODE=""
+    BRORAY_SUB_EFFECTIVE_FINISHED=""
     [ "$BRORAY_SUB_EFFECTIVE_STATUS" = running ] || return 0
     effective_id="$(jq -r '.backgroundOperationId // empty' "$1")"
     case "$effective_id" in op-*) ;; *) return 0 ;; esac
@@ -1060,6 +1090,12 @@ broray_subscription_effective_status()
       (.state=="aborted" or .state=="failed" or .state=="recovered" or .state=="completed")' "$effective_state" >/dev/null; then
         BRORAY_SUB_EFFECTIVE_STATUS=error
         BRORAY_SUB_EFFECTIVE_ERROR="Обновление прервано. Сохранены последние доступные данные подписки."
+        BRORAY_SUB_EFFECTIVE_CODE=OPERATION_INTERRUPTED
+        BRORAY_SUB_EFFECTIVE_FINISHED="$(jq -r '.finishedAt // empty' "$effective_state")"
+        if jq -e '.state=="aborted" and .errorCode=="CANCELLED"' "$effective_state" >/dev/null; then
+            BRORAY_SUB_EFFECTIVE_CODE=CANCELLED
+            BRORAY_SUB_EFFECTIVE_ERROR="Обновление остановлено пользователем. Сохранены последние доступные данные подписки."
+        fi
     fi
 }
 
@@ -1073,11 +1109,16 @@ broray_subscription_public_file()
     broray_subscription_effective_status "$public_file"
     jq \
         --arg effectiveStatus "$BRORAY_SUB_EFFECTIVE_STATUS" --arg effectiveError "$BRORAY_SUB_EFFECTIVE_ERROR" \
+        --arg effectiveCode "$BRORAY_SUB_EFFECTIVE_CODE" --arg effectiveFinished "$BRORAY_SUB_EFFECTIVE_FINISHED" \
         --arg displayUrl "$public_display_url" \
         --argjson serversCount "$public_count" \
         --argjson includeUrl "$public_include_url" '
         .lastUpdateStatus=$effectiveStatus |
-        (if $effectiveError!="" then .lastError=$effectiveError else . end) |
+        (if $effectiveError!="" then
+            .lastError=$effectiveError |
+            .lastUpdateResult={errorCode:$effectiveCode,durationMs:null,warnings:[]} |
+            (if $effectiveFinished!="" then .lastUpdatedAt=$effectiveFinished else . end)
+         else . end) |
         . + {
             displayUrl: $displayUrl,
             serversCount: $serversCount
@@ -1109,6 +1150,7 @@ broray_subscription_recover_stale()
           (.state=="completed" or .state=="failed" or .state=="aborted" or .state=="recovered")' "$recover_state" >/dev/null || continue
         recover_now_epoch="$(broray_subscription_now_epoch)"
         recover_now="$(broray_subscription_now_iso)"
+        broray_subscription_effective_status "$recover_file"
         recover_temp="$BRORAY_SUB_TMP/subscription-recover.$$.json"
         recover_enabled="$(jq -r '.enabled' "$recover_file")"
         recover_auto="$(jq -r '.autoUpdateEnabled' "$recover_file")"
@@ -1118,13 +1160,16 @@ broray_subscription_recover_stale()
         jq \
             --arg now "$recover_now" \
             --argjson epoch "$recover_now_epoch" \
-            --arg error "Предыдущее обновление было прервано перезапуском процесса." \
+            --arg error "$BRORAY_SUB_EFFECTIVE_ERROR" \
+            --arg code "$BRORAY_SUB_EFFECTIVE_CODE" \
+            --arg finished "$BRORAY_SUB_EFFECTIVE_FINISHED" \
             --arg nextAt "$BRORAY_SUB_NEXT_AT" \
             --argjson nextEpoch "$BRORAY_SUB_NEXT_EPOCH" '
             .lastUpdateStatus = "error" |
-            .lastUpdatedAt = $now |
+            .lastUpdatedAt = (if $finished!="" then $finished else $now end) |
             .lastUpdatedEpoch = $epoch |
             .lastError = $error |
+            .lastUpdateResult = {errorCode:$code,durationMs:null,warnings:[]} |
             .nextUpdateAt = (if $nextAt == "" then null else $nextAt end) |
             .nextUpdateEpoch = (if $nextEpoch == 0 then null else $nextEpoch end) |
             .updatedAt = $now
