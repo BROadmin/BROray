@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "telegram",
+  "name": "Telegram",
+  "bundleType": "extended",
+  "source": {
+    "provider": "github",
+    "repository": "RockBlack-VPN/ip-address",
+    "branch": "main",
+    "directory": "Global/Telegram",
+    "files": [
+      {
+        "name": "telegram.bat",
+        "type": "windows-route-bat",
+        "required": true,
+        "enabled": true
+      },
+      {
+        "name": "telegram_domain",
+        "type": "domain-list",
+        "required": false,
+        "enabled": false
+      }
+    ],
+    "discovery": {
+      "mode": "all-bat",
+      "recursive": false
+    }
+  },
+  "targetInterface": "Proxy0",
+  "exportComment": "BROray",
+  "limits": {
+    "maxSourceBytes": 1048576,
+    "maxRoutes": 2048
+  }
+}

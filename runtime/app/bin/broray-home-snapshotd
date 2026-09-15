@@ -1,0 +1,107 @@
+#!/opt/bin/ash
+
+ROOT="${BRORAY_ROOT:-/opt/broray}"
+REFRESH="${BRORAY_HOME_SNAPSHOT_REFRESH:-$ROOT/current/app/bin/broray-home-snapshot}"
+INTERVAL="${BRORAY_HOME_SNAPSHOT_INTERVAL:-30}"
+LOG="${BRORAY_HOME_SNAPSHOT_LOG:-$ROOT/logs/home-snapshots.log}"
+LIGHTTPD_GUARD="${BRORAY_LIGHTTPD_GUARD:-$ROOT/current/app/lib/lighttpd-guard.sh}"
+MONITOR_SERVICE="${BRORAY_MONITOR_SERVICE:-/opt/etc/init.d/S23broray-monitor}"
+MONITOR_RECOVERY_MIN="${BRORAY_MONITOR_RECOVERY_MIN_SECONDS:-30}"
+MONITOR_RECOVERY_MAX="${BRORAY_MONITOR_RECOVERY_MAX_SECONDS:-300}"
+PATH="$ROOT/bin:/opt/sbin:/opt/bin:/sbin:/bin:$PATH"
+export ROOT PATH
+
+case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=30 ;; esac
+[ "$INTERVAL" -ge 15 ] && [ "$INTERVAL" -le 300 ] || INTERVAL=30
+case "$MONITOR_RECOVERY_MIN" in ''|*[!0-9]*) MONITOR_RECOVERY_MIN=30 ;; esac
+case "$MONITOR_RECOVERY_MAX" in ''|*[!0-9]*) MONITOR_RECOVERY_MAX=300 ;; esac
+[ "$MONITOR_RECOVERY_MIN" -ge 15 ] || MONITOR_RECOVERY_MIN=30
+[ "$MONITOR_RECOVERY_MAX" -ge "$MONITOR_RECOVERY_MIN" ] || MONITOR_RECOVERY_MAX=300
+[ -x "$REFRESH" ] || exit 1
+mkdir -p "${LOG%/*}" || exit 1
+
+snapshot_daemon_stop=false
+snapshot_child_pid=''
+monitor_recovery_delay="$MONITOR_RECOVERY_MIN"
+monitor_recovery_next=0
+snapshot_daemon_request_stop()
+{
+    snapshot_daemon_stop=true
+    case "$snapshot_child_pid" in ''|*[!0-9]*) ;; *) kill "$snapshot_child_pid" 2>/dev/null || true ;; esac
+}
+trap snapshot_daemon_request_stop HUP INT TERM
+
+monitor_recover_if_needed()
+{
+    monitor_now="$(date '+%s')"
+    case "$monitor_now" in ''|*[!0-9]*) return 0 ;; esac
+
+    if [ -x "$MONITOR_SERVICE" ] && "$MONITOR_SERVICE" check >/dev/null 2>&1; then
+        monitor_recovery_delay="$MONITOR_RECOVERY_MIN"
+        monitor_recovery_next=0
+        return 0
+    fi
+
+    if [ "$monitor_recovery_next" -gt "$monitor_now" ]; then
+        return 0
+    fi
+
+    printf '%s MONITOR_AUTO_RECOVERY=ATTEMPT BACKOFF=%s\n' \
+        "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$monitor_recovery_delay" >>"$LOG"
+    if [ -x "$MONITOR_SERVICE" ] &&
+       "$MONITOR_SERVICE" start >>"$LOG" 2>&1 &&
+       "$MONITOR_SERVICE" check >/dev/null 2>&1
+    then
+        printf '%s MONITOR_AUTO_RECOVERY=PASS\n' \
+            "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >>"$LOG"
+        monitor_recovery_delay="$MONITOR_RECOVERY_MIN"
+        monitor_recovery_next=0
+        return 0
+    fi
+
+    monitor_recovery_next=$((monitor_now + monitor_recovery_delay))
+    printf '%s MONITOR_AUTO_RECOVERY=DEFER NEXT_EPOCH=%s BACKOFF=%s\n' \
+        "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$monitor_recovery_next" "$monitor_recovery_delay" >>"$LOG"
+    if [ "$monitor_recovery_delay" -lt "$MONITOR_RECOVERY_MAX" ]; then
+        monitor_recovery_delay=$((monitor_recovery_delay * 2))
+        [ "$monitor_recovery_delay" -le "$MONITOR_RECOVERY_MAX" ] ||
+            monitor_recovery_delay="$MONITOR_RECOVERY_MAX"
+    fi
+}
+
+while [ "$snapshot_daemon_stop" = false ]; do
+    snapshot_cycle_started="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    snapshot_cycle_failed=false
+    monitor_recover_if_needed
+    if [ -x "$LIGHTTPD_GUARD" ] && "$LIGHTTPD_GUARD" status >>"$LOG" 2>&1; then
+        printf '%s LIGHTTPD_PORT_GUARD=PASS\n' "$snapshot_cycle_started" >>"$LOG"
+    else
+        printf '%s LIGHTTPD_PORT_GUARD=FAIL\n' "$snapshot_cycle_started" >>"$LOG"
+        snapshot_cycle_failed=true
+    fi
+    for snapshot_module in xray keenetic servers subscriptions dns routes broray; do
+        [ "$snapshot_daemon_stop" = false ] || break
+        "$REFRESH" refresh "$snapshot_module" >>"$LOG" 2>&1 &
+        snapshot_child_pid=$!
+        if wait "$snapshot_child_pid"; then
+            printf '%s HOME_SNAPSHOT_REFRESH=%s:PASS\n' "$snapshot_cycle_started" "$snapshot_module" >>"$LOG"
+        else
+            printf '%s HOME_SNAPSHOT_REFRESH=%s:FAIL\n' "$snapshot_cycle_started" "$snapshot_module" >>"$LOG"
+            snapshot_cycle_failed=true
+        fi
+        snapshot_child_pid=''
+    done
+    if [ "$snapshot_cycle_failed" = false ] && [ "$snapshot_daemon_stop" = false ]; then
+        printf '%s HOME_SNAPSHOT_CYCLE=PASS\n' "$snapshot_cycle_started" >>"$LOG"
+    else
+        printf '%s HOME_SNAPSHOT_CYCLE=PARTIAL\n' "$snapshot_cycle_started" >>"$LOG"
+    fi
+    [ "$snapshot_daemon_stop" = false ] || break
+    sleep "$INTERVAL" &
+    snapshot_sleep_pid=$!
+    snapshot_child_pid="$snapshot_sleep_pid"
+    wait "$snapshot_sleep_pid" 2>/dev/null || true
+    snapshot_child_pid=''
+done
+
+exit 0

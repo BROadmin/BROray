@@ -1,0 +1,120 @@
+{
+  "candidateId": "3.0.0-r15c16",
+  "cgiBodyContract": "direct-fd0/1",
+  "cgiBodySource": "fd0-direct-length-checked",
+  "contractVersion": "1.0",
+  "dotTopLevel": true,
+  "forbiddenBodySources": [
+    "pseudo-stdin-path"
+  ],
+  "menuOrder": [
+    "home",
+    "servers",
+    "subscriptions",
+    "dns",
+    "routes",
+    "keenetic",
+    "xray",
+    "broray"
+  ],
+  "pages": {
+    "broray": [
+      "status",
+      "update-check",
+      "update",
+      "reinstall",
+      "cleanup-plan",
+      "cleanup",
+      "uninstall-plan"
+    ],
+    "dns": [
+      "status",
+      "test",
+      "apply",
+      "clear"
+    ],
+    "home": [
+      "summary",
+      "truthful-health",
+      "navigation"
+    ],
+    "keenetic": [
+      "status",
+      "check",
+      "repair"
+    ],
+    "routes": [
+      "summary",
+      "check",
+      "download",
+      "verify",
+      "export",
+      "stop",
+      "resume",
+      "delete",
+      "custom-import"
+    ],
+    "servers": [
+      "import-vless",
+      "import-vmess",
+      "import-trojan",
+      "import-hysteria2",
+      "details",
+      "check",
+      "activate",
+      "deactivate",
+      "delete",
+      "auto-switch"
+    ],
+    "subscriptions": [
+      "create",
+      "details",
+      "update",
+      "refresh",
+      "servers",
+      "delete"
+    ],
+    "xray": [
+      "status",
+      "start",
+      "stop",
+      "restart",
+      "update-check",
+      "update",
+      "reinstall"
+    ]
+  },
+  "productionDevStdinOccurrences": 0,
+  "requiredEvidenceFields": [
+    "page",
+    "action",
+    "method",
+    "endpoint",
+    "requestFixture",
+    "httpStatus",
+    "stableResponseCode",
+    "uiResult",
+    "stateBefore",
+    "stateAfter",
+    "mutationClass",
+    "rollbackResult",
+    "evidencePath"
+  ],
+  "routesSubmenu": [
+    "routes",
+    "routes-custom",
+    "routes-import"
+  ],
+  "schemaVersion": 1,
+  "topLevelNavigation": [
+    "home",
+    "servers",
+    "subscriptions",
+    "dns",
+    "routes",
+    "keenetic",
+    "xray",
+    "broray"
+  ],
+  "webUIBuild": "WebUI-3.0.0-r15c16"
+}

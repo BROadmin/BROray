@@ -1,0 +1,22 @@
+{
+  "appVersion": "3.1.0",
+  "architecture": "aarch64-3.10",
+  "builtAt": "2026-09-10T09:25:00Z",
+  "candidateId": "3.1.0-r09c02",
+  "layout": "broray-compact-app-slot/1",
+  "lifecycleContract": "compact-app-rename/1",
+  "packageVersion": "3.0.0-r14",
+  "releaseId": "3.1.0-r09",
+  "schemaVersion": 1,
+  "sharedRuntime": {
+    "xray": {
+      "bundled": false,
+      "mode": "preserve-installed",
+      "path": "/opt/broray/runtime/xray"
+    }
+  },
+  "stable": false,
+  "updaterEngine": "broray-updater/5",
+  "userDataLayout": "shared-outside-slot/1",
+  "webUIBuild": "WebUI-3.1.0-r09c02"
+}

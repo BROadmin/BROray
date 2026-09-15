@@ -1,0 +1,307 @@
+{
+  "schemaVersion": 3,
+  "contract": "keenetic-entware-capabilities/1",
+  "legacyIdentifier": false,
+  "activeMeaning": "r14c01-clean-bootstrap-and-updater-v5-capability-gates",
+  "requirementsContract": "1.7.2",
+  "lifecycleContract": "compact-app-rename/1",
+  "capabilityContract": "keenetic-entware-capabilities/1",
+  "spaceContract": "broray-space/2",
+  "candidateId": "3.0.0-r15c16",
+  "previousIpkRequired": false,
+  "historicalTransactionStateRequired": false,
+  "statelessBootstrap": false,
+  "selection": "clean-bootstrap-functional-gates-plus-keenetic-aarch64",
+  "target": {
+    "productFamily": "Keenetic",
+    "hwIdPolicy": "required-nonempty-diagnostic-only-no-model-branch",
+    "keeneticArchitecture": "aarch64",
+    "entwareArchitecture": "aarch64-3.10",
+    "keeneticOsTitle": "required-nonempty-diagnostic-only-no-version-branch",
+    "requiredComponentTokens": [
+      "proxy",
+      "opkg",
+      "ndns"
+    ],
+    "requiredReadOnlyApis": [
+      "show version",
+      "show version | grep components",
+      "show ndns",
+      "show ip http proxy",
+      "show running-config"
+    ],
+    "configuredOpkgDiskCount": 1
+  },
+  "executionEnvironment": {
+    "rootRequired": true,
+    "ashPath": "/opt/bin/ash",
+    "canonicalPath": "/opt/bin:/opt/sbin:/opt/usr/bin:/opt/usr/sbin:/bin:/sbin:/usr/bin:/usr/sbin",
+    "locale": "C",
+    "postinstRequiredCommandNames": [
+      "awk",
+      "cat",
+      "chmod",
+      "cmp",
+      "cp",
+      "curl",
+      "date",
+      "find",
+      "gzip",
+      "id",
+      "ip",
+      "jq",
+      "ln",
+      "mkdir",
+      "mv",
+      "ndmc",
+      "opkg",
+      "readlink",
+      "rm",
+      "rmdir",
+      "sed",
+      "sha256sum",
+      "sort",
+      "sync",
+      "tar",
+      "tr",
+      "wc"
+    ]
+  },
+  "cleanBootstrap": {
+    "preinstPersistentMutation": "none",
+    "preinstGates": [
+      "keenetic-aarch64-and-entware-architecture",
+      "exact-component-tokens-and-read-only-apis",
+      "exactly-one-configured-opkg-disk",
+      "clean-application-target-without-opkg-registration-introspection",
+      "fixed-free-space-minima-and-private-inode-allocation-probe"
+    ],
+    "routerInstallerPreflightGates": [
+      "absent-or-exact-physical-not-installed-tombstone-broray-opkg-status-before-feed-mutation",
+      "absent-broray-opkg-info-before-feed-mutation",
+      "clean-application-target-before-feed-mutation",
+      "absent-bootstrap-recovery-authorization-before-feed-mutation"
+    ],
+    "acceptedPhysicalOpkgTombstone": {
+      "maximumRawBrorayStanzas": 1,
+      "package": "broray",
+      "version": "3.0.0-r14",
+      "architecture": "aarch64-3.10",
+      "status": "install prefer,user not-installed",
+      "uniqueCoreFields": [
+        "Package",
+        "Version",
+        "Architecture",
+        "Status"
+      ],
+      "opkgStatusExitCode": 0,
+      "opkgStatusStdout": "empty",
+      "opkgStatusStderr": "empty",
+      "installedInfoObjectsRequiredAbsent": true,
+      "payloadAndRecoveryRequiredAbsent": true
+    },
+    "downloads": {
+      "scheme": "https",
+      "objects": [
+        "versioned release index",
+        "application bundle",
+        "updater-v5 platform bundle",
+        "Xray 26.7.28 aarch64-3.10 gzip"
+      ],
+      "exactSizeAndSha256Required": true,
+      "httpsRedirectDowngradeAllowed": false,
+      "archiveSafetyAndCompleteInternalManifestsRequired": true,
+      "allVerifiedBeforePersistentMutation": true
+    },
+    "cleanBoundaryRecheckedAfterDownload": true,
+    "reprovedImmediatelyBeforeFirstPersistentWrite": [
+      "nonempty Keenetic hw_id diagnostic evidence",
+      "aarch64",
+      "nonempty KeeneticOS title",
+      "exact proxy,opkg,ndns component tokens",
+      "all required read-only APIs",
+      "exactly one configured opkg disk",
+      "absence of foreign ip http proxy broray",
+      "unique LAN address from Keenetic configuration and live interfaces"
+    ],
+    "notReprovedImmediatelyBeforeFirstPersistentWrite": [
+      "free-space minima",
+      "Entware print-architecture"
+    ],
+    "installedBindings": {
+      "currentSlotManifestExact": true,
+      "sharedXrayPath": "/opt/broray/runtime/xray",
+      "sharedXrayVersion": "26.7.28",
+      "sharedXraySha256": "4b8af237444801bf17b3dc10a1c5c24581fbe3d433eba3d78c6c3a0da1df56fc",
+      "sharedXrayBytes": 35389566,
+      "updaterEngine": "broray-updater/5",
+      "privateWebExecutableRequired": true
+    },
+    "commitPostconditions": [
+      "updater-v5-running",
+      "WebUI-running",
+      "Xray-config-valid-and-local-SOCKS-active",
+      "owned-ProxyN-exact-protocol-upstream-and-link",
+      "scoped-owned-KeenDNS-HTTP-proxy",
+      "local-WebUI-root-HTTP-200",
+      "local-session-endpoint-HTTP-401",
+      "current-slot-and-complete-manifest-exact",
+      "shared-Xray-and-updater-byte-identities-exact"
+    ],
+    "preCommitFailureHandling": "best-effort-remove-bootstrap-owned-files-and-owned-Keenetic-objects",
+    "failedBootstrapRecovery": {
+      "entryPoint": "immutable-router-installer-only",
+      "exactRegistrationAndHookBytesRequired": true,
+      "cleanPayloadBoundaryRequired": true,
+      "authorizationOwner": "BROray-R14C01-Router-Installer",
+      "authorizationMode": "failed-bootstrap-recovery",
+      "authorizationOperationIdAndAgeBound": true,
+      "markerSelectedByExactInstalledHookSet": true,
+      "currentHookMarker": {
+        "owner": "BROray-R14C01-Router-Installer",
+        "candidateId": "3.0.0-r15c16"
+      },
+      "exactPinnedPredecessorHookMarker": {
+        "owner": "BROray-R13C14-Router-Installer",
+        "candidateId": "3.0.0-r14-candidate-14",
+        "hookSha256": {
+          "control": "98a0189714928181782ecf7d96e0c97fa0a81bf83f50b7ec7ebf73976eba639b",
+          "preinst": "3fe5d20e6766bf738d86dd05a8520cc31717510885a0aaef0eb0ad7bc71917ab",
+          "postinst": "2bd758ef4514a941f0f1a230ab23bfc7ae10195c7256458d30085a224040f402",
+          "prerm": "a5e72fdc24bd887a44360d76b71019981aad76f52bdf84ba16783a0a5262b368",
+          "postrm": "aab6d97f2cc463852a297a2e0314eeb037bbe46cc9563d42e48ff4061225530e"
+        }
+      },
+      "directOpkgRemovalAllowed": false,
+      "retryRequiresAbsentStatusInfoPayloadAndRecoveryMarker": true
+    }
+  },
+  "applicationLifecycle": {
+    "engine": "broray-updater/5",
+    "operations": [
+      "update",
+      "reinstall"
+    ],
+    "opkgMutation": false,
+    "sharedXrayPolicy": "preserve-single-installed-runtime",
+    "maximumLiveAppSlots": 2,
+    "switch": "two-same-filesystem-renames-with-durable-phase-marker",
+    "serviceSet": [
+      "S23broray-monitor",
+      "S24broray",
+      "S25broray-web",
+      "S27broray-auto-switch",
+      "S28broray-subscriptions"
+    ],
+    "servicePolicy": "capture-running-set-stop-running-set-restore-running-set",
+    "postSwitchHealth": [
+      "slot-tree-and-complete-SHA256SUMS",
+      "app-slot-metrics",
+      "Xray-config",
+      "captured-running-services",
+      "factual-broray-system-JSON-identity-and-health"
+    ],
+    "recovery": "complete-or-rollback-journaled-rename; ambiguous-layout-fails-closed"
+  },
+  "serialization": {
+    "updaterRequestFence": "/opt/var/lib/broray-updater/request.lock",
+    "updaterDaemonFence": "/opt/var/lib/broray-updater/daemon.lock",
+    "applicationOperationFence": "/opt/var/lock/broray/global-operation.lock",
+    "legacyApplicationOperationFence": "/tmp/broray-global-operation.lock",
+    "routesPendingGate": "/opt/broray/routes/operations/*.json with running-or-resumable state",
+    "updaterRequestPublication": "mkdir-request-lock-then-atomic-operation-id-pid-owner-start-request-and-queue-files",
+    "updaterDaemonIdentity": "pid-kill0-and-broray-updater-daemon-cmdline-token-when-proc-readable",
+    "nativeOpkgLockClaimedByUpdater": false,
+    "nativeOpkgLockEvidenceProduced": false,
+    "crossFenceAdmission": {
+      "applicationSide": "application-coordinators-recheck-updater-request-fence-after-publishing-global-fence",
+      "updaterChecks": [
+        "before-request-lock-publication",
+        "after-request-lock-owner-publication",
+        "daemon-after-request-owner-handoff-before-download",
+        "daemon-after-download-before-first-release-tree-mutation",
+        "daemon-after-staging-before-service-stop-state-seed-or-slot-switch"
+      ],
+      "presentOrAmbiguousForeignFence": "fail-closed",
+      "foreignFenceModifiedOrDeletedByUpdater": false,
+      "terminalError": "GLOBAL_OPERATION_CONFLICT",
+      "activeSlotMutationOnConflict": false
+    }
+  },
+  "keeneticOwnership": {
+    "lanSelection": "unique-intersection-of-one-configured-security-level-private-interface-and-live-RFC1918-bindings-with-stable-diagnostics",
+    "managedProxyInterface": "free-or-exactly-owned-ProxyN-with-receipt",
+    "foreignProxyInterfaces": "never-overwrite-or-delete",
+    "httpProxy": "exact-scoped-owned-ip-http-proxy-broray-with-receipt",
+    "dotDoh": "receipt-scoped-transactional-apply-delete-and-signal-rollback",
+    "routes": "owned-route-receipts-only",
+    "webProcess": "private-broray-lighttpd-executable-identity"
+  },
+  "uninstall": {
+    "entryPoint": "authenticated-WebUI-exact-confirmation",
+    "opkgAuthorization": "exact-operation-id-and-normal-or-full-mode-expiring-within-300-seconds",
+    "postrmRole": "authorization-and-stopped-services-preflight-only",
+    "payloadFinalizer": "copied-WebUI-worker-after-zero-opkg-exit-and-absent-status-info",
+    "normalPreservation": "verified-protected-user-data-archive-with-SHA256-and-LATEST",
+    "fullPreservation": "none",
+    "cooperativeSignalPolicy": "rollback-before-OPKG-commit; ignore-HUP-INT-TERM-during-OPKG-commit-and-payload-finalization",
+    "physicalInterruptionCaveat": "SIGKILL-or-power-loss-during-commit-finalization-requires-physical-validation-and-recovery-observation"
+  },
+  "evidence": {
+    "carrierValidation": [
+      "final-carrier-member-hashes",
+      "final-extracted-app-and-platform-manifests",
+      "BusyBox-ash-syntax",
+      "deterministic-updater-update-reinstall-and-rollback-fixtures",
+      "Keenetic-owner-and-private-process-fixtures",
+      "DoT-signal-rollback-fixture",
+      "normal-full-signal-uninstall-fixtures"
+    ],
+    "cleanInstall": "OPKG-hook-exit-status-and-factual-postcondition-stdout; no-durable-per-probe-envelope",
+    "updaterDurable": [
+      "/opt/var/lib/broray/operations/<operation-id>/state.json",
+      "/opt/var/lib/broray/operations/<operation-id>/log.txt",
+      "/opt/var/lib/broray/last-operation",
+      "/opt/var/lib/broray-updater/slots/<slot>.json",
+      "/opt/var/lib/broray-updater/updater.log"
+    ],
+    "notProducedByActiveLifecycle": [
+      "native-OPKG-owner-FD-or-contention-proof",
+      "per-probe-argv-and-stdout-stderr-hash-envelope",
+      "combined-opt-tmp-mount-graph-and-phase-space-envelope",
+      "legacy-full-IPK-snapshot-transaction-evidence"
+    ]
+  },
+  "labValidation": {
+    "result": "LAB_EXERCISED",
+    "authorizesProduction": false,
+    "physicalExecution": "NOT_RUN",
+    "testsFinalExtractedCarrierBytes": true
+  },
+  "physicalPromotion": {
+    "separateEvidenceRequired": true,
+    "exactCandidateSha256Required": true,
+    "requiredBeforeStable": true,
+    "candidateStableFlag": false,
+    "gates": [
+      "clean-install-on-compatible-Keenetic-aarch64-with-hook-duration-under-24-seconds",
+      "direct-LAN-WebUI-and-session-boundary",
+      "KeenDNS-TLS-and-session-enforcement",
+      "owned-ProxyN-real-SOCKS-traffic",
+      "live-update-and-same-version-reinstall-with-service-state-and-rollback",
+      "normal-uninstall-clean-reinstall-and-preserved-user-data-restore",
+      "full-uninstall-and-clean-reinstall",
+      "reboot",
+      "safe-Entware-unmount",
+      "coexistence-with-Entware-S80lighttpd",
+      "power-loss-or-SIGKILL-observation-at-uninstall-commit-boundary"
+    ]
+  },
+  "retiredClaims": [
+    "universal-full-IPK-update-reinstall-restore-transaction-is-active",
+    "native-OPKG-FIFO-owner-lock-is-held-by-the-active-updater",
+    "all-probes-have-a-durable-argv-and-output-hash-envelope",
+    "combined-opt-tmp-mount-graph-is-the-active-space-planner",
+    "lab-validation-alone-authorizes-stable-production-promotion"
+  ]
+}

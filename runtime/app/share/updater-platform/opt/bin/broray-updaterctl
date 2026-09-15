@@ -1,0 +1,4 @@
+#!/opt/bin/ash
+set -u
+
+exec /opt/bin/ash /opt/libexec/broray-updater/broray-updater.sh "$@"

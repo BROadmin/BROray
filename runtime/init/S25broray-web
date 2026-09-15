@@ -1,0 +1,319 @@
+#!/opt/bin/ash
+
+ENABLED=yes
+# This service intentionally does not set PROCS=lighttpd. Entware's generic
+# S80lighttpd uses basename-wide pidof/killall; BROray runs a private renamed
+# executable and owns only the exact exe+argv identity recorded by its PID file.
+DESC="BROray WebUI"
+
+BASE="${BRORAY_WEB_BASE:-/opt/broray}"
+CONF="${BRORAY_WEB_CONF:-$BASE/config/lighttpd.conf}"
+PIDFILE="${BRORAY_WEB_PIDFILE:-$BASE/run/lighttpd.pid}"
+LOG="${BRORAY_WEB_LOG:-$BASE/logs/lighttpd-error.log}"
+NETWORK="${BRORAY_WEB_NETWORK:-$BASE/lib/network.sh}"
+SOURCE_BINARY="${BRORAY_WEB_SOURCE_BINARY:-/opt/sbin/lighttpd}"
+RUNTIME_BINARY="${BRORAY_WEB_RUNTIME_BINARY:-$BASE/runtime/broray-lighttpd}"
+PROC_ROOT="${BRORAY_WEB_PROC_ROOT:-/proc}"
+CURL_BINARY="${BRORAY_WEB_CURL_BINARY:-/opt/bin/curl}"
+NATIVE_AUTH_LIBRARY="${BRORAY_WEB_NATIVE_AUTH_LIBRARY:-$BASE/lib/web-auth-native.sh}"
+
+broray_web_pid_read()
+{
+    [ -f "$PIDFILE" ] && [ ! -L "$PIDFILE" ] || return 1
+    awk '
+        NR == 1 && $0 ~ /^[0-9]+$/ && $0 > 1 {pid = $0; next}
+        {bad = 1}
+        END {
+            if (!bad && pid != "") print pid
+            else exit 1
+        }
+    ' "$PIDFILE"
+}
+
+broray_web_lan_ip()
+{
+    local value
+
+    value="$(sed -n '1p' "$BASE/run/lan-ip" 2>/dev/null || true)"
+    printf '%s\n' "$value" | awk -F. '
+        NF != 4 {exit 1}
+        {
+            for (i = 1; i <= 4; i++) {
+                if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) exit 1
+            }
+        }
+    ' || return 1
+    printf '%s\n' "$value"
+}
+
+broray_web_process_signature_once()
+{
+    local pid proc executable expected rc
+
+    pid="$1"
+    case "$pid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$pid" -gt 1 ] || return 1
+    proc="$PROC_ROOT/$pid"
+    [ -r "$proc/cmdline" ] || return 1
+
+    executable="$(readlink "$proc/exe" 2>/dev/null || true)"
+    [ "$executable" = "$RUNTIME_BINARY" ] || return 1
+
+    # Never put /proc/PID/cmdline in a shell variable: NUL is the only safe
+    # argv boundary. Compare its bytes with an exact NUL-delimited allowlist.
+    expected="$BASE/run/.lighttpd-argv.$$.${pid}"
+    umask 077
+    printf '%s\000%s\000%s\000' \
+        "$RUNTIME_BINARY" '-f' "$CONF" >"$expected" || return 1
+    cmp -s "$proc/cmdline" "$expected"
+    rc=$?
+    rm -f "$expected"
+    return "$rc"
+}
+
+broray_web_process_identity_once()
+{
+    local pid
+
+    pid="$1"
+    kill -0 "$pid" 2>/dev/null || return 1
+    broray_web_process_signature_once "$pid" || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+broray_web_process_identity_twice()
+{
+    local pid
+
+    pid="$1"
+    broray_web_process_identity_once "$pid" || return 1
+    broray_web_process_identity_once "$pid"
+}
+
+broray_web_http_healthy()
+{
+    local lan code
+
+    lan="$(broray_web_lan_ip)" || return 1
+    [ -x "$CURL_BINARY" ] || return 1
+    code="$(
+        unset http_proxy https_proxy all_proxy \
+            HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY no_proxy
+        "$CURL_BINARY" -q -sS --noproxy '*' --max-time 5 \
+            -o /dev/null -w '%{http_code}' "http://$lan:8080/"
+    )" || return 1
+    [ "$code" = 200 ]
+}
+
+broray_web_prepare_runtime_binary()
+{
+    local temporary
+
+    [ -f "$SOURCE_BINARY" ] && [ ! -L "$SOURCE_BINARY" ] &&
+    [ -x "$SOURCE_BINARY" ] || {
+        echo "Некорректный lighttpd: $SOURCE_BINARY" >&2
+        return 1
+    }
+    mkdir -p "${RUNTIME_BINARY%/*}" || return 1
+
+    if [ -e "$RUNTIME_BINARY" ] || [ -L "$RUNTIME_BINARY" ]; then
+        [ -f "$RUNTIME_BINARY" ] && [ ! -L "$RUNTIME_BINARY" ] || {
+            echo "Небезопасный runtime lighttpd: $RUNTIME_BINARY" >&2
+            return 1
+        }
+        if [ -x "$RUNTIME_BINARY" ] && cmp -s "$SOURCE_BINARY" "$RUNTIME_BINARY"; then
+            return 0
+        fi
+    fi
+
+    temporary="$RUNTIME_BINARY.new.$$"
+    cp "$SOURCE_BINARY" "$temporary" || {
+        rm -f "$temporary"
+        return 1
+    }
+    chmod 0755 "$temporary" || {
+        rm -f "$temporary"
+        return 1
+    }
+    cmp -s "$SOURCE_BINARY" "$temporary" || {
+        rm -f "$temporary"
+        return 1
+    }
+    mv -f "$temporary" "$RUNTIME_BINARY"
+}
+
+broray_web_configure_bind()
+{
+    local lan
+
+    lan="$1"
+    [ -f "$CONF" ] && [ ! -L "$CONF" ] || return 1
+    if grep -q '^server\.bind[[:space:]]*=' "$CONF"; then
+        sed -i \
+            "s|^server\.bind[[:space:]]*=.*|server.bind = \"$lan\"|" \
+            "$CONF" || return 1
+    else
+        sed -i \
+            "/^server\.port/i server.bind = \"$lan\"" \
+            "$CONF" || return 1
+    fi
+    "$RUNTIME_BINARY" -tt -f "$CONF"
+}
+
+start()
+{
+    local lan pid
+
+    [ -x "$BASE/bin/broray-runtime-prepare" ] || {
+        echo "Не найден $BASE/bin/broray-runtime-prepare" >&2
+        return 1
+    }
+    "$BASE/bin/broray-runtime-prepare" >/dev/null || {
+        echo "Не удалось подготовить runtime-состояние BROray" >&2
+        return 1
+    }
+
+    [ -f "$NETWORK" ] && [ ! -L "$NETWORK" ] || {
+        echo "Не найден $NETWORK" >&2
+        return 1
+    }
+    . "$NETWORK"
+    lan="$(broray_save_lan_ip)" || return 1
+
+    if [ -e "$PIDFILE" ] || [ -L "$PIDFILE" ]; then
+        pid="$(broray_web_pid_read 2>/dev/null || true)"
+        [ -n "$pid" ] || {
+            echo "Некорректный PID-файл BROray WebUI: $PIDFILE" >&2
+            return 1
+        }
+        if broray_web_process_identity_twice "$pid"; then
+            if broray_web_http_healthy; then
+                echo "BROray WebUI уже запущен, PID $pid"
+                return 0
+            fi
+            echo "BROray WebUI PID $pid принадлежит сервису, но HTTP health-check не прошёл." >&2
+            return 1
+        fi
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "PID-файл BROray WebUI указывает на чужой живой процесс $pid; файл не изменён." >&2
+            return 1
+        fi
+        rm -f "$PIDFILE"
+    fi
+
+    broray_web_prepare_runtime_binary || return 1
+    broray_web_configure_bind "$lan" || return 1
+    "$RUNTIME_BINARY" -f "$CONF" || return 1
+    sleep 1
+
+    status >/dev/null 2>&1 || {
+        echo "Ошибка запуска BROray WebUI" >&2
+        sed -n '1,80p' "$LOG" 2>/dev/null >&2 || true
+        return 1
+    }
+    echo "BROray WebUI запущен: http://$lan:8080/"
+}
+
+stop()
+{
+    local pid attempt
+
+    if [ -e "$BASE/run/web-new/native-auth" ] || [ -L "$BASE/run/web-new/native-auth" ]; then
+        [ -f "$NATIVE_AUTH_LIBRARY" ] && [ ! -L "$NATIVE_AUTH_LIBRARY" ] || {
+            echo "Не найден безопасный модуль остановки native-auth BROray." >&2
+            return 1
+        }
+        . "$NATIVE_AUTH_LIBRARY"
+        broray_native_auth_stop || {
+            echo "Native-auth BROray не остановлен; WebUI оставлен без изменений." >&2
+            return 1
+        }
+    fi
+
+    if [ ! -e "$PIDFILE" ] && [ ! -L "$PIDFILE" ]; then
+        echo "BROray WebUI не запущен"
+        return 0
+    fi
+    pid="$(broray_web_pid_read 2>/dev/null || true)"
+    [ -n "$pid" ] || {
+        echo "Некорректный PID-файл BROray WebUI; сигнал не отправлен." >&2
+        return 1
+    }
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$PIDFILE"
+        echo "BROray WebUI уже остановлен"
+        return 0
+    fi
+
+    # Two full exe+NUL-argv reads immediately precede the only signal. A live
+    # PID that fails either read is foreign/ambiguous and is never touched.
+    broray_web_process_identity_twice "$pid" || {
+        echo "PID $pid не подтверждён как BROray lighttpd; сигнал не отправлен." >&2
+        return 1
+    }
+    kill "$pid" 2>/dev/null || {
+        kill -0 "$pid" 2>/dev/null || {
+            rm -f "$PIDFILE"
+            return 0
+        }
+        return 1
+    }
+
+    attempt=0
+    while kill -0 "$pid" 2>/dev/null && [ "$attempt" -lt 5 ]; do
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+
+    if kill -0 "$pid" 2>/dev/null; then
+        if broray_web_process_identity_once "$pid"; then
+            echo "BROray WebUI не остановился за 5 секунд; PID-файл сохранён." >&2
+            return 1
+        fi
+        # The original process exited and the numeric PID was reused. Never
+        # send a second signal to the new identity.
+    fi
+
+    rm -f "$PIDFILE"
+    echo "BROray WebUI остановлен"
+}
+
+restart()
+{
+    stop || return 1
+    start
+}
+
+status()
+{
+    local pid lan
+
+    pid="$(broray_web_pid_read 2>/dev/null || true)"
+    [ -n "$pid" ] && broray_web_process_identity_twice "$pid" || {
+        echo "BROray WebUI не запущен или identity неоднозначна"
+        return 1
+    }
+    broray_web_http_healthy || {
+        echo "BROray WebUI process identity подтверждена, но HTTP health-check не прошёл"
+        return 1
+    }
+    lan="$(broray_web_lan_ip)" || return 1
+    echo "BROray WebUI работает"
+    echo "PID: $pid"
+    echo "Executable: $RUNTIME_BINARY"
+    echo "Адрес: http://$lan:8080/"
+}
+
+case "${1:-}" in
+    start) start ;;
+    stop) stop ;;
+    restart) restart ;;
+    status|check) status ;;
+    *)
+        echo "Использование: $0 {start|stop|restart|status|check}"
+        exit 1
+        ;;
+esac

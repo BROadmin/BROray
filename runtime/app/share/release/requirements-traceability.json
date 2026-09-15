@@ -1,0 +1,133 @@
+{
+  "activeUpdatePath": [
+    "/opt/bin/broray-updaterctl",
+    "/opt/libexec/broray-updater/broray-updater.sh",
+    "/opt/broray/current",
+    "/opt/broray/runtime/xray"
+  ],
+  "appSlotMetricContract": {
+    "directoryCount": "find APP_TREE -xdev -type d including extraction root",
+    "fileCount": "regular-file count",
+    "logicalBytes": "sum regular-file sizes",
+    "maxFileBytes": "maximum regular-file size",
+    "requiredParity": [
+      "builder",
+      "finalReleaseIndex",
+      "independentValidator",
+      "exactPackagedPostinst"
+    ],
+    "requiredResult": "PASS_4_OF_4",
+    "version": "fresh-extraction-root-inclusive/1"
+  },
+  "builtAt": "2026-08-18T00:00:00Z",
+  "candidateId": "3.0.0-r15c16",
+  "commonErrorRegisterSha256": "442947f7b2c9b8cbdaa52a7be99a45f2881b4af23e5b20fea6ae82aa3757c55d",
+  "commonRequirementIds": [
+    "R-PLAT-001",
+    "R-PLAT-002",
+    "R-PLAT-003",
+    "R-PLAT-004",
+    "R-ARCH-001",
+    "R-ARCH-002",
+    "R-ARCH-003",
+    "R-ARCH-004",
+    "R-LIFE-001",
+    "R-LIFE-002",
+    "R-LIFE-003",
+    "R-LIFE-004",
+    "R-LIFE-005",
+    "R-KN-001",
+    "R-KN-002",
+    "R-KN-003",
+    "R-KN-004",
+    "R-KN-005",
+    "R-KN-006",
+    "R-KN-007",
+    "R-KN-008",
+    "R-KN-009",
+    "R-XRAY-001",
+    "R-XRAY-002",
+    "R-XRAY-003",
+    "R-WEB-001",
+    "R-WEB-002",
+    "R-WEB-003",
+    "R-WEB-004",
+    "R-WEB-005",
+    "R-WEB-006",
+    "R-BUILD-001",
+    "R-BUILD-002",
+    "R-BUILD-003",
+    "R-BUILD-004",
+    "R-BUILD-005",
+    "R-BUILD-006",
+    "R-PUB-001",
+    "R-PUB-002",
+    "R-PUB-003",
+    "R-PUB-004",
+    "R-CMD-001",
+    "R-CMD-002",
+    "R-CMD-003",
+    "R-CMD-004",
+    "R-CMD-005",
+    "R-CMD-006",
+    "R-CMD-007",
+    "R-KN-010",
+    "R-WEB-007",
+    "R-WEB-008",
+    "R-WEB-009",
+    "R-WEB-010",
+    "R-WEB-011",
+    "R-BUILD-007",
+    "R-LIFE-007",
+    "R-CMD-008",
+    "R-CMD-009"
+  ],
+  "forbiddenUpdatePath": [
+    "opkg",
+    "CGI worker handoff",
+    "OPKG lock observer",
+    "legacy overlay bridge",
+    "universal transaction"
+  ],
+  "functionalBaseline": {
+    "builder": "BROray-2.2.7-r26-build-publish-r1.sh",
+    "builderSha256": "797a509c1369de4c3bcdad0ba6a5bdfbb99f1f03459b2101b5244b7f4557f1a0",
+    "exactR26IpkSha256": "0709fa8bd371afa75b19e9a34c895fb9f7dd260851ae7bc2f882da3bd12329a0",
+    "exactR26ReleaseSha256": "776b477a76a6795ec1c057991ca073b1d29ccae3c8f611c7d9290f92b84992c5",
+    "line": "BROray-2.2.7-r24/r26",
+    "packageLifecycleImported": false,
+    "use": "behavior-contract-only"
+  },
+  "lifecycleContract": "compact-app-rename/1",
+  "packageHealthContract": {
+    "appManifestFields": [
+      "packageVersion",
+      "architecture",
+      "packageRevision"
+    ],
+    "controlFields": [
+      "Version",
+      "Architecture",
+      "X-BROray-Package-Revision"
+    ],
+    "negativeFixture": "packageRevision mismatch rejected",
+    "requiredHealth": [
+      "ok",
+      "installationHealthy",
+      "versionsConsistent",
+      "opkgRegistrationHealthy",
+      "reinstallSupported"
+    ]
+  },
+  "pageWorkflowContract": "app/share/release/contracts/page-workflow-contract.json",
+  "productionCgiBodyContract": "app/lib/web-request-body.sh",
+  "productionCgiDevStdinOccurrences": 0,
+  "schemaVersion": 1,
+  "source": {
+    "historicalBaseRequired": false,
+    "historicalIpkRequired": false,
+    "identity": "r14c01-universal-functional-payload"
+  },
+  "updaterEngine": "broray-updater/5",
+  "webUIBuild": "WebUI-3.0.0-r15c16"
+}

@@ -1,0 +1,228 @@
+#!/opt/bin/ash
+
+PATH="${BRORAY_MONITOR_PATH:-/opt/bin:/opt/sbin:/bin:/sbin}"
+export PATH
+
+BASE="${BRORAY_MONITOR_ROOT:-/opt/broray}"
+BRORAY="${BRORAY_MONITOR_BRORAY:-$BASE/bin/broray}"
+RUN="${BRORAY_MONITOR_RUN_DIR:-$BASE/run}"
+
+STATUS_FILE="${BRORAY_MONITOR_STATUS_FILE:-$RUN/connection-status.json}"
+TEMP_FILE="$STATUS_FILE.new.$$"
+LOGFILE="${BRORAY_MONITOR_LOG:-$BASE/logs/connection-monitor.log}"
+MAX_LOG_BYTES="${BRORAY_MONITOR_LOG_MAX_BYTES:-262144}"
+MAINTENANCE="${BRORAY_MONITOR_MAINTENANCE:-$BASE/bin/broray-log-maintenance}"
+INTERVAL="${BRORAY_MONITOR_INTERVAL:-10}"
+MAINTENANCE_INTERVAL="${BRORAY_MONITOR_MAINTENANCE_INTERVAL:-3600}"
+LAST_MAINTENANCE=0
+
+case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=10 ;; esac
+[ "$INTERVAL" -ge 1 ] || INTERVAL=10
+case "$MAINTENANCE_INTERVAL" in ''|*[!0-9]*) MAINTENANCE_INTERVAL=3600 ;; esac
+case "$MAX_LOG_BYTES" in ''|*[!0-9]*) MAX_LOG_BYTES=262144 ;; esac
+[ "$MAX_LOG_BYTES" -ge 65536 ] || MAX_LOG_BYTES=262144
+
+monitor_log()
+{
+    log_size=0
+    mkdir -p "${LOGFILE%/*}" 2>/dev/null || return 0
+    if [ -f "$LOGFILE" ]; then
+        log_size="$(wc -c <"$LOGFILE" 2>/dev/null | tr -d ' ')"
+        case "$log_size" in ''|*[!0-9]*) log_size=0 ;; esac
+        if [ "$log_size" -gt "$MAX_LOG_BYTES" ]; then
+            tail -n 600 "$LOGFILE" >"$LOGFILE.new.$$" 2>/dev/null &&
+                mv -f "$LOGFILE.new.$$" "$LOGFILE"
+            rm -f "$LOGFILE.new.$$"
+        fi
+    fi
+    printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$LOGFILE" 2>/dev/null || true
+}
+
+status_document_valid()
+{
+    status_document="$1"
+    [ -s "$status_document" ] && [ ! -L "$status_document" ] || return 1
+    jq -e '
+        type == "object" and
+        (.available | type) == "boolean" and
+        (.up | type) == "boolean" and
+        (.address | type) == "string" and
+        ((.ping_ms == null) or ((.ping_ms | type) == "number")) and
+        ((.jitter_ms == null) or ((.jitter_ms | type) == "number")) and
+        ((.packet_loss_percent == null) or ((.packet_loss_percent | type) == "number")) and
+        (.quality_score | type) == "number" and
+        (.quality | type) == "string" and
+        (.checked_at | type) == "number" and
+        (.breaks | type) == "number"
+    ' "$status_document" >/dev/null 2>&1
+}
+
+publish_status()
+{
+    if ! status_document_valid "$TEMP_FILE"; then
+        monitor_log "MONITOR_STATUS_PUBLICATION=FAIL REASON=invalid-temporary-document"
+        rm -f "$TEMP_FILE"
+        return 1
+    fi
+    chmod 600 "$TEMP_FILE" 2>/dev/null || true
+    if ! mv -f "$TEMP_FILE" "$STATUS_FILE"; then
+        monitor_log "MONITOR_STATUS_PUBLICATION=FAIL REASON=atomic-rename"
+        rm -f "$TEMP_FILE"
+        return 1
+    fi
+}
+
+write_empty_status()
+{
+    now="$(date +%s)"
+
+    jq -n \
+        --argjson checked_at "$now" \
+        '{available:false,up:false,address:"",ping_ms:null,jitter_ms:null,packet_loss_percent:null,quality_score:0,quality:"Нет сервера",checked_at:$checked_at,breaks:0}' \
+        >"$TEMP_FILE" || {
+            monitor_log "MONITOR_STATUS_PUBLICATION=FAIL REASON=empty-status-build"
+            rm -f "$TEMP_FILE"
+            return 1
+        }
+
+    publish_status
+}
+
+read_previous_status()
+{
+    if status_document_valid "$STATUS_FILE"; then
+        jq -er '
+            [
+                ((.breaks // 0) | tostring),
+                (if (.up | type) == "boolean" then (.up | tostring) else "null" end),
+                (if (.address | type) == "string" then .address else "" end)
+            ] | @tsv
+        ' "$STATUS_FILE" 2>/dev/null && return 0
+    fi
+    printf '0\tnull\t\n'
+}
+
+calculate_quality()
+{
+    avg="$1"
+    jitter="$2"
+    loss="$3"
+
+    awk -v avg="$avg" -v jitter="$jitter" -v loss="$loss" '
+        BEGIN {
+            score = 100 - loss
+            if (avg > 300) score -= 45
+            else if (avg > 200) score -= 30
+            else if (avg > 120) score -= 15
+            else if (avg > 80) score -= 5
+            if (jitter > 50) score -= 30
+            else if (jitter > 30) score -= 20
+            else if (jitter > 15) score -= 10
+            else if (jitter > 8) score -= 5
+            if (score < 0) score = 0
+            if (score > 100) score = 100
+            printf "%.0f\n", score
+        }
+    '
+}
+
+run_maintenance_if_due()
+{
+    now="$1"
+    case "$LAST_MAINTENANCE" in ''|*[!0-9]*) LAST_MAINTENANCE=0 ;; esac
+    if [ $((now - LAST_MAINTENANCE)) -lt "$MAINTENANCE_INTERVAL" ]; then
+        return 0
+    fi
+    if [ -x "$MAINTENANCE" ]; then
+        BRORAY_ROOT="$BASE" "$MAINTENANCE" --once >/dev/null 2>&1 || true
+    fi
+    LAST_MAINTENANCE="$now"
+}
+
+quality_label()
+{
+    score="$1"
+    if [ "$score" -ge 90 ]; then printf '%s\n' "Отлично"
+    elif [ "$score" -ge 75 ]; then printf '%s\n' "Хорошо"
+    elif [ "$score" -ge 50 ]; then printf '%s\n' "Средне"
+    else printf '%s\n' "Плохо"
+    fi
+}
+
+monitor_exit()
+{
+    monitor_log "MONITOR_EXIT=SIGNALLED PID=$$"
+    rm -f "$TEMP_FILE"
+    exit 0
+}
+
+mkdir -p "$RUN" "${LOGFILE%/*}" || exit 1
+
+if ! status_document_valid "$STATUS_FILE"; then
+    monitor_log "MONITOR_STATUS=REGENERATE REASON=missing-or-invalid"
+    write_empty_status || exit 1
+fi
+
+trap monitor_exit INT TERM HUP
+monitor_log "MONITOR_PROCESS=START PID=$$"
+
+while :; do
+    now="$(date +%s)"
+    run_maintenance_if_due "$now"
+
+    address="$("$BRORAY" current-address 2>/dev/null || true)"
+    previous_status="$(read_previous_status)"
+    saved_ifs="$IFS"
+    IFS="$(printf '\t')"
+    set -- $previous_status
+    IFS="$saved_ifs"
+    breaks="${1:-0}"
+    previous_up="${2:-null}"
+    previous_address="${3:-}"
+
+    case "$breaks" in ''|*[!0-9]*) breaks=0 ;; esac
+
+    if [ -z "$address" ]; then
+        jq -n \
+            --argjson checked_at "$now" \
+            --argjson breaks "$breaks" \
+            '{available:false,up:false,address:"",ping_ms:null,jitter_ms:null,packet_loss_percent:null,quality_score:0,quality:"Нет сервера",checked_at:$checked_at,breaks:$breaks}' \
+            >"$TEMP_FILE" && publish_status
+        sleep "$INTERVAL"
+        continue
+    fi
+
+    [ "$address" = "$previous_address" ] || previous_up=null
+
+    ping_output="$(ping -c 5 -W 2 "$address" 2>&1 || true)"
+    loss="$(printf '%s\n' "$ping_output" | sed -n 's/.* \([0-9][0-9]*\)% packet loss.*/\1/p' | tail -n 1)"
+    case "$loss" in ''|*[!0-9]*) loss=100 ;; esac
+    avg="$(printf '%s\n' "$ping_output" | sed -n 's|.*= [^/]*/\([^/]*\)/.*|\1|p' | tail -n 1)"
+    times="$(printf '%s\n' "$ping_output" | sed -n 's/.*time=\([0-9.][0-9.]*\) ms.*/\1/p')"
+
+    if [ -n "$avg" ] && [ "$loss" -lt 100 ]; then
+        ping_ms="$(awk -v value="$avg" 'BEGIN { printf "%.0f\n", value }')"
+        jitter_ms="$(printf '%s\n' "$times" | awk '
+            NF { if (count > 0) { difference=$1-previous; if (difference<0) difference=-difference; total+=difference } previous=$1; count++ }
+            END { if (count>1) printf "%.1f\n", total/(count-1); else printf "0.0\n" }
+        ')"
+        score="$(calculate_quality "$avg" "$jitter_ms" "$loss")"
+        quality="$(quality_label "$score")"
+        jq -n \
+            --arg address "$address" --argjson ping_ms "$ping_ms" \
+            --argjson jitter_ms "$jitter_ms" --argjson packet_loss "$loss" \
+            --argjson quality_score "$score" --arg quality "$quality" \
+            --argjson checked_at "$now" --argjson breaks "$breaks" \
+            '{available:true,up:true,address:$address,ping_ms:$ping_ms,jitter_ms:$jitter_ms,packet_loss_percent:$packet_loss,quality_score:$quality_score,quality:$quality,checked_at:$checked_at,breaks:$breaks}' \
+            >"$TEMP_FILE" && publish_status
+    else
+        if [ "$previous_up" = true ]; then breaks=$((breaks + 1)); fi
+        jq -n \
+            --arg address "$address" --argjson packet_loss "$loss" \
+            --argjson checked_at "$now" --argjson breaks "$breaks" \
+            '{available:true,up:false,address:$address,ping_ms:null,jitter_ms:null,packet_loss_percent:$packet_loss,quality_score:0,quality:"Нет связи",checked_at:$checked_at,breaks:$breaks}' \
+            >"$TEMP_FILE" && publish_status
+    fi
+
+    sleep "$INTERVAL"
+done

@@ -1,0 +1,360 @@
+#!/opt/bin/ash
+
+ENABLED=yes
+PROCS=xray
+ARGS="run -c /opt/broray/config/config.json"
+PREARGS="env XRAY_LOCATION_ASSET=/opt/broray/bin"
+broray_lighttpd_guard_maintain()
+{
+    local guard
+    guard=/opt/broray/current/app/lib/lighttpd-guard.sh
+    [ -f "$guard" ] && [ ! -L "$guard" ] && [ -x "$guard" ] || return 1
+    /opt/bin/ash "$guard" maintain
+}
+
+PRECMD=broray_lighttpd_guard_maintain
+
+broray_owned_interface_name()
+{
+    local owner name suffix
+
+    owner=/opt/broray/config/interface.json
+    [ -f "$owner" ] && [ ! -L "$owner" ] || return 1
+    /opt/bin/jq -e '
+      .owner == "BROray" and
+      (.schemaVersion == 1 or .schemaVersion == 2) and
+      (.interfaceName | type) == "string"
+    ' "$owner" >/dev/null 2>&1 || return 1
+    name="$(/opt/bin/jq -r '.interfaceName' "$owner")" || return 1
+    case "$name" in
+        Proxy*) suffix="${name#Proxy}" ;;
+        *) return 1 ;;
+    esac
+    case "$suffix" in ''|*[!0-9]*) return 1 ;; esac
+    printf '%s\n' "$name"
+}
+
+broray_reconnect_owned()
+{
+    local name ndmc
+
+    name="$(broray_owned_interface_name 2>/dev/null || true)"
+    [ -n "$name" ] || return 0
+    ndmc="$(command -v ndmc 2>/dev/null || true)"
+    [ -n "$ndmc" ] && [ -x "$ndmc" ] || return 1
+    "$ndmc" -c "interface $name proxy connect" >/dev/null 2>&1 || return 1
+    "$ndmc" -c "interface $name up" >/dev/null 2>&1
+}
+
+broray_reconcile_owned()
+{
+    local interface_script start_stop_daemon pid old_pid
+
+    broray_owned_interface_name >/dev/null 2>&1 || return 0
+    interface_script=/opt/broray/current/app/lib/interface.sh
+    start_stop_daemon="$(command -v start-stop-daemon 2>/dev/null || true)"
+    pid=/opt/broray/run/interface-reconcile.pid
+    [ -r "$interface_script" ] || return 1
+    [ -n "$start_stop_daemon" ] && [ -x "$start_stop_daemon" ] || return 1
+    mkdir -p /opt/broray/run || return 1
+
+    if [ -s "$pid" ]; then
+        old_pid="$(sed -n '1p' "$pid" 2>/dev/null || true)"
+        case "$old_pid" in
+            ''|*[!0-9]*) ;;
+            *) kill -0 "$old_pid" 2>/dev/null && return 0 ;;
+        esac
+    fi
+    rm -f "$pid" || return 1
+    "$start_stop_daemon" -S -b -m -p "$pid" -x /opt/bin/ash -- -c '
+PATH=/opt/broray/bin:/opt/sbin:/opt/bin:/sbin:/bin
+LC_ALL=C
+export PATH LC_ALL
+PID_FILE=/opt/broray/run/interface-reconcile.pid
+STATUS_FILE=/opt/broray/run/interface-reconcile.status
+INTERFACE_SCRIPT=/opt/broray/current/app/lib/interface.sh
+status_write() {
+    state="$1"; attempt="$2"; method="$3"; temporary="$STATUS_FILE.tmp.$$"
+    umask 077
+    {
+        printf "state=%s\n" "$state"
+        printf "attempt=%s\n" "$attempt"
+        printf "method=%s\n" "$method"
+    } >"$temporary" || return 1
+    mv -f "$temporary" "$STATUS_FILE"
+}
+cleanup() { rm -f "$PID_FILE"; }
+trap cleanup EXIT
+trap "cleanup; exit 129" HUP INT TERM
+[ -r "$INTERFACE_SCRIPT" ] || { status_write error 0 missing-interface-script || true; exit 1; }
+attempt=1
+while [ "$attempt" -le 10 ]; do
+    sleep 3
+    if BRORAY_BASE=/opt/broray /opt/bin/ash "$INTERFACE_SCRIPT" check >/dev/null 2>&1; then
+        if BRORAY_BASE=/opt/broray /opt/bin/ash "$INTERFACE_SCRIPT" sync-name >/dev/null 2>&1 &&
+           BRORAY_BASE=/opt/broray /opt/bin/ash "$INTERFACE_SCRIPT" check >/dev/null 2>&1; then
+            status_write success "$attempt" sync-name || true
+            exit 0
+        fi
+    fi
+    if BRORAY_BASE=/opt/broray /opt/bin/ash "$INTERFACE_SCRIPT" repair >/dev/null 2>&1; then
+        status_write success "$attempt" repair || true
+        exit 0
+    fi
+    status_write retry "$attempt" repair || true
+    attempt=$((attempt + 1))
+done
+status_write error 10 repair || true
+exit 1
+'
+}
+
+broray_update_in_progress()
+{
+    [ -d /opt/var/lock/broray/global-operation.lock ] ||
+        [ -d /tmp/broray-global-operation.lock ]
+}
+
+broray_process_start_ticks()
+{
+    local process_pid
+    process_pid="$1"
+    case "$process_pid" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    [ -r "/proc/$process_pid/stat" ] || return 1
+    sed 's/.*) //' "/proc/$process_pid/stat" 2>/dev/null |
+        awk '{print $20; exit}'
+}
+
+broray_updater_request_owned()
+{
+    local state request_lock owner_pid daemon_pid daemon_ready owner_start actual_start operation_id command_line
+
+    state=/opt/var/lib/broray-updater
+    request_lock="$state/request.lock"
+    [ -d "$request_lock" ] && [ ! -L "$request_lock" ] || return 1
+    for file in pid owner-start operation-id
+    do
+        [ -f "$request_lock/$file" ] && [ ! -L "$request_lock/$file" ] || return 1
+    done
+    [ -f "$state/daemon.pid" ] && [ ! -L "$state/daemon.pid" ] || return 1
+    [ -f "$state/daemon.ready" ] && [ ! -L "$state/daemon.ready" ] || return 1
+
+    owner_pid="$(sed -n '1p' "$request_lock/pid" 2>/dev/null || true)"
+    daemon_pid="$(sed -n '1p' "$state/daemon.pid" 2>/dev/null || true)"
+    daemon_ready="$(sed -n '1p' "$state/daemon.ready" 2>/dev/null || true)"
+    owner_start="$(sed -n '1p' "$request_lock/owner-start" 2>/dev/null || true)"
+    operation_id="$(sed -n '1p' "$request_lock/operation-id" 2>/dev/null || true)"
+    case "$owner_pid:$daemon_pid:$daemon_ready:$owner_start" in
+        *[!0-9:]*) return 1 ;;
+    esac
+    [ -n "$owner_pid" ] && [ "$owner_pid" = "$daemon_pid" ] && [ "$owner_pid" = "$daemon_ready" ] || return 1
+    case "$operation_id" in
+        update-*|reinstall-*) ;;
+        *) return 1 ;;
+    esac
+    case "$operation_id" in
+        ''|.*|-*|*[!A-Za-z0-9._-]*) return 1 ;;
+    esac
+    kill -0 "$owner_pid" 2>/dev/null || return 1
+    actual_start="$(broray_process_start_ticks "$owner_pid" 2>/dev/null || true)"
+    [ -n "$actual_start" ] && [ "$actual_start" = "$owner_start" ] || return 1
+    [ -r "/proc/$owner_pid/cmdline" ] || return 1
+    command_line="$(tr '\000' ' ' <"/proc/$owner_pid/cmdline" 2>/dev/null || true)"
+    case "$command_line" in
+        *broray-updater*daemon*) return 0 ;;
+    esac
+    return 1
+}
+
+broray_reconcile_status_write()
+{
+    local state attempt method target temporary
+    state="$1"
+    attempt="$2"
+    method="$3"
+    target=/opt/broray/run/interface-reconcile.status
+    temporary="$target.tmp.$$"
+    umask 077
+    mkdir -p /opt/broray/run || return 1
+    {
+        printf 'state=%s\n' "$state"
+        printf 'attempt=%s\n' "$attempt"
+        printf 'method=%s\n' "$method"
+    } >"$temporary" || return 1
+    mv -f "$temporary" "$target"
+}
+
+broray_reconcile_owned_for_update()
+{
+    local interface_script
+
+    broray_owned_interface_name >/dev/null 2>&1 || return 0
+    interface_script=/opt/broray/current/app/lib/interface.sh
+    [ -r "$interface_script" ] || return 1
+    broray_reconcile_stop
+    if BRORAY_BASE=/opt/broray /opt/bin/ash "$interface_script" sync-name >/dev/null 2>&1 &&
+       BRORAY_BASE=/opt/broray /opt/bin/ash "$interface_script" check >/dev/null 2>&1
+    then
+        broray_reconcile_status_write success 1 sync-name-update || true
+        return 0
+    fi
+    broray_reconcile_status_write error 1 sync-name-update || true
+    return 1
+}
+
+broray_reconcile_pid_matches()
+{
+    local candidate_pid command_line
+    candidate_pid="$1"
+    case "$candidate_pid" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    kill -0 "$candidate_pid" 2>/dev/null || return 1
+    [ -r "/proc/$candidate_pid/cmdline" ] || return 1
+    command_line="$(tr '\000' ' ' <"/proc/$candidate_pid/cmdline" 2>/dev/null)" || return 1
+    case "$command_line" in
+        *'/opt/broray/run/interface-reconcile.pid'*'/opt/broray/current/app/lib/interface.sh'*) return 0 ;;
+    esac
+    return 1
+}
+
+broray_reconcile_stop()
+{
+    local pid_file reconcile_pid wait_round
+    pid_file=/opt/broray/run/interface-reconcile.pid
+    reconcile_pid="$(sed -n '1p' "$pid_file" 2>/dev/null || true)"
+    if broray_reconcile_pid_matches "$reconcile_pid"; then
+        kill "$reconcile_pid" 2>/dev/null || true
+        for wait_round in 1 2 3 4 5; do
+            broray_reconcile_pid_matches "$reconcile_pid" || break
+            sleep 1
+        done
+        broray_reconcile_pid_matches "$reconcile_pid" && kill -9 "$reconcile_pid" 2>/dev/null || true
+    fi
+    rm -f "$pid_file"
+}
+
+POSTCMD=broray_reconnect_owned
+DESC="BROray"
+PATH=/opt/broray/bin:/opt/sbin:/opt/bin:/sbin:/bin
+
+BRORAY_HOME_SNAPSHOT_DAEMON="${BRORAY_HOME_SNAPSHOT_DAEMON:-/opt/broray/current/app/bin/broray-home-snapshotd}"
+BRORAY_HOME_SNAPSHOT_REFRESH="${BRORAY_HOME_SNAPSHOT_REFRESH:-/opt/broray/current/app/bin/broray-home-snapshot}"
+BRORAY_HOME_SNAPSHOT_PIDFILE="${BRORAY_HOME_SNAPSHOT_PIDFILE:-/opt/broray/run/home-snapshotd.pid}"
+BRORAY_HOME_SNAPSHOT_SERVICE_LOG="${BRORAY_HOME_SNAPSHOT_SERVICE_LOG:-/opt/broray/logs/home-snapshotd-service.log}"
+
+broray_home_snapshot_pid()
+{
+    sed -n '1p' "$BRORAY_HOME_SNAPSHOT_PIDFILE" 2>/dev/null
+}
+
+broray_home_snapshot_running()
+{
+    local tracked_pid
+    tracked_pid="$(broray_home_snapshot_pid)"
+    case "$tracked_pid" in ''|*[!0-9]*|0) return 1 ;; esac
+    kill -0 "$tracked_pid" 2>/dev/null || return 1
+    [ -r "/proc/$tracked_pid/cmdline" ] || return 1
+    tr '\000' ' ' <"/proc/$tracked_pid/cmdline" 2>/dev/null |
+        grep -F "$BRORAY_HOME_SNAPSHOT_DAEMON" >/dev/null 2>&1
+}
+
+broray_home_snapshot_clear_pid()
+{
+    rm -f "$BRORAY_HOME_SNAPSHOT_PIDFILE" "$BRORAY_HOME_SNAPSHOT_PIDFILE.new.$$"
+}
+
+broray_home_snapshot_start()
+{
+    local launched_pid launched_tmp
+    [ -x "$BRORAY_HOME_SNAPSHOT_DAEMON" ] || return 1
+    broray_home_snapshot_running && return 0
+    broray_home_snapshot_clear_pid
+    mkdir -p "${BRORAY_HOME_SNAPSHOT_PIDFILE%/*}" "${BRORAY_HOME_SNAPSHOT_SERVICE_LOG%/*}" || return 1
+    BRORAY_HOME_SNAPSHOT_REFRESH="$BRORAY_HOME_SNAPSHOT_REFRESH" \
+        "$BRORAY_HOME_SNAPSHOT_DAEMON" >>"$BRORAY_HOME_SNAPSHOT_SERVICE_LOG" 2>&1 </dev/null &
+    launched_pid=$!
+    sleep 1
+    kill -0 "$launched_pid" 2>/dev/null || return 1
+    launched_tmp="$BRORAY_HOME_SNAPSHOT_PIDFILE.new.$$"
+    printf '%s\n' "$launched_pid" >"$launched_tmp" || return 1
+    chmod 0600 "$launched_tmp" 2>/dev/null || true
+    mv -f "$launched_tmp" "$BRORAY_HOME_SNAPSHOT_PIDFILE" || return 1
+    broray_home_snapshot_running
+}
+
+broray_home_snapshot_stop()
+{
+    local tracked_pid wait_round
+    if ! broray_home_snapshot_running; then
+        broray_home_snapshot_clear_pid
+        return 0
+    fi
+    tracked_pid="$(broray_home_snapshot_pid)"
+    kill "$tracked_pid" 2>/dev/null || true
+    for wait_round in 1 2 3 4 5; do
+        kill -0 "$tracked_pid" 2>/dev/null || break
+        sleep 1
+    done
+    kill -0 "$tracked_pid" 2>/dev/null && kill -9 "$tracked_pid" 2>/dev/null || true
+    broray_home_snapshot_clear_pid
+}
+
+broray_subscription_scheduler_start()
+{
+    local service
+    service=/opt/etc/init.d/S28broray-subscriptions
+    [ -f "$service" ] || [ -L "$service" ] || return 1
+    /opt/bin/ash "$service" start >/dev/null 2>&1
+}
+
+# Keep Entware rc.func unchanged; narrow its process operations in this service.
+BRORAY_XRAY_BINARY=/opt/broray/runtime/xray
+BRORAY_XRAY_CONFIG=/opt/broray/config/config.json
+. /opt/broray/current/app/lib/xray-process.sh || exit 1
+pidof() {
+    if [ "$#" = 1 ] && [ "$1" = xray ]; then
+        broray_xray_runtime_pids
+    else
+        command pidof "$@"
+    fi
+}
+killall() {
+    case "$*" in
+        xray) broray_xray_runtime_signal TERM ;;
+        '-9 xray') broray_xray_runtime_signal 9 ;;
+        '-SIGHUP xray') broray_xray_runtime_signal SIGHUP ;;
+        *) command killall "$@" ;;
+    esac
+}
+. /opt/etc/init.d/rc.func
+# rc.func does not propagate failures consistently. Check the actual runtime
+# before starting sidecars or reporting success, including the stopped state.
+case "$ACTION" in
+    start|restart|status|check|reconfigure) broray_xray_runtime_pid >/dev/null || exit 1 ;;
+    stop|kill) if broray_xray_runtime_pid >/dev/null; then exit 1; fi ;;
+esac
+
+case "$ACTION" in
+    start)
+        if broray_updater_request_owned; then
+            broray_reconcile_owned_for_update || exit 1
+        elif [ "${BRORAY_STARTUP_RECONCILE_SKIP:-0}" = 1 ] || broray_update_in_progress; then
+            broray_reconcile_stop
+        else
+            broray_reconcile_owned || true
+        fi
+        broray_home_snapshot_start || exit 1
+        broray_subscription_scheduler_start || exit 1
+        ;;
+    restart)
+        broray_home_snapshot_start || exit 1
+        broray_subscription_scheduler_start || exit 1
+        ;;
+    stop)
+        broray_reconcile_stop
+        broray_home_snapshot_stop || exit 1
+        ;;
+    status)
+        broray_home_snapshot_running || exit 1
+        ;;
+esac
+exit 0

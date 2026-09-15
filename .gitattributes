@@ -1,0 +1,6 @@
+runtime/** -text
+*.sh text eol=lf
+*.cgi text eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.json text eol=lf

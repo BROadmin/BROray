@@ -1,0 +1,6 @@
+#!/opt/bin/ash
+
+XRAY_LOCATION_ASSET=/opt/broray/bin \
+    /opt/broray/runtime/xray \
+    run -test \
+    -c /opt/broray/config/config.json

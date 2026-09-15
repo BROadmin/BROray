@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 1,
+  "requirementsContract": "1.7.2",
+  "lifecycleContract": "compact-app-rename/1",
+  "capabilityContract": "keenetic-entware-capabilities/1",
+  "spaceContract": "broray-space/2",
+  "candidateId": "3.0.0-r15c16",
+  "legacyIdentifier": false,
+  "previousIpkRequired": false,
+  "historicalTransactionStateRequired": false,
+  "statelessBootstrap": false,
+  "status": "physical-read-only-evidence-required",
+  "catalogVersion": "r14c01-official-20260814",
+  "catalogIdentity": [
+    "address",
+    "effectivePort",
+    "sni"
+  ],
+  "destructiveSelector": [
+    "address",
+    "effectivePort"
+  ],
+  "installedRecordPolicy": {
+    "classifyEveryActualRecord": true,
+    "exactlyOneClassPerRecord": true,
+    "catalogMatchIdsRequired": true,
+    "inCatalogRequiresExactlyOneExactIdentityMatch": true,
+    "unmatchedClass": "not-in-broray-catalog",
+    "ambiguousClass": "ambiguous",
+    "parseFailureClass": "unknown",
+    "extraAttributesPreventExactCatalogMatch": [
+      "spki",
+      "interface",
+      "domain"
+    ]
+  },
+  "ownershipPolicy": {
+    "externalRecordsRemainExternal": true,
+    "catalogMatchDoesNotGrantOwnership": true,
+    "legacyIncompleteReceiptGrantsDeleteAuthority": false,
+    "deleteRequiresUniqueSelector": true,
+    "deleteRequiresCompletePreDeleteAttributeEquality": true
+  },
+  "keeneticContract": {
+    "omittedTlsPort": 853,
+    "omittedTlsPortSource": "https://support.keenetic.com/peak/kn-2710/en/25049-dot-and-doh-proxy-servers-for-dns-requests-encryption.html",
+    "cliGrammarSource": "https://storage.googleapis.com/docs.help.keenetic.com/cli/5.0/en/cli_manual_kn-2710.pdf",
+    "runtimeReadCommand": "show dns-proxy",
+    "configurationReadCommand": "show running-config",
+    "deleteCommandSelector": [
+      "address",
+      "port"
+    ],
+    "physicalSerializationRequiredBeforeMutation": true
+  },
+  "targetJqContract": {
+    "entwarePackageVersion": "1.8.1-2",
+    "onigurumaAvailable": false,
+    "activeTargetScriptsMayUseJqRegexFunctions": false,
+    "forbiddenJqRegexFunctions": [
+      "test",
+      "match",
+      "capture",
+      "scan",
+      "sub",
+      "gsub",
+      "splits"
+    ]
+  },
+  "physicalReadOnlyEvidence": {
+    "evidenceCandidateId": "3.0.0-r14c01",
+    "sourceTranscriptSha256": "4a9ba496e86ee149edbda864ad4552d809fac1391765c5c17f8fb2b8940d4340",
+    "sourceTranscriptSizeBytes": 21244,
+    "sourceTranscriptLineCount": 341,
+    "collectorScriptSha256": "0cd6889a6fc69d0f5287e5e84474985cfe24dfc6701d9677d21e1689ad18ecbb",
+    "collectorGzipSha256": "d597a4340e75324985f63036a3ee532e23fbf2108a69de7a7322ebf8700d676b",
+    "sanitizedReportFixture": "validation/fixtures/r14c01-physical-dot-discovery-report.json",
+    "sanitizedReportSha256": "f2583c0369ff981eb17c4338c4bbb85fac69f1d01e7a9f89e15d67ecb68502e2",
+    "resultMarker": "R14C01_DOT_CATALOG_DISCOVERY=COMPLETE",
+    "configurationRecords": 0,
+    "runtimeRecords": 0,
+    "catalogClassificationDeterminate": true,
+    "persistentMutation": "NONE",
+    "scope": "read-only-discovery-on-observed-empty-installed-DoT-state"
+  },
+  "catalog": [
+    {
+      "id": "google-primary",
+      "provider": "Google",
+      "address": "8.8.8.8",
+      "effectivePort": 853,
+      "sni": "dns.google",
+      "sources": [
+        "https://developers.google.com/speed/public-dns",
+        "https://developers.google.com/speed/public-dns/docs/secure-transports",
+        "https://support.keenetic.com/peak/kn-2710/en/25049-dot-and-doh-proxy-servers-for-dns-requests-encryption.html"
+      ]
+    },
+    {
+      "id": "google-secondary",
+      "provider": "Google",
+      "address": "8.8.4.4",
+      "effectivePort": 853,
+      "sni": "dns.google",
+      "sources": [
+        "https://developers.google.com/speed/public-dns",
+        "https://developers.google.com/speed/public-dns/docs/secure-transports",
+        "https://support.keenetic.com/peak/kn-2710/en/25049-dot-and-doh-proxy-servers-for-dns-requests-encryption.html"
+      ]
+    },
+    {
+      "id": "yandex-primary",
+      "provider": "Yandex DNS",
+      "address": "77.88.8.8",
+      "effectivePort": 853,
+      "sni": "common.dot.dns.yandex.net",
+      "sources": [
+        "https://dns.yandex.com/"
+      ]
+    },
+    {
+      "id": "cloudflare-primary",
+      "provider": "Cloudflare",
+      "address": "1.1.1.1",
+      "effectivePort": 853,
+      "sni": "cloudflare-dns.com",
+      "sources": [
+        "https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-tls/",
+        "https://support.keenetic.com/peak/kn-2710/en/25049-dot-and-doh-proxy-servers-for-dns-requests-encryption.html",
+        "https://storage.googleapis.com/docs.help.keenetic.com/cli/5.0/en/cli_manual_kn-2710.pdf"
+      ]
+    },
+    {
+      "id": "cloudflare-secondary",
+      "provider": "Cloudflare",
+      "address": "1.0.0.1",
+      "effectivePort": 853,
+      "sni": "cloudflare-dns.com",
+      "sources": [
+        "https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-tls/",
+        "https://support.keenetic.com/peak/kn-2710/en/25049-dot-and-doh-proxy-servers-for-dns-requests-encryption.html"
+      ]
+    },
+    {
+      "id": "quad9",
+      "provider": "Quad9",
+      "address": "9.9.9.9",
+      "effectivePort": 853,
+      "sni": "dns.quad9.net",
+      "sources": [
+        "https://docs.quad9.net/Setup_Guides/Open-Source_Routers/OPNsense_%28Encrypted%29/",
+        "https://support.keenetic.com/peak/kn-2710/en/25049-dot-and-doh-proxy-servers-for-dns-requests-encryption.html"
+      ]
+    },
+    {
+      "id": "adguard-primary",
+      "provider": "AdGuard DNS",
+      "address": "94.140.14.14",
+      "effectivePort": 853,
+      "sni": "dns.adguard-dns.com",
+      "sources": [
+        "https://adguard-dns.io/kb/general/dns-providers/",
+        "https://support.keenetic.com/peak/kn-2710/en/25049-dot-and-doh-proxy-servers-for-dns-requests-encryption.html"
+      ]
+    },
+    {
+      "id": "adguard-secondary",
+      "provider": "AdGuard DNS",
+      "address": "94.140.15.15",
+      "effectivePort": 853,
+      "sni": "dns.adguard-dns.com",
+      "sources": [
+        "https://adguard-dns.io/kb/general/dns-providers/",
+        "https://support.keenetic.com/peak/kn-2710/en/25049-dot-and-doh-proxy-servers-for-dns-requests-encryption.html"
+      ]
+    }
+  ],
+  "excluded": [
+    {
+      "id": "yandex-secondary",
+      "address": "77.88.8.1",
+      "reason": "The official Yandex page documents this address as ordinary IPv4 DNS but documents DoT only for 77.88.8.8:853."
+    }
+  ]
+}

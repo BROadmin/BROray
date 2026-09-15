@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "requirementsContract": "1.7.2",
+  "lifecycleContract": "compact-app-rename/1",
+  "capabilityContract": "keenetic-entware-capabilities/1",
+  "spaceContract": "broray-space/2",
+  "candidateId": "3.0.0-r15c16",
+  "contract": "broray-universal-write-policy/1",
+  "status": "CANDIDATE_PHYSICAL_VALIDATION_REQUIRED",
+  "universalityGate": "PENDING",
+  "stablePromotionAllowed": false,
+  "stagingPublicationAllowed": true,
+  "selection": {
+    "method": "functional-capability-only",
+    "routerModelSelector": false,
+    "hwIdSelector": false,
+    "firmwareVersionSelector": false,
+    "sourceVersionSelector": false,
+    "diagnosticIdentityMayBeRecorded": true
+  },
+  "writeAdmission": {
+    "profile": "dynamic-bounded-v1",
+    "closedCommandGrammarRequired": true,
+    "scopedParserRequired": true,
+    "preMutationSnapshotRequired": true,
+    "postMutationConvergenceRequired": true,
+    "rollbackOrRecoveryMarkerRequired": true,
+    "foreignObjectPreservationRequired": true,
+    "preclassifiedModelProfilesForbidden": true
+  },
+  "requiredWritePaths": [
+    {"id": "keenetic-proxy-interface", "profile": "dynamic-bounded-v1"},
+    {"id": "keenetic-http-proxy", "profile": "dynamic-bounded-v1"},
+    {"id": "keenetic-dot", "profile": "dynamic-bounded-v1"},
+    {"id": "keenetic-routes", "profile": "dynamic-bounded-v1"}
+  ],
+  "releaseGates": {
+    "cleanEntwareInstall": "PENDING",
+    "updateFrom3x": "PENDING",
+    "sameVersionReinstallRecovery": "PENDING",
+    "exactSameBytesMultiEnvironment": "PENDING",
+    "stablePublicationRequiresUniversalityGatePass": true
+  }
+}

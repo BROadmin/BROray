@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Speedtest">
+  <circle cx="32" cy="32" r="30" fill="#1995E8"/>
+  <path fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" d="M14 41a20 20 0 1 1 36 0"/>
+  <path fill="#fff" d="M31 34.5 44.5 22 35 38a5 5 0 1 1-4-3.5Z"/>
+  <rect x="20" y="45" width="24" height="4" rx="2" fill="#fff"/>
+</svg>

@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 2,
+  "contract": "bro-any-structural/1",
+  "legacyIdentifier": false,
+  "activeMeaning": "r14c01-clean-bootstrap-and-active-slot-source-receipt",
+  "requirementsContract": "1.7.2",
+  "lifecycleContract": "compact-app-rename/1",
+  "capabilityContract": "keenetic-entware-capabilities/1",
+  "spaceContract": "broray-space/2",
+  "candidateId": "3.0.0-r15c16",
+  "previousIpkRequired": false,
+  "historicalTransactionStateRequired": false,
+  "statelessBootstrap": false,
+  "selection": "clean-bootstrap-plus-active-slot-source-receipt",
+  "versionMatrixRequired": false,
+  "versionRegistryRequired": false,
+  "versionSelectedMigration": false,
+  "cleanInstall": {
+    "previousApplicationRequired": false,
+    "legacyMigration": false,
+    "requiredAbsence": [
+      "/opt/broray",
+      "/opt/bin/broray* candidate-owned links",
+      "/opt/libexec/broray-updater",
+      "/opt/var/lib/broray",
+      "/opt/var/lib/broray-updater",
+      "/opt/var/lib/broray-opkg",
+      "/opt/var/lib/broray-opkg-transition",
+      "/opt/etc/init.d/S22broray-updater",
+      "/opt/etc/init.d/S23broray-monitor",
+      "/opt/etc/init.d/S24broray",
+      "/opt/etc/init.d/S25broray-web",
+      "/opt/etc/init.d/S27broray-auto-switch",
+      "/opt/etc/init.d/S28broray-subscriptions",
+      "installed broray OPKG status stanza",
+      "/opt/lib/opkg/info/broray.*"
+    ],
+    "allowedPhysicalOpkgTombstone": {
+      "maximumRawBrorayStanzas": 1,
+      "package": "broray",
+      "version": "3.0.0-r14",
+      "architecture": "aarch64-3.10",
+      "status": "install prefer,user not-installed",
+      "uniqueCoreFields": ["Package", "Version", "Architecture", "Status"],
+      "requiresEmptyOpkgStatusCommand": true,
+      "requiresAbsentInfoPayloadAndRecovery": true
+    },
+    "allowedExternalRestoreSource": "/opt/broray-preserved",
+    "restoreRequirements": {
+      "canonicalLatestPointer": true,
+      "regularFilesOnly": true,
+      "safeArchivePaths": true,
+      "sha256Required": true,
+      "protectedManifestExact": true,
+      "allowedUserRootsOnly": true
+    },
+    "allCandidateBytesVerifiedBeforePersistentMutation": true,
+    "cleanBoundaryRecheckedAfterDownload": true
+  },
+  "applicationUpdate": {
+    "engine": "broray-updater/5",
+    "source": "fresh-versioned-channel-index",
+    "currentSlotMetadataRequired": true,
+    "differentCandidateIdRequired": true,
+    "packageMutation": false,
+    "legacyOverlay": false
+  },
+  "applicationReinstall": {
+    "engine": "broray-updater/5",
+    "source": "active-slot-durable-source-receipt",
+    "sameVersionAllowed": true,
+    "packageMutation": false,
+    "historicalIpkRequired": false
+  },
+  "uninstall": {
+    "entryPoint": "authenticated-WebUI",
+    "authorization": "exact-operation-id-bound-OPKG-remove-marker",
+    "directCommandLineRemoval": "fail-closed",
+    "normal": "preserve-one-verified-user-data-archive",
+    "full": "remove-preserved-archive"
+  },
+  "retiredClaims": [
+    "accept-any-existing-BROray-functional-tree",
+    "migrate-legacy-source-by-structural-admission",
+    "universal-update-reinstall-restore-opkg-transaction",
+    "version-independent-overlay-of-an-installed-package"
+  ]
+}

@@ -1,0 +1,88 @@
+#!/opt/bin/ash
+
+set -u
+umask 077
+
+ROOT="${BRORAY_ROOT:-/opt/broray}"
+LOG_DIR="$ROOT/logs"
+STATE_ROOT="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}"
+OPERATION_ROOT="${BRORAY_OPERATION_ROOT:-$STATE_ROOT/operations}"
+OPERATION_POINTER="${BRORAY_OPERATION_POINTER:-$STATE_ROOT/last-operation}"
+ACCESS_MAX_BYTES="${BRORAY_ACCESS_LOG_MAX_BYTES:-5242880}"
+ERROR_MAX_BYTES="${BRORAY_ERROR_LOG_MAX_BYTES:-1048576}"
+RUNTIME_MAX_BYTES="${BRORAY_RUNTIME_LOG_MAX_BYTES:-1048576}"
+KEEP_ROTATIONS="${BRORAY_LOG_ROTATIONS:-3}"
+KEEP_OPERATIONS="${BRORAY_OPERATION_KEEP:-20}"
+
+valid_number()
+{
+    case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac
+    return 0
+}
+
+file_size()
+{
+    wc -c <"$1" 2>/dev/null | tr -d ' '
+}
+
+rotate_file()
+{
+    file="$1"
+    max_bytes="$2"
+    [ -f "$file" ] || return 0
+    size="$(file_size "$file" 2>/dev/null || printf '0')"
+    valid_number "$size" || size=0
+    [ "$size" -gt "$max_bytes" ] || return 0
+
+    index="$KEEP_ROTATIONS"
+    while [ "$index" -ge 1 ]; do
+        previous=$((index - 1))
+        if [ "$previous" -eq 0 ]; then
+            source="$file"
+        else
+            source="$file.$previous.gz"
+        fi
+        destination="$file.$index.gz"
+        if [ -e "$source" ]; then
+            if [ "$previous" -eq 0 ]; then
+                gzip -c "$source" >"$destination.tmp.$$" || return 1
+                mv -f "$destination.tmp.$$" "$destination" || return 1
+            else
+                mv -f "$source" "$destination" || return 1
+            fi
+        fi
+        index=$((index - 1))
+    done
+    : >"$file" || return 1
+    chmod 600 "$file" 2>/dev/null || true
+}
+
+mkdir -p "$LOG_DIR" "$OPERATION_ROOT" || exit 1
+valid_number "$KEEP_ROTATIONS" || KEEP_ROTATIONS=3
+[ "$KEEP_ROTATIONS" -ge 1 ] || KEEP_ROTATIONS=1
+valid_number "$KEEP_OPERATIONS" || KEEP_OPERATIONS=20
+[ "$KEEP_OPERATIONS" -ge 1 ] || KEEP_OPERATIONS=1
+
+rotate_file "$LOG_DIR/access.log" "$ACCESS_MAX_BYTES"
+rotate_file "$LOG_DIR/error.log" "$ERROR_MAX_BYTES"
+rotate_file "$LOG_DIR/lighttpd-error.log" "$ERROR_MAX_BYTES"
+rotate_file "$LOG_DIR/connection-monitor.log" "$RUNTIME_MAX_BYTES"
+rotate_file "$LOG_DIR/subscriptions.log" "$RUNTIME_MAX_BYTES"
+rotate_file "$LOG_DIR/server-auto-switch.log" "$RUNTIME_MAX_BYTES"
+rotate_file "$LOG_DIR/subscription-scheduler.log" "$RUNTIME_MAX_BYTES"
+rotate_file "$LOG_DIR/update-last.log" "$RUNTIME_MAX_BYTES"
+
+current=""
+[ -r "$OPERATION_POINTER" ] && current="$(sed -n '1p' "$OPERATION_POINTER" 2>/dev/null)"
+find "$OPERATION_ROOT" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null |
+    sort -r |
+    awk -v keep="$KEEP_OPERATIONS" 'NR > keep {print}' |
+    while IFS= read -r old_dir; do
+        [ "${old_dir##*/}" = "$current" ] && continue
+        if [ -s "$old_dir/state.json" ] && jq -e '.running == true' "$old_dir/state.json" >/dev/null 2>&1; then
+            continue
+        fi
+        rm -rf "$old_dir"
+    done
+
+exit 0

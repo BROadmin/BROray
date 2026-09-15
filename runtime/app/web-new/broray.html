@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="ru" data-build-id="WebUI-3.1.0-r09c02">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#0b1117">
+    <meta name="robots" content="noindex,nofollow">
+    <title>BROray — О программе</title>
+    <link rel="icon" href="/assets/images/branding/favicon.ico?v=WebUI-3.1.0-r09c02">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png?v=WebUI-3.1.0-r09c02">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.1.0-r09c02">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.1.0-r09c02">
+    <link rel="manifest" href="/manifest.json?v=WebUI-3.1.0-r09c02">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.1.0-r09c02">
+    <script src="/assets/js/theme-init.js?v=WebUI-3.1.0-r09c02"></script>
+</head>
+<body class="app-body page-broray" data-page="broray" data-webui-build="WebUI-3.1.0-r09c02">
+    <div id="app" class="app-layout" hidden>
+        <aside id="sidebar" class="sidebar" aria-label="Основная навигация">
+            <div class="sidebar-header">
+                <a class="sidebar-brand" href="/home.html?v=WebUI-3.1.0-r09c02" aria-label="BROray — Главная">
+                    <span class="sidebar-brand-mark" aria-hidden="true">
+                        <img class="sidebar-brand-image" src="/assets/images/branding/broray-logo-64.png?v=WebUI-3.1.0-r09c02" alt="" width="40" height="40">
+                    </span>
+                    <span class="sidebar-brand-copy">
+                        <strong>BROray</strong>
+                        <small>Менеджер Xray</small>
+                    </span>
+                </a>
+                <button id="sidebar-collapse" class="sidebar-icon-button sidebar-collapse-button" type="button" aria-label="Свернуть боковое меню" aria-expanded="true">
+                    <span id="sidebar-collapse-symbol" class="sidebar-collapse-symbol" data-icon="chevron" aria-hidden="true"></span>
+                </button>
+            </div>
+            <nav class="sidebar-navigation" aria-label="Разделы BROray">
+                <a class="sidebar-link" href="/home.html?v=WebUI-3.1.0-r09c02" title="Главная" data-page="home">
+                    <span class="sidebar-link-icon" data-icon="home" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Главная</span>
+                </a>
+                <a class="sidebar-link" href="/servers.html?v=WebUI-3.1.0-r09c02" title="Серверы" data-page="servers">
+                    <span class="sidebar-link-icon" data-icon="servers" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Серверы</span>
+                </a>
+                <a class="sidebar-link" href="/subscriptions.html?v=WebUI-3.1.0-r09c02" title="Подписки" data-page="subscriptions">
+                    <span class="sidebar-link-icon" data-icon="subscriptions" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Подписки</span>
+                </a>
+                <a class="sidebar-link" href="/dns.html?v=WebUI-3.1.0-r09c02" title="DNS-over-TLS" data-page="dns">
+                    <span class="sidebar-link-icon" data-icon="dns" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">DNS-over-TLS</span>
+                </a>
+                <a class="sidebar-link" href="/routes.html?v=WebUI-3.1.0-r09c02" title="Маршруты" data-page="routes">
+                    <span class="sidebar-link-icon" data-icon="routes" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Маршруты</span>
+                </a>
+                <a class="sidebar-link" href="/keenetic.html?v=WebUI-3.1.0-r09c02" title="Keenetic" data-page="keenetic">
+                    <span class="sidebar-link-icon" data-icon="keenetic" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Keenetic</span>
+                </a>
+                <a class="sidebar-link" href="/xray.html?v=WebUI-3.1.0-r09c02" title="Xray" data-page="xray">
+                    <span class="sidebar-link-icon" data-icon="xray" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Xray</span>
+                </a>
+                <a class="sidebar-link" href="/broray.html?v=WebUI-3.1.0-r09c02" title="BROray" data-page="broray">
+                    <span class="sidebar-link-icon" data-icon="security" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">BROray</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="support-button" class="sidebar-support" type="button" aria-haspopup="dialog" aria-controls="support-root">
+                    <span class="sidebar-link-icon" data-icon="help" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Поддержать проект</span>
+                </button>
+                <div class="sidebar-user">
+                    <span class="sidebar-user-avatar" data-icon="user" aria-hidden="true"></span>
+                    <span class="sidebar-user-copy">
+                        <strong id="current-user"></strong>
+                        <small>KeeneticOS</small>
+                    </span>
+                </div>
+                <button id="logout-button" class="sidebar-logout" type="button">
+                    <span class="sidebar-link-icon" data-icon="exit" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Выйти</span>
+                </button>
+            </div>
+        </aside>
+        <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Закрыть меню" hidden></button>
+        <div class="app-workspace">
+            <header class="workspace-header">
+                <div class="workspace-header-primary">
+                    <button id="mobile-menu-button" class="sidebar-icon-button mobile-menu-button" data-icon="menu" type="button" aria-label="Открыть меню" aria-controls="sidebar" aria-expanded="false"></button>
+                    <div class="workspace-title">
+                        <span class="workspace-section">Система</span>
+                        <strong>BROray</strong>
+                    </div>
+                </div>
+                <div class="workspace-header-actions">
+                    <div id="theme-control-mount" class="theme-control-mount"></div>
+                    <button id="refresh-status" class="button button-secondary button-compact" data-icon="update" type="button" hidden aria-hidden="true" tabindex="-1">Обновить</button>
+                </div>
+            </header>
+<main class="workspace-content broray-page" id="main-content">
+    <section class="page-heading broray-page-heading" aria-labelledby="broray-page-title">
+        <div>
+            <span class="eyebrow">Версия, компоненты и обслуживание</span>
+            <h1 id="broray-page-title">BROray</h1>
+            <p>Состояние установки, состав системы, обновление и переустановка компактного слота приложения, безопасное удаление.</p>
+        </div>
+        <span id="installation-status" class="status-badge status-loading" data-icon="status">Проверка…</span>
+    </section>
+
+    <section class="card broray-overview-card" aria-labelledby="broray-version-title">
+        <div class="broray-version-panel">
+            <span class="broray-product-icon" data-icon="security" aria-hidden="true"></span>
+            <div class="broray-version-copy">
+                <span class="eyebrow" id="broray-version-title">Установленная версия</span>
+                <strong class="broray-version" id="current-version">—</strong>
+                <p id="build-description">Сборка: загрузка…</p>
+                <p class="broray-last-check">Последняя проверка: <span id="last-update-check">—</span></p>
+            </div>
+        </div>
+
+        <dl class="broray-overview-facts">
+            <div class="broray-fact">
+                <dt>Архитектура</dt>
+                <dd id="architecture">—</dd>
+            </div>
+            <div class="broray-fact">
+                <dt>Канал обновлений</dt>
+                <dd id="update-channel">—</dd>
+            </div>
+            <div class="broray-fact">
+                <dt>Пакет OPKG</dt>
+                <dd id="installed-package-version">—</dd>
+            </div>
+            <div class="broray-fact">
+                <dt>Доступная версия</dt>
+                <dd id="available-version">—</dd>
+            </div>
+            <div class="broray-fact">
+                <dt>WebUI</dt>
+                <dd id="webui-build">—</dd>
+            </div>
+            <div class="broray-fact">
+                <dt>Updater</dt>
+                <dd id="updater-platform">—</dd>
+            </div>
+        </dl>
+
+    </section>
+
+    <section class="card broray-update-card" aria-labelledby="broray-update-title">
+        <div class="section-heading">
+            <div>
+                <span class="eyebrow">Обслуживание</span>
+                <h2 id="broray-update-title">Обновление и переустановка</h2>
+            </div>
+        </div>
+        <div class="broray-update-actions" aria-label="Обновление BROray">
+            <button id="check-update" class="button button-secondary" data-icon="search" type="button">
+                <span class="button-label">Проверить обновление</span>
+            </button>
+            <button id="install-update" class="button button-primary" data-icon="update" type="button" disabled>
+                <span class="button-label">Установить обновление</span>
+            </button>
+            <button id="reinstall-current" class="button button-secondary" data-icon="restore" type="button" disabled>
+                <span class="button-label">Переустановить текущую версию</span>
+            </button>
+        </div>
+        <p class="section-note broray-reinstall-note">Переустановка заново развернёт текущий компактный слот приложения BROray через постоянный updater-v5, сохранив настройки, подписки, серверы, маршруты и DNS-over-TLS. Пакет OPKG при этом не переустанавливается.</p>
+    </section>
+
+    <section class="card broray-cleanup-card" aria-labelledby="broray-cleanup-title">
+        <div class="section-heading">
+            <div>
+                <span class="eyebrow">Свободное место</span>
+                <h2 id="broray-cleanup-title">Безопасная очистка</h2>
+            </div>
+            <span id="cleanup-state" class="status-badge status-neutral" data-icon="storage">Не проверено</span>
+        </div>
+        <p class="section-note">BROray удаляет только распознанные старые служебные файлы. Активные журналы, последние резервные копии, неизвестные файлы и внешние симлинки не затрагиваются.</p>
+        <div class="broray-cleanup-options" aria-label="Категории очистки">
+            <label class="broray-cleanup-option">
+                <input id="cleanup-temp" type="checkbox" checked>
+                <span><strong>Временные файлы</strong><small>Незавершённые загрузки и устаревшие служебные каталоги</small></span>
+            </label>
+            <label class="broray-cleanup-option">
+                <input id="cleanup-backups" type="checkbox" checked>
+                <span><strong>Старые резервные копии</strong><small>Последние три копии каждого управляемого типа сохраняются</small></span>
+            </label>
+            <label class="broray-cleanup-option">
+                <input id="cleanup-route-backups" type="checkbox" checked>
+                <span><strong>Копии отката маршрутов</strong><small>Сохраняются три последних набора каждого типа</small></span>
+            </label>
+            <label class="broray-cleanup-option">
+                <input id="cleanup-logs" type="checkbox" checked>
+                <span><strong>Старые журналы</strong><small>Только архивы и ротации старше семи дней</small></span>
+            </label>
+        </div>
+        <div class="broray-cleanup-actions">
+            <button id="cleanup-plan" class="button button-secondary" data-icon="search" type="button">
+                <span class="button-label">Проверить очистку</span>
+            </button>
+            <button id="cleanup-run" class="button button-primary" data-icon="delete" type="button" disabled>
+                <span class="button-label">Очистить</span>
+            </button>
+        </div>
+        <div id="cleanup-result" class="broray-cleanup-result" hidden aria-live="polite">
+            <dl class="broray-cleanup-summary">
+                <div><dt>Объектов</dt><dd id="cleanup-count">0</dd></div>
+                <div><dt>Можно освободить</dt><dd id="cleanup-bytes">0 Б</dd></div>
+                <div><dt>Подтверждение</dt><dd id="cleanup-expiry">—</dd></div>
+            </dl>
+            <details class="broray-cleanup-details">
+                <summary data-icon="logs">Что будет удалено</summary>
+                <ul id="cleanup-candidates" class="broray-cleanup-candidates"></ul>
+            </details>
+        </div>
+    </section>
+
+    <!-- BROray information cards: components, capabilities, protocols, project r2 -->
+    <div class="broray-information-grid">
+        <section class="card broray-components-card" aria-labelledby="components-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">Состав установки</span>
+                    <h2 id="components-title">Компоненты</h2>
+                </div>
+            </div>
+            <div id="component-list" class="broray-component-list" aria-live="polite"></div>
+        </section>
+
+        <section class="card broray-capabilities-card" aria-labelledby="capabilities-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">Возможности</span>
+                    <h2 id="capabilities-title">Что умеет BROray</h2>
+                </div>
+            </div>
+            <ul id="capability-list" class="broray-capability-list"></ul>
+        </section>
+
+        <section class="card broray-protocols-card" aria-labelledby="protocols-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">Импорт конфигураций</span>
+                    <h2 id="protocols-title">Протоколы</h2>
+                </div>
+            </div>
+            <div id="protocol-list" class="broray-protocol-grid" aria-live="polite"></div>
+            <p class="section-note">Показываются парсеры, фактически установленные в BROray.</p>
+        </section>
+
+        <section class="card broray-project-card" aria-labelledby="project-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">Проект</span>
+                    <h2 id="project-title">Ссылки и поддержка</h2>
+                </div>
+            </div>
+            <div class="broray-project-links">
+                <a id="project-link" class="broray-link-card" data-icon="help" href="https://docs.brovibe.cloud/broray/" target="_blank" rel="noopener noreferrer">
+                    <span>
+                        <strong>Страница проекта</strong>
+                        <small>Документация и сведения о BROray</small>
+                    </span>
+                </a>
+                <a id="github-link" class="broray-link-card" data-icon="integrations" href="https://github.com/BROadmin/BROray" target="_blank" rel="noopener noreferrer">
+                    <span>
+                        <strong>GitHub</strong>
+                        <small>Исходный код и выпуски</small>
+                    </span>
+                </a>
+                <details id="donate-link" class="broray-support-details">
+                    <summary class="broray-link-card broray-donation-card" data-icon="help">
+                        <span>
+                            <strong>Поддержать проект</strong>
+                            <small>QR-код и прямая ссылка CloudTips</small>
+                        </span>
+                    </summary>
+                    <div class="broray-support-panel">
+                        <a class="support-qr-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer" aria-label="Открыть CloudTips для поддержки BROray">
+                            <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=WebUI-3.1.0-r09c02" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
+                        </a>
+                        <div class="broray-support-copy">
+                            <p>Поддержка помогает оплачивать инфраструктуру, тестирование и выпуск обновлений BROray.</p>
+                            <a class="support-direct-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">https://pay.cloudtips.ru/p/09b23d0a</a>
+                        </div>
+                    </div>
+                </details>
+            </div>
+        </section>
+    </div>
+
+    <section class="card broray-operation-card" aria-labelledby="operation-title">
+        <div class="section-heading broray-operation-heading">
+            <div>
+                <span class="eyebrow">Последняя операция</span>
+                <h2 id="operation-title">Обновление и переустановка</h2>
+            </div>
+            <span id="operation-state" class="status-badge status-neutral" data-icon="logs">Нет операций</span>
+        </div>
+
+        <div id="operation-progress" class="broray-operation-progress" hidden>
+            <progress id="operation-progress-bar" max="100" value="0">0%</progress>
+            <span id="operation-progress-value">0%</span>
+        </div>
+
+        <p id="operation-message" class="broray-operation-message">Операции ещё не выполнялись.</p>
+        <p id="operation-error" class="broray-operation-error" role="alert" hidden></p>
+
+        <div class="broray-operation-actions">
+            <button id="restore-backup" class="button button-secondary" data-icon="restore" type="button" disabled aria-disabled="true" title="Восстановление резервной копии не поддерживается компактной схемой кандидата.">
+                <span class="button-label">Восстановление недоступно</span>
+            </button>
+        </div>
+
+        <details class="broray-log-details">
+            <summary data-icon="logs">Технический журнал</summary>
+            <pre id="operation-log">Журнал пока пуст.</pre>
+        </details>
+    </section>
+
+    <section class="card broray-danger-zone" aria-labelledby="danger-title">
+        <div class="section-heading">
+            <div>
+                <span class="eyebrow">Опасная зона</span>
+                <h2 id="danger-title">Удаление BROray</h2>
+            </div>
+        </div>
+        <div class="broray-danger-grid">
+            <article class="broray-danger-option">
+                <div>
+                    <h3>Обычное удаление</h3>
+                    <p>Удаляет программу и созданные ею рабочие объекты. Перед удалением создаётся резервная копия пользовательских данных.</p>
+                </div>
+                <button id="uninstall-normal" class="button button-danger-outline" data-icon="delete" type="button">
+                    <span class="button-label">Удалить BROray</span>
+                </button>
+            </article>
+            <article class="broray-danger-option broray-danger-option-critical">
+                <div>
+                    <h3>Полное удаление</h3>
+                    <p>Удаляет BROray, настройки, подписки, серверы, маршруты, управляемый интерфейс BROray, KeenDNS HTTP Proxy и служебные данные.</p>
+                </div>
+                <button id="uninstall-full" class="button button-danger" data-icon="delete" type="button">
+                    <span class="button-label">Удалить полностью</span>
+                </button>
+            </article>
+        </div>
+    </section>
+
+    <div id="page-error" class="page-error" role="alert" hidden></div>
+</main>
+            <footer class="workspace-footer">
+                <span>BROray · Менеджер Xray для Keenetic</span>
+                <a href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Поддержать проект</a>
+            </footer>
+        </div>
+    </div>
+    <div id="page-loader" class="page-loader">
+        <span class="loader-spinner" aria-hidden="true"></span>
+        <span>Загрузка BROray…</span>
+    </div>
+    <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+    <div id="support-root" class="modal-root support-modal-root" hidden>
+        <button id="support-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть окно поддержки"></button>
+        <section class="modal support-modal" role="dialog" aria-modal="true" aria-labelledby="support-title" aria-describedby="support-message">
+            <span class="eyebrow">Поддержка проекта</span>
+            <h2 id="support-title">Помочь развитию BROray</h2>
+            <div class="support-modal-content">
+                <a class="support-qr-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer" aria-label="Открыть CloudTips для поддержки BROray">
+                    <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=WebUI-3.1.0-r09c02" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
+                </a>
+                <div class="support-modal-copy">
+                    <p id="support-message">BROray развивается как открытый проект. Поддержка помогает оплачивать инфраструктуру, тестирование и выпуск обновлений.</p>
+                    <a class="support-direct-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">https://pay.cloudtips.ru/p/09b23d0a</a>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="support-close" class="button button-secondary" type="button">Закрыть</button>
+                <a class="button button-primary" data-icon="help" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Открыть CloudTips</a>
+            </div>
+        </section>
+    </div>
+    <div id="confirm-root" class="modal-root" hidden>
+        <button id="confirm-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть"></button>
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+            <span id="confirm-eyebrow" class="eyebrow">Подтверждение</span>
+            <h2 id="confirm-title">Подтвердите действие</h2>
+            <p id="confirm-message"></p>
+            <div id="confirm-input-group" class="modal-input-group" hidden>
+                <label id="confirm-input-label" for="confirm-input">Введите значение</label>
+                <input id="confirm-input" type="text" autocomplete="off" spellcheck="false">
+                <p id="confirm-input-hint" class="modal-input-hint" hidden></p>
+                <p id="confirm-input-error" class="modal-input-error" role="alert" hidden></p>
+            </div>
+            <div class="modal-actions">
+                <button id="confirm-cancel" class="button button-secondary" type="button">Отмена</button>
+                <button id="confirm-accept" class="button button-danger" type="button">Продолжить</button>
+            </div>
+        </section>
+    </div>
+
+    <script src="/assets/js/common.js?v=WebUI-3.1.0-r09c02"></script>
+    <script src="/assets/js/icons.js?v=WebUI-3.1.0-r09c02"></script>
+    <script src="/assets/js/app-shell.js?v=WebUI-3.1.0-r09c02"></script>
+    <script src="/assets/js/theme.js?v=WebUI-3.1.0-r09c02"></script>
+    <script src="/assets/js/dialogs.js?v=WebUI-3.1.0-r09c02"></script>
+    <script src="/assets/js/broray.js?v=WebUI-3.1.0-r09c02"></script>
+</body>
+</html>

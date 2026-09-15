@@ -1,0 +1,43 @@
+#!/opt/bin/ash
+set -u
+umask 077
+PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+BRORAY_ROOT="${BRORAY_ROOT:-/opt/broray}"
+
+broray_prepare_fail()
+{
+    printf 'BRORAY_RUNTIME_PREPARE=FAIL REASON=%s\n' "$1" >&2
+    return 1
+}
+
+for directory in data deleted-subscriptions subscriptions servers run logs tmp backup routes
+do
+    target="$BRORAY_ROOT/$directory"
+    if [ -e "$target" ] || [ -L "$target" ]; then
+        [ -d "$target" ] && [ ! -L "$target" ] || broray_prepare_fail "unsafe-$directory" || exit 1
+    else
+        mkdir -p "$target" || broray_prepare_fail "mkdir-$directory" || exit 1
+    fi
+done
+
+[ -r "$BRORAY_ROOT/lib/routes-runtime-repair.sh" ] || broray_prepare_fail routes-repair-missing || exit 1
+. "$BRORAY_ROOT/lib/routes-runtime-repair.sh"
+broray_routes_runtime_prepare || broray_prepare_fail routes-repair || exit 1
+
+[ -r "$BRORAY_ROOT/lib/routes-dot.sh" ] || broray_prepare_fail dot-library-missing || exit 1
+. "$BRORAY_ROOT/lib/routes-dot.sh"
+broray_dot_ensure_files || broray_prepare_fail dot-state || exit 1
+
+# An older compact updater can activate the current application bundle but
+# cannot consume its updater-platform member.  Queue the one-time continuation
+# while the source update is still durably identifiable.  The worker waits for
+# that source transaction to finish before replacing updater files.
+BRORAY_PLATFORM_HANDOFF="${BRORAY_PLATFORM_HANDOFF:-$BRORAY_ROOT/current/app/lib/universal-platform-handoff.sh}"
+[ -f "$BRORAY_PLATFORM_HANDOFF" ] && [ ! -L "$BRORAY_PLATFORM_HANDOFF" ] &&
+    [ -x "$BRORAY_PLATFORM_HANDOFF" ] ||
+    broray_prepare_fail platform-handoff-missing || exit 1
+/opt/bin/ash "$BRORAY_PLATFORM_HANDOFF" schedule ||
+    broray_prepare_fail platform-handoff-schedule || exit 1
+
+printf 'BRORAY_RUNTIME_PREPARE=PASS\n'

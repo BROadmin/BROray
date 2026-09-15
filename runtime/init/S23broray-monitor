@@ -1,0 +1,188 @@
+#!/opt/bin/ash
+
+ENABLED="${BRORAY_MONITOR_ENABLED:-yes}"
+
+BASE="${BRORAY_MONITOR_ROOT:-/opt/broray}"
+MONITOR="${BRORAY_MONITOR_EXECUTABLE:-$BASE/bin/broray-connection-monitor}"
+ASH_BIN="${BRORAY_MONITOR_ASH:-/opt/bin/ash}"
+PIDFILE="${BRORAY_MONITOR_PIDFILE:-$BASE/run/connection-monitor.pid}"
+LOGFILE="${BRORAY_MONITOR_LOG:-$BASE/logs/connection-monitor.log}"
+PROC_ROOT="${BRORAY_MONITOR_PROC_ROOT:-/proc}"
+MAX_LOG_BYTES="${BRORAY_MONITOR_LOG_MAX_BYTES:-262144}"
+
+case "$MAX_LOG_BYTES" in ''|*[!0-9]*) MAX_LOG_BYTES=262144 ;; esac
+[ "$MAX_LOG_BYTES" -ge 65536 ] || MAX_LOG_BYTES=262144
+
+monitor_log()
+{
+    log_size=0
+    mkdir -p "${LOGFILE%/*}" 2>/dev/null || return 0
+    if [ -f "$LOGFILE" ]; then
+        log_size="$(wc -c <"$LOGFILE" 2>/dev/null | tr -d ' ')"
+        case "$log_size" in ''|*[!0-9]*) log_size=0 ;; esac
+        if [ "$log_size" -gt "$MAX_LOG_BYTES" ]; then
+            tail -n 600 "$LOGFILE" >"$LOGFILE.new.$$" 2>/dev/null &&
+                mv -f "$LOGFILE.new.$$" "$LOGFILE"
+            rm -f "$LOGFILE.new.$$"
+        fi
+    fi
+    printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$LOGFILE" 2>/dev/null || true
+}
+
+monitor_pid_read()
+{
+    [ -f "$PIDFILE" ] && [ ! -L "$PIDFILE" ] || return 1
+    monitor_pid="$(sed -n '1p' "$PIDFILE" 2>/dev/null)"
+    case "$monitor_pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$monitor_pid" -gt 1 ] || return 1
+    printf '%s\n' "$monitor_pid"
+}
+
+monitor_pid_matches()
+{
+    monitor_match_pid="$1"
+    case "$monitor_match_pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$monitor_match_pid" -gt 1 ] || return 1
+    kill -0 "$monitor_match_pid" 2>/dev/null || return 1
+    [ -r "$PROC_ROOT/$monitor_match_pid/cmdline" ] || return 1
+
+    tr '\000' '\n' <"$PROC_ROOT/$monitor_match_pid/cmdline" 2>/dev/null |
+        awk -v wanted="$MONITOR" -v wanted_shell="$ASH_BIN" '
+            NR == 1 { first = $0 }
+            NR == 2 { second = $0 }
+            END {
+                if (first == wanted ||
+                    (first == wanted_shell && second == wanted)) exit 0
+                exit 1
+            }
+        '
+}
+
+monitor_pidfile_write()
+{
+    monitor_write_pid="$1"
+    monitor_pidfile_temp="$PIDFILE.new.$$"
+    mkdir -p "${PIDFILE%/*}" || return 1
+    printf '%s\n' "$monitor_write_pid" >"$monitor_pidfile_temp" || {
+        rm -f "$monitor_pidfile_temp"
+        return 1
+    }
+    chmod 600 "$monitor_pidfile_temp" 2>/dev/null || true
+    mv -f "$monitor_pidfile_temp" "$PIDFILE"
+}
+
+start()
+{
+    [ "$ENABLED" = "yes" ] || return 0
+
+    mkdir -p "${PIDFILE%/*}" "${LOGFILE%/*}" || return 1
+
+    if existing_pid="$(monitor_pid_read 2>/dev/null)" &&
+       monitor_pid_matches "$existing_pid"
+    then
+        echo "BROray Monitor уже запущен, PID $existing_pid"
+        return 0
+    fi
+
+    if [ -e "$PIDFILE" ] || [ -L "$PIDFILE" ]; then
+        stale_pid="$(sed -n '1p' "$PIDFILE" 2>/dev/null || true)"
+        rm -f "$PIDFILE"
+        monitor_log "MONITOR_PIDFILE=DISCARDED PID=${stale_pid:-invalid} REASON=identity-mismatch"
+    fi
+
+    [ -x "$MONITOR" ] || {
+        monitor_log "MONITOR_START=FAIL REASON=executable-unavailable PATH=$MONITOR"
+        echo "Не найден монитор: $MONITOR"
+        return 1
+    }
+    [ -x "$ASH_BIN" ] || {
+        monitor_log "MONITOR_START=FAIL REASON=ash-unavailable PATH=$ASH_BIN"
+        echo "Не найден shell: $ASH_BIN"
+        return 1
+    }
+
+    "$ASH_BIN" "$MONITOR" >>"$LOGFILE" 2>&1 &
+    started_pid="$!"
+    monitor_pidfile_write "$started_pid" || {
+        kill "$started_pid" 2>/dev/null || true
+        monitor_log "MONITOR_START=FAIL PID=$started_pid REASON=pidfile-publication"
+        echo "Ошибка запуска BROray Monitor"
+        return 1
+    }
+
+    sleep 1
+
+    if monitor_pid_matches "$started_pid"; then
+        monitor_log "MONITOR_START=PASS PID=$started_pid"
+        echo "BROray Monitor запущен, PID $started_pid"
+        return 0
+    fi
+
+    rm -f "$PIDFILE"
+    monitor_log "MONITOR_START=FAIL PID=$started_pid REASON=process-not-running"
+    echo "Ошибка запуска BROray Monitor"
+    return 1
+}
+
+stop()
+{
+    if ! stopped_pid="$(monitor_pid_read 2>/dev/null)"; then
+        rm -f "$PIDFILE"
+        echo "BROray Monitor не запущен"
+        return 0
+    fi
+
+    if ! monitor_pid_matches "$stopped_pid"; then
+        rm -f "$PIDFILE"
+        monitor_log "MONITOR_STOP=SKIP PID=$stopped_pid REASON=identity-mismatch"
+        echo "BROray Monitor не запущен"
+        return 0
+    fi
+
+    kill "$stopped_pid" 2>/dev/null || true
+    counter=0
+
+    while monitor_pid_matches "$stopped_pid" && [ "$counter" -lt 10 ]; do
+        sleep 1
+        counter=$((counter + 1))
+    done
+
+    if monitor_pid_matches "$stopped_pid"; then
+        kill -9 "$stopped_pid" 2>/dev/null || true
+    fi
+
+    rm -f "$PIDFILE"
+    monitor_log "MONITOR_STOP=PASS PID=$stopped_pid"
+    echo "BROray Monitor остановлен"
+}
+
+status()
+{
+    if running_pid="$(monitor_pid_read 2>/dev/null)" &&
+       monitor_pid_matches "$running_pid"
+    then
+        echo "BROray Monitor работает"
+        echo "PID: $running_pid"
+        return 0
+    fi
+
+    echo "BROray Monitor не запущен"
+    return 1
+}
+
+restart()
+{
+    stop
+    start
+}
+
+case "${1:-}" in
+    start) start ;;
+    stop) stop ;;
+    restart) restart ;;
+    status|check) status ;;
+    *)
+        echo "Использование: $0 {start|stop|restart|status|check}"
+        exit 1
+        ;;
+esac

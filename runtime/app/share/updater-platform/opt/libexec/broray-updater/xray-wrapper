@@ -1,0 +1,3 @@
+#!/opt/bin/ash
+
+exec /opt/broray/runtime/xray "$@"

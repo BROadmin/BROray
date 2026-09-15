@@ -1,0 +1,126 @@
+#!/opt/bin/ash
+
+ROOT="${BRORAY_ROOT:-/opt/broray}"
+SNAPSHOT_ASH="${BRORAY_HOME_SNAPSHOT_ASH:-/opt/bin/ash}"
+PATH="$ROOT/bin:/opt/sbin:/opt/bin:/sbin:/bin:$PATH"
+export ROOT PATH
+
+. "$ROOT/lib/home-snapshot.sh"
+
+snapshot_collect()
+{
+    collect_module="$1"
+    collect_output="$2"
+    collect_auxiliary="$ROOT/tmp/home-snapshot-${collect_module}-aux.$$"
+    rm -f "$collect_auxiliary"
+
+    case "$collect_module" in
+        xray)
+            . "$ROOT/lib/xray.sh"
+            broray_xray_status_json |
+                jq -ce 'select(.success == true and (.data | type) == "object") | .data' \
+                    >"$collect_output"
+            ;;
+        keenetic)
+            . "$ROOT/lib/keenetic-page.sh"
+            broray_keenetic_status_json |
+                jq -ce 'select(type == "object")' >"$collect_output"
+            ;;
+        servers)
+            BRORAY_SERVER_SKIP_KEENETIC_REFRESH=true
+            export BRORAY_SERVER_SKIP_KEENETIC_REFRESH
+            . "$ROOT/lib/server-service.sh"
+            broray_server_summary |
+                jq -ce 'select(type == "object")' >"$collect_output"
+            ;;
+        subscriptions)
+            . "$ROOT/lib/subscription-service.sh"
+            broray_subscription_summary |
+                jq -ce 'select(type == "object")' >"$collect_output"
+            ;;
+        dns)
+            . "$ROOT/lib/routes-dot.sh"
+            broray_dot_status |
+                jq -ce 'select(type == "object")' >"$collect_output"
+            ;;
+        routes)
+            . "$ROOT/lib/routes-page-summary.sh"
+            broray_routes_page_summary all "$collect_auxiliary" || return 1
+            jq -ce '
+              . as $page |
+              {
+                schemaVersion:2,
+                availableBundles:($page.totals.bundleCount // 0),
+                installedBundles:($page.totals.verifiedInstalledCount // 0),
+                verifiedInstalledBundles:($page.totals.verifiedInstalledCount // 0),
+                recordedInstalledBundles:($page.totals.recordedInstalledCount // 0),
+                installedRouteCount:($page.totals.presentRouteCount // 0),
+                attentionCount:($page.totals.attentionCount // 0),
+                actionRequired:($page.health.actionRequired // true),
+                operationRunning:($page.globalOperation.running // false),
+                managedInterface:($page.managedInterface // "ProxyN"),
+                routerSnapshot:($page.routerSnapshot // null),
+                bundles:($page.bundles // []),
+                health:$page.health,
+                updatedAt:($page.generatedAt // null)
+              }
+            ' "$collect_auxiliary" >"$collect_output"
+            ;;
+        broray)
+            "$ROOT/bin/broray-system" info |
+                jq -ce 'select(.ok == true and type == "object")' >"$collect_output"
+            ;;
+        *) return 2 ;;
+    esac
+    collect_rc=$?
+    rm -f "$collect_auxiliary"
+    return "$collect_rc"
+}
+
+snapshot_refresh_one()
+{
+    refresh_module="$1"
+    broray_home_snapshot_module_valid "$refresh_module" || return 2
+    mkdir -p "$ROOT/tmp" || return 1
+    refresh_output="$ROOT/tmp/home-snapshot-${refresh_module}.$$"
+    rm -f "$refresh_output"
+    snapshot_collect "$refresh_module" "$refresh_output" || {
+        refresh_rc=$?
+        rm -f "$refresh_output"
+        return "$refresh_rc"
+    }
+    broray_home_snapshot_write "$refresh_module" "$refresh_output"
+    refresh_rc=$?
+    rm -f "$refresh_output"
+    return "$refresh_rc"
+}
+
+snapshot_refresh_all()
+{
+    refresh_failures=0
+    for refresh_module in xray keenetic servers subscriptions dns routes broray; do
+        if "$SNAPSHOT_ASH" "$0" refresh "$refresh_module"; then
+            printf 'HOME_SNAPSHOT_REFRESH=%s:PASS\n' "$refresh_module"
+        else
+            printf 'HOME_SNAPSHOT_REFRESH=%s:FAIL\n' "$refresh_module" >&2
+            refresh_failures=$((refresh_failures + 1))
+        fi
+    done
+    [ "$refresh_failures" -eq 0 ]
+}
+
+case "${1:-}" in
+    refresh)
+        snapshot_refresh_one "${2:-}"
+        ;;
+    refresh-all)
+        snapshot_refresh_all
+        ;;
+    read)
+        broray_home_snapshot_read "${2:-}"
+        ;;
+    *)
+        printf '%s\n' 'Использование: broray-home-snapshot {refresh MODULE|refresh-all|read MODULE}' >&2
+        exit 2
+        ;;
+esac

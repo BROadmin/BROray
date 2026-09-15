@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 3,
+  "contract": "broray-space/2",
+  "legacyIdentifier": false,
+  "activeMeaning": "r14c01-bounded-clean-bootstrap-and-compact-slot-checks",
+  "requirementsContract": "1.7.2",
+  "lifecycleContract": "compact-app-rename/1",
+  "capabilityContract": "keenetic-entware-capabilities/1",
+  "spaceContract": "broray-space/2",
+  "candidateId": "3.0.0-r15c16",
+  "previousIpkRequired": false,
+  "historicalTransactionStateRequired": false,
+  "statelessBootstrap": false,
+  "unit": "bytes",
+  "activePolicy": "bounded-fail-closed-clean-bootstrap-and-compact-app-slot",
+  "cleanBootstrap": {
+    "optMinimumFreeBytes": 67108864,
+    "tmpMinimumFreeBytes": 78643200,
+    "tmpMinimumAllocatableInodes": 4096,
+    "immutableBootstrapPeakObjects": 341,
+    "tmpAllocationProbeObjects": 4096,
+    "tmpAllocationReserveObjects": 3755,
+    "measuredInPreinstBeforePayloadDownload": true,
+    "repeatedImmediatelyBeforeFirstPersistentWrite": false,
+    "tmpConcurrentObjects": [
+      "versioned release index",
+      "application bundle and extracted validation tree",
+      "updater-v5 platform bundle and extracted validation tree",
+      "Xray gzip and decompressed executable"
+    ],
+    "sharedXray": {
+      "compressedBytes": 12563150,
+      "installedBytes": 35389566,
+      "singleInstalledCopy": true
+    },
+    "failureBeforeMutation": "temporary-workspace-removed-and-persistent-target-unchanged",
+    "failureAfterMutationBeforeCommit": "best-effort-remove-bootstrap-owned-objects"
+  },
+  "applicationUpdater": {
+    "engine": "broray-updater/5",
+    "tmpCheck": "free-bytes-at-least-published-bundle-size-before-download",
+    "optCheck": "free-bytes-at-least-published-app-slot-logical-bytes-plus-slot-marker-bytes-after-old-rollback-prune",
+    "inodeCheck": false,
+    "allocationUpperBoundCheck": false,
+    "sharedXrayDuplicated": false,
+    "persistentUserStateDuplicated": false,
+    "oldRollbackPrunedBeforeStaging": true,
+    "maximumLiveAppSlots": 2,
+    "stagingMetricsReproved": [
+      "logicalBytes",
+      "fileCount",
+      "directoryCount",
+      "maxFileBytes"
+    ],
+    "preSwitchFailureInvariant": "active-slot-unchanged",
+    "postSwitchFailureInvariant": "journaled-rename-rollback-to-previous-slot-or-fail-closed-recovery-state"
+  },
+  "uninstall": {
+    "temporaryRollbackSnapshot": "verified-gzip-of-protected-user-roots-created-before-Keenetic-or-service-mutation",
+    "explicitSpacePrecheck": false,
+    "snapshotWriteFailure": "abort-before-mutation",
+    "normal": "create-and-verify-one-external-protected-archive-plus-SHA256-before-OPKG-commit",
+    "full": "no-external-preserved-archive; temporary-precommit-rollback-snapshot-still-required",
+    "preservedRoot": "/opt/broray-preserved"
+  },
+  "measurements": {
+    "freeBlocks": "LC_ALL=C df -Pk PATH; available-KiB multiplied by 1024",
+    "allocatableInodesCleanBootstrap": "create and remove 4096 zero-byte regular files inside one private mktemp directory on /tmp",
+    "fileBytes": "wc -c",
+    "slotLogicalBytes": "find -xdev -type f -printf %s and awk sum",
+    "slotObjectCounts": "find -xdev and wc -l"
+  },
+  "failClosedLimitations": [
+    "fixed-clean-bootstrap-minima-are-not-a-per-device-combined-peak-proof",
+    "clean-bootstrap-space-minima-and-inode-allocation-probe-are-not-repeated-immediately-before-first-persistent-write",
+    "updater-opt-check-uses-logical-bytes-not-filesystem-allocation-upper-bound",
+    "updater-does-not-preflight-inodes",
+    "updater-tmp-check-covers-bundle-size-not-bundle-plus-extraction-allocation-peak",
+    "uninstall-relies-on-successful-verified-snapshot-write-instead-of-an-advance-space-formula",
+    "no-active-combined-opt-tmp-mount-identity-or-phase-peak-planner"
+  ],
+  "retiredClaims": [
+    "legacy-full-IPK-snapshot-formula-is-active",
+    "gzip-upper-bound-proves-current-rollback-space",
+    "hardlink-topology-accounting-drives-current-bootstrap",
+    "same-backing-filesystem-phase-equations-are-enforced",
+    "machine-evidence-schema-5-is-produced-by-the-active-lifecycle"
+  ]
+}

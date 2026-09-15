@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "chatgpt",
+  "name": "ChatGPT",
+  "source": {
+    "provider": "github",
+    "repository": "RockBlack-VPN/ip-address",
+    "branch": "main",
+    "directory": "Global/ChatGPT(OpenAI)",
+    "files": [
+      {
+        "name": "ChatGPT(OpenAI)_0.0.6.bat",
+        "type": "windows-route-bat",
+        "enabled": true
+      }
+    ],
+    "discovery": {
+      "mode": "all-bat",
+      "recursive": false
+    }
+  },
+  "targetInterface": "Proxy0",
+  "exportComment": "BROray",
+  "limits": {
+    "maxSourceBytes": 4194304,
+    "maxRoutes": 10000
+  }
+}

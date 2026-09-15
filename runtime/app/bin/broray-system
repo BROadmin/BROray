@@ -1,0 +1,34 @@
+#!/opt/bin/ash
+
+BRORAY_SYSTEM_BASE="${BRORAY_BASE:-/opt/broray}"
+BRORAY_SYSTEM_LIB="${BRORAY_SYSTEM_LIB:-$BRORAY_SYSTEM_BASE/lib/broray-page.sh}"
+BRORAY_UPDATER_CTL="${BRORAY_UPDATER_CTL:-/opt/bin/broray-updaterctl}"
+BRORAY_UPDATER_COMPAT="${BRORAY_UPDATER_COMPAT:-/opt/libexec/broray-updater/broray-compat.sh}"
+
+case "${1:-}" in
+    update-check)
+        exec "$BRORAY_UPDATER_CTL" check
+        ;;
+    update-start)
+        exec "$BRORAY_UPDATER_CTL" request update
+        ;;
+    reinstall-start)
+        exec "$BRORAY_UPDATER_CTL" request reinstall
+        ;;
+    status)
+        exec "$BRORAY_UPDATER_CTL" status
+        ;;
+    restore-start)
+        printf '%s\n' '{"ok":false,"error":{"code":"RESTORE_UNAVAILABLE","message":"Восстановление резервной копии недоступно для компактной схемы."}}'
+        exit 1
+        ;;
+esac
+
+[ -r "$BRORAY_SYSTEM_LIB" ] || {
+    printf 'Не найден backend BROray: %s\n' "$BRORAY_SYSTEM_LIB" >&2
+    exit 1
+}
+
+. "$BRORAY_SYSTEM_LIB"
+[ -r "$BRORAY_UPDATER_COMPAT" ] && . "$BRORAY_UPDATER_COMPAT"
+broray_system_main "$@"

@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "candidateId": "3.1.0-r09c02",
+      "architecture": "arm64",
+      "xrayTag": "v26.2.6",
+      "archiveSha256": "b52d8263453fbd6f4747fd6a1ecf70cd43a664243615dc892ea4674c01b2b5ee",
+      "testedAt": "2026-09-10T08:29:20Z",
+      "status": "incompatible",
+      "evidence": "R0082/r06/26.2.6: install, validation and runtime pass, but HTTPS through VLESS/XHTTP/REALITY fails 0/3; isolated Firefox and Chrome controls also fail 0/3 each. Classified incompatible for BROray by project owner on 2026-09-10. No claim that every Xray configuration fails."
+    },
+    {
+      "candidateId": "3.1.0-r09c02",
+      "architecture": "arm64",
+      "xrayTag": "v26.3.27",
+      "archiveSha256": "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c",
+      "testedAt": "2026-09-10T08:30:14Z",
+      "status": "compatible",
+      "evidence": "R0082/r06/26.3.27: physical install, validation, restart, SOCKS and HTTPS 3/3 with concurrent validation; VLESS/XHTTP/REALITY. r09 has identical runtime code; final r09 acceptance is recorded separately."
+    },
+    {
+      "candidateId": "3.1.0-r09c02",
+      "architecture": "arm64",
+      "xrayTag": "v26.6.27",
+      "archiveSha256": "13a251379bea366c2cf10363ad71e75734193d401f26f518bf0c25e5c8f8c931",
+      "testedAt": "2026-09-10T08:31:04Z",
+      "status": "compatible",
+      "evidence": "R0082/r06/26.6.27: physical install, validation, restart, SOCKS and HTTPS 3/3 with concurrent validation; VLESS/XHTTP/REALITY. r09 has identical runtime code; final r09 acceptance is recorded separately."
+    },
+    {
+      "candidateId": "3.1.0-r09c02",
+      "architecture": "arm64",
+      "xrayTag": "v26.7.11",
+      "archiveSha256": "89cfe01674d7c9f6847b7dd9389537be9acb3b9dc3c6cb9fdeba87a3e4e57fc1",
+      "testedAt": "2026-09-10T08:31:54Z",
+      "status": "compatible",
+      "evidence": "R0082/r06/26.7.11: physical install, validation, restart, SOCKS and HTTPS 3/3 with concurrent validation; VLESS/XHTTP/REALITY. r09 has identical runtime code; final r09 acceptance is recorded separately."
+    },
+    {
+      "candidateId": "3.1.0-r09c02",
+      "architecture": "arm64",
+      "xrayTag": "v26.7.28",
+      "archiveSha256": "f5698bb218ada3b4022db26fafc39601c5f53b46b19eb76c9616325985807501",
+      "testedAt": "2026-09-10T08:32:43Z",
+      "status": "compatible",
+      "evidence": "R0082/r06/26.7.28: physical install, validation, restart, SOCKS and HTTPS 3/3 with concurrent validation; VLESS/XHTTP/REALITY. r09 has identical runtime code; final r09 acceptance is recorded separately."
+    },
+    {
+      "candidateId": "3.1.0-r09c02",
+      "architecture": "arm64",
+      "xrayTag": "v26.9.8",
+      "archiveSha256": "6721edb5b80e046536abc8235bd0977a2c69ade88ad42c01c0df368beba070dc",
+      "testedAt": "2026-09-10T08:33:33Z",
+      "status": "compatible",
+      "evidence": "R0082/r06/26.9.8: physical install, validation, restart, SOCKS and HTTPS 3/3 with concurrent validation; VLESS/XHTTP/REALITY. r09 has identical runtime code; final r09 acceptance is recorded separately."
+    },
+    {
+      "candidateId": "3.1.0-r09c02",
+      "architecture": "arm64",
+      "xrayTag": "v26.9.9",
+      "archiveSha256": "3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c",
+      "testedAt": "2026-09-10T08:34:22Z",
+      "status": "compatible",
+      "evidence": "R0082/r06/26.9.9: physical install, validation, restart, SOCKS and HTTPS 3/3 with concurrent validation; VLESS/XHTTP/REALITY. r09 has identical runtime code; final r09 acceptance is recorded separately."
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "appVersion": "3.1.0",
+  "buildId": "WebUI-3.1.0-r09c02",
+  "candidateId": "3.1.0-r09c02",
+  "capabilityContract": "keenetic-entware-capabilities/1",
+  "historicalTransactionStateRequired": false,
+  "lifecycleContract": "compact-app-rename/1",
+  "packageVersion": "3.0.0-r14",
+  "previousIpkRequired": false,
+  "releaseId": "3.1.0-r09",
+  "requirementsContract": "1.7.2",
+  "schemaVersion": 1,
+  "spaceContract": "broray-space/2",
+  "statelessBootstrap": false,
+  "updaterEngine": "broray-updater/5"
+}
