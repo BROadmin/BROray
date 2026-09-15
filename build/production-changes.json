@@ -13,6 +13,10 @@
     "app/lib/server-subscription-service.sh",
     "app/lib/server-xray-manager.sh",
     "app/lib/subscription-service.sh",
+    "app/lib/xray-control.sh",
+    "app/lib/xray-releases.sh",
+    "app/lib/xray-update.sh",
+    "app/lib/xray-web-operation.sh",
     "app/web-new/api/auth-common.sh",
     "app/web-new/api/servers/auto-switch-status.cgi",
     "app/web-new/api/servers/common.sh",
@@ -20,6 +24,7 @@
     "app/web-new/api/subscriptions/common.sh",
     "app/web-new/api/subscriptions/create.cgi",
     "app/web-new/api/subscriptions/update.cgi",
+    "app/web-new/api/xray/operation-status.cgi",
     "app/web-new/assets/css/allpage.css",
     "app/web-new/assets/js/dns.js",
     "app/web-new/broray.html"

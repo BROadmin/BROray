@@ -191,31 +191,27 @@ broray_xray_selected_runtime_ready() (
 )
 
 broray_xray_release_operation_fence() {
-    if [ "${BRORAY_ROUTES_API_LOCK_HELD:-false}" = true ]; then
-        broray_routes_api_lock_release
-    fi
+    broray_job_finish "${1:-failed}"
 }
 
 broray_xray_install_dispatch() {
     local install_rc
-    . "$BRORAY_BASE/lib/routes-api-operation.sh" || return 1
-    # A CGI worker already owns the fence. Only its immediate child can reuse it.
-    if [ "${BRORAY_XRAY_PARENT_LOCK:-0}" = 1 ] &&
-       [ "$(cat "$BRORAY_ROUTES_API_LOCK/pid" 2>/dev/null)" = "$PPID" ] &&
-       [ "$(cat "$BRORAY_ROUTES_API_LOCK/action" 2>/dev/null)" = "xray:$1" ]; then
+    if [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ]; then
+        # Only the actual acknowledged executor can continue this job.
+        broray_job_require_owner || return $?
         broray_xray_update_install "$@"
         return $?
     fi
-    broray_routes_api_lock_acquire "xray:$1" xray || {
-        broray_xray_update_error 'Другая конфликтующая операция BROray уже выполняется.'; return 1;
-    }
-    trap 'broray_routes_api_lock_release' 0
-    trap 'exit 129' 1
-    trap 'exit 130' 2
-    trap 'exit 143' 15
-    # The same process handles signals, rollback and fence release in that order.
+    broray_job_begin routes "xray:$1" xray USER cooperative || return $?
+    trap 'broray_xray_job_exit "$?"' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    install_rc=0
     broray_xray_update_install "$@"
     install_rc=$?
-    broray_routes_api_lock_release
+    broray_xray_update_abort_cleanup || return 75
+    broray_job_exit "$install_rc" || return 75
+    trap - EXIT HUP INT TERM
     return "$install_rc"
 }

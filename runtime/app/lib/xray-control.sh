@@ -1,9 +1,9 @@
 #!/opt/bin/ash
 
-BRORAY_XRAY_BINARY="${BRORAY_XRAY_BINARY:-/opt/broray/runtime/xray}"
-BRORAY_XRAY_CONFIG="${BRORAY_XRAY_CONFIG:-/opt/broray/config/config.json}"
+BRORAY_XRAY_BINARY="${BRORAY_XRAY_BINARY:-${BRORAY_BASE:-/opt/broray}/runtime/xray}"
+BRORAY_XRAY_CONFIG="${BRORAY_XRAY_CONFIG:-${BRORAY_BASE:-/opt/broray}/config/config.json}"
 BRORAY_XRAY_INIT="${BRORAY_XRAY_INIT:-/opt/etc/init.d/S24broray}"
-BRORAY_XRAY_ASSET_DIR="${BRORAY_XRAY_ASSET_DIR:-/opt/broray/bin}"
+BRORAY_XRAY_ASSET_DIR="${BRORAY_XRAY_ASSET_DIR:-${BRORAY_BASE:-/opt/broray}/bin}"
 
 . "${BRORAY_BASE:-/opt/broray}/lib/xray-process.sh" || return 1
 
