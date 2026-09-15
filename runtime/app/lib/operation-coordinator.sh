@@ -649,12 +649,28 @@ ops_stop_background()
 
 ops_status()
 {
-    local file dir id owner status rows errors count item paused fence
+    local file dir id owner status rows errors count item paused fence cancelled
     rows='[]'; errors='[]'; count=0
     for file in "$OPS_ROOT"/*/state.json; do
         [ -e "$file" ] || [ -L "$file" ] || continue
         count=$((count+1)); [ "$count" -le 128 ] || { errors='["HISTORY_LIMIT"]'; break; }
         dir="${file%/state.json}"; id="${dir##*/}"
+        # Terminal history is display data, not authority to retire a fence or
+        # run work. Avoid /proc identity probes and repeated owner parsing for
+        # every old row while holding the global coordinator guard. The actual
+        # fence is still independently validated below, even for a terminal row.
+        cancelled=false
+        [ ! -f "$dir/cancel.json" ] || [ -L "$dir/cancel.json" ] || cancelled=true
+        if ops_id_valid "$id" && ops_dir_safe "$dir" && ops_file_safe "$file" &&
+          item="$(jq -ec -L "$OPS_APP/lib" --arg id "$id" --argjson cancelled "$cancelled" '
+            include "operation-public";
+            select(type=="object" and .schemaVersion==2 and .kind=="background" and .operationId==$id and
+              .running==false and .phase=="finished" and (.resourceLocks|type)=="array" and
+              (.revision|type)=="number" and (.state=="completed" or .state=="failed" or .state=="aborted" or .state=="recovered")) |
+            .ownerStatus="FINISHED" | .ownerReason="operation_finished" | .cancelRequested=$cancelled | operation_public' "$file" 2>/dev/null)"; then
+            rows="$(jq -nc --argjson rows "$rows" --argjson item "$item" '$rows+[$item]')" || return 1
+            continue
+        fi
         # Legacy updater history has its own public API; do not invent owners.
         if ops_file_safe "$file" && jq -e '.kind!="background"' "$file" >/dev/null 2>&1; then continue; fi
         if ! ops_load "$id"; then errors='["STATE_UNAVAILABLE"]'; continue; fi

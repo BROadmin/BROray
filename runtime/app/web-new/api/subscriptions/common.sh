@@ -101,6 +101,15 @@ broray_subscriptions_api_run()
         broray_subscriptions_service_rc=$?
     fi
 
+    # A guard timeout before helper admission can coincide with an accepted
+    # cancellation. Confirm owner and drained terminal state before answering;
+    # never turn an unresolved helper/publication failure into cancellation.
+    if [ "$broray_subscriptions_service_rc" = 75 ] &&
+       [ "${BRORAY_JOB_UNRESOLVED:-false}" != true ] &&
+       broray_ops_cancel_requested && broray_job_finish aborted; then
+        broray_subscriptions_service_rc=130
+    fi
+
     broray_subscriptions_api_error_line="$(grep 'BRORAY_ERROR:' "$broray_subscriptions_api_error_file" | tail -n 1)"
     broray_subscriptions_api_error_code="$(printf '%s' "$broray_subscriptions_api_error_line" | cut -d: -f2)"
     broray_subscriptions_api_error_message="$(printf '%s' "$broray_subscriptions_api_error_line" | cut -d: -f3-)"

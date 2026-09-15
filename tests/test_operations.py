@@ -306,6 +306,27 @@ class Operations(unittest.TestCase):
         before=snapshot();self.call('status');self.call('events');self.call('report')
         self.assertEqual(snapshot(),before)
 
+    def test_terminal_history_is_display_data_without_process_identity_probe(self):
+        a=self.begin();self.call('finish',a['operationId'],a['token'],'completed','')
+        self.set_owner({'status':'unreadable'})
+        before=self.opfile(a,'state.json').read_bytes()
+        result=self.call('status');row=result['operations'][0]
+        self.assertTrue(result['complete']);self.assertEqual(row['state'],'completed')
+        self.assertEqual(row['ownerStatus'],'FINISHED');self.assertEqual(row['ownerReason'],'operation_finished')
+        self.assertEqual(self.opfile(a,'state.json').read_bytes(),before)
+
+    def test_terminal_history_cannot_hide_an_ambiguous_global_fence(self):
+        a=self.begin();self.call('finish',a['operationId'],a['token'],'aborted','CANCELLED')
+        (self.temp/'global.lock').mkdir();(self.temp/'global.lock'/'unknown').write_text('KEEP')
+        result=self.call('status');self.assertFalse(result['complete'])
+        self.assertEqual(result['globalFence'],'ambiguous');self.assertEqual(result['operations'][0]['ownerStatus'],'FINISHED')
+        self.assertEqual((self.temp/'global.lock'/'unknown').read_text(),'KEEP')
+
+    def test_corrupt_terminal_state_still_makes_status_incomplete(self):
+        a=self.begin();self.call('finish',a['operationId'],a['token'],'completed','')
+        path=self.opfile(a,'state.json');record=json.loads(path.read_text());record['revision']='bad';path.write_text(json.dumps(record))
+        result=self.call('status');self.assertFalse(result['complete']);self.assertIn('STATE_UNAVAILABLE',result['errors'])
+
     def test_legacy_lock_is_not_presented_as_idle(self):
         self.call('pause');(self.temp/'global.lock').mkdir()
         result=self.call('status');self.assertFalse(result['ok']);self.assertEqual(result['globalFence'],'ambiguous')

@@ -35,8 +35,8 @@ def operation_public:
    cancelRequested:(.cancelRequested==true),
    startedAt:(.startedAt|timestamp),updatedAt:(.updatedAt|timestamp),finishedAt:(.finishedAt|timestamp),
    errorCode:(.errorCode|error_code),
-   ownerStatus:(.ownerStatus|enum(["ACTIVE","STALE","AMBIGUOUS"];"AMBIGUOUS")),
-   ownerReason:(.ownerReason|enum(["identity_matches","absent","pid_reused","previous_boot","process_unreadable","identity_changed","invalid_identity"];"invalid_identity"))};
+   ownerStatus:(.ownerStatus|enum(["ACTIVE","STALE","AMBIGUOUS","FINISHED"];"AMBIGUOUS")),
+   ownerReason:(.ownerReason|enum(["identity_matches","absent","pid_reused","previous_boot","process_unreadable","identity_changed","invalid_identity","operation_finished"];"invalid_identity"))};
 def event_name: enum(["started","lock_acquired","lock_conflict","phase_changed","owner_transferred","cancel_requested","completed","failed","aborted","recovered","ambiguous_owner","heartbeat_problem","term","kill"];"unknown");
 def event_message:
   if .=="started" then "Операция запущена"

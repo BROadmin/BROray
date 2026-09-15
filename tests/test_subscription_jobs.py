@@ -167,6 +167,26 @@ printf 200
         self.assertFalse((self.temp/'global.lock').is_symlink())
         report=self.shell('. "$BRORAY_ROOT/lib/operation-client.sh"; broray_ops_call report').stdout.decode()
         self.assertNotIn('PRIVATE_CANARY',report);self.assertNotIn('11111111-2222-4333',report)
+    def test_api_cancelled_preparation_timeout_is_confirmed_before_response(self):
+        self.record()
+        p=self.shell(''' . "$BRORAY_ROOT/web-new/api/subscriptions/common.sh"
+broray_subscriptions_api_lock refresh
+before_helper() { broray_ops_call cancel "$BRORAY_BACKGROUND_OPERATION_ID" >/dev/null || return 1; return 75; }
+broray_subscriptions_api_run before_helper
+''')
+        headers,body=p.stdout.decode().split('\r\n\r\n',1)
+        self.assertIn('409 Conflict',headers);self.assertEqual(json.loads(body)['error']['code'],'OPERATION_CANCELLED')
+        self.assertEqual(self.states()[0]['state'],'aborted');self.assertFalse((self.temp/'global.lock').is_symlink())
+    def test_api_cancel_does_not_resolve_unconfirmed_helper_or_publication(self):
+        self.record()
+        p=self.shell(''' . "$BRORAY_ROOT/web-new/api/subscriptions/common.sh"
+broray_subscriptions_api_lock refresh
+unconfirmed() { broray_ops_call cancel "$BRORAY_BACKGROUND_OPERATION_ID" >/dev/null || return 1; BRORAY_JOB_UNRESOLVED=true; return 75; }
+broray_subscriptions_api_run unconfirmed
+''')
+        headers,body=p.stdout.decode().split('\r\n\r\n',1)
+        self.assertIn('503 Service Unavailable',headers);self.assertEqual(json.loads(body)['error']['code'],'OPERATION_UNRESOLVED')
+        self.assertTrue(self.states()[0]['running']);self.assertTrue((self.temp/'global.lock').is_symlink())
     def test_legacy_resource_lock_is_preserved_during_admitted_job(self):
         path=self.record();before=path.read_bytes()
         lock=self.app/'run/subscriptions/test.lock';lock.mkdir(parents=True)
