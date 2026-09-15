@@ -13,7 +13,7 @@ ops_journal_safe()
     done
 }
 
-ops_event()
+ops_event_append()
 {
     local event record state owner size file bytes
     event="$1"; state='{}'; owner='{}'
@@ -25,7 +25,7 @@ ops_event()
       --arg now "$(ops_now)" --arg event "$event" --arg code "${2:-}" \
       'include "operation-public"; {timestamp:$now,operationId:$state.operationId,operationType:$state.type,
        source:($state.source // "SYSTEM_RECOVERY"),event:$event,pid:$owner.owner.pid,
-       result:(if $event=="completed" or $event=="recovered" then "success" elif $event=="failed" then "failure" else "pending" end),
+       result:(if $event=="completed" or $event=="recovered" then "success" elif $event=="failed" then "failure" elif $event=="aborted" then "cancelled" else "pending" end),
        errorCode:($code|if .=="" then $state.errorCode else . end)} | event_public')" || return 1
     bytes="$(printf '%s\n' "$record" | wc -c)"
     [ "$bytes" -le 2048 ] || return 1
@@ -39,9 +39,27 @@ ops_event()
     printf '%s\n' "$record" >>"$file"
 }
 
-ops_journal_read()
+ops_event()
 {
-    local file
+    if ops_event_append "$@"; then return 0; fi
+    # Sticky evidence: failure of a diagnostic write cannot prevent retirement.
+    # RAM is the fallback when the persistent filesystem cannot accept writes.
+    if [ ! -L "$OPS_RAM" ] && mkdir -p "$OPS_RAM"; then
+        [ -L "$OPS_RAM/journal-gap" ] || printf '%s\n' gap >"$OPS_RAM/journal-gap" 2>/dev/null || true
+    fi
+    if [ -d "$OPS_JOURNAL" ] && [ ! -L "$OPS_JOURNAL" ] && [ ! -L "$OPS_JOURNAL/gap" ]; then
+        printf '%s\n' gap >"$OPS_JOURNAL/gap" 2>/dev/null || true
+    fi
+    return 1
+}
+
+ops_journal_snapshot()
+{
+    local file gap
+    gap=false
+    [ ! -e "$OPS_JOURNAL" ] && [ ! -L "$OPS_JOURNAL" ] || ops_dir_safe "$OPS_JOURNAL" || return 1
+    if [ -e "$OPS_JOURNAL/gap" ] || [ -L "$OPS_JOURNAL/gap" ] ||
+       [ -e "$OPS_RAM/journal-gap" ] || [ -L "$OPS_RAM/journal-gap" ]; then gap=true; fi
     # The output is projected again; old/partial/untrusted lines are never raw.
     for file in "$OPS_JOURNAL/events.2.jsonl" "$OPS_JOURNAL/events.1.jsonl" "$OPS_JOURNAL/events.jsonl"; do
         [ ! -L "$file" ] || return 1
@@ -50,5 +68,14 @@ ops_journal_read()
     done
     for file in "$OPS_JOURNAL/events.2.jsonl" "$OPS_JOURNAL/events.1.jsonl" "$OPS_JOURNAL/events.jsonl"; do
         [ ! -f "$file" ] || cat "$file"
-    done | tail -n 500 | jq -Rsc -L "$OPS_APP/lib" 'include "operation-public"; split("\n") | map(select(length>0) | fromjson? | select(type=="object") | event_public)'
+    done | jq -Rsc -L "$OPS_APP/lib" --argjson gap "$gap" '
+      include "operation-public";
+      split("\n") | map(select(length>0)) as $lines |
+      ($lines | map(try fromjson catch null)) as $rows |
+      ($gap or any($rows[]; type!="object")) as $incomplete |
+      {ok:true,complete:($incomplete|not),truncated:($rows|length>500),nextCursor:null,
+       errors:(if $incomplete then ["JOURNAL_GAP"] else [] end),
+       events:($rows[-500:] | map(select(type=="object") | event_public))}'
 }
+
+ops_journal_read() { ops_journal_snapshot | jq -c '.events'; }

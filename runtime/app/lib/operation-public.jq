@@ -11,6 +11,7 @@ def operation_id:
   if type!="string" then null else . as $value | split("-") |
     if length==4 and .[0]=="op" and (.[1]|length)==14 and (.[1]|ascii_digits) and
       (.[2]|length)>0 and (.[2]|length)<=10 and (.[2]|ascii_digits) and
+      (.[2]|tonumber)>1 and (.[2]|tonumber)<=2147483647 and
       (.[3]|length)==12 and (.[3]|ascii_hex) then $value else null end end;
 def operation_type:
   if type!="string" then "unknown"

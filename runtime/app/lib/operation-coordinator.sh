@@ -11,9 +11,11 @@ OPS_UPDATER="${BRORAY_OPS_UPDATER_ROOT:-/opt/var/lib/broray-updater}"
 OPS_LEGACY="${BRORAY_LEGACY_GLOBAL_LOCK:-/tmp/broray-global-operation.lock}"
 OPS_AUTOMATION="$OPS_STATE/background-automation.json"
 OPS_GUARD="${BRORAY_OPS_GUARD:-$OPS_APP/bin/broray-ops-guard}"
+OPS_RAM="${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}"
 [ "${BRORAY_OPS_GUARD_HELD:-0}" = 1 ] || exit 73
 . "$OPS_APP/lib/operation-owner.sh"
 . "$OPS_APP/lib/operation-journal.sh"
+. "$OPS_APP/lib/operation-report.sh"
 
 ops_error()
 {
@@ -21,6 +23,7 @@ ops_error()
     exit "${2:-2}"
 }
 ops_id_valid() { case "${1:-}" in ''|.*|-*|*[!A-Za-z0-9._-]*) return 1 ;; esac; [ "${#1}" -le 96 ]; }
+ops_nonce_valid() { case "${1:-}" in ''|*[!0-9a-f]*) return 1 ;; esac; [ "${#1}" = 32 ]; }
 ops_dir_safe() { [ -d "$1" ] && [ ! -L "$1" ]; }
 ops_file_safe() { [ -f "$1" ] && [ ! -L "$1" ] && [ "$(wc -c <"$1")" -le "${2:-32768}" ]; }
 ops_now() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
@@ -35,7 +38,10 @@ ops_write()
     (set -C; printf '%s\n' "$json" >"$tmp") || return 1
     jq -e 'type=="object"' "$tmp" >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
     chmod 600 "$tmp" 2>/dev/null || true
-    mv -f "$tmp" "$path"
+    case "$path" in
+        "$OPS_RAM/"*) mv -f "$tmp" "$path" ;;
+        *) "$OPS_GUARD" --replace-file "$tmp" "$path" ;;
+    esac
 }
 
 ops_load()
@@ -60,13 +66,22 @@ ops_authorize()
     jq -e '.running==true' "$OPS_CURRENT/state.json" >/dev/null 2>&1 || ops_error OPERATION_FINISHED
 }
 
+ops_owner_authorize()
+{
+    local owner
+    owner="$(broray_ops_capture_owner "$1")" || ops_error OWNER_UNCONFIRMED 1
+    jq -e --argjson owner "$owner" '.owner==$owner' "$OPS_CURRENT/owner.json" >/dev/null 2>&1 || ops_error OWNER_CHANGED
+}
+
 ops_state_transition()
 {
     local state phase error running json
     state="$1"; phase="$2"; error="${3:-}"; running=true
     case "$state" in completed|failed|aborted|recovered) running=false ;; esac
-    json="$(jq -c --arg state "$state" --arg phase "$phase" --arg code "$error" --arg now "$(ops_now)" --argjson running "$running" '
+    json="$(jq -c --arg state "$state" --arg phase "$phase" --arg code "$error" --arg mode "${4:-}" --arg now "$(ops_now)" --argjson running "$running" '
       .state=$state | .phase=$phase | .running=$running | .revision+=1 | .updatedAt=$now |
+      (if $state=="running" then .acknowledged=true else . end) |
+      (if $mode!="" then .cancelability=$mode else . end) |
       .errorCode=(if $code=="" then null else $code end) |
       if $running then . else .finishedAt=$now end' "$OPS_CURRENT/state.json")" || return 1
     ops_write "$OPS_CURRENT/state.json" "$json" || return 1
@@ -143,7 +158,7 @@ ops_pending_domain()
 
 ops_recover_global()
 {
-    local id owner status reason cancelability
+    local id owner status reason cancelability target
     OPS_RECOVERY_RESULT=absent
     [ -e "$OPS_GLOBAL" ] || [ -L "$OPS_GLOBAL" ] || return 0
     if [ -L "$OPS_GLOBAL" ]; then
@@ -175,8 +190,10 @@ ops_recover_global()
     # Absence of an executor is not proof that a protected domain commit can
     # be discarded. Route/updater/Xray state stays under its original owner.
     cancelability="$(jq -r '.cancelability' "$OPS_CURRENT/state.json")"
-    if [ "$cancelability" != cooperative ]; then OPS_RECOVERY_RESULT=protected_recovery; return 2; fi
-    ops_pending_domain && { OPS_RECOVERY_RESULT=domain_pending; return 2; }
+    if ! jq -e '.state=="starting" and .acknowledged==false' "$OPS_CURRENT/state.json" >/dev/null; then
+        if [ "$cancelability" != cooperative ]; then OPS_RECOVERY_RESULT=protected_recovery; return 2; fi
+        ops_pending_domain && { OPS_RECOVERY_RESULT=domain_pending; return 2; }
+    fi
     ops_state_transition aborted recovering OWNER_DISAPPEARED || return 1
     ops_retire_global || return 1
     ops_state_transition recovered finished OWNER_DISAPPEARED || return 1
@@ -186,14 +203,38 @@ ops_recover_global()
 
 ops_begin()
 {
-    local scope action bundle source pid cancelability owner nonce id dir record state rc fence
+    local scope action bundle source pid cancelability owner nonce id dir record state rc fence launch file count
     scope="$1"; action="$2"; bundle="$3"; source="$4"; pid="$5"; cancelability="$6"
+    launch="$7"; ops_nonce_valid "$launch" || ops_error INVALID_LAUNCH_NONCE 1
     case "$scope" in routes|system) ;; *) ops_error INVALID_SCOPE 1 ;; esac
     case "$action" in auto-switch|subscriptions:*|servers:*|xray:*|keenetic:*|dot:*|custom:*|preflight:*|check|download|verify|plan|export|delete|resume) ;; *) ops_error INVALID_ACTION 1 ;; esac
     case "$action:$bundle" in *[!A-Za-z0-9._:-]*) ops_error INVALID_ACTION 1 ;; esac
     [ "${#action}" -le 64 ] && [ "${#bundle}" -le 64 ] || ops_error INVALID_ACTION 1
     case "$source" in USER|SCHEDULER|SUBSCRIPTION_AUTO|SERVER_CHECK_AUTO|AUTO_SWITCH|UPDATER|SYSTEM_RECOVERY) ;; *) ops_error INVALID_SOURCE 1 ;; esac
     case "$cancelability" in cooperative|protected) ;; *) ops_error INVALID_CANCEL_MODE 1 ;; esac
+    ops_prune || ops_error STATE_UNAVAILABLE 1
+    owner="$(broray_ops_capture_owner "$pid")" || ops_error OWNER_UNCONFIRMED 1
+    count=0
+    for file in "$OPS_ROOT"/*/owner.json; do
+        [ -e "$file" ] || [ -L "$file" ] || continue
+        count=$((count+1)); [ "$count" -le 128 ] || ops_error HISTORY_LIMIT 1
+        ops_file_safe "$file" 4096 || ops_error STATE_UNAVAILABLE 1
+        jq -e --arg nonce "$launch" --argjson owner "$owner" '.launchNonce==$nonce and .owner==$owner' "$file" >/dev/null 2>&1 || continue
+        dir="${file%/owner.json}"; id="${dir##*/}"
+        ops_load "$id" || ops_error STATE_UNAVAILABLE 1
+        jq -e --arg scope "$scope" --arg action "$action" --arg bundle "$bundle" --arg source "$source" --arg mode "$cancelability" \
+          '.scope==$scope and .operation==$action and .bundleId==$bundle and .source==$source and .initialCancelability==$mode' "$OPS_CURRENT/state.json" >/dev/null || ops_error LAUNCH_MISMATCH
+        jq -e '.running==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error OPERATION_FINISHED
+        # A launch interrupted before publication has never been admitted.
+        if ! ops_global_matches; then
+            [ ! -e "$OPS_GLOBAL" ] && [ ! -L "$OPS_GLOBAL" ] || ops_error OPERATION_BUSY
+            jq -e '.state=="starting" and .acknowledged==false' "$OPS_CURRENT/state.json" >/dev/null || ops_error OWNER_CHANGED
+            ops_pending_domain && ops_error DOMAIN_OPERATION_BUSY
+            "$OPS_GUARD" --publish-fence "$OPS_CURRENT/fence" "$OPS_GLOBAL" || ops_error OWNER_PUBLICATION_FAILED 1
+        fi
+        jq -c '{ok:true,operationId,token}' "$OPS_CURRENT/owner.json"
+        return 0
+    done
     if [ "$source" != USER ] && [ -e "$OPS_AUTOMATION" ]; then
         ops_file_safe "$OPS_AUTOMATION" 4096 || ops_error AUTOMATION_STATE_INVALID
         jq -e '.paused==false' "$OPS_AUTOMATION" >/dev/null 2>&1 || ops_error AUTOMATION_PAUSED
@@ -201,19 +242,18 @@ ops_begin()
     ops_pending_domain && ops_error DOMAIN_OPERATION_BUSY
     rc=0; ops_recover_global || rc=$?
     [ "$rc" = 0 ] || ops_error OPERATION_BUSY
-    owner="$(broray_ops_capture_owner "$pid")" || ops_error OWNER_UNCONFIRMED 1
     nonce="$(hexdump -n 16 -v -e '1/1 "%02x"' /dev/urandom 2>/dev/null)"
     if [ "${BRORAY_OPS_TEST:-0}" = 1 ] && [ "$OPS_APP" != /opt/broray ]; then nonce="${BRORAY_OPS_TEST_NONCE:-$nonce}"; fi
     case "$nonce" in *[!0-9a-f]*|'') ops_error RANDOM_UNAVAILABLE 1 ;; esac
     [ "${#nonce}" = 32 ] || ops_error RANDOM_UNAVAILABLE 1
-    id="op-$(date -u '+%Y%m%d%H%M%S')-$pid-$(printf '%s' "$nonce" | sha256sum | cut -c 1-12)"
+    id="op-$(date -u '+%Y%m%d%H%M%S')-$pid-$(printf '%s' "$launch" | sha256sum | cut -c 1-12)"
     dir="$OPS_ROOT/$id"
     [ ! -e "$dir" ] && [ ! -L "$dir" ] || ops_error OPERATION_EXISTS
     mkdir "$dir" || ops_error STATE_UNAVAILABLE 1
-    record="$(jq -nc --arg id "$id" --arg token "$nonce" --argjson owner "$owner" '{schemaVersion:2,operationId:$id,token:$token,owner:$owner}')" || ops_error STATE_UNAVAILABLE 1
+    record="$(jq -nc --arg id "$id" --arg token "$nonce" --arg launch "$launch" --argjson owner "$owner" '{schemaVersion:2,operationId:$id,token:$token,launchNonce:$launch,owner:$owner}')" || ops_error STATE_UNAVAILABLE 1
     state="$(jq -nc --arg id "$id" --arg action "$action" --arg source "$source" --arg scope "$scope" --arg bundle "$bundle" --arg now "$(ops_now)" --arg mono "$(ops_monotonic)" --arg mode "$cancelability" \
       '{schemaVersion:2,kind:"background",operationId:$id,operation:$action,type:$action,source:$source,scope:$scope,bundleId:$bundle,
-        state:"starting",phase:"starting",running:true,revision:1,resourceLocks:["global"],cancelRequested:false,cancelability:$mode,
+        state:"starting",phase:"starting",running:true,revision:1,resourceLocks:["global"],cancelRequested:false,cancelability:$mode,initialCancelability:$mode,acknowledged:false,
         startedAt:$now,updatedAt:$now,startedMonotonic:$mono,finishedAt:null,errorCode:null}')" || ops_error STATE_UNAVAILABLE 1
     ops_write "$dir/owner.json" "$record" && ops_write "$dir/state.json" "$state" || ops_error STATE_UNAVAILABLE 1
     OPS_CURRENT="$dir"; OPS_ID="$id"
@@ -230,15 +270,104 @@ ops_begin()
         ops_state_transition aborted finished DOMAIN_OPERATION_BUSY && ops_retire_global || ops_error STATE_UNAVAILABLE 1
         ops_error DOMAIN_OPERATION_BUSY
     fi
-    ops_state_transition running working || ops_error STATE_UNAVAILABLE 1
-    ops_event started >/dev/null 2>&1 || true
     ops_event lock_acquired >/dev/null 2>&1 || true
     jq -nc --arg id "$id" --arg token "$nonce" '{ok:true,operationId:$id,token:$token}'
 }
 
+ops_prune()
+{
+    local file dir id count owner
+    count=0
+    # Keep the latest twenty terminal records. Never remove a live/ambiguous
+    # owner, a fence, an unreadable state or a child whose absence is unproven.
+    printf '%s\n' "$OPS_ROOT"/*/state.json | sort -r | while IFS= read -r file; do
+        [ -e "$file" ] || continue
+        ops_file_safe "$file" || continue
+        jq -e '.kind=="background" and .running==false and (.state=="completed" or .state=="failed" or .state=="aborted" or .state=="recovered")' "$file" >/dev/null 2>&1 || continue
+        count=$((count+1)); [ "$count" -gt 20 ] || continue
+        dir="${file%/state.json}"; id="${dir##*/}"
+        ops_load "$id" || continue
+        ops_global_matches && continue
+        ops_children_absent || continue
+        owner="$(jq -c '.owner' "$dir/owner.json")"; broray_ops_classify_owner "$owner"
+        [ "$OPS_OWNER_STATUS" = STALE ] || continue
+        # ops_load checked a direct nonsymlink child and a constrained ID.
+        rm -rf "$OPS_ROOT/$id" || return 1
+        [ -L "$OPS_RAM/$id.json" ] || rm -f "$OPS_RAM/$id.json"
+    done
+}
+
+ops_ack()
+{
+    ops_authorize "$1" "$2"; ops_owner_authorize "$3"
+    ops_global_matches || ops_error OWNER_CHANGED
+    if jq -e '.acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null; then
+        printf '%s\n' '{"ok":true,"acknowledged":true}'; return 0
+    fi
+    ops_pending_domain && ops_error DOMAIN_OPERATION_BUSY
+    [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED
+    ops_state_transition running working || ops_error STATE_UNAVAILABLE 1
+    ops_event started >/dev/null 2>&1 || true
+    printf '%s\n' '{"ok":true,"acknowledged":true}'
+}
+
+ops_recover_orphans()
+{
+    local file dir id owner count
+    count=0
+    for file in "$OPS_ROOT"/*/state.json; do
+        [ -e "$file" ] || [ -L "$file" ] || continue
+        count=$((count+1)); [ "$count" -le 128 ] || return 1
+        ops_file_safe "$file" || return 1
+        jq -e '.kind=="background" and .running==true' "$file" >/dev/null 2>&1 || continue
+        dir="${file%/state.json}"; id="${dir##*/}"
+        ops_load "$id" || return 1
+        ops_global_matches && continue
+        # Only never-acknowledged work can be recovered without its fence.
+        jq -e '.state=="starting" and .acknowledged==false' "$file" >/dev/null || return 1
+        owner="$(jq -c '.owner' "$OPS_CURRENT/owner.json")"
+        broray_ops_classify_owner "$owner"
+        [ "$OPS_OWNER_STATUS" = STALE ] || return 1
+        ops_children_absent || return 1
+        ops_state_transition recovered finished OWNER_DISAPPEARED || return 1
+    done
+}
+
+ops_cancel()
+{
+    ops_load "$1" || ops_error STATE_UNAVAILABLE 1
+    jq -e '.running==true' "$OPS_CURRENT/state.json" >/dev/null 2>&1 || { printf '%s\n' '{"ok":true,"alreadyFinished":true}'; return 0; }
+    jq -e '.cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null 2>&1 || ops_error CANCEL_NOT_SUPPORTED
+    if ops_file_safe "$OPS_CURRENT/cancel.json" 4096 && jq -e '.cancelRequested==true' "$OPS_CURRENT/cancel.json" >/dev/null; then
+        printf '%s\n' '{"ok":true,"cancelRequested":true}'; return 0
+    fi
+    ops_write "$OPS_CURRENT/cancel.json" "$(jq -nc --arg now "$(ops_now)" '{cancelRequested:true,requestedAt:$now}')" || ops_error STATE_UNAVAILABLE 1
+    ops_event cancel_requested >/dev/null 2>&1 || true
+    printf '%s\n' '{"ok":true,"cancelRequested":true}'
+}
+
+ops_stop_background()
+{
+    local file id dir results result rc count
+    ops_write "$OPS_AUTOMATION" "$(jq -nc --arg now "$(ops_now)" '{schemaVersion:1,paused:true,updatedAt:$now}')" || ops_error STATE_UNAVAILABLE 1
+    results='[]'; count=0
+    for file in "$OPS_ROOT"/*/state.json; do
+        [ -e "$file" ] || [ -L "$file" ] || continue
+        count=$((count+1)); [ "$count" -le 128 ] || ops_error HISTORY_LIMIT 1
+        ops_file_safe "$file" || ops_error STATE_UNAVAILABLE 1
+        jq -e '.kind=="background" and .running==true' "$file" >/dev/null 2>&1 || continue
+        dir="${file%/state.json}"; id="${dir##*/}"
+        rc=0; result="$(ops_cancel "$id")" || rc=$?
+        # The same projection as status prevents untrusted identifiers escaping.
+        results="$(jq -nc -L "$OPS_APP/lib" --argjson rows "$results" --arg id "$id" --argjson result "$result" --argjson rc "$rc" \
+          'include "operation-public"; $rows+[{operationId:($id|operation_id),cancelRequested:($result.cancelRequested==true),protected:($result.errorCode=="CANCEL_NOT_SUPPORTED"),ok:($rc==0)}]')" || ops_error STATE_UNAVAILABLE 1
+    done
+    jq -nc --argjson results "$results" '{ok:true,automationPaused:true,operations:$results}'
+}
+
 ops_status()
 {
-    local file dir id owner status rows errors count item paused
+    local file dir id owner status rows errors count item paused fence
     rows='[]'; errors='[]'; count=0
     for file in "$OPS_ROOT"/*/state.json; do
         [ -e "$file" ] || [ -L "$file" ] || continue
@@ -260,24 +389,42 @@ ops_status()
     if [ -e "$OPS_AUTOMATION" ]; then
         ops_file_safe "$OPS_AUTOMATION" 4096 && jq -e '.paused==false' "$OPS_AUTOMATION" >/dev/null 2>&1 || paused=true
     fi
-    jq -nc --argjson rows "$rows" --argjson errors "$errors" --argjson paused "$paused" --arg now "$(ops_now)" \
-      '{ok:($errors|length==0),capturedAt:$now,operations:($rows|sort_by(.startedAt)|reverse),errors:$errors,automationPaused:$paused}'
+    fence=absent
+    if [ -e "$OPS_GLOBAL" ] || [ -L "$OPS_GLOBAL" ]; then
+        fence=ambiguous
+        if [ -L "$OPS_GLOBAL" ]; then
+            dir="$(readlink "$OPS_GLOBAL")"; id="${dir%/fence}"; id="${id##*/}"
+            if ops_load "$id" && ops_global_matches; then
+                owner="$(jq -c '.owner' "$OPS_CURRENT/owner.json")"; broray_ops_classify_owner "$owner"
+                case "$OPS_OWNER_STATUS" in ACTIVE) fence=managed_active ;; STALE) fence=managed_stale ;; esac
+            fi
+        fi
+        [ "$fence" != ambiguous ] || errors='["OWNER_UNCONFIRMED"]'
+    fi
+    jq -nc --argjson rows "$rows" --argjson errors "$errors" --argjson paused "$paused" --arg fence "$fence" --arg now "$(ops_now)" \
+      '{ok:($errors|length==0),complete:($errors|length==0),capturedAt:$now,operations:($rows|sort_by(.startedAt)|reverse),errors:$errors,automationPaused:$paused,globalFence:$fence}'
 }
 
 for directory in "$OPS_STATE" "$OPS_ROOT"; do
     [ ! -L "$directory" ] || ops_error UNSAFE_STATE 1
-    mkdir -p "$directory" || ops_error STATE_UNAVAILABLE 1
+    case "${1:-}" in status|events|report|classify) ;; *) mkdir -p "$directory" || ops_error STATE_UNAVAILABLE 1 ;; esac
     ops_dir_safe "$directory" || ops_error UNSAFE_STATE 1
 done
 verb="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$verb" in
-    begin) [ "$#" = 6 ] || ops_error INVALID_REQUEST 1; ops_begin "$@" ;;
+    begin) [ "$#" = 7 ] || ops_error INVALID_REQUEST 1; ops_begin "$@" ;;
+    ack) [ "$#" = 3 ] || ops_error INVALID_REQUEST 1; ops_ack "$@" ;;
     finish)
         [ "$#" = 4 ] || ops_error INVALID_REQUEST 1
-        ops_authorize "$1" "$2"
+        ops_load "$1" || ops_error STATE_UNAVAILABLE 1
+        [ "$(jq -r '.token' "$OPS_CURRENT/owner.json")" = "$2" ] || ops_error OWNER_CHANGED
         case "$3" in completed|failed|aborted) ;; *) ops_error INVALID_STATE 1 ;; esac
         case "$4" in ''|CANCELLED|OPERATION_FAILED) ;; *) ops_error INVALID_ERROR_CODE 1 ;; esac
         ops_children_absent || ops_error CHILDREN_UNCONFIRMED
+        if jq -e '.running==false' "$OPS_CURRENT/state.json" >/dev/null; then
+            if ops_global_matches; then ops_retire_global || ops_error STATE_UNAVAILABLE 1; fi
+            printf '%s\n' '{"ok":true,"alreadyFinished":true}'; exit 0
+        fi
         ops_global_matches || ops_error OWNER_CHANGED
         ops_state_transition "$3" finished "$4" && ops_retire_global || ops_error STATE_UNAVAILABLE 1
         printf '%s\n' '{"ok":true}' ;;
@@ -286,20 +433,29 @@ case "$verb" in
         ops_authorize "$1" "$2"
         case "$3" in working|checking|fetching|parsing|committing|switching|waiting) ;; *) ops_error INVALID_PHASE 1 ;; esac
         ops_global_matches || ops_error OWNER_CHANGED
-        ops_state_transition running "$3" || ops_error STATE_UNAVAILABLE 1
-        ops_write "$OPS_CURRENT/heartbeat.json" "$(jq -nc --arg now "$(ops_now)" --arg mono "$(ops_monotonic)" '{heartbeatAt:$now,heartbeatMonotonic:$mono}')" || ops_error STATE_UNAVAILABLE 1
+        jq -e '.acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error NOT_ACKNOWLEDGED
+        # The commit boundary and cancellation request serialize on this guard.
+        case "$3" in committing|switching)
+            [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED ;;
+        esac
+        if [ "$(jq -r '.phase' "$OPS_CURRENT/state.json")" != "$3" ]; then
+            mode="$(jq -r '.initialCancelability' "$OPS_CURRENT/state.json")"
+            case "$3" in committing|switching) mode=protected ;; esac
+            ops_state_transition running "$3" '' "$mode" || ops_error STATE_UNAVAILABLE 1
+            ops_event phase_changed >/dev/null 2>&1 || true
+        fi
+        [ ! -L "$OPS_RAM" ] || ops_error UNSAFE_STATE 1
+        mkdir -p "$OPS_RAM" && chmod 700 "$OPS_RAM" || ops_error STATE_UNAVAILABLE 1
+        ops_write "$OPS_RAM/$OPS_ID.json" "$(jq -nc --arg id "$OPS_ID" --arg boot "$(broray_ops_boot_id)" --arg now "$(ops_now)" --arg mono "$(ops_monotonic)" '{operationId:$id,bootId:$boot,heartbeatAt:$now,heartbeatMonotonic:$mono}')" || ops_error STATE_UNAVAILABLE 1
         printf '%s\n' '{"ok":true}' ;;
     cancel)
         [ "$#" = 1 ] || ops_error INVALID_REQUEST 1
-        ops_load "$1" || ops_error STATE_UNAVAILABLE 1
-        jq -e '.running==true' "$OPS_CURRENT/state.json" >/dev/null 2>&1 || { printf '%s\n' '{"ok":true,"alreadyFinished":true}'; exit 0; }
-        jq -e '.cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null 2>&1 || ops_error CANCEL_NOT_SUPPORTED
-        ops_write "$OPS_CURRENT/cancel.json" "$(jq -nc --arg now "$(ops_now)" '{cancelRequested:true,requestedAt:$now}')" || ops_error STATE_UNAVAILABLE 1
-        ops_event cancel_requested >/dev/null 2>&1 || true
-        printf '%s\n' '{"ok":true,"cancelRequested":true}' ;;
+        ops_cancel "$1" ;;
+    stop-background) [ "$#" = 0 ] || ops_error INVALID_REQUEST 1; ops_stop_background ;;
     recover)
         [ "$#" = 0 ] || ops_error INVALID_REQUEST 1
         rc=0; ops_recover_global || rc=$?
+        if [ "$rc" = 0 ]; then ops_recover_orphans || { rc=2; OPS_RECOVERY_RESULT=orphan_unconfirmed; }; fi
         jq -nc --arg result "$OPS_RECOVERY_RESULT" --argjson rc "$rc" '{ok:($rc==0),result:$result}'
         exit "$rc" ;;
     pause|resume)
@@ -308,10 +464,10 @@ case "$verb" in
         ops_write "$OPS_AUTOMATION" "$(jq -nc --argjson paused "$paused" --arg now "$(ops_now)" '{schemaVersion:1,paused:$paused,updatedAt:$now}')" || ops_error STATE_UNAVAILABLE 1
         printf '%s\n' '{"ok":true}' ;;
     status) ops_status ;;
+    report) [ "$#" = 0 ] || ops_error INVALID_REQUEST 1; ops_report || ops_error REPORT_UNAVAILABLE 1 ;;
     events)
         [ "$#" = 0 ] || ops_error INVALID_REQUEST 1
-        events="$(ops_journal_read)" || ops_error JOURNAL_UNAVAILABLE 1
-        jq -nc --argjson events "$events" '{ok:true,events:$events}' ;;
+        ops_journal_snapshot || ops_error JOURNAL_UNAVAILABLE 1 ;;
     classify)
         [ "$#" = 1 ] || ops_error INVALID_REQUEST 1
         ops_load "$1" || ops_error STATE_UNAVAILABLE 1

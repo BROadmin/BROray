@@ -184,7 +184,7 @@
             return {text:"Каталожный endpoint с дополнительными атрибутами", className:"status-warning"};
         }
         if (value === "not-in-broray-catalog") {
-            return {text:"NOT_IN_CATALOG", className:"status-warning"};
+            return {text:"Не в каталоге BROray", className:"status-warning"};
         }
         if (value === "ambiguous") {
             return {text:"Неоднозначное совпадение каталога", className:"status-error"};
@@ -218,7 +218,6 @@
         var ownership = ownershipPresentation(entry);
         var matches = Array.isArray(entry.catalogMatchIds) && entry.catalogMatchIds.length ? entry.catalogMatchIds.join(", ") : "нет";
         var classificationBadge = create("span", "status-badge " + classification.className, classification.text);
-        var membershipBadge = create("span", "status-badge " + (entry.inCatalog === true ? "status-success" : "status-warning"), entry.inCatalog === true ? "Член каталога: да" : "Член каталога: нет");
         var ownershipBadge = create("span", "status-badge " + ownership.className, ownership.text);
 
         marker.setAttribute("data-icon", entry.valid === true ? "dns" : "warning");
@@ -235,7 +234,7 @@
             actualAttribute("Неизвестных токенов", Number(entry.unknownTokenCount || 0)),
             actualAttribute("Ошибка разбора", parseErrorPresentation(entry))
         );
-        badges.append(classificationBadge, membershipBadge, ownershipBadge);
+        badges.append(classificationBadge, ownershipBadge);
         header.append(copy, badges);
         card.append(marker, header);
         card.classList.toggle("is-installed", true);

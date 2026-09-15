@@ -54,16 +54,41 @@ static int publish_fence(const char *target,const char *linkpath) {
     return sync_path(parent,1)?74:0;
 }
 
+/* Durable state transitions: success permits the caller to start work/commit.
+ * A temporary file is on the same filesystem, private, and never a hardlink.
+ * Both names are under the coordinator's private directory and serialized by
+ * its persistent lock. A failed directory fsync is an error, never admission.
+ */
+static int replace_file(const char *temporary,const char *target) {
+    struct stat st;
+    char from_parent[PATH_MAX],to_parent[PATH_MAX];
+    if (temporary[0]!='/' || target[0]!='/' || strlen(temporary)>=PATH_MAX ||
+        strlen(target)>=PATH_MAX || !strcmp(temporary,target)) return 64;
+    strcpy(from_parent,temporary);strcpy(to_parent,target);
+    char *a=strrchr(from_parent,'/'),*b=strrchr(to_parent,'/');
+    if (!a || a==from_parent || !b || b==to_parent) return 64;
+    *a=0;*b=0;
+    if (strcmp(from_parent,to_parent)) return 64;
+    if (lstat(temporary,&st) || !S_ISREG(st.st_mode) || st.st_uid!=geteuid() ||
+        st.st_nlink!=1 || (st.st_mode&0077) || sync_path(temporary,0)) return 74;
+    if (lstat(target,&st)==0) {
+        if (!S_ISREG(st.st_mode) || st.st_uid!=geteuid() || st.st_nlink!=1 || (st.st_mode&0077)) return 74;
+    } else if (errno!=ENOENT) return 74;
+    if (rename(temporary,target)) return 74;
+    return sync_path(to_parent,1)?74:0;
+}
+
 int main(int argc, char **argv) {
     int fd, flags, attempts = 0;
     struct stat before, after;
     struct flock lock;
     struct timespec pause = {0, 10000000};
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-        puts("broray-ops-guard/2 fcntl-exec atomic-fence");
+        puts("broray-ops-guard/3 fcntl-exec atomic-fence durable-state");
         return 0;
     }
     if (argc==4 && strcmp(argv[1],"--publish-fence")==0) return publish_fence(argv[2],argv[3]);
+    if (argc==4 && strcmp(argv[1],"--replace-file")==0) return replace_file(argv[2],argv[3]);
     if (argc < 3 || argv[1][0] != '/' || argv[2][0] != '/') return 64;
     umask(077);
     fd = open(argv[1], O_RDWR | O_CREAT | O_NOFOLLOW, 0600);

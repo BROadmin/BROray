@@ -68,6 +68,28 @@ class Guard(unittest.TestCase):
         self.assertEqual(self.publish(fence).returncode,74)
         self.assertFalse(self.lock.exists());self.assertFalse(self.lock.is_symlink())
 
+    def replace(self,temporary,target):
+        return subprocess.run([str(GUARD),'--replace-file',str(temporary),str(target)],capture_output=True,timeout=5)
+    def private_file(self,name,data):
+        p=self.temp/name;p.write_text(data);p.chmod(0o600);return p
+    def test_durable_state_replacement_preserves_complete_json(self):
+        a=self.private_file('state.tmp','{"acknowledged":true}')
+        b=self.private_file('state','{"acknowledged":false}')
+        self.assertEqual(self.replace(a,b).returncode,0)
+        self.assertEqual(json.loads(b.read_text()),{'acknowledged':True});self.assertFalse(a.exists())
+    def test_durable_state_rejects_symlink_target(self):
+        a=self.private_file('state.tmp','NEW');foreign=self.private_file('foreign','KEEP')
+        b=self.temp/'state';b.symlink_to(foreign)
+        self.assertEqual(self.replace(a,b).returncode,74);self.assertEqual(foreign.read_text(),'KEEP')
+    def test_durable_state_rejects_hardlinked_source(self):
+        a=self.private_file('state.tmp','NEW');os.link(a,self.temp/'other')
+        b=self.private_file('state','KEEP')
+        self.assertEqual(self.replace(a,b).returncode,74);self.assertEqual(b.read_text(),'KEEP')
+    def test_durable_state_rejects_public_source(self):
+        a=self.private_file('state.tmp','NEW');a.chmod(0o644)
+        b=self.private_file('state','KEEP')
+        self.assertEqual(self.replace(a,b).returncode,74);self.assertEqual(b.read_text(),'KEEP')
+
 if __name__=='__main__':
     result=unittest.TextTestRunner(verbosity=2,failfast=True).run(unittest.defaultTestLoader.loadTestsFromTestCase(Guard))
     report={'status':'PASS' if result.wasSuccessful() else 'FAIL','testsRun':result.testsRun,'environment':'Isolated Linux QEMU guest, native x86_64 guard, real kernel processes','network':'disabled','routerAccessed':False}

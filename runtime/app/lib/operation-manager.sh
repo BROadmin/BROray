@@ -14,6 +14,10 @@ BRORAY_OPERATION_POINTER="${BRORAY_OPERATION_POINTER:-$BRORAY_STATE_ROOT/last-op
 BRORAY_OPERATION_LEGACY_ROOT="${BRORAY_OPERATION_LEGACY_ROOT:-$BRORAY_APPLICATION_ROOT/run/broray}"
 BRORAY_OPERATION_KEEP="${BRORAY_OPERATION_KEEP:-20}"
 
+if [ -f "$BRORAY_APPLICATION_ROOT/lib/operation-client.sh" ] && [ ! -L "$BRORAY_APPLICATION_ROOT/lib/operation-client.sh" ]; then
+    . "$BRORAY_APPLICATION_ROOT/lib/operation-client.sh"
+fi
+
 broray_operation_valid_id()
 {
     case "${1:-}" in
@@ -169,6 +173,11 @@ broray_operation_prune()
             [ -n "$old_dir" ] || continue
             old_id="${old_dir##*/}"
             [ "$old_id" = "$current" ] && continue
+            # Background records and ambiguous/corrupt records are retained.
+            # Only the serialized background coordinator can prune its owners.
+            [ -f "$old_dir/state.json" ] && [ ! -L "$old_dir/state.json" ] || continue
+            [ ! -e "$old_dir/owner.json" ] && [ ! -L "$old_dir/owner.json" ] || continue
+            jq -e 'type=="object" and .kind!="background" and .running==false' "$old_dir/state.json" >/dev/null 2>&1 || continue
             if [ -s "$old_dir/state.json" ] &&
                jq -e '.running == true' "$old_dir/state.json" >/dev/null 2>&1
             then

@@ -37,6 +37,7 @@ class Operations(unittest.TestCase):
             'BRORAY_OPS_TEST_IDENTITIES':self.identities.as_posix(),
             'BRORAY_OPS_GUARD':GUARD.as_posix(),'BRORAY_OPS_ASH':BB.as_posix(),
             'BRORAY_OPS_TEST_NONCE':uuid.uuid4().hex,
+            'BRORAY_OPS_RAM_ROOT':(self.temp/'ram').as_posix(),
         })
         self.state.mkdir()
     def set_owner(self,owner):
@@ -48,8 +49,11 @@ class Operations(unittest.TestCase):
         self.assertEqual(p.returncode,expected,(args,raw,p.stderr.decode('utf-8',errors='replace')))
         self.assertTrue(raw,(args,p.stderr))
         return json.loads(raw)
-    def begin(self,mode='cooperative',source='USER',expected=0):
-        return self.call('begin','system','subscriptions:scheduler','subscriptions',source,'900001',mode,expected=expected)
+    def begin(self,mode='cooperative',source='USER',expected=0,ack=True,launch=None):
+        self.launch=launch or uuid.uuid4().hex
+        result=self.call('begin','system','subscriptions:scheduler','subscriptions',source,'900001',mode,self.launch,expected=expected)
+        if expected==0 and ack:self.call('ack',result['operationId'],result['token'],'900001')
+        return result
     def opfile(self,result,name):
         return self.state/'operations'/result['operationId']/name
     def test_normal_finish_and_next_begin(self):
@@ -171,7 +175,7 @@ class Operations(unittest.TestCase):
     def test_journal_records_start_cancel_and_completion(self):
         a=self.begin();self.call('cancel',a['operationId']);self.call('finish',a['operationId'],a['token'],'aborted','CANCELLED')
         events=self.call('events')['events']
-        self.assertEqual([e['event'] for e in events],['started','lock_acquired','cancel_requested','aborted'])
+        self.assertEqual([e['event'] for e in events],['lock_acquired','started','cancel_requested','aborted'])
         self.assertNotIn(a['token'],json.dumps(events))
     def test_rotation_is_bounded_and_returns_valid_projected_events(self):
         a=self.begin();journal=self.state/'operation-events';f=journal/'events.jsonl'
@@ -188,6 +192,153 @@ class Operations(unittest.TestCase):
         (self.temp/'global.lock').symlink_to(target,target_is_directory=True)
         self.assertEqual(self.call('recover',expected=2)['result'],'unsafe_lock')
         self.assertEqual((target/'owner.json').read_text(),'SECRET_CANARY')
+
+    def test_lost_begin_response_returns_same_launch(self):
+        a=self.begin(ack=False); nonce=self.launch
+        b=self.begin(ack=False,launch=nonce)
+        self.assertEqual(a,b)
+        self.assertEqual(len(list((self.state/'operations').iterdir())),1)
+        state=json.loads(self.opfile(a,'state.json').read_text())
+        self.assertEqual(state['state'],'starting');self.assertFalse(state['acknowledged'])
+
+    def test_ack_repeated_after_lost_response_does_not_duplicate_start(self):
+        a=self.begin(); before=self.opfile(a,'state.json').read_bytes()
+        self.call('ack',a['operationId'],a['token'],'900001')
+        self.assertEqual(self.opfile(a,'state.json').read_bytes(),before)
+        self.assertEqual(sum(e['event']=='started' for e in self.call('events')['events']),1)
+
+    def test_cancel_before_ack_does_not_admit_work(self):
+        a=self.begin(ack=False);self.call('cancel',a['operationId'])
+        self.assertEqual(self.call('ack',a['operationId'],a['token'],'900001',expected=2)['errorCode'],'CANCELLED')
+        self.assertFalse(json.loads(self.opfile(a,'state.json').read_text())['acknowledged'])
+
+    def test_ack_rejects_reused_pid(self):
+        a=self.begin(ack=False);self.set_owner({**self.owner,'startTicks':'999'})
+        self.assertEqual(self.call('ack',a['operationId'],a['token'],'900001',expected=2)['errorCode'],'OWNER_CHANGED')
+
+    def test_same_launch_rejects_different_parameters(self):
+        self.begin(ack=False); nonce=self.launch
+        self.assertEqual(self.begin(mode='protected',launch=nonce,expected=2)['errorCode'],'LAUNCH_MISMATCH')
+
+    def test_dead_unacknowledged_protected_launch_can_recover(self):
+        self.begin(mode='protected',ack=False);self.set_owner({'status':'absent'})
+        self.assertEqual(self.call('recover')['result'],'recovered')
+
+    def test_retries_unpublished_launch(self):
+        a=self.begin(ack=False); nonce=self.launch;(self.temp/'global.lock').unlink()
+        self.assertEqual(self.begin(launch=nonce),a)
+        self.assertTrue((self.temp/'global.lock').is_symlink())
+
+    def test_dead_unpublished_launch_recovers(self):
+        a=self.begin(ack=False);(self.temp/'global.lock').unlink();self.set_owner({'status':'absent'})
+        self.assertTrue(self.call('recover')['ok'])
+        self.assertEqual(json.loads(self.opfile(a,'state.json').read_text())['state'],'recovered')
+
+    def test_live_orphan_is_not_reported_recovered(self):
+        self.begin(ack=False);(self.temp/'global.lock').unlink()
+        self.assertEqual(self.call('recover',expected=2)['result'],'orphan_unconfirmed')
+
+    def test_finish_retry_does_not_remove_next_generation(self):
+        a=self.begin();self.call('finish',a['operationId'],a['token'],'completed','')
+        b=self.begin();target=(self.temp/'global.lock').readlink()
+        self.assertTrue(self.call('finish',a['operationId'],a['token'],'failed','OPERATION_FAILED')['alreadyFinished'])
+        self.assertEqual((self.temp/'global.lock').readlink(),target)
+        self.assertEqual(json.loads(self.opfile(a,'state.json').read_text())['state'],'completed')
+        self.assertTrue(json.loads(self.opfile(b,'state.json').read_text())['running'])
+
+    def test_heartbeat_writes_ram_without_flash_revision_churn(self):
+        a=self.begin();self.call('tick',a['operationId'],a['token'],'checking')
+        before=self.opfile(a,'state.json').read_bytes();events=self.call('events')['events']
+        self.call('tick',a['operationId'],a['token'],'checking')
+        self.assertEqual(self.opfile(a,'state.json').read_bytes(),before)
+        self.assertEqual(self.call('events')['events'],events)
+        self.assertFalse(self.opfile(a,'heartbeat.json').exists())
+        self.assertEqual(json.loads((self.temp/'ram'/f"{a['operationId']}.json").read_text())['bootId'],'boot-one')
+
+    def test_cancellation_wins_before_commit_boundary(self):
+        a=self.begin();self.call('cancel',a['operationId'])
+        self.assertEqual(self.call('tick',a['operationId'],a['token'],'committing',expected=2)['errorCode'],'CANCELLED')
+        self.assertEqual(json.loads(self.opfile(a,'state.json').read_text())['cancelability'],'cooperative')
+
+    def test_commit_boundary_protects_until_next_phase(self):
+        a=self.begin();self.call('tick',a['operationId'],a['token'],'committing')
+        self.assertEqual(self.call('cancel',a['operationId'],expected=2)['errorCode'],'CANCEL_NOT_SUPPORTED')
+        self.call('tick',a['operationId'],a['token'],'fetching')
+        self.assertTrue(self.call('cancel',a['operationId'])['cancelRequested'])
+
+    def test_cancel_retry_does_not_duplicate_event(self):
+        a=self.begin();self.call('cancel',a['operationId']);before=self.opfile(a,'cancel.json').read_bytes()
+        self.call('cancel',a['operationId'])
+        self.assertEqual(self.opfile(a,'cancel.json').read_bytes(),before)
+        self.assertEqual(sum(e['event']=='cancel_requested' for e in self.call('events')['events']),1)
+
+    def test_journal_partial_line_is_reported_without_raw_fallback(self):
+        a=self.begin();journal=self.state/'operation-events/events.jsonl'
+        with journal.open('a') as f:f.write('{"message":"SECRET_CANARY_UNFINISHED')
+        result=self.call('events')
+        self.assertFalse(result['complete']);self.assertEqual(result['errors'],['JOURNAL_GAP'])
+        self.assertNotIn('SECRET_CANARY_UNFINISHED',json.dumps(result))
+        self.assertEqual(len(result['events']),2)
+
+    def test_journal_failure_does_not_hold_terminal_fence(self):
+        a=self.begin();journal=self.state/'operation-events/events.jsonl';journal.unlink();journal.mkdir()
+        self.assertTrue(self.call('finish',a['operationId'],a['token'],'completed','')['ok'])
+        self.assertFalse((self.temp/'global.lock').exists())
+        self.assertTrue((self.temp/'ram/journal-gap').exists())
+
+    def test_report_excludes_secrets_and_marks_unavailable_components(self):
+        a=self.begin();result=self.call('report');raw=json.dumps(result)
+        self.assertEqual(result['reportKind'],'broray-diagnostics')
+        self.assertFalse(result['complete']);self.assertIn('serviceIdentities',result['unavailable'])
+        self.assertNotIn(a['token'],raw);self.assertNotIn(self.launch,raw);self.assertNotIn(self.owner['commandDigest'],raw)
+        self.assertEqual(result['fences']['global'],'managed_active')
+        self.assertLess(len(raw.encode()),1048576)
+
+    def test_status_report_and_events_leave_registry_bytes_unchanged(self):
+        self.begin()
+        def snapshot():return {str(p.relative_to(self.state)):p.read_bytes() for p in self.state.rglob('*') if p.is_file() and not p.is_symlink()}
+        before=snapshot();self.call('status');self.call('events');self.call('report')
+        self.assertEqual(snapshot(),before)
+
+    def test_legacy_lock_is_not_presented_as_idle(self):
+        self.call('pause');(self.temp/'global.lock').mkdir()
+        result=self.call('status');self.assertFalse(result['ok']);self.assertEqual(result['globalFence'],'ambiguous')
+
+    def test_stop_background_pauses_and_cancels_current_job(self):
+        a=self.begin();result=self.call('stop-background')
+        self.assertTrue(result['automationPaused']);self.assertTrue(result['operations'][0]['cancelRequested'])
+        self.call('finish',a['operationId'],a['token'],'aborted','CANCELLED')
+        self.assertEqual(self.begin(source='SUBSCRIPTION_AUTO',expected=2)['errorCode'],'AUTOMATION_PAUSED')
+        self.assertTrue(self.begin()['ok'])
+
+    def test_stop_background_preserves_protected_commit(self):
+        a=self.begin();self.call('tick',a['operationId'],a['token'],'committing')
+        result=self.call('stop-background')
+        self.assertTrue(result['automationPaused']);self.assertTrue(result['operations'][0]['protected'])
+        self.assertFalse(self.opfile(a,'cancel.json').exists())
+
+    def test_history_prunes_only_confirmed_dead_terminal_owners(self):
+        a=self.begin();self.call('finish',a['operationId'],a['token'],'completed','')
+        template_state=json.loads(self.opfile(a,'state.json').read_text())
+        template_owner=json.loads(self.opfile(a,'owner.json').read_text())
+        root=self.state/'operations'
+        for index in range(25):
+            id=f'op-20000101000000-900001-{index:012x}';d=root/id;d.mkdir()
+            (d/'state.json').write_text(json.dumps({**template_state,'operationId':id}))
+            (d/'owner.json').write_text(json.dumps({**template_owner,'operationId':id}))
+        self.set_owner({**self.owner,'startTicks':'999'})
+        self.begin()
+        self.assertEqual(len(list(root.iterdir())),21)
+
+    def test_history_prune_preserves_live_and_corrupt_records(self):
+        a=self.begin();self.call('finish',a['operationId'],a['token'],'completed','')
+        state=json.loads(self.opfile(a,'state.json').read_text());owner=json.loads(self.opfile(a,'owner.json').read_text())
+        root=self.state/'operations'
+        for index in range(25):
+            id=f'op-20000101000000-900001-{index:012x}';d=root/id;d.mkdir()
+            (d/'state.json').write_text(json.dumps({**state,'operationId':id}))
+            (d/'owner.json').write_text(json.dumps({**owner,'operationId':id}))
+        self.begin();self.assertEqual(len(list(root.iterdir())),27)
 
 if __name__=='__main__':
     if os.name=='nt':raise SystemExit('Atomic publication requires Linux. Use tools/run_linux_tests.py; stage02 contains the earlier Windows-adapter evidence.')

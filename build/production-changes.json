@@ -1,0 +1,9 @@
+{
+  "baseline": "3.1.0-r09c02",
+  "changedBaselineFiles": [
+    "app/lib/operation-manager.sh",
+    "app/web-new/assets/css/allpage.css",
+    "app/web-new/assets/js/dns.js",
+    "app/web-new/broray.html"
+  ]
+}

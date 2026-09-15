@@ -5143,12 +5143,21 @@ body.modal-open {
 .page-dns .dns-server-header,
 .page-dns .dns-server-copy {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     min-width: 0;
     gap: 4px;
 }
 
 .page-dns .dns-server-name {
     font-size: 16px;
+    overflow-wrap: anywhere;
+}
+
+.page-dns .dns-server-copy .eyebrow,
+.page-dns .dns-server-badges .status-badge {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    max-width: 100%;
 }
 
 .page-dns .dns-server-address,

@@ -13,6 +13,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.1.0-r09c02">
     <link rel="manifest" href="/manifest.json?v=WebUI-3.1.0-r09c02">
     <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.1.0-r09c02">
+    <link rel="stylesheet" href="/assets/css/background-operations.css?v=operations-311">
     <script src="/assets/js/theme-init.js?v=WebUI-3.1.0-r09c02"></script>
 </head>
 <body class="app-body page-broray" data-page="broray" data-webui-build="WebUI-3.1.0-r09c02">
@@ -292,6 +293,26 @@
         </section>
     </div>
 
+    <section class="card bg-card" aria-labelledby="bg-title">
+        <div class="section-heading"><div><span class="eyebrow">Управление</span><h2 id="bg-title">Фоновые операции</h2></div><span id="bg-badge" class="status-badge status-neutral">Загрузка</span></div>
+        <p id="bg-summary" role="status" aria-live="polite">Чтение состояния операций…</p>
+        <div id="bg-list"></div>
+        <div class="bg-actions"><button id="bg-recover" class="button button-warning" type="button" hidden>Аварийное восстановление</button><button id="bg-refresh" class="button button-secondary" type="button">Обновить состояние</button></div>
+        <p id="bg-feedback" class="section-note" role="status" aria-live="polite"></p>
+    </section>
+    <section class="card bg-card" aria-labelledby="bg-automation-title">
+        <div class="section-heading"><div><span class="eyebrow">Автоматика</span><h2 id="bg-automation-title">Остановка фоновой работы</h2></div><span id="bg-automation-badge" class="status-badge status-neutral">Состояние неизвестно</span></div>
+        <p class="section-note">Остановка управляющих фоновых задач BROray с паузой новых автоматических запусков. Настройки расписаний сохранятся.</p>
+        <div class="bg-actions"><button id="bg-stop-all" class="button button-warning" type="button">Остановить фоновые операции</button><button id="bg-resume" class="button button-secondary" type="button" hidden>Возобновить автоматику</button></div>
+    </section>
+    <section class="card bg-card" aria-labelledby="bg-journal-title">
+        <div class="section-heading"><div><span class="eyebrow">Диагностика</span><h2 id="bg-journal-title">Журнал BROray</h2></div><span id="bg-journal-badge" class="status-badge status-neutral">Загрузка</span></div>
+        <ul id="bg-events" class="bg-events" aria-live="polite"></ul>
+        <div class="bg-actions"><button id="bg-journal-refresh" class="button button-secondary" type="button">Обновить журнал</button><button id="bg-copy" class="button button-secondary" type="button">Скопировать диагностику</button><button id="bg-download" class="button button-secondary" type="button">Скачать диагностический отчёт</button></div>
+        <p id="bg-report-feedback" class="section-note" role="status" aria-live="polite"></p>
+        <textarea id="bg-report-copy" aria-label="Диагностика для копирования" readonly hidden></textarea>
+    </section>
+
     <section class="card broray-operation-card" aria-labelledby="operation-title">
         <div class="section-heading broray-operation-heading">
             <div>
@@ -408,5 +429,6 @@
     <script src="/assets/js/theme.js?v=WebUI-3.1.0-r09c02"></script>
     <script src="/assets/js/dialogs.js?v=WebUI-3.1.0-r09c02"></script>
     <script src="/assets/js/broray.js?v=WebUI-3.1.0-r09c02"></script>
+    <script src="/assets/js/background-operations.js?v=operations-311"></script>
 </body>
 </html>
