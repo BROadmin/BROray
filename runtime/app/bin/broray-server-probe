@@ -1,38 +1,23 @@
 #!/opt/bin/ash
 
-PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/sbin:/bin"
+ROOT="${BRORAY_ROOT:-/opt/broray}"
+PATH="$ROOT/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
-ROOT="/opt/broray"
+[ "${BRORAY_OPS_SUPERVISED:-}" = ptrace/1 ] && [ -n "${BRORAY_SERVER_PROBE_WORK:-}" ] || exit 73
+umask 077
 SOURCE_CONFIG="${1:-}"
 SERVER_ID="${2:-unknown}"
 
-WORK="/opt/broray/tmp/broray-server-probe-$$"
+WORK="$BRORAY_SERVER_PROBE_WORK"
 CONFIG="$WORK/config.json"
 XRAY_LOG="$WORK/xray.log"
 CURL_LOG="$WORK/curl.log"
 
 XRAY_PID=""
 
-cleanup()
-{
-    if [ -n "$XRAY_PID" ] &&
-       kill -0 "$XRAY_PID" 2>/dev/null
-    then
-        kill "$XRAY_PID" 2>/dev/null || true
-        sleep 1
-
-        if kill -0 "$XRAY_PID" 2>/dev/null; then
-            kill -9 "$XRAY_PID" 2>/dev/null || true
-        fi
-
-        wait "$XRAY_PID" 2>/dev/null || true
-    fi
-
-    rm -rf "$WORK"
-}
-
-trap cleanup EXIT
+# The enclosing native supervisor owns the whole temporary process tree.
+# It drains that tree before the admitted job removes the private directory.
 trap 'exit 130' HUP INT TERM
 
 emit()
@@ -141,7 +126,7 @@ if [ -r "$ROOT/lib/xray.sh" ]; then
     . "$ROOT/lib/xray.sh"
 fi
 
-XRAY_BIN="${BRORAY_XRAY_BINARY:-/opt/broray/runtime/xray}"
+XRAY_BIN="${BRORAY_XRAY_BINARY:-$ROOT/runtime/xray}"
 XRAY_ASSET_DIR="${BRORAY_XRAY_ASSET_DIR:-}"
 
 [ -x "$XRAY_BIN" ] ||

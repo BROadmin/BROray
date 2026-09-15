@@ -6,7 +6,7 @@ BRORAY_BASE="${BRORAY_BASE:-${BRORAY_ROOT:-/opt/broray}}"
 . "$BRORAY_BASE/lib/server.sh"
 
 BRORAY_SETTINGS="$BRORAY_BASE/config/system/settings.json"
-BRORAY_SERVER_TMP_CONFIG="$BRORAY_BASE/tmp/server-config.new.json"
+BRORAY_SERVER_TMP_CONFIG="${BRORAY_SERVER_TMP_CONFIG:-$BRORAY_BASE/tmp/server-config.new.json}"
 
 broray_generate_server_config()
 {

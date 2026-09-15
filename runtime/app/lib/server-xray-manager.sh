@@ -11,7 +11,7 @@ BRORAY_BASE="${BRORAY_BASE:-${BRORAY_ROOT:-/opt/broray}}"
 BRORAY_CONFIG="$BRORAY_BASE/config/config.json"
 BRORAY_BACKUP="$BRORAY_BASE/backup"
 BRORAY_INIT="${BRORAY_INIT:-/opt/etc/init.d/S24broray}"
-BRORAY_XRAY="/opt/broray/runtime/xray"
+BRORAY_XRAY="${BRORAY_XRAY_BINARY:-$BRORAY_BASE/runtime/xray}"
 
 broray_xray_test_file() {
     config_file="$1"

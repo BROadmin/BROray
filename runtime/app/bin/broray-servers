@@ -1,7 +1,14 @@
 #!/opt/bin/ash
 
-. /opt/broray/lib/server-service.sh
-. /opt/broray/lib/server-import.sh
+BRORAY_ROOT="${BRORAY_ROOT:-/opt/broray}"
+PATH="$BRORAY_ROOT/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export BRORAY_ROOT PATH
+. "$BRORAY_ROOT/lib/server-service.sh"
+
+server_worker()
+{
+    exec "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$BRORAY_ROOT/lib/server-job-worker.sh" "$@"
+}
 
 command_name="${1:-summary}"
 
@@ -15,22 +22,22 @@ case "$command_name" in
         ;;
     import)
         shift
-        broray_server_import "${1:-}" manual "" 0
+        server_worker import broray_server_import "${1:-}" manual "" 0
         ;;
     check)
         shift
-        broray_server_check "${1:-}" "${2:-manual}"
+        server_worker check broray_server_check "${1:-}" "${2:-manual}"
         ;;
     activate|use)
         shift
-        broray_server_activate "${1:-}"
+        server_worker activate broray_server_activate "${1:-}"
         ;;
     deactivate|disable)
-        broray_server_deactivate
+        server_worker deactivate broray_server_deactivate
         ;;
     delete)
         shift
-        broray_server_delete_safe "${1:-}"
+        server_worker delete broray_server_delete_safe "${1:-}"
         ;;
     *)
         cat >&2 <<'USAGE'

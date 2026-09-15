@@ -1,39 +1,28 @@
 #!/opt/bin/ash
 
-. /opt/broray/web-new/api/auth-common.sh
+BRORAY_ROOT="${BRORAY_ROOT:-/opt/broray}"
+. "$BRORAY_ROOT/web-new/api/auth-common.sh"
 
 broray_servers_api_load_request_body()
 {
     command -v broray_web_request_body_to_file >/dev/null 2>&1 && return 0
-    . /opt/broray/lib/web-request-body.sh
+    . "$BRORAY_ROOT/lib/web-request-body.sh"
 }
 
 broray_servers_api_load_services()
 {
     command -v broray_server_summary >/dev/null 2>&1 &&
         command -v broray_server_import >/dev/null 2>&1 && return 0
-    . /opt/broray/lib/server-service.sh
-    . /opt/broray/lib/server-import.sh
+    . "$BRORAY_ROOT/lib/server-service.sh"
+    . "$BRORAY_ROOT/lib/server-import.sh"
 }
 
 broray_servers_api_lock()
 {
-    action="$1"
-    bundle="${2:-servers}"
-    [ -r /opt/broray/lib/routes-api-operation.sh ] ||
-        broray_api_error "500 Internal Server Error" "GLOBAL_LOCK_UNAVAILABLE" "Общий координатор операций недоступен."
-    . /opt/broray/lib/routes-api-operation.sh
-    lock_rc=0
-    broray_routes_api_lock_acquire "servers:$action" "$bundle" || lock_rc=$?
-    case "$lock_rc" in
-        0)
-            trap 'broray_routes_api_lock_release' EXIT
-            trap 'exit 129' HUP
-            trap 'exit 130' INT
-            trap 'exit 143' TERM
-            ;;
-        2) broray_api_error "409 Conflict" "OPERATION_BUSY" "Другая конфликтующая операция BROray уже выполняется." ;;
-        *) broray_api_error "500 Internal Server Error" "GLOBAL_LOCK_FAILED" "Не удалось установить общую блокировку BROray." ;;
+    # The actual worker admits itself before touching business state.
+    case "$1" in
+      import|check|activate|deactivate|delete|quality-batch-complete) BRORAY_SERVER_JOB_ACTION="$1" ;;
+      *) broray_api_error "500 Internal Server Error" "INVALID_SERVER_ACTION" "Неизвестная операция сервера." ;;
     esac
 }
 
@@ -71,15 +60,21 @@ broray_servers_api_run()
 {
     broray_servers_api_load_services ||
         broray_api_error "500 Internal Server Error" "SERVER_LIBRARY_UNAVAILABLE" "Служба серверов недоступна."
-    broray_servers_api_output_file="/opt/broray/tmp/servers-api-output.$$.json"
-    broray_servers_api_error_file="/opt/broray/tmp/servers-api-error.$$"
+    broray_servers_api_output_file="$BRORAY_ROOT/tmp/servers-api-output.$$.json"
+    broray_servers_api_error_file="$BRORAY_ROOT/tmp/servers-api-error.$$"
 
-    mkdir -p /opt/broray/tmp
+    mkdir -p "$BRORAY_ROOT/tmp"
+    umask 077
+    if [ -n "${BRORAY_SERVER_JOB_ACTION:-}" ]; then
+        set -- "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$BRORAY_ROOT/lib/server-job-worker.sh" "$BRORAY_SERVER_JOB_ACTION" "$@"
+    fi
 
     # Server service functions use broray_die (exit 1). Run the requested
     # operation in a child shell so a validated backend failure cannot exit
     # the CGI before this wrapper emits a stable HTTP/application error.
-    if ( "$@" ) >"$broray_servers_api_output_file" 2>"$broray_servers_api_error_file"; then
+    broray_servers_api_rc=0
+    ( "$@" ) >"$broray_servers_api_output_file" 2>"$broray_servers_api_error_file" || broray_servers_api_rc=$?
+    if [ "$broray_servers_api_rc" = 0 ]; then
         if ! jq -e . "$broray_servers_api_output_file" >/dev/null 2>&1; then
             jq -n \
                 --rawfile output "$broray_servers_api_output_file" '{
@@ -107,6 +102,13 @@ broray_servers_api_run()
         )"
 
     rm -f "$broray_servers_api_output_file" "$broray_servers_api_error_file"
+
+    case "$broray_servers_api_rc" in
+      76) broray_api_error "409 Conflict" "OPERATION_BUSY" "Другая конфликтующая операция BROray уже выполняется." ;;
+      130) broray_api_error "409 Conflict" "OPERATION_CANCELLED" "Операция остановлена. Прежняя оценка сервера сохранена." ;;
+      124) broray_api_error "504 Gateway Timeout" "SERVER_CHECK_TIMEOUT" "Время проверки истекло. Прежняя оценка сервера сохранена." ;;
+      75) broray_api_error "503 Service Unavailable" "OPERATION_UNRESOLVED" "Завершение операции ещё не подтверждено. Блокировка сохранена." ;;
+    esac
 
     broray_api_error \
         "400 Bad Request" \

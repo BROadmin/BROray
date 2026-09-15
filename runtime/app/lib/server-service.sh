@@ -10,6 +10,7 @@ export BRORAY_ROOT
 . "$BRORAY_BASE/lib/server-xray-manager.sh"
 . "$BRORAY_BASE/lib/xray.sh"
 . "$BRORAY_BASE/lib/status-contract.sh"
+. "$BRORAY_BASE/lib/server-check-job.sh"
 
 BRORAY_SERVERS="$BRORAY_BASE/servers"
 BRORAY_QUALITY_DIR="$BRORAY_BASE/run/server-quality"
@@ -579,8 +580,9 @@ broray_server_details()
         '
 }
 
-broray_server_check()
+broray_server_measure()
 {
+    [ "${BRORAY_OPS_SUPERVISED:-}" = ptrace/1 ] && [ -n "${BRORAY_SERVER_CHECK_TMP:-}" ] || return 73
     check_server_id="$1"
     check_source="${2:-manual}"
 
@@ -619,28 +621,28 @@ broray_server_check()
     check_error=""
     generated_config=""
 
-    if ! broray_server_validate "$check_server_file" 2>"$BRORAY_BASE/tmp/server-check-error.$$"; then
+    if ! broray_server_validate "$check_server_file" 2>"$BRORAY_SERVER_CHECK_TMP/server-check-error"; then
         check_error="$(
-            cat "$BRORAY_BASE/tmp/server-check-error.$$"
+            cat "$BRORAY_SERVER_CHECK_TMP/server-check-error"
         )"
     else
         check_stage="xray-config"
 
         if generated_config="$(
             broray_generate_server_config "$check_server_id" \
-                2>"$BRORAY_BASE/tmp/server-check-error.$$"
+                2>"$BRORAY_SERVER_CHECK_TMP/server-check-error"
         )"; then
             # BRORAY_REAL_PROXY_PROBE_V1
             if broray_xray_test_file "$generated_config" \
-                >"$BRORAY_BASE/tmp/server-check-output.$$" \
+                >"$BRORAY_SERVER_CHECK_TMP/server-check-output" \
                 2>&1; then
                 check_stage="proxy-https"
 
                 check_probe_json="$(
-                    "$BRORAY_BASE/bin/broray-server-probe" \
+                    "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$BRORAY_BASE/bin/broray-server-probe" \
                         "$generated_config" \
                         "$check_server_id" \
-                        2>"$BRORAY_BASE/tmp/server-probe-error.$$"
+                        2>"$BRORAY_SERVER_CHECK_TMP/server-probe-error"
                 )" || true
 
                 if printf '%s\n' "$check_probe_json" |
@@ -677,7 +679,7 @@ broray_server_check()
                     else
                         check_error="$(
                             cat \
-                                "$BRORAY_BASE/tmp/server-probe-error.$$" \
+                                "$BRORAY_SERVER_CHECK_TMP/server-probe-error" \
                                 2>/dev/null
                         )"
 
@@ -687,15 +689,15 @@ broray_server_check()
                 fi
 
                 rm -f \
-                    "$BRORAY_BASE/tmp/server-probe-error.$$"
+                    "$BRORAY_SERVER_CHECK_TMP/server-probe-error"
             else
                 check_error="$(
-                    cat "$BRORAY_BASE/tmp/server-check-output.$$"
+                    cat "$BRORAY_SERVER_CHECK_TMP/server-check-output"
                 )"
             fi
         else
             check_error="$(
-                cat "$BRORAY_BASE/tmp/server-check-error.$$"
+                cat "$BRORAY_SERVER_CHECK_TMP/server-check-error"
             )"
         fi
     fi
@@ -874,8 +876,8 @@ broray_server_check()
 
     rm -f \
         "$generated_config" \
-        "$BRORAY_BASE/tmp/server-check-error.$$" \
-        "$BRORAY_BASE/tmp/server-check-output.$$"
+        "$BRORAY_SERVER_CHECK_TMP/server-check-error" \
+        "$BRORAY_SERVER_CHECK_TMP/server-check-output"
 
     jq -n \
         --arg serverId "$check_server_id" \
@@ -897,6 +899,7 @@ broray_server_check()
 
 broray_server_activate()
 {
+    broray_job_require_owner || return $?
     activate_server_id="$1"
 
     broray_server_validate_id "$activate_server_id"
@@ -904,7 +907,10 @@ broray_server_activate()
         broray_die \
             "сервер $activate_server_id не найден"
 
-    broray_xray_apply_server "$activate_server_id"
+    broray_job_checkpoint committing || return $?
+    BRORAY_JOB_UNRESOLVED=true
+    broray_xray_apply_server "$activate_server_id" || return $?
+    BRORAY_JOB_UNRESOLVED=false
 
     # The activation response must describe the server that was just applied,
     # not a still-fresh cache entry captured for the previous active server.
@@ -975,6 +981,8 @@ broray_server_remove_route()
 
 broray_server_deactivate()
 {
+    broray_job_checkpoint committing || return $?
+    BRORAY_JOB_UNRESOLVED=true
     previous_active_id=""
 
     if [ -f "$BRORAY_ACTIVE_SERVER_FILE" ]; then
@@ -1007,7 +1015,8 @@ broray_server_deactivate()
 
     rm -f \
         "$BRORAY_ACTIVE_SERVER_FILE" \
-        "$BRORAY_INTERFACE_STATUS"
+        "$BRORAY_INTERFACE_STATUS" || return 1
+    BRORAY_JOB_UNRESOLVED=false
 
     jq -n \
         --arg previousActiveServerId "$previous_active_id" \
@@ -1029,6 +1038,7 @@ broray_server_deactivate()
 
 broray_server_delete_safe()
 {
+    broray_job_require_owner || return $?
     delete_server_id="$1"
 
     broray_server_validate_id "$delete_server_id"
@@ -1056,11 +1066,14 @@ broray_server_delete_safe()
         broray_server_quality_path "$delete_server_id"
     )"
 
+    broray_job_checkpoint committing || return $?
+    BRORAY_JOB_UNRESOLVED=true
     rm -f \
         "$delete_server_file" \
         "$delete_quality_file" ||
         broray_die \
             "не удалось удалить сервер $delete_server_id"
+    BRORAY_JOB_UNRESOLVED=false
 
     jq -n \
         --arg id "$delete_server_id" \
@@ -1069,4 +1082,14 @@ broray_server_delete_safe()
             id: $id,
             updatedAt: $updatedAt
         }'
+}
+
+broray_server_publish_snapshot()
+{
+    local snapshot_file
+    broray_job_require_owner || return $?
+    "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$BRORAY_BASE/bin/broray-home-snapshot" refresh servers >/dev/null || return 1
+    snapshot_file="$BRORAY_BASE/run/home-snapshots/servers.json"
+    jq -e 'type=="object" and .module=="servers" and (.capturedAt|type)=="string" and (.data.servers|type)=="array"' "$snapshot_file" >/dev/null || return 1
+    jq '{published:true,totalServers:(.data.servers|length),capturedAt:.capturedAt}' "$snapshot_file"
 }
