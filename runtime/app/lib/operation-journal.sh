@@ -19,7 +19,7 @@ ops_event_append()
     event="$1"; state='{}'; owner='{}'
     if [ -n "${OPS_CURRENT:-}" ]; then
         ops_file_safe "$OPS_CURRENT/state.json" && state="$(cat "$OPS_CURRENT/state.json")"
-        ops_file_safe "$OPS_CURRENT/owner.json" 4096 && owner="$(cat "$OPS_CURRENT/owner.json")"
+        ops_file_safe "${OPS_EXECUTOR:-$OPS_CURRENT/owner.json}" 8192 && owner="$(cat "${OPS_EXECUTOR:-$OPS_CURRENT/owner.json}")"
     fi
     key=''
     if [ -n "${3:-}" ]; then

@@ -102,3 +102,41 @@ broray_ops_run_helper()
     done
     return 75
 }
+
+broray_ops_handoff_to()
+{
+    local attempt response rc
+    [ "$#" = 2 ] && [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || return 64
+    attempt=0
+    while [ "$attempt" -lt 3 ]; do
+        attempt=$((attempt+1)); rc=0
+        response="$(broray_ops_call handoff "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "$$" "$1" "$2")" || rc=$?
+        if [ "$rc" = 0 ]; then
+            printf '%s\n' "$response" | jq -e '.ok==true and .transferred==true' >/dev/null || return 1
+            unset BRORAY_BACKGROUND_OPERATION_ID BRORAY_BACKGROUND_OPERATION_TOKEN BRORAY_BACKGROUND_LAUNCH_NONCE
+            return 0
+        fi
+        printf '%s\n' "$response" | jq -e '.ok==false' >/dev/null 2>&1 && return "$rc"
+    done
+    return "$rc"
+}
+
+broray_ops_accept_handoff()
+{
+    local attempt response rc token
+    [ "$#" = 1 ] && [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || return 64
+    attempt=0
+    while [ "$attempt" -lt 10 ]; do
+        attempt=$((attempt+1)); rc=0
+        response="$(broray_ops_call accept-handoff "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "$$" "$1")" || rc=$?
+        if [ "$rc" = 0 ]; then
+            token="$(printf '%s\n' "$response" | jq -er '.token')" || return 1
+            BRORAY_BACKGROUND_OPERATION_TOKEN="$token"; export BRORAY_BACKGROUND_OPERATION_TOKEN
+            return 0
+        fi
+        # Only an unpublished handoff or missing transport response is retried.
+        printf '%s\n' "$response" | jq -e '.ok==false and .errorCode!="HANDOFF_NOT_READY"' >/dev/null 2>&1 && return "$rc"
+        [ "$attempt" = 10 ] || sleep 1
+    done
+    return 1
+}

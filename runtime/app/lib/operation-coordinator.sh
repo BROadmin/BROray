@@ -56,21 +56,90 @@ ops_load()
       (.token|type)=="string" and (.token|length)==32 and
       (.token|all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102)))' "$dir/owner.json" >/dev/null 2>&1 || return 1
     jq -c '.owner' "$dir/owner.json" | broray_ops_owner_valid || return 1
-    OPS_CURRENT="$dir"; OPS_ID="$id"
+    OPS_CURRENT="$dir"; OPS_ID="$id"; OPS_EXECUTOR="$dir/owner.json"
+    if [ -e "$dir/executor.json" ] || [ -L "$dir/executor.json" ]; then
+        ops_file_safe "$dir/executor.json" 8192 || return 1
+        jq -e --arg id "$id" '.schemaVersion==1 and .operationId==$id and (.acknowledged|type)=="boolean" and
+          (.token|type)=="string" and (.token|length)==32 and (.token|all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))) and
+          (.handoffNonce|type)=="string" and (.handoffNonce|length)==32 and (.handoffNonce|all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))) and
+          (.previousTokenDigest|type)=="string" and (.previousTokenDigest|length)==64 and (.previousTokenDigest|all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102)))' "$dir/executor.json" >/dev/null 2>&1 || return 1
+        jq -c '.owner' "$dir/executor.json" | broray_ops_owner_valid || return 1
+        OPS_EXECUTOR="$dir/executor.json"
+    fi
+}
+
+ops_executor_pending()
+{
+    [ "$OPS_EXECUTOR" = "$OPS_CURRENT/executor.json" ] && jq -e '.acknowledged==false' "$OPS_EXECUTOR" >/dev/null
 }
 
 ops_authorize()
 {
     ops_load "$1" || ops_error STATE_UNAVAILABLE 1
-    [ "$(jq -r '.token' "$OPS_CURRENT/owner.json")" = "$2" ] || ops_error OWNER_CHANGED
+    [ "$(jq -r '.token' "$OPS_EXECUTOR")" = "$2" ] || ops_error OWNER_CHANGED
     jq -e '.running==true' "$OPS_CURRENT/state.json" >/dev/null 2>&1 || ops_error OPERATION_FINISHED
+    ! ops_executor_pending || ops_error NOT_ACKNOWLEDGED
 }
 
 ops_owner_authorize()
 {
     local owner
     owner="$(broray_ops_capture_owner "$1")" || ops_error OWNER_UNCONFIRMED 1
-    jq -e --argjson owner "$owner" '.owner==$owner' "$OPS_CURRENT/owner.json" >/dev/null 2>&1 || ops_error OWNER_CHANGED
+    jq -e --argjson owner "$owner" '.owner==$owner' "$OPS_EXECUTOR" >/dev/null 2>&1 || ops_error OWNER_CHANGED
+}
+
+ops_handoff()
+{
+    local previous next digest token nonce record
+    ops_load "$1" || ops_error STATE_UNAVAILABLE 1
+    nonce="$5"; ops_nonce_valid "$nonce" || ops_error INVALID_REQUEST 1
+    previous="$(broray_ops_capture_owner "$3")" || ops_error OWNER_UNCONFIRMED
+    [ "$3" != "$4" ] || ops_error HANDOFF_NOT_ALLOWED
+    digest="$(printf '%s' "$2" | sha256sum | cut -d ' ' -f 1)" || ops_error STATE_UNAVAILABLE 1
+    if [ "$OPS_EXECUTOR" = "$OPS_CURRENT/executor.json" ]; then
+        # Lost handoff responses may be retried. Authority is never rotated a
+        # second time, and the former token cannot authorize ordinary writes.
+        jq -e --argjson previous "$previous" --arg pid "$4" --arg digest "$digest" --arg nonce "$nonce" \
+          '.previousOwner==$previous and (.owner.pid|tostring)==$pid and .previousTokenDigest==$digest and .handoffNonce==$nonce' "$OPS_EXECUTOR" >/dev/null || ops_error OWNER_CHANGED
+        printf '%s\n' '{"ok":true,"transferred":true}'
+        return 0
+    fi
+    ops_global_matches || ops_error OWNER_CHANGED
+    jq -e '.running==true and .acknowledged==true and .phase=="working" and
+      (.operation=="xray:install" or .operation=="xray:update" or .operation=="xray:reinstall")' "$OPS_CURRENT/state.json" >/dev/null || ops_error HANDOFF_NOT_ALLOWED
+    next="$(broray_ops_capture_owner "$4")" || ops_error OWNER_UNCONFIRMED
+    ops_authorize "$1" "$2"; ops_owner_authorize "$3"
+    ops_children_absent || ops_error CHILDREN_UNCONFIRMED
+    ops_pending_domain && ops_error DOMAIN_OPERATION_BUSY
+    [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED
+    token="$(hexdump -n 16 -v -e '1/1 "%02x"' /dev/urandom)" || ops_error RANDOM_UNAVAILABLE 1
+    ops_nonce_valid "$token" || ops_error RANDOM_UNAVAILABLE 1
+    record="$(jq -nc --arg id "$OPS_ID" --arg token "$token" --arg digest "$digest" --arg nonce "$nonce" \
+      --argjson owner "$next" --argjson previous "$previous" \
+      '{schemaVersion:1,operationId:$id,token:$token,owner:$owner,previousTokenDigest:$digest,previousOwner:$previous,handoffNonce:$nonce,acknowledged:false}')" || ops_error STATE_UNAVAILABLE 1
+    ops_write "$OPS_CURRENT/executor.json" "$record" || ops_error STATE_UNAVAILABLE 1
+    OPS_EXECUTOR="$OPS_CURRENT/executor.json"
+    ops_event owner_transferred >/dev/null 2>&1 || true
+    printf '%s\n' '{"ok":true,"transferred":true}'
+}
+
+ops_accept_handoff()
+{
+    local owner digest record
+    ops_load "$1" || ops_error STATE_UNAVAILABLE 1
+    [ "$OPS_EXECUTOR" = "$OPS_CURRENT/executor.json" ] || ops_error HANDOFF_NOT_READY
+    ops_global_matches || ops_error OWNER_CHANGED
+    jq -e '.running==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error OPERATION_FINISHED
+    owner="$(broray_ops_capture_owner "$3")" || ops_error OWNER_UNCONFIRMED
+    digest="$(printf '%s' "$2" | sha256sum | cut -d ' ' -f 1)" || ops_error STATE_UNAVAILABLE 1
+    jq -e --argjson owner "$owner" --arg digest "$digest" --arg nonce "$4" \
+      '.owner==$owner and .previousTokenDigest==$digest and .handoffNonce==$nonce' "$OPS_EXECUTOR" >/dev/null || ops_error OWNER_CHANGED
+    if ops_executor_pending; then
+        [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED
+        record="$(jq -c '.acknowledged=true' "$OPS_EXECUTOR")" || ops_error STATE_UNAVAILABLE 1
+        ops_write "$OPS_EXECUTOR" "$record" || ops_error STATE_UNAVAILABLE 1
+    fi
+    jq -c '{ok:true,operationId,token}' "$OPS_EXECUTOR"
 }
 
 ops_state_transition()
@@ -260,7 +329,7 @@ ops_supervisor_register()
     ops_write "$dir/children.json" "$record" || ops_error STATE_UNAVAILABLE 1
     records="$(printf '%s\n' "$records" | jq -c --arg sid "$nonce" --argjson owner "$owner" '.supervisors += [{supervisorId:$sid,owner:$owner}]')" || ops_error STATE_UNAVAILABLE 1
     ops_write "$file" "$records" || ops_error STATE_UNAVAILABLE 1
-    jq -r --arg ledger "$dir/children.json" '[.owner.pid,.owner.startTicks,.owner.bootId,$ledger]|@tsv' "$OPS_CURRENT/owner.json"
+    jq -r --arg ledger "$dir/children.json" '[.owner.pid,.owner.startTicks,.owner.bootId,$ledger]|@tsv' "$OPS_EXECUTOR"
 }
 
 ops_pending_domain()
@@ -313,7 +382,7 @@ ops_recover_global()
         OPS_RECOVERY_RESULT=terminal_lock_retired
         return 0
     fi
-    owner="$(jq -c '.owner' "$OPS_CURRENT/owner.json")"
+    owner="$(jq -c '.owner' "$OPS_EXECUTOR")"
     broray_ops_classify_owner "$owner"
     status="$OPS_OWNER_STATUS"; reason="$OPS_OWNER_REASON"
     if [ "$status" != STALE ]; then OPS_RECOVERY_RESULT="$status"; return 2; fi
@@ -321,7 +390,7 @@ ops_recover_global()
     # Absence of an executor is not proof that a protected domain commit can
     # be discarded. Route/updater/Xray state stays under its original owner.
     cancelability="$(jq -r '.cancelability' "$OPS_CURRENT/state.json")"
-    if ! jq -e '.state=="starting" and .acknowledged==false' "$OPS_CURRENT/state.json" >/dev/null; then
+    if ! ops_executor_pending && ! jq -e '.state=="starting" and .acknowledged==false' "$OPS_CURRENT/state.json" >/dev/null; then
         if [ "$cancelability" != cooperative ]; then OPS_RECOVERY_RESULT=protected_recovery; return 2; fi
         ops_pending_domain && { OPS_RECOVERY_RESULT=domain_pending; return 2; }
     fi
@@ -353,6 +422,7 @@ ops_begin()
         jq -e --arg nonce "$launch" --argjson owner "$owner" '.launchNonce==$nonce and .owner==$owner' "$file" >/dev/null 2>&1 || continue
         dir="${file%/owner.json}"; id="${dir##*/}"
         ops_load "$id" || ops_error STATE_UNAVAILABLE 1
+        [ "$OPS_EXECUTOR" = "$OPS_CURRENT/owner.json" ] || ops_error OWNER_CHANGED
         jq -e --arg scope "$scope" --arg action "$action" --arg bundle "$bundle" --arg source "$source" --arg mode "$cancelability" \
           '.scope==$scope and .operation==$action and .bundleId==$bundle and .source==$source and .initialCancelability==$mode' "$OPS_CURRENT/state.json" >/dev/null || ops_error LAUNCH_MISMATCH
         jq -e '.running==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error OPERATION_FINISHED
@@ -387,7 +457,7 @@ ops_begin()
         state:"starting",phase:"starting",running:true,revision:1,resourceLocks:["global"],cancelRequested:false,cancelability:$mode,initialCancelability:$mode,acknowledged:false,
         startedAt:$now,updatedAt:$now,startedMonotonic:$mono,finishedAt:null,errorCode:null}')" || ops_error STATE_UNAVAILABLE 1
     ops_write "$dir/owner.json" "$record" && ops_write "$dir/state.json" "$state" || ops_error STATE_UNAVAILABLE 1
-    OPS_CURRENT="$dir"; OPS_ID="$id"
+    OPS_CURRENT="$dir"; OPS_ID="$id"; OPS_EXECUTOR="$dir/owner.json"
     mkdir -p "${OPS_GLOBAL%/*}" || ops_error STATE_UNAVAILABLE 1
     fence="$dir/fence"
     mkdir "$fence" || ops_error OWNER_PUBLICATION_FAILED 1
@@ -420,7 +490,7 @@ ops_prune()
         ops_load "$id" || continue
         ops_global_matches && continue
         ops_children_absent || continue
-        owner="$(jq -c '.owner' "$dir/owner.json")"; broray_ops_classify_owner "$owner"
+        owner="$(jq -c '.owner' "$OPS_EXECUTOR")"; broray_ops_classify_owner "$owner"
         [ "$OPS_OWNER_STATUS" = STALE ] || continue
         # ops_load checked a direct nonsymlink child and a constrained ID.
         rm -rf "$OPS_ROOT/$id" || return 1
@@ -456,7 +526,7 @@ ops_recover_orphans()
         ops_global_matches && continue
         # Only never-acknowledged work can be recovered without its fence.
         jq -e '.state=="starting" and .acknowledged==false' "$file" >/dev/null || return 1
-        owner="$(jq -c '.owner' "$OPS_CURRENT/owner.json")"
+        owner="$(jq -c '.owner' "$OPS_EXECUTOR")"
         broray_ops_classify_owner "$owner"
         [ "$OPS_OWNER_STATUS" = STALE ] || return 1
         ops_children_absent || return 1
@@ -507,10 +577,11 @@ ops_status()
         # Legacy updater history has its own public API; do not invent owners.
         if ops_file_safe "$file" && jq -e '.kind!="background"' "$file" >/dev/null 2>&1; then continue; fi
         if ! ops_load "$id"; then errors='["STATE_UNAVAILABLE"]'; continue; fi
-        owner="$(jq -c '.owner' "$OPS_CURRENT/owner.json")"
+        owner="$(jq -c '.owner' "$OPS_EXECUTOR")"
         broray_ops_classify_owner "$owner"; status="$OPS_OWNER_STATUS"
         item="$(jq -c -L "$OPS_APP/lib" --arg owner "$status" --arg reason "$OPS_OWNER_REASON" \
           'include "operation-public"; .ownerStatus=$owner | .ownerReason=$reason | operation_public' "$file")" || return 1
+        if ops_executor_pending; then item="$(printf '%s\n' "$item" | jq -c '.phase="waiting"')" || return 1; fi
         if [ -f "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ]; then
             item="$(printf '%s\n' "$item" | jq -c '.cancelRequested=true')"
         fi
@@ -526,7 +597,7 @@ ops_status()
         if [ -L "$OPS_GLOBAL" ]; then
             dir="$(readlink "$OPS_GLOBAL")"; id="${dir%/fence}"; id="${id##*/}"
             if ops_load "$id" && ops_global_matches; then
-                owner="$(jq -c '.owner' "$OPS_CURRENT/owner.json")"; broray_ops_classify_owner "$owner"
+                owner="$(jq -c '.owner' "$OPS_EXECUTOR")"; broray_ops_classify_owner "$owner"
                 case "$OPS_OWNER_STATUS" in ACTIVE) fence=managed_active ;; STALE) fence=managed_stale ;; esac
             fi
         fi
@@ -546,6 +617,8 @@ case "$verb" in
     begin) [ "$#" = 7 ] || ops_error INVALID_REQUEST 1; ops_begin "$@" ;;
     ack) [ "$#" = 3 ] || ops_error INVALID_REQUEST 1; ops_ack "$@" ;;
     supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" ;;
+    handoff) [ "$#" = 5 ] || ops_error INVALID_REQUEST 1; ops_handoff "$@" ;;
+    accept-handoff) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_accept_handoff "$@" ;;
     helpers-drain)
         [ "$#" = 2 ] || ops_error INVALID_REQUEST 1
         ops_authorize "$1" "$2"
@@ -555,7 +628,7 @@ case "$verb" in
     finish)
         [ "$#" = 4 ] || ops_error INVALID_REQUEST 1
         ops_load "$1" || ops_error STATE_UNAVAILABLE 1
-        [ "$(jq -r '.token' "$OPS_CURRENT/owner.json")" = "$2" ] || ops_error OWNER_CHANGED
+        [ "$(jq -r '.token' "$OPS_EXECUTOR")" = "$2" ] || ops_error OWNER_CHANGED
         case "$3" in completed|failed|aborted) ;; *) ops_error INVALID_STATE 1 ;; esac
         case "$4" in ''|CANCELLED|OPERATION_FAILED) ;; *) ops_error INVALID_ERROR_CODE 1 ;; esac
         ops_children_absent || ops_error CHILDREN_UNCONFIRMED
@@ -563,6 +636,7 @@ case "$verb" in
             if ops_global_matches; then ops_retire_global || ops_error STATE_UNAVAILABLE 1; fi
             printf '%s\n' '{"ok":true,"alreadyFinished":true}'; exit 0
         fi
+        ! ops_executor_pending || ops_error NOT_ACKNOWLEDGED
         ops_global_matches || ops_error OWNER_CHANGED
         ops_state_transition "$3" finished "$4" && ops_retire_global || ops_error STATE_UNAVAILABLE 1
         printf '%s\n' '{"ok":true}' ;;
@@ -610,7 +684,7 @@ case "$verb" in
     classify)
         [ "$#" = 1 ] || ops_error INVALID_REQUEST 1
         ops_load "$1" || ops_error STATE_UNAVAILABLE 1
-        broray_ops_classify_owner "$(jq -c '.owner' "$OPS_CURRENT/owner.json")"
+        broray_ops_classify_owner "$(jq -c '.owner' "$OPS_EXECUTOR")"
         jq -nc --arg status "$OPS_OWNER_STATUS" --arg reason "$OPS_OWNER_REASON" '{ok:true,ownerStatus:$status,reason:$reason}' ;;
     *) ops_error INVALID_REQUEST 1 ;;
 esac

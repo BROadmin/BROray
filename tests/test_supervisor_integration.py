@@ -26,8 +26,8 @@ class Integration(unittest.TestCase):
         p=subprocess.run([str(GUARD),str(self.state/'operations.guard'),'/bin/ash',str(APP/'lib/operation-coordinator.sh'),*args],env=self.env,capture_output=True,timeout=20)
         self.assertEqual(p.returncode,expected,(args,p.stdout,p.stderr))
         return json.loads(p.stdout)
-    def begin(self,owner=None):
-        a=self.call('begin','system','subscriptions:scheduler','subscriptions','USER',str(owner or os.getpid()),'cooperative',uuid.uuid4().hex)
+    def begin(self,owner=None,action='subscriptions:scheduler'):
+        a=self.call('begin','system',action,'subscriptions','USER',str(owner or os.getpid()),'cooperative',uuid.uuid4().hex)
         self.call('ack',a['operationId'],a['token'],str(owner or os.getpid()))
         self.id=a['operationId'];self.token=a['token'];self.op=self.state/'operations'/self.id
         self.env.update({'BRORAY_BACKGROUND_OPERATION_ID':self.id,'BRORAY_BACKGROUND_OPERATION_TOKEN':self.token})

@@ -37,7 +37,7 @@ def operation_public:
    errorCode:(.errorCode|error_code),
    ownerStatus:(.ownerStatus|enum(["ACTIVE","STALE","AMBIGUOUS"];"AMBIGUOUS")),
    ownerReason:(.ownerReason|enum(["identity_matches","absent","pid_reused","previous_boot","process_unreadable","identity_changed","invalid_identity"];"invalid_identity"))};
-def event_name: enum(["started","lock_acquired","lock_conflict","phase_changed","cancel_requested","completed","failed","aborted","recovered","ambiguous_owner","heartbeat_problem","term","kill"];"unknown");
+def event_name: enum(["started","lock_acquired","lock_conflict","phase_changed","owner_transferred","cancel_requested","completed","failed","aborted","recovered","ambiguous_owner","heartbeat_problem","term","kill"];"unknown");
 def event_message:
   if .=="started" then "Операция запущена"
   elif .=="lock_acquired" then "Ресурсы зарезервированы"
@@ -52,6 +52,7 @@ def event_message:
   elif .=="term" then "Управляемому процессу отправлен сигнал завершения"
   elif .=="kill" then "Управляемый процесс принудительно завершён"
   elif .=="phase_changed" then "Этап операции изменился"
+  elif .=="owner_transferred" then "Операция передана фоновому исполнителю"
   else "Событие не распознано" end;
 def event_public:
   (.event|event_name) as $event |
