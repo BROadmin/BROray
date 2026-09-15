@@ -1,20 +1,18 @@
 #!/opt/bin/ash
 
-. /opt/broray/web-new/api/auth-common.sh
-. /opt/broray/lib/web-request-body.sh
-. /opt/broray/lib/subscription-service.sh
+. "${BRORAY_ROOT:-/opt/broray}/web-new/api/auth-common.sh"
+. "${BRORAY_ROOT:-/opt/broray}/lib/web-request-body.sh"
+. "${BRORAY_ROOT:-/opt/broray}/lib/subscription-service.sh"
+. "${BRORAY_ROOT:-/opt/broray}/lib/operation-job.sh"
 
 broray_subscriptions_api_lock()
 {
     action="$1"
-    [ -r /opt/broray/lib/routes-api-operation.sh ] ||
-        broray_api_error "500 Internal Server Error" "GLOBAL_LOCK_UNAVAILABLE" "Общий координатор операций недоступен."
-    . /opt/broray/lib/routes-api-operation.sh
     lock_rc=0
-    broray_routes_api_lock_acquire "subscriptions:$action" subscriptions || lock_rc=$?
+    broray_job_begin routes "subscriptions:$action" subscriptions USER cooperative || lock_rc=$?
     case "$lock_rc" in
         0)
-            trap 'broray_routes_api_lock_release' EXIT
+            trap 'broray_job_finish failed' EXIT
             trap 'exit 129' HUP
             trap 'exit 130' INT
             trap 'exit 143' TERM
@@ -58,11 +56,14 @@ broray_subscriptions_api_error_status()
         SUBSCRIPTION_NOT_FOUND)
             printf '%s\n' "404 Not Found"
             ;;
-        UPDATE_ALREADY_RUNNING|ACTIVE_SERVER_CONFLICT|SERVER_SYNC_BUSY|SERVER_ID_CONFLICT)
+        UPDATE_ALREADY_RUNNING|ACTIVE_SERVER_CONFLICT|SERVER_SYNC_BUSY|SERVER_ID_CONFLICT|OPERATION_CANCELLED)
             printf '%s\n' "409 Conflict"
             ;;
         DOWNLOAD_TIMEOUT)
             printf '%s\n' "504 Gateway Timeout"
+            ;;
+        OPERATION_UNRESOLVED)
+            printf '%s\n' "503 Service Unavailable"
             ;;
         HTTP_ERROR|DOWNLOAD_SECURITY)
             printf '%s\n' "502 Bad Gateway"
@@ -81,9 +82,9 @@ broray_subscriptions_api_error_status()
 
 broray_subscriptions_api_run()
 {
-    broray_subscriptions_api_output_file="/opt/broray/tmp/subscriptions-api-output.$$.json"
-    broray_subscriptions_api_error_file="/opt/broray/tmp/subscriptions-api-error.$$"
-    mkdir -p /opt/broray/tmp
+    broray_subscriptions_api_output_file="$BRORAY_ROOT/tmp/subscriptions-api-output.$$.json"
+    broray_subscriptions_api_error_file="$BRORAY_ROOT/tmp/subscriptions-api-error.$$"
+    mkdir -p "$BRORAY_ROOT/tmp"
     if "$@" > "$broray_subscriptions_api_output_file" 2> "$broray_subscriptions_api_error_file"; then
         if ! jq -e . "$broray_subscriptions_api_output_file" >/dev/null 2>&1; then
             rm -f "$broray_subscriptions_api_output_file" "$broray_subscriptions_api_error_file"
@@ -96,6 +97,8 @@ broray_subscriptions_api_run()
         rm -f "$broray_subscriptions_api_output_file" "$broray_subscriptions_api_error_file"
         broray_api_success "$broray_subscriptions_api_response_json"
         exit 0
+    else
+        broray_subscriptions_service_rc=$?
     fi
 
     broray_subscriptions_api_error_line="$(grep 'BRORAY_ERROR:' "$broray_subscriptions_api_error_file" | tail -n 1)"
@@ -103,6 +106,14 @@ broray_subscriptions_api_run()
     broray_subscriptions_api_error_message="$(printf '%s' "$broray_subscriptions_api_error_line" | cut -d: -f3-)"
     [ -n "$broray_subscriptions_api_error_code" ] || broray_subscriptions_api_error_code="SUBSCRIPTION_OPERATION_FAILED"
     [ -n "$broray_subscriptions_api_error_message" ] || broray_subscriptions_api_error_message="Операция с подпиской завершилась ошибкой."
+    case "$broray_subscriptions_service_rc" in
+        130)
+            broray_subscriptions_api_error_code=OPERATION_CANCELLED
+            broray_subscriptions_api_error_message="Обновление подписки остановлено." ;;
+        75)
+            broray_subscriptions_api_error_code=OPERATION_UNRESOLVED
+            broray_subscriptions_api_error_message="Завершение вспомогательных процессов ещё не подтверждено." ;;
+    esac
     broray_subscriptions_api_http_status="$(broray_subscriptions_api_error_status "$broray_subscriptions_api_error_code")"
     rm -f "$broray_subscriptions_api_output_file" "$broray_subscriptions_api_error_file"
     broray_api_error \
@@ -110,4 +121,3 @@ broray_subscriptions_api_run()
         "$broray_subscriptions_api_error_code" \
         "$broray_subscriptions_api_error_message"
 }
-

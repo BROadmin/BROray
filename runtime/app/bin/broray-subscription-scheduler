@@ -1,9 +1,9 @@
 #!/opt/bin/ash
 
-PATH="/opt/broray/bin:/opt/sbin:/opt/bin:/sbin:/bin"
+ROOT="${BRORAY_ROOT:-/opt/broray}"
+PATH="$ROOT/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
-ROOT="${BRORAY_ROOT:-/opt/broray}"
 . "$ROOT/lib/subscription-service.sh"
 
 PID_FILE="${BRORAY_SUBSCRIPTION_PIDFILE:-$ROOT/run/subscription-scheduler.pid}"
@@ -11,11 +11,8 @@ STARTTIME_FILE="${BRORAY_SUBSCRIPTION_STARTTIME_FILE:-$ROOT/run/subscription-sch
 LOG_FILE="${BRORAY_SUBSCRIPTION_LOG_FILE:-$ROOT/logs/subscription-scheduler.log}"
 PROC_ROOT="${BRORAY_SUBSCRIPTION_PROC_ROOT:-/proc}"
 INTERVAL_SECONDS="${BRORAY_SUB_SCHEDULER_INTERVAL:-60}"
-GLOBAL_LOCK="${BRORAY_SUBSCRIPTION_GLOBAL_LOCK:-/opt/var/lock/broray/global-operation.lock}"
-UPDATER_LOCK="${BRORAY_SUBSCRIPTION_UPDATER_LOCK:-/opt/var/lib/broray-updater/request.lock}"
-SYSTEM_LOCK="${BRORAY_SUBSCRIPTION_SYSTEM_LOCK:-/tmp/broray-global-operation.lock}"
-ROUTES_OPERATIONS="${BRORAY_SUBSCRIPTION_ROUTES_OPERATIONS:-$ROOT/routes/operations}"
-GLOBAL_HELD=false
+BRORAY_ROUTES_API_LOCK="${BRORAY_SUBSCRIPTION_GLOBAL_LOCK:-${BRORAY_ROUTES_API_LOCK:-/opt/var/lock/broray/global-operation.lock}}"
+export BRORAY_ROUTES_API_LOCK
 OWN_STARTTIME=""
 
 process_starttime()
@@ -45,25 +42,8 @@ write_one()
     mv -f "$scheduler_temporary" "$scheduler_path"
 }
 
-routes_resumable_pending()
-{
-    local operation_file
-    [ -d "$ROUTES_OPERATIONS" ] || return 1
-    for operation_file in "$ROUTES_OPERATIONS"/*.json; do
-        [ -f "$operation_file" ] && [ ! -L "$operation_file" ] || continue
-        jq -e 'type=="object" and .kind=="routes" and .running==false and .resumable==true and (.bundleId|type)=="string" and (.bundleId|length)>0' \
-            "$operation_file" >/dev/null 2>&1 && return 0
-    done
-    return 1
-}
-
 scheduler_cleanup()
 {
-    if [ "$GLOBAL_HELD" = true ] &&
-       [ "$(sed -n '1p' "$GLOBAL_LOCK/pid" 2>/dev/null || true)" = "$$" ]; then
-        rm -rf "$GLOBAL_LOCK" 2>/dev/null || true
-    fi
-    GLOBAL_HELD=false
     recorded_pid="$(sed -n '1p' "$PID_FILE" 2>/dev/null)"
     recorded_start="$(sed -n '1p' "$STARTTIME_FILE" 2>/dev/null)"
     if [ "$recorded_pid" = "$$" ] && [ -n "$OWN_STARTTIME" ] && [ "$recorded_start" = "$OWN_STARTTIME" ]; then
@@ -73,33 +53,37 @@ scheduler_cleanup()
 
 scheduler_cycle()
 {
-    [ ! -d "$UPDATER_LOCK" ] || return 0
-    [ ! -d "$SYSTEM_LOCK" ] || return 0
-    ! routes_resumable_pending || return 0
-    mkdir -p "${GLOBAL_LOCK%/*}" || return 1
-    mkdir "$GLOBAL_LOCK" 2>/dev/null || return 0
-    printf '%s\n' "$$" >"$GLOBAL_LOCK/pid" &&
-    printf '%s\n' system >"$GLOBAL_LOCK/scope" &&
-    printf '%s\n' subscriptions:scheduler >"$GLOBAL_LOCK/action" &&
-    : >"$GLOBAL_LOCK/bundle" &&
-    printf '%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >"$GLOBAL_LOCK/startedAt" || {
-        rm -rf "$GLOBAL_LOCK"
-        return 1
-    }
-    GLOBAL_HELD=true
-    if [ -d "$UPDATER_LOCK" ] || [ -d "$SYSTEM_LOCK" ] || routes_resumable_pending; then
-        rm -rf "$GLOBAL_LOCK"
-        GLOBAL_HELD=false
-        return 0
-    fi
-    broray_subscription_scheduler_once
-    cycle_rc=$?
-    if [ "$(sed -n '1p' "$GLOBAL_LOCK/pid" 2>/dev/null || true)" = "$$" ]; then
-        rm -rf "$GLOBAL_LOCK"
-    fi
-    GLOBAL_HELD=false
-    return "$cycle_rc"
+    local due_file due_now
+    due_now="$(broray_subscription_now_epoch)"
+    for due_file in "$BRORAY_SUB_DIR"/*.json; do
+        [ -f "$due_file" ] && [ ! -L "$due_file" ] || continue
+        if jq -e --argjson now "$due_now" '.enabled==true and .autoUpdateEnabled==true and
+          (.nextUpdateEpoch|type)=="number" and .nextUpdateEpoch>0 and .nextUpdateEpoch<=$now' "$due_file" >/dev/null 2>&1; then
+            # A fresh exec has its own PID/birth identity and exit traps. The
+            # daemon cannot be mistaken for a completed or hung update job.
+            "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$ROOT/bin/broray-subscription-scheduler" --job
+            return $?
+        fi
+    done
+    return 0
 }
+
+case "${1:-}" in
+    --job)
+        job_rc=0
+        broray_job_begin system subscriptions:scheduler subscriptions SUBSCRIPTION_AUTO cooperative || job_rc=$?
+        [ "$job_rc" != 2 ] || exit 0
+        [ "$job_rc" = 0 ] || exit "$job_rc"
+        trap 'broray_job_exit "$?"' EXIT
+        trap 'exit 129' HUP
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        broray_subscription_scheduler_once
+        exit $? ;;
+    --once) scheduler_cycle; exit $? ;;
+    '') ;;
+    *) exit 64 ;;
+esac
 
 mkdir -p "${PID_FILE%/*}" "${LOG_FILE%/*}"
 OWN_STARTTIME="$(process_starttime "$$")"

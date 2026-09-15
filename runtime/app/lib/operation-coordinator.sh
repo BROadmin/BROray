@@ -694,6 +694,12 @@ verb="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$verb" in
     begin) [ "$#" = 7 ] || ops_error INVALID_REQUEST 1; ops_begin "$@" ;;
     ack) [ "$#" = 3 ] || ops_error INVALID_REQUEST 1; ops_ack "$@" ;;
+    owner-check)
+        [ "$#" = 3 ] || ops_error INVALID_REQUEST 1
+        ops_authorize "$1" "$2"; ops_owner_authorize "$3"
+        ops_global_matches || ops_error OWNER_CHANGED
+        jq -e '.acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error NOT_ACKNOWLEDGED
+        printf '%s\n' '{"ok":true}' ;;
     supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" ;;
     handoff) [ "$#" = 5 ] || ops_error INVALID_REQUEST 1; ops_handoff "$@" ;;
     accept-handoff) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_accept_handoff "$@" ;;

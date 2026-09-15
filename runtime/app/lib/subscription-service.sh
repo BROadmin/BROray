@@ -8,6 +8,8 @@ export BRORAY_ROOT
 . "$BRORAY_BASE/lib/server-subscription-service.sh"
 BRORAY_STATUS_LIBRARY="${BRORAY_STATUS_LIBRARY:-$BRORAY_BASE/lib/status-contract.sh}"
 . "$BRORAY_STATUS_LIBRARY"
+. "$BRORAY_BASE/lib/operation-job.sh"
+. "$BRORAY_BASE/lib/subscription-job.sh"
 BRORAY_SUB_DIR="${BRORAY_SUB_DIR:-$BRORAY_SUB_BASE/config/subscriptions}"
 BRORAY_SUB_RUN="${BRORAY_SUB_RUN:-$BRORAY_SUB_BASE/run/subscriptions}"
 BRORAY_SUB_TMP="${BRORAY_SUB_TMP:-$BRORAY_SUB_BASE/tmp}"
@@ -147,6 +149,7 @@ broray_subscription_validate_file()
 
 broray_subscription_write_json()
 {
+    broray_job_checkpoint committing || return $?
     write_target="$1"
     write_source="$2"
     write_temp="$write_target.new.$$"
@@ -165,7 +168,7 @@ broray_subscription_write_json()
         return 1
     fi
     chmod 600 "$write_temp" || true
-    mv "$write_temp" "$write_target" || {
+    "${BRORAY_OPS_GUARD:-$BRORAY_BASE/bin/broray-ops-guard}" --replace-file "$write_temp" "$write_target" || {
         rm -f "$write_temp"
         broray_subscription_set_error \
             "PERSISTENCE_ERROR" \
@@ -1007,34 +1010,23 @@ broray_subscription_lock_path()
 broray_subscription_acquire_lock()
 {
     acquire_id="$1"
-    broray_subscription_prepare_dirs
+    broray_job_require_owner || return $?
     acquire_lock="$(broray_subscription_lock_path "$acquire_id")"
-    if mkdir "$acquire_lock" 2>/dev/null; then
-        printf '%s\n' "$$" > "$acquire_lock/pid"
-        return 0
-    fi
-    acquire_old_pid="$(cat "$acquire_lock/pid" 2>/dev/null || true)"
-    if [ -n "$acquire_old_pid" ] && kill -0 "$acquire_old_pid" 2>/dev/null; then
+    if [ -e "$acquire_lock" ] || [ -L "$acquire_lock" ]; then
         broray_subscription_set_error \
             "UPDATE_ALREADY_RUNNING" \
-            "Обновление этой подписки уже выполняется."
+            "Состояние прежней операции подписки требует восстановления."
         return 1
     fi
-    rm -rf "$acquire_lock"
-    if mkdir "$acquire_lock" 2>/dev/null; then
-        printf '%s\n' "$$" > "$acquire_lock/pid"
-        return 0
-    fi
-    broray_subscription_set_error \
-        "UPDATE_ALREADY_RUNNING" \
-        "Не удалось получить блокировку подписки."
-    return 1
+    # The managed global fence already excludes all subscription writers.
+    # Never recreate or reclaim a second PID-only ownership namespace.
+    broray_job_checkpoint committing
 }
 
 broray_subscription_release_lock()
 {
-    release_id="$1"
-    rm -rf "$(broray_subscription_lock_path "$release_id")"
+    # Ownership lasts until the enclosing job finishes.
+    broray_subscription_cleanup_preparation
 }
 
 broray_subscription_schedule_values()
@@ -1052,6 +1044,25 @@ broray_subscription_schedule_values()
     fi
 }
 
+broray_subscription_effective_status()
+{
+    local effective_id effective_state
+    BRORAY_SUB_EFFECTIVE_STATUS="$(jq -r '.lastUpdateStatus // "never"' "$1")"
+    BRORAY_SUB_EFFECTIVE_ERROR=""
+    [ "$BRORAY_SUB_EFFECTIVE_STATUS" = running ] || return 0
+    effective_id="$(jq -r '.backgroundOperationId // empty' "$1")"
+    case "$effective_id" in op-*) ;; *) return 0 ;; esac
+    case "$effective_id" in *[!A-Za-z0-9._-]*) return 0 ;; esac
+    [ "${#effective_id}" -le 96 ] || return 0
+    effective_state="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}/operations/$effective_id/state.json"
+    [ -f "$effective_state" ] && [ ! -L "$effective_state" ] || return 0
+    if jq -e --arg id "$effective_id" '.kind=="background" and .operationId==$id and .running==false and
+      (.state=="aborted" or .state=="failed" or .state=="recovered" or .state=="completed")' "$effective_state" >/dev/null; then
+        BRORAY_SUB_EFFECTIVE_STATUS=error
+        BRORAY_SUB_EFFECTIVE_ERROR="Обновление прервано. Сохранены последние доступные данные подписки."
+    fi
+}
+
 broray_subscription_public_file()
 {
     public_file="$1"
@@ -1059,10 +1070,14 @@ broray_subscription_public_file()
     public_id="$(jq -r '.id' "$public_file")"
     public_count="$(broray_server_subscription_count "$public_id" 2>/dev/null || printf '0')"
     public_display_url="$(broray_subscription_mask_url "$(jq -r '.url' "$public_file")")"
+    broray_subscription_effective_status "$public_file"
     jq \
+        --arg effectiveStatus "$BRORAY_SUB_EFFECTIVE_STATUS" --arg effectiveError "$BRORAY_SUB_EFFECTIVE_ERROR" \
         --arg displayUrl "$public_display_url" \
         --argjson serversCount "$public_count" \
         --argjson includeUrl "$public_include_url" '
+        .lastUpdateStatus=$effectiveStatus |
+        (if $effectiveError!="" then .lastError=$effectiveError else . end) |
         . + {
             displayUrl: $displayUrl,
             serversCount: $serversCount
@@ -1074,19 +1089,24 @@ broray_subscription_public_file()
 
 broray_subscription_recover_stale()
 {
+    broray_job_require_owner || return $?
     broray_subscription_prepare_dirs
     for recover_file in "$BRORAY_SUB_DIR"/*.json; do
-        [ -f "$recover_file" ] || continue
+        [ -f "$recover_file" ] && [ ! -L "$recover_file" ] || continue
         recover_status="$(jq -r '.lastUpdateStatus // "never"' "$recover_file" 2>/dev/null)"
         [ "$recover_status" = "running" ] || continue
         recover_id="$(jq -r '.id // empty' "$recover_file")"
-        [ -n "$recover_id" ] || continue
+        broray_subscription_validate_id "$recover_id" || continue
         recover_lock="$(broray_subscription_lock_path "$recover_id")"
-        recover_pid="$(cat "$recover_lock/pid" 2>/dev/null || true)"
-        if [ -n "$recover_pid" ] && kill -0 "$recover_pid" 2>/dev/null; then
-            continue
-        fi
-        rm -rf "$recover_lock"
+        [ ! -e "$recover_lock" ] && [ ! -L "$recover_lock" ] || continue
+        recover_operation="$(jq -r '.backgroundOperationId // empty' "$recover_file")"
+        case "$recover_operation" in op-*) ;; *) continue ;; esac
+        case "$recover_operation" in *[!A-Za-z0-9._-]*) continue ;; esac
+        [ "${#recover_operation}" -le 96 ] || continue
+        recover_state="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}/operations/$recover_operation/state.json"
+        [ -f "$recover_state" ] && [ ! -L "$recover_state" ] || continue
+        jq -e --arg id "$recover_operation" '.kind=="background" and .operationId==$id and .running==false and
+          (.state=="completed" or .state=="failed" or .state=="aborted" or .state=="recovered")' "$recover_state" >/dev/null || continue
         recover_now_epoch="$(broray_subscription_now_epoch)"
         recover_now="$(broray_subscription_now_iso)"
         recover_temp="$BRORAY_SUB_TMP/subscription-recover.$$.json"
@@ -1117,7 +1137,6 @@ broray_subscription_recover_stale()
 broray_subscription_list()
 {
     broray_subscription_prepare_dirs
-    broray_subscription_recover_stale
     list_file="$BRORAY_SUB_TMP/subscriptions-list.$$.json"
     printf '%s\n' '[]' > "$list_file"
     for subscription_file in "$BRORAY_SUB_DIR"/*.json; do
@@ -1288,7 +1307,9 @@ broray_subscription_create()
         "subscription=$create_id action=create url=$(broray_subscription_mask_url "$create_url")"
 
     if [ "$create_immediate" = "true" ]; then
-        broray_subscription_update "$create_id" initial >/dev/null 2>&1 || true
+        create_refresh_rc=0
+        broray_subscription_update "$create_id" initial >/dev/null 2>&1 || create_refresh_rc=$?
+        case "$create_refresh_rc" in 130|75) return "$create_refresh_rc" ;; esac
     fi
     broray_subscription_get "$create_id"
 }
@@ -1481,6 +1502,7 @@ broray_subscription_save_failed_update()
 
 broray_subscription_update()
 {
+    broray_job_require_owner || return $?
     update_subscription_id="$1"
     update_trigger="${2:-manual}"
     case "$update_trigger" in
@@ -1522,12 +1544,13 @@ broray_subscription_update()
     update_id="$(printf '%s-%s-%s' "$update_subscription_id" "$update_started_epoch" "$$")"
     update_temp="$BRORAY_SUB_TMP/subscription-running.$$.json"
     jq \
-        --arg now "$update_started_at" '
+        --arg now "$update_started_at" --arg operationId "$BRORAY_BACKGROUND_OPERATION_ID" '
         .lastUpdateStatus = "running" |
+        .backgroundOperationId = $operationId |
         .lastError = null |
         .updatedAt = $now
     ' "$update_path" > "$update_temp" && \
-        broray_subscription_write_json "$update_path" "$update_temp"
+        broray_subscription_write_json "$update_path" "$update_temp" || return 1
     rm -f "$update_temp"
 
     update_url="$(jq -r '.url' "$update_path")"
@@ -1540,17 +1563,19 @@ broray_subscription_update()
     update_fail_code=""
     update_fail_message=""
 
-    if ! broray_subscription_fetch \
-        "$update_url" "$update_download" "$update_client_hwid"; then
-        update_fail_code="$BRORAY_SUB_ERROR_CODE"
-        update_fail_message="$BRORAY_SUB_ERROR_MESSAGE"
-    elif ! broray_subscription_extract_nodes "$update_download" "$update_nodes"; then
-        update_fail_code="$BRORAY_SUB_ERROR_CODE"
-        update_fail_message="$BRORAY_SUB_ERROR_MESSAGE"
-    elif ! broray_subscription_stage_nodes \
-        "$update_subscription_id" "$update_nodes" "$update_stage" "$update_enabled"; then
-        update_fail_code="$BRORAY_SUB_ERROR_CODE"
-        update_fail_message="$BRORAY_SUB_ERROR_MESSAGE"
+    update_prepare_rc=0
+    broray_subscription_prepare_update || update_prepare_rc=$?
+    case "$update_prepare_rc" in
+        130) broray_subscription_cleanup_preparation; return 130 ;;
+        75) return 75 ;;
+    esac
+    if [ "$update_prepare_rc" != 0 ]; then
+        update_fail_code="${BRORAY_SUB_ERROR_CODE:-INTERNAL_ERROR}"
+        update_fail_message="${BRORAY_SUB_ERROR_MESSAGE:-Не удалось подготовить подписку.}"
+    elif ! broray_job_checkpoint committing; then
+        broray_subscription_cleanup_preparation
+        broray_ops_cancel_requested && return 130
+        return 1
     elif ! broray_server_subscription_sync \
         "$update_subscription_id" "$update_stage" "$update_enabled" "$update_id" \
         > "$update_sync" 2> "$update_sync_error"; then
@@ -1751,7 +1776,6 @@ broray_subscription_servers()
 broray_subscription_summary()
 {
     broray_subscription_prepare_dirs
-    broray_subscription_recover_stale
     summary_total=0
     summary_enabled=0
     summary_auto=false
@@ -1772,7 +1796,8 @@ broray_subscription_summary()
         summary_total=$((summary_total + 1))
         summary_file_enabled="$(jq -r '.enabled' "$summary_file")"
         summary_file_auto="$(jq -r '.autoUpdateEnabled' "$summary_file")"
-        summary_file_status="$(jq -r '.lastUpdateStatus // "never"' "$summary_file")"
+        broray_subscription_effective_status "$summary_file"
+        summary_file_status="$BRORAY_SUB_EFFECTIVE_STATUS"
 
         [ "$summary_file_enabled" = "true" ] &&
             summary_enabled=$((summary_enabled + 1))
@@ -1908,8 +1933,10 @@ broray_subscription_summary()
 
 broray_subscription_scheduler_once()
 {
+    local scheduler_result scheduler_rc
+    scheduler_result=0
     broray_subscription_prepare_dirs
-    broray_subscription_recover_stale
+    broray_subscription_recover_stale || return $?
     scheduler_now="$(broray_subscription_now_epoch)"
     for scheduler_file in "$BRORAY_SUB_DIR"/*.json; do
         [ -f "$scheduler_file" ] || continue
@@ -1925,7 +1952,12 @@ broray_subscription_scheduler_once()
         [ "$scheduler_auto" = "true" ] || continue
         [ "$scheduler_next" -gt 0 ] || continue
         [ "$scheduler_next" -le "$scheduler_now" ] || continue
+        broray_job_checkpoint working || return $?
+        scheduler_rc=0
         broray_subscription_update "$scheduler_id" automatic \
-            >/dev/null 2>&1 || true
+            >/dev/null 2>&1 || scheduler_rc=$?
+        case "$scheduler_rc" in 130|75) return "$scheduler_rc" ;; esac
+        [ "$scheduler_rc" = 0 ] || scheduler_result=1
     done
+    return "$scheduler_result"
 }

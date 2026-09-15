@@ -3,6 +3,7 @@
 BRORAY_SERVER_SUB_BASE="${BRORAY_SERVER_SUB_BASE:-${BRORAY_BASE:-${BRORAY_ROOT:-/opt/broray}}}"
 
 . "$BRORAY_SERVER_SUB_BASE/lib/server-service.sh"
+. "$BRORAY_SERVER_SUB_BASE/lib/operation-job.sh"
 
 BRORAY_SERVER_SUB_LIVE="$BRORAY_SERVER_SUB_BASE/servers"
 BRORAY_SERVER_SUB_DISABLED="$BRORAY_SERVER_SUB_BASE/config/disabled-subscription-servers"
@@ -40,32 +41,19 @@ broray_server_subscription_validate_id()
 
 broray_server_subscription_acquire_lock()
 {
-    mkdir -p "$BRORAY_SERVER_SUB_BASE/run"
-    if mkdir "$BRORAY_SERVER_SUB_LOCK" 2>/dev/null; then
-        printf '%s\n' "$$" > "$BRORAY_SERVER_SUB_LOCK/pid"
-        return 0
-    fi
-    old_pid="$(cat "$BRORAY_SERVER_SUB_LOCK/pid" 2>/dev/null || true)"
-    if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+    broray_job_require_owner || return $?
+    if [ -e "$BRORAY_SERVER_SUB_LOCK" ] || [ -L "$BRORAY_SERVER_SUB_LOCK" ]; then
         broray_server_subscription_error \
             "SERVER_SYNC_BUSY" \
-            "Модуль серверов уже выполняет синхронизацию."
+            "Прежняя синхронизация серверов требует восстановления."
         return 1
     fi
-    rm -rf "$BRORAY_SERVER_SUB_LOCK"
-    if mkdir "$BRORAY_SERVER_SUB_LOCK" 2>/dev/null; then
-        printf '%s\n' "$$" > "$BRORAY_SERVER_SUB_LOCK/pid"
-        return 0
-    fi
-    broray_server_subscription_error \
-        "SERVER_SYNC_BUSY" \
-        "Не удалось получить блокировку модуля серверов."
-    return 1
+    broray_job_checkpoint committing
 }
 
 broray_server_subscription_release_lock()
 {
-    rm -rf "$BRORAY_SERVER_SUB_LOCK"
+    return 0
 }
 
 broray_server_subscription_import_key()

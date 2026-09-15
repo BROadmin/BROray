@@ -1,6 +1,9 @@
 #!/opt/bin/ash
 
 BRORAY_ROOT="${BRORAY_ROOT:-/opt/broray}"
+PATH="$BRORAY_ROOT/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+umask 077
 
 . "$BRORAY_ROOT/lib/subscription-service.sh"
 
@@ -36,6 +39,29 @@ read_json_input()
     printf '%s\n' "$input_temp"
 }
 
+cli_cleanup()
+{
+    local cli_rc
+    cli_rc="$1"
+    [ -z "${body_file:-}" ] || rm -f "$body_file"
+    broray_job_exit "$cli_rc"
+}
+
+cli_begin()
+{
+    local cli_rc
+    cli_rc=0
+    broray_job_begin routes "subscriptions:$1" subscriptions "${2:-USER}" cooperative || cli_rc=$?
+    if [ "$cli_rc" != 0 ]; then
+        printf '%s\n' 'BRORAY_ERROR:OPERATION_BUSY:Операция не допущена общим координатором BROray.' >&2
+        exit "$cli_rc"
+    fi
+}
+
+trap 'cli_cleanup "$?"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 command_name="${1:-list}"
 case "$command_name" in
     list)
@@ -46,6 +72,7 @@ case "$command_name" in
         ;;
     create)
         body_file="$(read_json_input "${2:--}")" || exit 1
+        cli_begin create
         broray_subscription_create "$body_file"
         result="$?"
         rm -f "$body_file"
@@ -54,29 +81,34 @@ case "$command_name" in
     update)
         subscription_id="${2:-}"
         body_file="$(read_json_input "${3:--}")" || exit 1
+        cli_begin update
         broray_subscription_update_settings "$subscription_id" "$body_file"
         result="$?"
         rm -f "$body_file"
         exit "$result"
         ;;
     refresh|update-now)
+        cli_begin refresh
         broray_subscription_update "${2:-}" manual
         ;;
     servers)
         broray_subscription_servers "${2:-}"
         ;;
     delete)
+        cli_begin delete
         broray_subscription_delete "${2:-}"
         ;;
     summary)
         broray_subscription_summary
         ;;
     scheduler-once)
-        broray_subscription_scheduler_once
+        cli_begin scheduler SUBSCRIPTION_AUTO
+        broray_subscription_scheduler_once || exit $?
         broray_subscription_summary
         ;;
     recover)
-        broray_subscription_recover_stale
+        cli_begin recover
+        broray_subscription_recover_stale || exit $?
         broray_subscription_list
         ;;
     help|--help|-h)

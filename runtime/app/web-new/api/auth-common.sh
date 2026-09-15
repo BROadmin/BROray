@@ -1,5 +1,5 @@
 #!/opt/bin/ash
-PATH=/opt/broray/bin:/opt/sbin:/opt/bin:/sbin:/bin
+PATH="${BRORAY_ROOT:-/opt/broray}/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
 BRORAY_SESSION_CGI="${BRORAY_SESSION_CGI:-/opt/broray/web-new/api/session.cgi}"
@@ -14,6 +14,9 @@ broray_api_print_json_headers() {
 }
 
 broray_api_release_operation_lock() {
+    if command -v broray_job_finish >/dev/null 2>&1 && [ "${BRORAY_JOB_ACTIVE:-false}" = true ]; then
+        broray_job_finish "${1:-failed}" || return $?
+    fi
     if command -v broray_routes_api_lock_release >/dev/null 2>&1; then
         broray_routes_api_lock_release || true
     fi
@@ -25,7 +28,7 @@ broray_api_error() {
     error_message="$3"
     error_details="${4:-}"
 
-    broray_api_release_operation_lock
+    broray_api_release_operation_lock failed || true
     printf 'Status: %s\r\n' "$http_status"
     broray_api_print_json_headers
     printf '\r\n'
@@ -93,7 +96,9 @@ broray_api_require_session() {
 broray_api_success() {
     data_json="$1"
 
-    broray_api_release_operation_lock
+    broray_api_release_operation_lock completed || {
+        broray_api_error "503 Service Unavailable" "OPERATION_FINALIZATION_FAILED" "Результат операции сохранён, но её завершение ещё не подтверждено."
+    }
     broray_api_print_json_headers
     printf '\r\n'
 
