@@ -1,5 +1,6 @@
 /* Short-lived coordinator guard. No daemon, stale-lock deletion or PID signals.
- * Advisory POSIX locks survive exec in this process and die with it.
+ * The descriptor owns the lock across fork/exec, including native publishers
+ * orphaned by a coordinator crash. The last inherited close releases it.
  * The lock file must remain at the same pathname/inode for the installation.
  */
 #define _POSIX_C_SOURCE 200809L
@@ -9,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <time.h>
 #include <unistd.h>
 #include <limits.h>
@@ -81,10 +83,9 @@ static int replace_file(const char *temporary,const char *target) {
 int main(int argc, char **argv) {
     int fd, flags, attempts = 0;
     struct stat before, after;
-    struct flock lock;
     struct timespec pause = {0, 10000000};
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-        puts("broray-ops-guard/3 fcntl-exec atomic-fence durable-state");
+        puts("broray-ops-guard/4 flock-fork-exec atomic-fence durable-state");
         return 0;
     }
     if (argc==4 && strcmp(argv[1],"--publish-fence")==0) return publish_fence(argv[2],argv[3]);
@@ -95,11 +96,14 @@ int main(int argc, char **argv) {
     if (fd < 0) return 74;
     if (fstat(fd, &before) || !S_ISREG(before.st_mode) || before.st_nlink != 1 ||
         before.st_uid != geteuid() || (before.st_mode & 0077)) return 74;
-    memset(&lock, 0, sizeof lock);
-    lock.l_type = F_WRLCK;
-    lock.l_whence = SEEK_SET;
-    while (fcntl(fd, F_SETLK, &lock) < 0) {
-        if (errno != EACCES && errno != EAGAIN && errno != EINTR) return 74;
+    /* Linux flock uses the open file description, unlike process-owned POSIX
+     * record locks. A forked --replace-file/--publish-fence must finish before
+     * a successor can enter, even when its parent dies first. No flock utility
+     * or newer OFD-lock kernel ABI is needed. Do not mix guard generations on
+     * an active installation: old fcntl locks and flock do not interoperate.
+     */
+    while (flock(fd, LOCK_EX | LOCK_NB) < 0) {
+        if (errno != EWOULDBLOCK && errno != EINTR) return 74;
         if (++attempts >= 200) return 75;
         nanosleep(&pause, NULL);
     }
