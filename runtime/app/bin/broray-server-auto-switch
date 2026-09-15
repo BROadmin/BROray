@@ -1,7 +1,7 @@
 #!/opt/bin/ash
 
 ROOT="${BRORAY_ROOT:-/opt/broray}"
-PATH="$ROOT/bin:/opt/sbin:/opt/bin:/sbin:/bin"
+PATH="$ROOT/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
 set +e
@@ -16,7 +16,12 @@ GLOBAL_LOCK="${BRORAY_GLOBAL_LOCK:-/opt/var/lock/broray/global-operation.lock}"
 UPDATER_LOCK="${BRORAY_UPDATER_LOCK:-/opt/var/lib/broray-updater/request.lock}"
 SYSTEM_LOCK="${BRORAY_SYSTEM_LOCK:-/tmp/broray-global-operation.lock}"
 ROUTES_OPERATIONS="$ROOT/routes/operations"
-GLOBAL_HELD=false
+BRORAY_ROUTES_API_LOCK="$GLOBAL_LOCK"
+BRORAY_LEGACY_GLOBAL_LOCK="$SYSTEM_LOCK"
+BRORAY_SERVER_SKIP_KEENETIC_REFRESH=true
+export BRORAY_ROUTES_API_LOCK BRORAY_LEGACY_GLOBAL_LOCK BRORAY_SERVER_SKIP_KEENETIC_REFRESH
+. "$ROOT/lib/server-service.sh"
+umask 077
 
 routes_resumable_pending()
 {
@@ -44,6 +49,8 @@ ATTEMPT_GUARD_SECONDS=60
 STATE_HEARTBEAT_SECONDS=60
 
 case "${1:-}" in
+    --job) MODE=job ;;
+    --job-dry-run) MODE=job; DRY_RUN=true ;;
     --once)
         MODE="once"
         ;;
@@ -115,68 +122,6 @@ rating_rank()
             echo 0
             ;;
     esac
-}
-
-acquire_lock()
-{
-    [ ! -d "$UPDATER_LOCK" ] || return 1
-    [ ! -d "$SYSTEM_LOCK" ] || return 1
-    ! routes_resumable_pending || return 1
-    mkdir -p "${GLOBAL_LOCK%/*}" || return 1
-    if ! mkdir "$GLOBAL_LOCK" 2>/dev/null; then
-        return 1
-    fi
-    printf '%s\n' "$$" >"$GLOBAL_LOCK/pid" || { rmdir "$GLOBAL_LOCK" 2>/dev/null; return 1; }
-    printf '%s\n' system >"$GLOBAL_LOCK/scope" || { rm -rf "$GLOBAL_LOCK"; return 1; }
-    printf '%s\n' auto-switch >"$GLOBAL_LOCK/action" || { rm -rf "$GLOBAL_LOCK"; return 1; }
-    : >"$GLOBAL_LOCK/bundle" || { rm -rf "$GLOBAL_LOCK"; return 1; }
-    printf '%s\n' "$(now_iso)" >"$GLOBAL_LOCK/startedAt" || { rm -rf "$GLOBAL_LOCK"; return 1; }
-    if [ -d "$UPDATER_LOCK" ] || [ -d "$SYSTEM_LOCK" ] || routes_resumable_pending; then
-        rm -rf "$GLOBAL_LOCK"
-        return 1
-    fi
-    GLOBAL_HELD=true
-
-    if mkdir "$LOCK" 2>/dev/null; then
-        echo "$$" > "$LOCK/pid"
-        return 0
-    fi
-
-    OLD_PID="$(cat "$LOCK/pid" 2>/dev/null || true)"
-
-    if [ -n "$OLD_PID" ] &&
-       kill -0 "$OLD_PID" 2>/dev/null
-    then
-        release_global_lock
-        return 1
-    fi
-
-    rm -rf "$LOCK"
-
-    if mkdir "$LOCK" 2>/dev/null; then
-        echo "$$" > "$LOCK/pid"
-        return 0
-    fi
-
-    release_global_lock
-
-    return 1
-}
-
-release_global_lock()
-{
-    [ "$GLOBAL_HELD" = true ] || return 0
-    owner="$(sed -n '1p' "$GLOBAL_LOCK/pid" 2>/dev/null || true)"
-    action="$(sed -n '1p' "$GLOBAL_LOCK/action" 2>/dev/null || true)"
-    if [ "$owner" = "$$" ] && [ "$action" = auto-switch ]; then
-        rm -rf "$GLOBAL_LOCK" 2>/dev/null || true
-    fi
-    GLOBAL_HELD=false
-}
-
-release_lock()
-{
-    rm -rf "$LOCK"
 }
 
 load_config()
@@ -393,6 +338,8 @@ state_signature()
 
 save_state()
 {
+    broray_job_require_owner || exit $?
+    broray_ops_cancel_requested && exit 130
     TMP="$STATE.new.$$"
     EVALUATION_EPOCH="${NOW_EPOCH:-$(date '+%s')}"
     CURRENT_SIGNATURE="$(state_signature)"
@@ -413,6 +360,7 @@ save_state()
     S_LAST_EVALUATION_EPOCH="$EVALUATION_EPOCH"
 
     jq -n \
+        --arg backgroundOperationId "$BRORAY_BACKGROUND_OPERATION_ID" \
         --argjson enabled "$S_ENABLED" \
         --arg status "$S_STATUS" \
         --arg activeServerId "$S_ACTIVE_ID" \
@@ -444,6 +392,7 @@ save_state()
         --arg qualityLastError "$S_Q_LAST_ERROR" '
         {
             schemaVersion: 3,
+            backgroundOperationId: $backgroundOperationId,
             enabled: $enabled,
             status: $status,
 
@@ -560,8 +509,12 @@ save_state()
         return 1
     }
 
-    chmod 0600 "$TMP"
-    mv "$TMP" "$STATE" || return 1
+    chmod 0600 "$TMP" || exit 1
+    broray_job_checkpoint committing || exit $?
+    if ! "${BRORAY_OPS_GUARD:-$ROOT/bin/broray-ops-guard}" --replace-file "$TMP" "$STATE"; then
+        BRORAY_JOB_UNRESOLVED=true; exit 75
+    fi
+    broray_job_checkpoint working || exit $?
     S_LOADED_SIGNATURE="$CURRENT_SIGNATURE"
 }
 
@@ -613,7 +566,8 @@ build_candidates()
 
     MIN_RANK="$(rating_rank "$CFG_MINIMUM")"
 
-    jq -r '.servers[]?.id // empty' "$SUMMARY_FILE" |
+    CANDIDATE_IDS="$ROOT/tmp/auto-switch-ids.$$.txt"
+    jq -r '.servers[]?.id // empty' "$SUMMARY_FILE" >"$CANDIDATE_IDS" || return 1
     while IFS= read -r SERVER_ID
     do
         [ -n "$SERVER_ID" ] || continue
@@ -624,9 +578,9 @@ build_candidates()
 
         rm -f "$RESULT_FILE" "$ERROR_FILE"
 
-        "$SERVERS_BIN" check "$SERVER_ID" auto-switch \
-            > "$RESULT_FILE" \
-            2> "$ERROR_FILE"
+        CANDIDATE_RC=0
+        broray_server_check "$SERVER_ID" auto-switch >"$RESULT_FILE" 2>"$ERROR_FILE" || CANDIDATE_RC=$?
+        case "$CANDIDATE_RC" in 130|124|75|73|74) return "$CANDIDATE_RC" ;; esac
 
         if ! jq -e '.success == true' "$RESULT_FILE" >/dev/null 2>&1; then
             rm -f "$RESULT_FILE" "$ERROR_FILE"
@@ -677,7 +631,8 @@ build_candidates()
         ' >> "$OUT_JSONL"
 
         rm -f "$RESULT_FILE" "$ERROR_FILE"
-    done
+    done <"$CANDIDATE_IDS"
+    rm -f "$CANDIDATE_IDS"
 
     if [ ! -s "$OUT_JSONL" ]; then
         printf '%s\n' '[]' > "$OUT_ARRAY"
@@ -743,21 +698,22 @@ activate_candidate()
 
     rm -f "$ACTIVATE_OUT" "$ACTIVATE_ERR" "$VERIFY_OUT"
 
-    "$SERVERS_BIN" activate "$SELECTED_ID" \
+    broray_server_activate "$SELECTED_ID" \
         > "$ACTIVATE_OUT" \
         2> "$ACTIVATE_ERR"
 
     ACTIVATE_RC="$?"
+    BRORAY_JOB_UNRESOLVED=true
 
     sleep 3
 
-    "$SERVERS_BIN" summary > "$VERIFY_OUT" 2>/dev/null
+    broray_server_summary > "$VERIFY_OUT" 2>/dev/null
 
     VERIFY_ID="$(jq -r '.activeServer.id // empty' "$VERIFY_OUT" 2>/dev/null)"
     VERIFY_XRAY="$(jq -r '.xrayRunning // false' "$VERIFY_OUT" 2>/dev/null)"
     VERIFY_SOCKS="$(
-        "$BRORAY_BIN" xray status 2>/dev/null |
-            jq -r '.socks.active // false' 2>/dev/null
+        broray_xray_status_json 2>/dev/null |
+            jq -r '.data.socks.active // false' 2>/dev/null
     )"
 
     if [ "$ACTIVATE_RC" -eq 0 ] &&
@@ -765,6 +721,7 @@ activate_candidate()
        [ "$VERIFY_XRAY" = "true" ] &&
        [ "$VERIFY_SOCKS" = "true" ]
     then
+        BRORAY_JOB_UNRESOLVED=false
         rm -f "$ACTIVATE_OUT" "$ACTIVATE_ERR" "$VERIFY_OUT"
         return 0
     fi
@@ -782,7 +739,8 @@ activate_candidate()
 
     if [ -n "$CURRENT_ID" ]; then
         log_message "Откат на предыдущий сервер $CURRENT_ID"
-        "$SERVERS_BIN" activate "$CURRENT_ID" >/dev/null 2>&1 || true
+        broray_server_activate "$CURRENT_ID" >/dev/null 2>&1 || return 75
+        BRORAY_JOB_UNRESOLVED=false
     fi
 
     S_LAST_ERROR="$ERROR_TEXT"
@@ -800,6 +758,7 @@ quality_refresh_finish()
 
     if [ "$S_Q_ERRORS" -gt 0 ]; then
         S_Q_STATUS="partial"
+        AUTO_CYCLE_FAILURE=1
         S_Q_LAST_ERROR="Не удалось выполнить проверку для серверов: $S_Q_ERRORS."
     else
         S_Q_STATUS="success"
@@ -814,6 +773,7 @@ quality_refresh_finish()
 quality_refresh_fail()
 {
     QUALITY_FAILURE="$1"
+    AUTO_CYCLE_FAILURE=1
     QUALITY_FINISHED_EPOCH="$(date '+%s')"
     S_Q_STATUS="error"
     S_Q_RUN_STARTED_AT=""
@@ -879,7 +839,7 @@ run_quality_refresh()
     S_Q_LAST_ERROR=""
     save_state
 
-    "$SERVERS_BIN" summary >"$QUALITY_SUMMARY" 2>"$QUALITY_SUMMARY_ERR"
+    broray_server_summary >"$QUALITY_SUMMARY" 2>"$QUALITY_SUMMARY_ERR"
     if ! jq -e 'type == "object" and (.servers | type) == "array"' \
         "$QUALITY_SUMMARY" >/dev/null 2>&1
     then
@@ -912,8 +872,9 @@ run_quality_refresh()
         [ -n "$QUALITY_SERVER_ID" ] || continue
         rm -f "$QUALITY_OUT" "$QUALITY_ERR"
         QUALITY_CHECK_RC=0
-        "$SERVERS_BIN" check "$QUALITY_SERVER_ID" scheduled \
+        broray_server_check "$QUALITY_SERVER_ID" scheduled \
             >"$QUALITY_OUT" 2>"$QUALITY_ERR" || QUALITY_CHECK_RC=$?
+        case "$QUALITY_CHECK_RC" in 130|124|75|73|74) return "$QUALITY_CHECK_RC" ;; esac
 
         QUALITY_CHECK_STATUS="$(
             jq -r '.quality.status // empty' "$QUALITY_OUT" 2>/dev/null
@@ -922,7 +883,7 @@ run_quality_refresh()
            [ "$QUALITY_CHECK_STATUS" = "available" ]
         then
             S_Q_AVAILABLE=$((S_Q_AVAILABLE + 1))
-        elif [ "$QUALITY_CHECK_RC" -eq 0 ] &&
+        elif [ "$QUALITY_CHECK_RC" -eq 1 ] &&
              [ "$QUALITY_CHECK_STATUS" = "unavailable" ]
         then
             S_Q_UNAVAILABLE=$((S_Q_UNAVAILABLE + 1))
@@ -935,7 +896,7 @@ run_quality_refresh()
     done <"$QUALITY_IDS"
 
     if [ ! -x "$HOME_SNAPSHOT" ] ||
-       ! "$HOME_SNAPSHOT" refresh servers >>"$LOG" 2>&1
+       ! "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$HOME_SNAPSHOT" refresh servers >>"$LOG" 2>&1
     then
         quality_refresh_fail "Проверка серверов завершена, но итоговое состояние для Главной не опубликовано."
         rm -f \
@@ -959,7 +920,9 @@ run_cycle_inner()
     S_ENABLED="$CFG_ENABLED"
     NOW_EPOCH="$(date '+%s')"
 
-    run_quality_refresh
+    QUALITY_CYCLE_RC=0
+    run_quality_refresh || QUALITY_CYCLE_RC=$?
+    [ "$QUALITY_CYCLE_RC" = 0 ] || return "$QUALITY_CYCLE_RC"
     NOW_EPOCH="$(date '+%s')"
 
     if [ "$CFG_ENABLED" != "true" ]; then
@@ -1081,7 +1044,7 @@ run_cycle_inner()
     fi
 
     rm -f "$SUMMARY_FILE" "$SUMMARY_ERR"
-    "$SERVERS_BIN" summary > "$SUMMARY_FILE" 2> "$SUMMARY_ERR"
+    broray_server_summary > "$SUMMARY_FILE" 2> "$SUMMARY_ERR"
 
     if ! jq -e 'type == "object"' "$SUMMARY_FILE" >/dev/null 2>&1; then
         S_STATUS="error"
@@ -1129,6 +1092,7 @@ run_cycle_inner()
 
     build_candidates "$SUMMARY_FILE" "$ACTIVE_ID" "$CANDIDATE_FILE"
     BUILD_RC="$?"
+    case "$BUILD_RC" in 130|124|75|73|74) return "$BUILD_RC" ;; esac
 
     S_CANDIDATE_COUNT="$(jq 'length' "$CANDIDATE_FILE" 2>/dev/null)"
     case "$S_CANDIDATE_COUNT" in
@@ -1144,7 +1108,7 @@ run_cycle_inner()
         save_state
         rm -f "$SUMMARY_FILE" "$SUMMARY_ERR" "$CANDIDATE_FILE"
         log_message "$S_LAST_ERROR"
-        return 0
+        return 1
     fi
 
     if ! select_candidate "$CANDIDATE_FILE"; then
@@ -1184,7 +1148,7 @@ run_cycle_inner()
     fi
 
     FRESH_SUMMARY="$ROOT/tmp/auto-switch-fresh.$$.json"
-    "$SERVERS_BIN" summary > "$FRESH_SUMMARY" 2>/dev/null
+    broray_server_summary > "$FRESH_SUMMARY" 2>/dev/null
     FRESH_ACTIVE="$(jq -r '.activeServer.id // empty' "$FRESH_SUMMARY" 2>/dev/null)"
 
     if [ "$FRESH_ACTIVE" != "$ACTIVE_ID" ]; then
@@ -1230,7 +1194,8 @@ run_cycle_inner()
         log_message "Переключение $ACTIVE_ID -> $SELECTED_ID ($SELECTED_NAME)"
     else
         S_STATUS="error"
-        S_LAST_REASON="Ошибка переключения; выполнен откат"
+        AUTO_CYCLE_FAILURE=1
+        S_LAST_REASON="Ошибка переключения"
         save_state
         log_message "$S_LAST_REASON: $S_LAST_ERROR"
     fi
@@ -1241,31 +1206,48 @@ run_cycle_inner()
 
 run_cycle()
 {
-    if ! acquire_lock; then
-        return 0
-    fi
-
-    run_cycle_inner
-    RC="$?"
-
-    release_lock
-    release_global_lock
-    return "$RC"
+    load_config
+    if [ "$CFG_ENABLED" != true ] && [ "$CFG_QUALITY_ENABLED" != true ] &&
+      jq -e '.status=="disabled" and .qualityRefresh.status=="disabled"' "$STATE" >/dev/null 2>&1; then return 0; fi
+    if [ "$CFG_ENABLED" != true ] && [ "$CFG_QUALITY_ENABLED" = true ] &&
+      jq -e --argjson now "$(date '+%s')" --argjson interval "$CFG_QUALITY_INTERVAL" \
+        '.qualityRefresh.intervalMinutes==$interval and .qualityRefresh.nextCheckEpoch>$now and
+         (.qualityRefresh.status=="success" or .qualityRefresh.status=="scheduled" or .qualityRefresh.status=="partial" or .qualityRefresh.status=="error")' "$STATE" >/dev/null 2>&1; then return 0; fi
+    if [ "$DRY_RUN" = true ]; then job_mode=--job-dry-run; else job_mode=--job; fi
+    "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$ROOT/bin/broray-server-auto-switch" "$job_mode"
 }
 
-trap 'release_lock; release_global_lock; exit 0' HUP INT TERM
-
-if [ "$MODE" = "once" ]; then
-    run_cycle
-    exit "$?"
+if [ "$MODE" = job ]; then
+    # Preserve any old cycle lock for compatibility recovery.
+    [ ! -e "$LOCK" ] && [ ! -L "$LOCK" ] || exit 2
+    load_config
+    job_source=AUTO_SWITCH
+    [ "$CFG_ENABLED" = true ] || job_source=SERVER_CHECK_AUTO
+    job_rc=0
+    broray_job_begin system auto-switch servers "$job_source" cooperative || job_rc=$?
+    [ "$job_rc" != 2 ] || exit 0
+    [ "$job_rc" = 0 ] || exit "$job_rc"
+    job_exit() {
+        local final_rc
+        final_rc="$1"; trap - EXIT
+        broray_job_exit "$final_rc" || final_rc=75
+        exit "$final_rc"
+    }
+    trap 'job_exit "$?"' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    AUTO_CYCLE_FAILURE=0
+    run_cycle_inner || exit $?
+    exit "$AUTO_CYCLE_FAILURE"
 fi
 
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if [ "$MODE" = once ]; then run_cycle; exit $?; fi
 log_message "Сервис автоматического выбора запущен"
-
-while :
-do
-    run_cycle ||
-        log_message "Цикл завершился ошибкой"
-
+while :; do
+    run_cycle || log_message "Цикл завершился ошибкой"
     sleep "$INTERVAL_SECONDS"
 done

@@ -1,12 +1,13 @@
 #!/opt/bin/ash
 
-AUTH="/opt/broray/web-new/api/auth-common.sh"
-CONFIG="/opt/broray/config/system/server-auto-switch.json"
-STATE="/opt/broray/run/server-auto-switch-state.json"
-PIDFILE="/opt/broray/run/server-auto-switch.pid"
-MONITOR="/opt/broray/run/connection-status.json"
-MONITOR_PIDFILE="/opt/broray/run/connection-monitor.pid"
-LOG="/opt/broray/logs/server-auto-switch.log"
+ROOT="${BRORAY_ROOT:-/opt/broray}"
+AUTH="$ROOT/web-new/api/auth-common.sh"
+CONFIG="$ROOT/config/system/server-auto-switch.json"
+STATE="$ROOT/run/server-auto-switch-state.json"
+PIDFILE="$ROOT/run/server-auto-switch.pid"
+MONITOR="$ROOT/run/connection-status.json"
+MONITOR_PIDFILE="$ROOT/run/connection-monitor.pid"
+LOG="$ROOT/logs/server-auto-switch.log"
 
 . "$AUTH"
 
@@ -19,11 +20,8 @@ else
     CONFIG_JSON='{"enabled":false}'
 fi
 
-if jq -e 'type == "object"' "$STATE" >/dev/null 2>&1; then
-    STATE_JSON="$(cat "$STATE")"
-else
-    STATE_JSON='null'
-fi
+. "$ROOT/lib/auto-switch-status.sh"
+STATE_JSON="$(broray_auto_switch_public_state "$STATE")"
 
 if jq -e 'type == "object"' "$MONITOR" >/dev/null 2>&1; then
     MONITOR_JSON="$(cat "$MONITOR")"
