@@ -1858,6 +1858,16 @@ broray_subscription_summary()
         esac
 
         summary_epoch="$(jq -r '.lastUpdatedEpoch // 0' "$summary_file")"
+        summary_file_at="$(jq -r '.lastUpdatedAt // empty' "$summary_file")"
+        summary_file_warnings="$(jq -c '.lastUpdateResult.warnings // []' "$summary_file")"
+        if [ -n "$BRORAY_SUB_EFFECTIVE_FINISHED" ]; then
+            # Coordinator timestamps are UTC. BusyBox date accepts the space
+            # separated form; preserve the same attempt as the public card.
+            summary_finished_epoch="$(date -u -d "$(printf '%s' "$BRORAY_SUB_EFFECTIVE_FINISHED" | tr T ' ' | sed 's/Z$//')" '+%s' 2>/dev/null)" || summary_finished_epoch=''
+            case "$summary_finished_epoch" in ''|*[!0-9]*) ;;
+                *) summary_epoch="$summary_finished_epoch"; summary_file_at="$BRORAY_SUB_EFFECTIVE_FINISHED"; summary_file_warnings='[]' ;;
+            esac
+        fi
         case "$summary_epoch" in
             ''|*[!0-9]*) summary_epoch=0 ;;
         esac
@@ -1879,8 +1889,8 @@ broray_subscription_summary()
         if [ "$summary_epoch" -gt "$summary_latest_epoch" ]; then
             summary_latest_epoch="$summary_epoch"
             summary_latest_status="$summary_file_status"
-            summary_latest_at="$(jq -r '.lastUpdatedAt // empty' "$summary_file")"
-            summary_latest_warnings="$(jq -c '.lastUpdateResult.warnings // []' "$summary_file")"
+            summary_latest_at="$summary_file_at"
+            summary_latest_warnings="$summary_file_warnings"
         fi
     done
 

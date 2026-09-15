@@ -142,6 +142,7 @@ printf 200
             self.assertEqual(public['lastUpdateStatus'],'error');self.assertEqual(path.read_bytes(),before)
             summary=json.loads(self.shell('. "$BRORAY_ROOT/lib/subscription-service.sh"; broray_subscription_summary').stdout)
             self.assertEqual(summary['runningCount'],0);self.assertEqual(summary['errorCount'],1)
+            self.assertEqual(summary['lastUpdatedAt'],public['lastUpdatedAt'])
         finally:
             if p.poll() is None:p.kill();p.communicate(timeout=10)
     def test_paused_scheduler_starts_no_update(self):

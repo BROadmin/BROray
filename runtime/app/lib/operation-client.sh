@@ -3,7 +3,7 @@
 
 broray_ops_call()
 {
-    local app state guard ash controller rc
+    local app state guard ash controller rc response attempt
     app="${BRORAY_ROOT:-${BRORAY_BASE:-/opt/broray}}"
     state="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}"
     guard="${BRORAY_OPS_GUARD:-$app/bin/broray-ops-guard}"
@@ -17,11 +17,22 @@ broray_ops_call()
         mkdir -p "$state" || return 1
         chmod 700 "$state" 2>/dev/null || true ;;
     esac
-    if [ "${BRORAY_OPS_TEST:-0}" = 1 ] && [ "$app" != /opt/broray ]; then
-        "$guard" "$state/operations.guard" "$ash" ash "$controller" "$@"
-    else
-        "$guard" "$state/operations.guard" "$ash" "$controller" "$@"
-    fi
+    attempt=0
+    while :; do
+        attempt=$((attempt+1)); rc=0
+        if [ "${BRORAY_OPS_TEST:-0}" = 1 ] && [ "$app" != /opt/broray ]; then
+            response="$("$guard" "$state/operations.guard" "$ash" ash "$controller" "$@")" || rc=$?
+        else
+            response="$("$guard" "$state/operations.guard" "$ash" "$controller" "$@")" || rc=$?
+        fi
+        # Guard exit 75 with no response means its two-second lock wait ended
+        # before exec: no coordinator work has run. Bound total wait to three
+        # attempts. Structured publication errors and all other failures remain
+        # final, including errors returned after a durable mutation.
+        [ "$rc" = 75 ] && [ -z "$response" ] && [ "$attempt" -lt 3 ] || break
+    done
+    [ -z "$response" ] || printf '%s\n' "$response"
+    return "$rc"
 }
 
 broray_ops_begin()
