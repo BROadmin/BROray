@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru" data-theme="broray">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BROray 3.1.1 — макет фоновых операций</title>
+  <link rel="stylesheet" href="../runtime/app/web-new/assets/css/allpage.css">
+  <link rel="stylesheet" href="operations.css">
+  <script src="operations.js" defer></script>
+</head>
+<body>
+<main class="preview-page">
+  <header class="preview-header">
+    <div><span class="eyebrow">BROray 3.1.1</span><h1>Фоновые операции</h1><p class="section-note">Интерактивный макет · демонстрационные данные</p></div>
+    <label>Тема <select id="theme"><option value="broray">BROray</option><option value="day">Светлая</option></select></label>
+  </header>
+  <section class="preview-controls" aria-label="Настройки макета">
+    <label for="scenario">Сценарий</label>
+    <select id="scenario">
+      <option value="checking">Проверка серверов</option><option value="fetching">Обновление подписки</option>
+      <option value="idle">Нет операций</option><option value="ambiguous">Нужна проверка состояния</option>
+      <option value="protected">Защищённый этап</option><option value="unavailable">Ошибка чтения состояния</option>
+    </select>
+    <span class="section-note">Кнопки изменяют только этот макет.</span>
+  </section>
+  <section class="card ops-card" aria-labelledby="operations-title">
+    <div class="section-heading"><div><span class="eyebrow">Управление</span><h2 id="operations-title">Фоновые операции</h2></div><span id="ops-badge" class="status-badge status-neutral"></span></div>
+    <p id="ops-summary" role="status" aria-live="polite"></p>
+    <dl id="ops-details" class="ops-facts">
+      <div><dt>Тип</dt><dd id="ops-type"></dd></div><div><dt>Источник</dt><dd id="ops-source">Автоматически</dd></div>
+      <div><dt>Начало</dt><dd>15.09.2026, 12:34</dd></div><div><dt>Выполняется</dt><dd>01:24</dd></div>
+    </dl>
+    <div class="ops-actions"><button id="cancel" class="button button-secondary" type="button">Остановить операцию</button><button id="recover" class="button button-warning" type="button" hidden>Аварийное восстановление</button><button id="refresh" class="button button-secondary" type="button">Обновить</button></div>
+    <p id="operation-feedback" class="section-note" role="status" aria-live="polite"></p>
+  </section>
+  <section class="card ops-card" aria-labelledby="automation-title">
+    <div class="section-heading"><div><span class="eyebrow">Автоматика</span><h2 id="automation-title">Остановка фоновой работы</h2></div><span id="automation-badge" class="status-badge status-neutral">Включена</span></div>
+    <p class="section-note">Останавливает управляющие и зависшие фоновые операции BROray. Xray и текущее VPN-соединение не останавливаются.</p>
+    <p class="section-note">Новые автоматические задачи будут на паузе до возобновления. Настройки расписаний сохранятся.</p>
+    <div class="ops-actions"><button id="stop-all" class="button button-warning" type="button">Остановить фоновые операции</button><button id="resume" class="button button-secondary" type="button" hidden>Возобновить автоматику</button></div>
+    <p id="automation-feedback" class="section-note" role="status" aria-live="polite"></p>
+  </section>
+  <section class="card ops-card" aria-labelledby="journal-title">
+    <div class="section-heading"><div><span class="eyebrow">Диагностика</span><h2 id="journal-title">Журнал BROray</h2></div><span class="status-badge status-neutral">Последние события</span></div>
+    <ul id="event-list" class="ops-events" aria-live="polite"></ul>
+    <div class="ops-actions"><button id="journal-refresh" class="button button-secondary" type="button">Обновить</button><button id="copy" class="button button-secondary" type="button">Скопировать диагностику</button><button id="download" class="button button-secondary" type="button">Скачать диагностический отчёт</button></div>
+    <p id="report-feedback" class="section-note" role="status" aria-live="polite"></p>
+  </section>
+  <footer class="section-note">Макет показывает будущие действия. Он не подключён к роутеру и не подтверждает состояние Xray или VPN.</footer>
+</main>
+</body></html>

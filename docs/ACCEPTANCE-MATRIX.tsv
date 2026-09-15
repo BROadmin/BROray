@@ -1,0 +1,25 @@
+Requirement	Prepared_evidence	Local_result	Product_or_physical_gate
+A normal completion	Operations.test_normal_finish_and_next_begin	PASS prototype	All real producers must use the manager
+B crash before cleanup	Operations.test_dead_owner_recovers; Owner.test_actual_identity_and_exit	PASS separate unit cases	End-to-end daemon crash and live children
+C live owner preserved	Operations.test_live_owner_blocks_recovery_and_new_writer	PASS prototype	Physical service owner
+D PID reused	Operations.test_reused_pid_is_not_owner; Owner.test_mismatched_birth_never_signals_live_process	PASS synthetic birth mismatch	Real PID churn and safe signal handle
+E stale heartbeat live owner	Operations.test_stale_heartbeat_does_not_remove_live_lock	PASS prototype	Real bounded helper and runtime heartbeat
+F owner absent	Operations.test_dead_owner_recovers	PASS new-format prototype	Legacy lock migration, orphan starting records
+G cancellation	Operations.test_cancel_is_idempotent; preview cancellation	PASS request flag only	Cooperative cancellation in each real job
+H TERM	Owner.test_actual_identity_and_exit	Identity after exit checked	Managed TERM path NOT_IMPLEMENTED
+I KILL fallback	Guard.test_exec_holds_lock_and_death_releases	Kernel guard death checked	Managed safe escalation NOT_IMPLEMENTED
+J stop button preserves Xray	Preview and source separation	MOCK_ONLY	Runtime integration and controlled child targeting
+K VPN continuity	ROUTER-TEST-PLAN.md	NOT_RUN	Continuous physical VPN stream and new requests
+L secrets	Public seven tests; Operations journal canary test	PASS shared projection	Authenticated full report and all event producers
+M rotation	Operations.test_rotation_is_bounded_and_returns_valid_projected_events	PASS prototype size and read projection	Concurrent/full-disk/power-loss journal and health
+N reboot	Operations.test_previous_boot_recovers	PASS simulated boot ID	Physical reboot and filesystem power loss
+O scheduler plus manual	Guard.test_multiple_writers_do_not_overlap	PASS six kernel critical sections	Real admission race across schedulers and HTTP
+P combined automation soak	ROUTER-TEST-PLAN.md	NOT_RUN	24h minimum and 72h incident-length soak
+Q updater excludes active owner	Operations.test_old_updater_preserves_new_fence	PASS exact old classifier	Full enqueue/install/reinstall flow
+R updater after recovery	Operations.test_normal_finish_and_next_begin	Prototype fence removal checked	Blocked 3.1.0 supported UI delivery NOT_RESOLVED
+UI widths and themes	test_preview.cjs	PASS 54 checks / 8 images	Full page and authenticated backend integration
+Backward compatibility	check_local_sources.py	PASS 299 baseline files byte-identical	Preserve user data across actual install/update
+Native target	build_native_guard.py	PASS two deterministic static builds per architecture	ARM64 execution and fcntl/fsync on target filesystem
+Crash publication	Guard.test_incomplete_fence_never_becomes_visible; test_publication_does_not_replace_existing_directory	PASS syscall-level prototype	begin/ack lost response and orphan scan remain
+Read-only preflight	test_preflight.py	Fixture tests in final Linux run	Actual router run NOT_RUN
+Release	No installable artifact is generated	PREPARATION_ONLY	All product gates, candidate identity, build, signing and delivery
