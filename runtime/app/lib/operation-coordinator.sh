@@ -119,7 +119,9 @@ ops_children_absent()
 {
     local child state children
     children="$OPS_CURRENT/children.json"
-    [ -e "$children" ] || return 0
+    ops_supervisors_absent || return 1
+    ops_supervisors_collect || return 1
+    [ -e "$children" ] || { [ ! -L "$children" ]; return $?; }
     ops_file_safe "$children" || return 1
     jq -e '.children|type=="array"' "$children" >/dev/null 2>&1 || return 1
     jq -c '.children[]' "$children" >"$OPS_CURRENT/children.scan.$$" || return 1
@@ -130,6 +132,135 @@ ops_children_absent()
     done <"$OPS_CURRENT/children.scan.$$"
     rm -f "$OPS_CURRENT/children.scan.$$"
     [ "$state" = 0 ]
+}
+
+ops_child_birth_absent()
+{
+    local record pid ticks boot current
+    record="$1"
+    printf '%s\n' "$record" | jq -e '(.pid|type)=="number" and .pid>1 and .pid<=2147483647 and .pid==(.pid|floor) and
+      (.startTicks|type)=="string" and (.startTicks|length)>0 and (.startTicks|all(explode[]; .>=48 and .<=57)) and
+      (.bootId|type)=="string" and (.bootId|length)>0' >/dev/null 2>&1 || return 1
+    pid="$(printf '%s\n' "$record" | jq -r '.pid')"
+    ticks="$(printf '%s\n' "$record" | jq -r '.startTicks')"
+    boot="$(broray_ops_boot_id)" || return 1
+    [ -n "$boot" ] || return 1
+    [ "$(printf '%s\n' "$record" | jq -r '.bootId')" = "$boot" ] || return 0
+    if [ ! -e "$OPS_PROC/$pid" ] && [ ! -L "$OPS_PROC/$pid" ]; then
+        kill -0 "$pid" 2>/dev/null && return 1
+        return 0
+    fi
+    current="$(broray_ops_start_ticks "$OPS_PROC/$pid")"
+    [ -n "$current" ] && [ "$current" != "$ticks" ]
+}
+
+ops_supervisor_absent()
+{
+    local record id owner dir ledger boot child rows count n
+    record="$1"; id="$(printf '%s\n' "$record" | jq -r '.supervisorId')"
+    ops_nonce_valid "$id" || return 1
+    owner="$(printf '%s\n' "$record" | jq -c '.owner')"
+    broray_ops_classify_owner "$owner"
+    [ "$OPS_OWNER_STATUS" = STALE ] || return 1
+    [ "$OPS_OWNER_REASON" != previous_boot ] || return 0
+    dir="$OPS_RAM/supervisors/$OPS_ID/$id"; ledger="$dir/children.json"
+    ops_dir_safe "$OPS_RAM" && ops_dir_safe "$OPS_RAM/supervisors" &&
+      ops_dir_safe "$OPS_RAM/supervisors/$OPS_ID" && ops_dir_safe "$dir" && ops_file_safe "$ledger" 65536 || return 1
+    jq -e --arg id "$OPS_ID" --arg sid "$id" --argjson owner "$owner" '
+      .schemaVersion==1 and .operationId==$id and .supervisorId==$sid and .supervisorPid==$owner.pid and
+      .supervisorStartTicks==$owner.startTicks and .bootId==$owner.bootId and (.children|type)=="array" and (.children|length)<=256' "$ledger" >/dev/null 2>&1 || return 1
+    count="$(jq '.children|length' "$ledger")"; n=0
+    while [ "$n" -lt "$count" ]; do
+        child="$(jq -c --argjson n "$n" '.children[$n]' "$ledger")" || return 1
+        ops_child_birth_absent "$child" || return 1
+        n=$((n+1))
+    done
+}
+
+ops_supervisors_absent()
+{
+    local file n count record
+    file="$OPS_CURRENT/supervisors.json"
+    [ -e "$file" ] || { [ ! -L "$file" ]; return $?; }
+    ops_file_safe "$file" 131072 || return 1
+    jq -e '.schemaVersion==1 and (.supervisors|type)=="array" and (.supervisors|length)<=128' "$file" >/dev/null 2>&1 || return 1
+    count="$(jq '.supervisors|length' "$file")"; n=0
+    while [ "$n" -lt "$count" ]; do
+        record="$(jq -c --argjson n "$n" '.supervisors[$n]' "$file")" || return 1
+        ops_supervisor_absent "$record" || return 1
+        n=$((n+1))
+    done
+}
+
+ops_supervisors_collect()
+{
+    local file records kept removed record sid ledger count n changed
+    file="$OPS_CURRENT/supervisors.json"
+    [ -e "$file" ] || { [ ! -L "$file" ]; return $?; }
+    ops_file_safe "$file" 131072 || return 1
+    jq -e '.schemaVersion==1 and (.supervisors|type)=="array" and (.supervisors|length)<=128' "$file" >/dev/null || return 1
+    records="$(cat "$file")"; kept='[]'; removed=''; n=0; changed=false
+    count="$(printf '%s\n' "$records" | jq '.supervisors|length')"
+    while [ "$n" -lt "$count" ]; do
+        record="$(printf '%s\n' "$records" | jq -c --argjson n "$n" '.supervisors[$n]')" || return 1
+        if ops_supervisor_absent "$record"; then
+            sid="$(printf '%s\n' "$record" | jq -r '.supervisorId')"
+            ledger="$OPS_RAM/supervisors/$OPS_ID/$sid/children.json"
+            # A previous boot is already proof of absence; its RAM is gone.
+            if ops_file_safe "$ledger" 65536; then
+                jq -e '.termSent==true' "$ledger" >/dev/null && ops_event term '' "$sid" >/dev/null 2>&1 || true
+                jq -e '.killTriggered==true' "$ledger" >/dev/null && ops_event kill '' "$sid" >/dev/null 2>&1 || true
+            fi
+            removed="$removed $sid"; changed=true
+        else
+            kept="$(jq -nc --argjson rows "$kept" --argjson item "$record" '$rows+[$item]')" || return 1
+        fi
+        n=$((n+1))
+    done
+    [ "$changed" = true ] || return 0
+    records="$(jq -nc --argjson rows "$kept" '{schemaVersion:1,supervisors:$rows}')" || return 1
+    ops_write "$file" "$records" || return 1
+    # Registry retirement is durable before deleting any ledger. An interrupted
+    # cleanup can leave a harmless RAM directory, never an unprovable registry.
+    for sid in $removed; do
+        ledger="$OPS_RAM/supervisors/$OPS_ID/$sid/children.json"
+        if ops_dir_safe "${ledger%/*}" && ops_file_safe "$ledger" 65536; then
+            rm -f "$ledger" || true
+            rmdir "${ledger%/*}" 2>/dev/null || true
+        fi
+    done
+    rmdir "$OPS_RAM/supervisors/$OPS_ID" 2>/dev/null || true
+}
+
+ops_supervisor_register()
+{
+    local owner records record dir directory context file nonce
+    ops_authorize "$1" "$2"
+    jq -e '.acknowledged==true and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCEL_NOT_SUPPORTED
+    [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED
+    nonce="$4"; ops_nonce_valid "$nonce" || ops_error INVALID_REQUEST 1
+    owner="$(broray_ops_capture_owner "$3")" || ops_error OWNER_UNCONFIRMED 1
+    ops_global_matches || ops_error OWNER_CHANGED
+    ops_supervisors_collect || ops_error CHILDREN_UNCONFIRMED
+    records='{"schemaVersion":1,"supervisors":[]}'
+    file="$OPS_CURRENT/supervisors.json"
+    if [ -e "$file" ] || [ -L "$file" ]; then
+        ops_file_safe "$file" 131072 && jq -e '.schemaVersion==1 and (.supervisors|type)=="array" and (.supervisors|length)<128' "$file" >/dev/null || ops_error CHILDREN_UNCONFIRMED
+        records="$(cat "$file")"
+    fi
+    printf '%s\n' "$records" | jq -e --arg nonce "$nonce" 'all(.supervisors[]; .supervisorId!=$nonce)' >/dev/null || ops_error OPERATION_EXISTS
+    dir="$OPS_RAM/supervisors/$OPS_ID/$nonce"
+    for directory in "$OPS_RAM" "$OPS_RAM/supervisors" "$OPS_RAM/supervisors/$OPS_ID"; do
+        [ ! -L "$directory" ] && mkdir -p "$directory" && ops_dir_safe "$directory" || ops_error UNSAFE_STATE 1
+        chmod 700 "$directory" || ops_error UNSAFE_STATE 1
+    done
+    mkdir -m 700 "$dir" || ops_error STATE_UNAVAILABLE 1
+    record="$(jq -nc --arg id "$OPS_ID" --arg sid "$nonce" --argjson owner "$owner" \
+      '{schemaVersion:1,operationId:$id,supervisorId:$sid,supervisorPid:$owner.pid,supervisorStartTicks:$owner.startTicks,bootId:$owner.bootId,state:"gated",revision:0,children:[]}')" || ops_error STATE_UNAVAILABLE 1
+    ops_write "$dir/children.json" "$record" || ops_error STATE_UNAVAILABLE 1
+    records="$(printf '%s\n' "$records" | jq -c --arg sid "$nonce" --argjson owner "$owner" '.supervisors += [{supervisorId:$sid,owner:$owner}]')" || ops_error STATE_UNAVAILABLE 1
+    ops_write "$file" "$records" || ops_error STATE_UNAVAILABLE 1
+    jq -r --arg ledger "$dir/children.json" '[.owner.pid,.owner.startTicks,.owner.bootId,$ledger]|@tsv' "$OPS_CURRENT/owner.json"
 }
 
 ops_pending_domain()
@@ -414,6 +545,13 @@ verb="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$verb" in
     begin) [ "$#" = 7 ] || ops_error INVALID_REQUEST 1; ops_begin "$@" ;;
     ack) [ "$#" = 3 ] || ops_error INVALID_REQUEST 1; ops_ack "$@" ;;
+    supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" ;;
+    helpers-drain)
+        [ "$#" = 2 ] || ops_error INVALID_REQUEST 1
+        ops_authorize "$1" "$2"
+        ops_global_matches || ops_error OWNER_CHANGED
+        ops_children_absent || ops_error CHILDREN_UNCONFIRMED
+        printf '%s\n' '{"ok":true}' ;;
     finish)
         [ "$#" = 4 ] || ops_error INVALID_REQUEST 1
         ops_load "$1" || ops_error STATE_UNAVAILABLE 1
@@ -438,6 +576,7 @@ case "$verb" in
         case "$3" in committing|switching)
             [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED ;;
         esac
+        case "$3" in committing|switching) ops_children_absent || ops_error CHILDREN_UNCONFIRMED ;; esac
         if [ "$(jq -r '.phase' "$OPS_CURRENT/state.json")" != "$3" ]; then
             mode="$(jq -r '.initialCancelability' "$OPS_CURRENT/state.json")"
             case "$3" in committing|switching) mode=protected ;; esac

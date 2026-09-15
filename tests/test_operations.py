@@ -118,6 +118,12 @@ class Operations(unittest.TestCase):
         # Parent birth is stale, but child below is the current process.
         self.opfile(a,'children.json').write_text(json.dumps({'children':[{**self.owner,'startTicks':'999'}]}))
         self.assertEqual(self.call('recover',expected=2)['result'],'children_unconfirmed')
+    @unittest.skipIf(os.name=='nt','symlink fixture is exercised in Linux')
+    def test_broken_child_ledger_link_is_not_absence(self):
+        a=self.begin();self.opfile(a,'children.json').symlink_to(self.temp/'missing-child-evidence')
+        self.set_owner({'status':'absent'})
+        self.assertEqual(self.call('recover',expected=2)['result'],'children_unconfirmed')
+        self.assertTrue((self.temp/'global.lock').exists())
     def test_legacy_five_file_lock_needs_preflight(self):
         lock=self.temp/'global.lock'; lock.mkdir()
         for k,v in {'pid':'900001','scope':'system','action':'auto-switch','bundle':'','startedAt':'2020'}.items(): (lock/k).write_text(v+'\n')

@@ -15,21 +15,30 @@ ops_journal_safe()
 
 ops_event_append()
 {
-    local event record state owner size file bytes
+    local event record state owner size file bytes key
     event="$1"; state='{}'; owner='{}'
     if [ -n "${OPS_CURRENT:-}" ]; then
         ops_file_safe "$OPS_CURRENT/state.json" && state="$(cat "$OPS_CURRENT/state.json")"
         ops_file_safe "$OPS_CURRENT/owner.json" 4096 && owner="$(cat "$OPS_CURRENT/owner.json")"
     fi
-    record="$(jq -nc -L "$OPS_APP/lib" --argjson state "$state" --argjson owner "$owner" \
+    key=''
+    if [ -n "${3:-}" ]; then
+        key="$(printf '%s:%s:%s' "${OPS_ID:-}" "$event" "$3" | sha256sum | cut -c 1-32)" || return 1
+    fi
+    record="$(jq -nc -L "$OPS_APP/lib" --argjson state "$state" --argjson owner "$owner" --arg key "$key" \
       --arg now "$(ops_now)" --arg event "$event" --arg code "${2:-}" \
-      'include "operation-public"; {timestamp:$now,operationId:$state.operationId,operationType:$state.type,
+      'include "operation-public"; {eventId:$key,timestamp:$now,operationId:$state.operationId,operationType:$state.type,
        source:($state.source // "SYSTEM_RECOVERY"),event:$event,pid:$owner.owner.pid,
        result:(if $event=="completed" or $event=="recovered" then "success" elif $event=="failed" then "failure" elif $event=="aborted" then "cancelled" else "pending" end),
        errorCode:($code|if .=="" then $state.errorCode else . end)} | event_public')" || return 1
     bytes="$(printf '%s\n' "$record" | wc -c)"
     [ "$bytes" -le 2048 ] || return 1
     ops_journal_safe || return 1
+    if [ -n "$key" ]; then
+        for file in "$OPS_JOURNAL/events.jsonl" "$OPS_JOURNAL/events.1.jsonl" "$OPS_JOURNAL/events.2.jsonl"; do
+            [ ! -f "$file" ] || ! grep -Fq "\"eventId\":\"$key\"" "$file" || return 0
+        done
+    fi
     file="$OPS_JOURNAL/events.jsonl"; size=0
     [ ! -e "$file" ] || size="$(wc -c <"$file")"
     if [ "$((size+bytes))" -gt "$OPS_JOURNAL_LIMIT" ]; then

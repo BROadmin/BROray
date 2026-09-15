@@ -74,3 +74,31 @@ broray_ops_cancel_requested()
     case "$id" in ''|*[!A-Za-z0-9._-]*|.*) return 1 ;; esac
     [ -f "$state/operations/$id/cancel.json" ] && [ ! -L "$state/operations/$id/cancel.json" ]
 }
+
+broray_ops_run_helper()
+{
+    # Only bounded cooperative work belongs here. Starting the persistent Xray
+    # service is a protected owner action, never a traced helper command.
+    local app ash supervisor state timeout rc attempt
+    [ "$#" -ge 3 ] && [ "$2" = -- ] || return 64
+    timeout="$1"; shift 2
+    [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] && [ -n "${BRORAY_BACKGROUND_OPERATION_TOKEN:-}" ] || return 73
+    [ "${BRORAY_OPS_SUPERVISED:-}" != ptrace/1 ] || return 73
+    app="${BRORAY_ROOT:-/opt/broray}"
+    ash="${BRORAY_OPS_ASH:-/opt/bin/ash}"
+    state="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}"
+    supervisor="${BRORAY_OPS_SUPERVISOR:-$app/bin/broray-ops-supervisor}"
+    [ -f "$supervisor" ] && [ ! -L "$supervisor" ] || return 74
+    rc=0
+    "$supervisor" "$ash" "$app/lib/operation-supervisor-control.sh" \
+      "$state/operations/$BRORAY_BACKGROUND_OPERATION_ID/cancel.json" "$timeout" 1 2 -- "$@" || rc=$?
+    # EXITKILL is asynchronous. The next commit/finish is permitted only after
+    # the coordinator confirms every registered helper has disappeared.
+    attempt=0
+    while [ "$attempt" -lt 5 ]; do
+        attempt=$((attempt+1))
+        broray_ops_call helpers-drain "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" >/dev/null && return "$rc"
+        [ "$attempt" = 5 ] || sleep 1
+    done
+    return 75
+}
