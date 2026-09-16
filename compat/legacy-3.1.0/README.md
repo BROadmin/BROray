@@ -38,6 +38,43 @@ not a public API accepting arbitrary paths or commands.
 
 ## Evidence
 
+`legacy-full-cycle-20260916`: c04 PASS on the installed, checksum-verified
+original 3.1.0-r09c02. The controlled five-file fence blocked the real update
+API with HTTP 409. Delivery through Keenetic Web CLI verified the detached
+signature before executing the recovery bundle. The unrestricted process
+inventory passed, the exact fence was archived, business snapshots matched,
+and persistent Xray PID/start ticks/executable/command/boot were unchanged.
+The ordinary signed update to 3.1.1-r08c01 then completed successfully; running
+and startup Keenetic configuration and BROray business files were preserved.
+This reproduces a blocked old installation, not the original user's unknown
+failure trigger. It is not a real VPN traffic or endurance result.
+
+The test installation was downgraded with a laboratory target selector because
+the installed updater has no product downgrade API. Signed-index validation,
+exact original archive hash, normal admission and the installed updater's
+transaction/health/rollback implementation were retained. Only the subsequent
+3.1.0 to 3.1.1 update was an ordinary product update.
+
+### Complete the one-time legacy recovery
+
+Keep automation paused while updating. The updater restores the services it
+found running; recovery deliberately stopped the old automation services.
+After confirming a successful signed 3.1.1 update, start the new services using
+their existing lifecycle controller, then confirm all four are ready:
+
+```sh
+for service in connection-monitor home-snapshot auto-switch subscriptions; do
+    /opt/bin/ash /opt/broray/bin/broray-service "$service" start || exit 1
+done
+```
+
+This is an explicit final recovery step, not automatic updater behavior.
+Physical evidence `service-completion.json` verifies all four services ready,
+automation still paused and persistent Xray unchanged. Resume automation with
+the existing WebUI control after checking the recovered installation. No old
+3.1.0 service may be restarted before the update: it does not honor the new
+pause state.
+
 The real downgrade history also retains `retired-lock` links to each completed
 job's own `fence` directory. The saved router archive contains 13 such links;
 `legacy-recovery-retired-history-baseline-20260916` reproduces the previous
@@ -58,7 +95,8 @@ Full physical c02 delivery verified the signature through Keenetic Web CLI,
 then stopped before creating a recovery session: Entware BusyBox `od` lacks
 `-A`/`-N`. The global fence and application stayed unchanged. The wrapper now
 uses the same `hexdump` nonce invocation as the installed coordinator. Evidence:
-`legacy-full-cycle-20260916/webcli-first-result.txt`. Full recovery remains open.
+`legacy-full-cycle-20260916/webcli-first-result.txt`. The later c04 result above
+completes the full recovery gate.
 
 `legacy-recovery-downgrade-history-linux-20260916`: 17 policy/wrapper checks
 PASS. Two preserved baseline attempts reproduce refusal of completed schema-2
@@ -105,9 +143,7 @@ collision is separately recorded and fixed.
 
 ## Open acceptance
 
-- Signed bundle/bootstrap delivery, verified before execution.
-- Full archived application scenario and ARM64 ptrace/fsync on the router.
-- Physical blocked 3.1.0 → recovery → ordinary signed 3.1.1 update.
 - Real VPN continuity, interrupted finalization, disk failures and reboot.
+- Route restore/resume admission and remaining application release gates.
 
 No stable publication or release readiness follows from this checkpoint.
