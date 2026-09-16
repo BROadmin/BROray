@@ -49,6 +49,8 @@
     "app/lib/routes-user-import.sh",
     "app/lib/routes-api-operation.sh",
     "app/bin/broray-routes",
+    "app/bin/broray-routes-user",
+    "app/web-new/api/routes/custom-common.sh",
     "app/lib/routes-operation-progress.sh",
     "app/lib/routes-page-summary.sh",
     "app/web-new/api/routes/stop.cgi",

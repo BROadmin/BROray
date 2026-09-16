@@ -8,5 +8,9 @@ case "${1:-}" in
         [ "$#" = 3 ] || exit 64
         broray_ops_call supervisor-register "${BRORAY_BACKGROUND_OPERATION_ID:-}" "${BRORAY_BACKGROUND_OPERATION_TOKEN:-}" "$2" "$3"
         ;;
+    register-route)
+        [ "$#" = 3 ] || exit 64
+        broray_ops_call route-supervisor-register "${BRORAY_BACKGROUND_OPERATION_ID:-}" "${BRORAY_BACKGROUND_OPERATION_TOKEN:-}" "$2" "$3"
+        ;;
     *) exit 64 ;;
 esac

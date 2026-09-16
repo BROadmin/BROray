@@ -369,12 +369,23 @@ ops_supervisors_collect()
 
 ops_supervisor_register()
 {
-    local owner records record dir directory context file nonce
+    local owner records record dir directory context file nonce route_mode expected_exe
     ops_authorize "$1" "$2"
-    jq -e -L "$OPS_APP/lib" 'include "operation-public"; (route_protected|not) and .acknowledged==true and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCEL_NOT_SUPPORTED
-    [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED
+    route_mode="${5:-false}"
+    if [ "$route_mode" = true ]; then
+        jq -e '.scope=="routes" and .acknowledged==true and .cancelability=="protected" and .initialCancelability=="protected"' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCEL_NOT_SUPPORTED
+        [ ! -e "$OPS_CURRENT/route-supervision.json" ] && [ ! -L "$OPS_CURRENT/route-supervision.json" ] || ops_error OPERATION_EXISTS
+    else
+        jq -e -L "$OPS_APP/lib" 'include "operation-public"; (route_protected|not) and .acknowledged==true and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCEL_NOT_SUPPORTED
+        [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED
+    fi
     nonce="$4"; ops_nonce_valid "$nonce" || ops_error INVALID_REQUEST 1
     owner="$(broray_ops_capture_owner "$3")" || ops_error OWNER_UNCONFIRMED 1
+    if [ "$route_mode" = true ]; then
+        expected_exe="$(readlink -f "${BRORAY_OPS_SUPERVISOR:-$OPS_APP/bin/broray-ops-supervisor}")" || ops_error OWNER_UNCONFIRMED 1
+        [ "$(printf '%s\n' "$owner" | jq -r .executable)" = "$expected_exe" ] &&
+          [ "$(tr '\000' '\n' <"$OPS_PROC/$3/cmdline" | sed -n '2p')" = --protected-route ] || ops_error OWNER_UNCONFIRMED
+    fi
     ops_global_matches || ops_error OWNER_CHANGED
     ops_supervisors_collect || ops_error CHILDREN_UNCONFIRMED
     records='{"schemaVersion":1,"supervisors":[]}'
@@ -395,7 +406,40 @@ ops_supervisor_register()
     ops_write "$dir/children.json" "$record" || ops_error STATE_UNAVAILABLE 1
     records="$(printf '%s\n' "$records" | jq -c --arg sid "$nonce" --argjson owner "$owner" '.supervisors += [{supervisorId:$sid,owner:$owner}]')" || ops_error STATE_UNAVAILABLE 1
     ops_write "$file" "$records" || ops_error STATE_UNAVAILABLE 1
+    if [ "$route_mode" = true ]; then
+        context="$(jq -nc --arg id "$OPS_ID" --arg sid "$nonce" --argjson owner "$owner" \
+          '{schemaVersion:1,kind:"protected-route-supervision",operationId:$id,supervisorId:$sid,owner:$owner}')" || ops_error STATE_UNAVAILABLE 1
+        ops_write "$OPS_CURRENT/route-supervision.json" "$context" || ops_error STATE_UNAVAILABLE 1
+    fi
     jq -r --arg ledger "$dir/children.json" '[.owner.pid,.owner.startTicks,.owner.bootId,$ledger]|@tsv' "$OPS_EXECUTOR"
+}
+
+ops_route_worker_check()
+{
+    local context supervisor owner pid sid ledger tracer digest
+    ops_authorize "$1" "$2"; ops_global_matches || ops_error OWNER_CHANGED
+    jq -e '.scope=="routes" and .acknowledged==true and .cancelability=="protected"' "$OPS_CURRENT/state.json" >/dev/null || ops_error OWNER_CHANGED
+    context="$OPS_CURRENT/route-supervision.json"
+    ops_file_safe "$context" 4096 || ops_error CHILDREN_UNCONFIRMED
+    jq -e --arg id "$OPS_ID" '.schemaVersion==1 and .kind=="protected-route-supervision" and .operationId==$id' "$context" >/dev/null || ops_error CHILDREN_UNCONFIRMED
+    supervisor="$(jq -c .owner "$context")"; sid="$(jq -r .supervisorId "$context")"
+    ops_nonce_valid "$sid" || ops_error CHILDREN_UNCONFIRMED
+    broray_ops_classify_owner "$supervisor"
+    [ "$OPS_OWNER_STATUS" = ACTIVE ] || ops_error CHILDREN_UNCONFIRMED
+    ops_file_safe "$OPS_CURRENT/supervisors.json" 131072 &&
+      jq -e --arg sid "$sid" --argjson owner "$supervisor" 'any(.supervisors[]; .supervisorId==$sid and .owner==$owner)' "$OPS_CURRENT/supervisors.json" >/dev/null || ops_error CHILDREN_UNCONFIRMED
+    pid="$3"; owner="$(broray_ops_capture_owner "$pid")" || ops_error OWNER_UNCONFIRMED
+    tracer="$(awk '$1=="TracerPid:"{print $2}' "$OPS_PROC/$pid/status")" || ops_error CHILDREN_UNCONFIRMED
+    [ "$tracer" = "$(printf '%s\n' "$supervisor" | jq -r .pid)" ] || ops_error CHILDREN_UNCONFIRMED
+    ledger="$OPS_RAM/supervisors/$OPS_ID/$sid/children.json"
+    ops_file_safe "$ledger" 65536 && jq -e --arg id "$OPS_ID" --arg sid "$sid" --argjson owner "$owner" --argjson supervisor "$supervisor" '
+      .schemaVersion==1 and .operationId==$id and .supervisorId==$sid and
+      .supervisorPid==$supervisor.pid and .supervisorStartTicks==$supervisor.startTicks and .bootId==$supervisor.bootId and
+      any(.children[]; .pid==$owner.pid and .startTicks==$owner.startTicks and .bootId==$owner.bootId)' "$ledger" >/dev/null || ops_error CHILDREN_UNCONFIRMED
+    digest="$(printf '%s' "$2" | sha256sum | cut -d ' ' -f 1)" || ops_error STATE_UNAVAILABLE 1
+    jq -nc --arg id "$OPS_ID" --arg sid "$sid" --arg digest "$digest" --argjson supervisor "$supervisor" \
+      --arg bundle "$(jq -r '.bundleId // ""' "$OPS_CURRENT/state.json")" --arg action "$(jq -r '.operation' "$OPS_CURRENT/state.json")" \
+      '{ok:true,operationId:$id,supervisorId:$sid,jobTokenDigest:$digest,supervisorOwner:$supervisor,bundleId:$bundle,action:$action}'
 }
 
 ops_pending_domain()
@@ -493,7 +537,7 @@ ops_begin()
     scope="$1"; action="$2"; bundle="$3"; source="$4"; pid="$5"; cancelability="$6"
     launch="$7"; ops_nonce_valid "$launch" || ops_error INVALID_LAUNCH_NONCE 1
     case "$scope" in routes|system) ;; *) ops_error INVALID_SCOPE 1 ;; esac
-    case "$action" in auto-switch|subscriptions:*|servers:*|xray:*|keenetic:*|dot:*|custom:*|preflight:*|check|download|verify|plan|export|delete|resume) ;; *) ops_error INVALID_ACTION 1 ;; esac
+    case "$action" in auto-switch|subscriptions:*|servers:*|xray:*|keenetic:*|dot:*|custom:*|preflight:*|check|download|build-export|verify|plan|export|delete|resume) ;; *) ops_error INVALID_ACTION 1 ;; esac
     case "$action:$bundle" in *[!A-Za-z0-9._:-]*) ops_error INVALID_ACTION 1 ;; esac
     [ "${#action}" -le 64 ] && [ "${#bundle}" -le 64 ] || ops_error INVALID_ACTION 1
     case "$source" in USER|SCHEDULER|SUBSCRIPTION_AUTO|SERVER_CHECK_AUTO|AUTO_SWITCH|UPDATER|SYSTEM_RECOVERY) ;; *) ops_error INVALID_SOURCE 1 ;; esac
@@ -794,6 +838,8 @@ case "$verb" in
         printf '%s\n' '{"ok":true}' ;;
     publish-json) [ "$#" = 8 ] || ops_error INVALID_REQUEST 1; ops_publish_json "$@" ;;
     supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" ;;
+    route-supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" true ;;
+    route-worker-check) [ "$#" = 3 ] || ops_error INVALID_REQUEST 1; ops_route_worker_check "$@" ;;
     handoff) [ "$#" = 5 ] || ops_error INVALID_REQUEST 1; ops_handoff "$@" ;;
     accept-handoff) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_accept_handoff "$@" ;;
     helpers-drain)

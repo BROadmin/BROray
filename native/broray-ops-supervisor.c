@@ -1,4 +1,7 @@
-/* Short-lived supervisor for cooperative helpers only. The direct fork-child
+/* Short-lived supervisor for cooperative helpers and protected route jobs.
+ * Protected jobs ignore user cancellation; owner loss and internal deadlines
+ * still close their execution gate and terminate the traced process tree.
+ * The direct fork-child
  * is never reaped before TERM. Other tracees receive no userspace PID signals:
  * the kernel's PTRACE_O_EXITKILL owns their termination when this process exits.
  * Every tracee is recorded in RAM before it is allowed to execute user code.
@@ -21,7 +24,7 @@
 #define MAX_CHILDREN 256
 struct child {pid_t pid;unsigned long long ticks;};
 static struct child children[MAX_CHILDREN];
-static int count=0,term_sent=0,kill_triggered=0;
+static int count=0,term_sent=0,kill_triggered=0,protected_route=0;
 static unsigned long revision=0;
 static char ledger[PATH_MAX],boot[128],nonce[33],operation[97];
 static pid_t owner_pid,root_pid;
@@ -76,7 +79,7 @@ static int register_supervisor(const char *ash,const char *control){
         close(output[0]);dup2(output[1],STDOUT_FILENO);close(output[1]);
         int null=open("/dev/null",O_RDONLY);if(null>=0){dup2(null,STDIN_FILENO);close(null);}
         char pid[24];snprintf(pid,sizeof pid,"%d",getppid());
-        execl(ash,ash,control,"register",pid,nonce,(char *)0);_exit(74);
+        execl(ash,ash,control,protected_route?"register-route":"register",pid,nonce,(char *)0);_exit(74);
     }
     close(output[1]);char buffer[PATH_MAX+512];size_t length=0;
     for(;;){ssize_t n=read(output[0],buffer+length,sizeof buffer-length-1);if(n<0&&errno==EINTR)continue;if(n<=0)break;length+=(size_t)n;if(length==sizeof buffer-1)break;}
@@ -106,7 +109,8 @@ static int end_supervisor(int result,const char *state,int killing){
     return result;
 }
 int main(int argc,char **argv){
-    if(argc==2&&!strcmp(argv[1],"--version")){puts("broray-ops-supervisor/1 ptrace-exitkill cooperative-helper");return 0;}
+    if(argc==2&&!strcmp(argv[1],"--version")){puts("broray-ops-supervisor/2 ptrace-exitkill cooperative-helper protected-route");return 0;}
+    if(argc>1&&!strcmp(argv[1],"--protected-route")){protected_route=1;argc--;argv++;}
     /* ash, control script, cancel-file, timeout seconds, cooperative grace,
        TERM grace, --, absolute command, command arguments */
     if(argc<9||strcmp(argv[7],"--")||argv[1][0]!='/'||argv[2][0]!='/'||argv[3][0]!='/'||argv[8][0]!='/')return 64;
@@ -122,20 +126,23 @@ int main(int argc,char **argv){
     if(root_pid==0){
         close(gate[1]);char c;if(read(gate[0],&c,1)!=1)_exit(74);close(gate[0]);
         signal(SIGTERM,SIG_DFL);signal(SIGINT,SIG_DFL);signal(SIGHUP,SIG_DFL);
-        setenv("BRORAY_OPS_SUPERVISED","ptrace/1",1);execv(argv[8],argv+8);_exit(127);
+        setenv("BRORAY_OPS_SUPERVISED","ptrace/1",1);
+        if(protected_route)setenv("BRORAY_OPS_ROUTE_SUPERVISED","ptrace/1",1);
+        else unsetenv("BRORAY_OPS_ROUTE_SUPERVISED");
+        execv(argv[8],argv+8);_exit(127);
     }
     close(gate[0]);
     long opts=PTRACE_O_EXITKILL|PTRACE_O_TRACEFORK|PTRACE_O_TRACEVFORK|PTRACE_O_TRACECLONE|PTRACE_O_TRACEEXEC|PTRACE_O_TRACEEXIT;
     if(ptrace(PTRACE_SEIZE,root_pid,0,opts)<0){close(gate[1]);int status;waitpid(root_pid,&status,0);return end_supervisor(74,"unsupported",0);}
     if(add_child(root_pid)){close(gate[1]);return end_supervisor(74,"ledger_failed",1);}
-    if(interrupted||cancellation(argv[3])||owner_absent()){close(gate[1]);return end_supervisor(130,"cancelled_before_gate",1);}
+    if(interrupted||(!protected_route&&cancellation(argv[3]))||owner_absent()){close(gate[1]);return end_supervisor(130,"cancelled_before_gate",1);}
     if(write(gate[1],"G",1)!=1){close(gate[1]);return end_supervisor(74,"gate_failed",1);}close(gate[1]);
     uint64_t deadline=milliseconds()+(uint64_t)durations[0]*1000,stop_at=0,term_at=0;
     int reason=0;
     for(;;){
         uint64_t now=milliseconds();
         if(owner_absent())return end_supervisor(125,"owner_absent",1);
-        if(!reason&&(interrupted||cancellation(argv[3])||now>=deadline)){reason=now>=deadline?124:130;stop_at=now;}
+        if(!reason&&(interrupted||(!protected_route&&cancellation(argv[3]))||now>=deadline)){reason=now>=deadline?124:130;stop_at=now;}
         if(reason&&!term_sent&&now-stop_at>=(uint64_t)(reason==124?0:durations[1])*1000){
             /* Direct fork-child, never reaped at this point. Even if already
                exited, its PID cannot belong to an unrelated process. */

@@ -16,8 +16,8 @@ class Supervisor(unittest.TestCase):
         for p in self.processes:
             if p.poll() is None:p.kill()
             p.wait(timeout=5)
-    def launch(self,script,timeout=20,cooperative=0,term=1,env=None):
-        p=subprocess.Popen([str(BINARY),'/bin/sh',str(self.control),str(self.cancel),str(timeout),str(cooperative),str(term),'--','/bin/sh','-c',script],env={**self.env,**(env or {})},stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    def launch(self,script,timeout=20,cooperative=0,term=1,env=None,protected_route=False):
+        p=subprocess.Popen([str(BINARY),*(['--protected-route'] if protected_route else []),'/bin/sh',str(self.control),str(self.cancel),str(timeout),str(cooperative),str(term),'--','/bin/sh','-c',script],env={**self.env,**(env or {})},stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         self.processes.append(p);return p
     def wait_ready(self,p,file):
         until=time.monotonic()+5
@@ -40,6 +40,14 @@ class Supervisor(unittest.TestCase):
     def test_normal_output_and_exit_code(self):
         p=self.launch("printf '%s' 'literal spaces $HOME'; exit 23")
         out,err=p.communicate(timeout=5);self.assertEqual(p.returncode,23,(out,err));self.assertEqual(out,b'literal spaces $HOME');self.verify_gone()
+    def test_protected_route_ignores_old_user_cancel_marker(self):
+        self.cancel.write_text('{}')
+        p=self.launch('sleep 1; echo completed',protected_route=True)
+        out,err=p.communicate(timeout=5)
+        self.assertEqual(p.returncode,0,(out,err));self.assertEqual(out,b'completed\n');self.verify_gone()
+    def test_protected_route_still_enforces_internal_timeout(self):
+        p=self.launch('trap "" TERM; sleep 60',timeout=1,term=1,protected_route=True)
+        p.communicate(timeout=6);self.assertEqual(p.returncode,124);self.verify_gone()
     def test_shell_forks_and_execs_complete(self):
         p=self.launch('echo first; sleep 1; echo last')
         out,err=p.communicate(timeout=5);self.assertEqual(p.returncode,0,(out,err));self.assertEqual(out,b'first\nlast\n');self.verify_gone()

@@ -143,6 +143,17 @@ broray_routes_api_lock_acquire()
     action="${1:-unknown}"
     bundle="${2:-}"
 
+    case "$action" in
+        check|download|verify|plan|export|delete|resume|preflight:*|custom:*)
+            if [ -z "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] &&
+               { [ -e "$BRORAY_ROUTES_API_LOCK" ] || [ -L "$BRORAY_ROUTES_API_LOCK" ]; }; then
+                return 2
+            fi
+            . "$BRORAY_ROOT/lib/route-api-job.sh" || return 74
+            broray_route_api_enter "$action" "$bundle"
+            return $? ;;
+    esac
+
     { [ ! -e "$BRORAY_UPDATER_REQUEST_LOCK" ] && [ ! -L "$BRORAY_UPDATER_REQUEST_LOCK" ]; } || return 2
     { [ ! -e "$BRORAY_LEGACY_GLOBAL_LOCK" ] && [ ! -L "$BRORAY_LEGACY_GLOBAL_LOCK" ]; } || return 2
     updater_operation="$(sed -n '1p' "$BRORAY_UPDATER_OPERATION_POINTER" 2>/dev/null || true)"

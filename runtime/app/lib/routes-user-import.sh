@@ -1344,7 +1344,15 @@ broray_user_routes_commit()
 
 broray_user_routes_list()
 {
-    broray_user_routes_prepare_runtime || return 1
+    # Listing remains available during a pending route operation. It must not
+    # initialize or change the catalog merely to render the page.
+    if [ ! -e "$BRORAY_USER_ROUTES_INDEX" ] && [ ! -L "$BRORAY_USER_ROUTES_INDEX" ]; then
+        printf '%s\n' '{"schemaVersion":1,"bundles":[]}'
+        return 0
+    fi
+    [ -f "$BRORAY_USER_ROUTES_INDEX" ] && [ ! -L "$BRORAY_USER_ROUTES_INDEX" ] &&
+      jq -e '.schemaVersion==1 and (.bundles|type)=="array"' "$BRORAY_USER_ROUTES_INDEX" >/dev/null ||
+      { broray_user_routes_fail INDEX_INVALID "Реестр пользовательских маршрутов повреждён."; return 1; }
 
     jq -c \
         --arg routes_root "$BRORAY_ROUTES_ROOT" '

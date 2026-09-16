@@ -26,6 +26,13 @@ USAGE
     exit 1
 }
 
+case "${1:-}" in
+    preview|commit|validate|remove)
+        [ "$#" -eq 2 ] || usage
+        . "$ROOT/lib/route-job.sh" || exit 74
+        broray_route_user_cli_enter "$@" || exit $? ;;
+esac
+
 . "$LIBRARY"
 trap broray_user_routes_cleanup EXIT
 trap 'exit 129' HUP

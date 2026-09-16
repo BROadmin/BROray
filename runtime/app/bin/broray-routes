@@ -44,6 +44,25 @@ usage()
 }
 
 case "${1:-}" in
+    check|download|build-export|preflight|plan|export|delete|resume)
+        [ "$#" -eq 2 ] || usage
+        . "$ROOT/lib/route-job.sh" || exit 74
+        # preflight is the existing router-interface check; use its descriptive
+        # action within the coordinator's existing preflight namespace.
+        route_entry_action="$1"
+        if [ "$route_entry_action" = preflight ]; then
+            if [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ]; then
+                broray_route_cli_worker_check preflight "$2" || exit 73
+            else
+                route_entry_rc=0
+                broray_route_job_run preflight:check "$2" "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$ROOT/bin/broray-routes" "$@" || route_entry_rc=$?
+                exit "$route_entry_rc"
+            fi
+        else broray_route_cli_enter "$@" || exit $?; fi
+        ;;
+esac
+
+case "${1:-}" in
     check)
         [ "$#" -eq 2 ] || usage
         [ -r "$DOWNLOAD_LIBRARY" ] || {

@@ -76,7 +76,7 @@ broray_custom_routes_run()
         "Модуль блокировки операций недоступен."
     . "$BRORAY_CUSTOM_ROUTES_API_LOCK_LIBRARY"
     custom_lock_owned=false
-    if [ "${BRORAY_CUSTOM_ROUTES_PRELOCKED:-false}" != true ]; then
+    if [ "$custom_action" != list ] && [ "${BRORAY_CUSTOM_ROUTES_PRELOCKED:-false}" != true ]; then
         custom_lock_rc=0
         broray_routes_api_lock_acquire "custom:$custom_action" "$custom_bundle" || custom_lock_rc=$?
         case "$custom_lock_rc" in

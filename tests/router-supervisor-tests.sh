@@ -35,7 +35,7 @@ cancel_when_ready() {
 }
 
 [ "$(uname -m)" = aarch64 ]
-[ "$("$BRORAY_OPS_SUPERVISOR" --version)" = 'broray-ops-supervisor/1 ptrace-exitkill cooperative-helper' ]
+[ "$("$BRORAY_OPS_SUPERVISOR" --version)" = 'broray-ops-supervisor/2 ptrace-exitkill cooperative-helper protected-route' ]
 pass static_arm64_supervisor
 case_dir normal
 begin
