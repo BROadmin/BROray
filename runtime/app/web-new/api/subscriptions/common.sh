@@ -9,7 +9,7 @@ broray_subscriptions_api_lock()
 {
     action="$1"
     lock_rc=0
-    broray_job_begin routes "subscriptions:$action" subscriptions USER cooperative || lock_rc=$?
+    broray_job_begin system "subscriptions:$action" subscriptions USER cooperative || lock_rc=$?
     case "$lock_rc" in
         0)
             trap 'broray_job_finish failed' EXIT

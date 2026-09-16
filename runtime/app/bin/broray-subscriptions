@@ -51,7 +51,7 @@ cli_begin()
 {
     local cli_rc
     cli_rc=0
-    broray_job_begin routes "subscriptions:$1" subscriptions "${2:-USER}" cooperative || cli_rc=$?
+    broray_job_begin system "subscriptions:$1" subscriptions "${2:-USER}" cooperative || cli_rc=$?
     if [ "$cli_rc" != 0 ]; then
         printf '%s\n' 'BRORAY_ERROR:OPERATION_BUSY:Операция не допущена общим координатором BROray.' >&2
         exit "$cli_rc"

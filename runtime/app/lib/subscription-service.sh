@@ -823,6 +823,7 @@ broray_subscription_extract_nodes()
     extract_output="$2"
     extract_normalized="$BRORAY_SUB_TMP/subscription-normalized.$$.txt"
     extract_decoded="$BRORAY_SUB_TMP/subscription-decoded.$$.txt"
+    BRORAY_SUB_JSON_IMPORT=false
 
     tr -d '\r' < "$extract_input" > "$extract_normalized"
     sed -i '1s/^\xef\xbb\xbf//' "$extract_normalized" 2>/dev/null || true
@@ -839,17 +840,26 @@ broray_subscription_extract_nodes()
     if grep -Eq '^(vless|vmess|trojan|ss|hysteria2|hy2|tuic|socks|socks5|http|https)://' \
         "$extract_normalized"; then
         cp "$extract_normalized" "$extract_output"
-    elif broray_subscription_decode_base64 \
-        "$extract_normalized" "$extract_decoded" && \
-        grep -Eq '^(vless|vmess|trojan|ss|hysteria2|hy2|tuic|socks|socks5|http|https)://' \
-            "$extract_decoded"; then
-        tr -d '\r' < "$extract_decoded" > "$extract_output"
     else
-        rm -f "$extract_normalized" "$extract_decoded" "$extract_output"
-        broray_subscription_set_error \
-            "PARSE_ERROR" \
-            "Содержимое подписки не удалось распознать."
-        return 1
+        extract_json_input="$extract_normalized"
+        # BusyBox base64 may ignore JSON punctuation and accept some plain
+        # documents as garbage bytes. Recognize JSON before trying Base64.
+        if ! grep -Eq '^[[:space:]]*(\{|\[)' "$extract_normalized" &&
+            broray_subscription_decode_base64 "$extract_normalized" "$extract_decoded"; then
+            extract_json_input="$extract_decoded"
+        fi
+        if grep -Eq '^(vless|vmess|trojan|ss|hysteria2|hy2|tuic|socks|socks5|http|https)://' "$extract_json_input"; then
+            tr -d '\r' < "$extract_json_input" > "$extract_output"
+        elif jq -rs --argjson max_nodes "$BRORAY_SUB_MAX_NODES" \
+            -f "$BRORAY_SUB_BASE/lib/subscription-xray-json.jq" "$extract_json_input" > "$extract_output" 2>/dev/null; then
+            BRORAY_SUB_JSON_IMPORT=true
+        else
+            rm -f "$extract_normalized" "$extract_decoded" "$extract_output"
+            broray_subscription_set_error \
+                "PARSE_ERROR" \
+                "Содержимое подписки не удалось распознать."
+            return 1
+        fi
     fi
 
     sed -i \
@@ -913,6 +923,9 @@ broray_subscription_stage_nodes()
     rm -rf "$stage_raw_dir" "$stage_parse_tmp" "$stage_output_dir"
     mkdir -p "$stage_raw_dir" "$stage_parse_tmp" "$stage_output_dir"
     : > "$stage_warnings"
+    if [ "${BRORAY_SUB_JSON_IMPORT:-false}" = true ]; then
+        printf '%s\n' 'Из JSON импортируются отдельные серверы. DNS, маршрутизация, балансировка и фрагментация профиля не применяются.' >> "$stage_warnings"
+    fi
 
     BRORAY_SUB_PARSED=0
     BRORAY_SUB_ACCEPTED=0
@@ -921,6 +934,11 @@ broray_subscription_stage_nodes()
     stage_index=0
     while IFS= read -r stage_uri || [ -n "$stage_uri" ]; do
         stage_index=$((stage_index + 1))
+        if [ "$stage_uri" = 'broray-json-error://unsupported-node' ]; then
+            BRORAY_SUB_REJECTED=$((BRORAY_SUB_REJECTED + 1))
+            printf 'Узел %s: параметры JSON-конфигурации не поддерживаются.\n' "$stage_index" >> "$stage_warnings"
+            continue
+        fi
         stage_error="$BRORAY_SUB_TMP/subscription-node-error.$$.txt"
         stage_output="$BRORAY_SUB_TMP/subscription-node-output.$$.txt"
         : > "$stage_error"
