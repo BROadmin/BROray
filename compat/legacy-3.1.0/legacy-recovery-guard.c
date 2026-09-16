@@ -121,7 +121,10 @@ static int capture(pid_t pid,struct task *t) {
     ssize_t n=readlink(path,t->exe,sizeof t->exe-1);if(n<=0||n>=(ssize_t)sizeof t->exe-1)return -1;t->exe[n]=0;
     snprintf(path,sizeof path,"/proc/%d/cmdline",pid);
     t->length=read_bytes(path,t->cmd,sizeof t->cmd,0);
-    if(t->length<=0||t->cmd[t->length-1]!=0)return -1;
+    /* Linux 4.9 may expose a rewritten process title without its terminating
+     * NUL (observed in Keenetic's own nginx). Preserve the exact bounded raw
+     * bytes for identity; role_valid/args still require valid argv for targets. */
+    if(t->length<=0)return -1;
     n=read_bytes("/proc/sys/kernel/random/boot_id",t->boot,sizeof t->boot-1,0);
     if(n<=0)return -1;
     while(n>0&&(t->boot[n-1]=='\n'||t->boot[n-1]=='\r'))n--;

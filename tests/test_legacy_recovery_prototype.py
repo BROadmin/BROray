@@ -154,6 +154,24 @@ class LegacyPrototype(unittest.TestCase):
         self.register(probe,'preserve-xray',0)
         self.invoke(75);self.assert_preserved()
 
+    def test_native_vendor_title_without_final_nul_is_readable(self):
+        self.native('broray-lighttpd','hold-web');owner=self.daemon()
+        directory=Path('/tmp')/('legacy-vendor-title-'+self.nonce);directory.mkdir()
+        binary=directory/'nginx';shutil.copy2(FIXTURE,binary);binary.chmod(0o700)
+        vendor=self.start([str(binary)])
+        # Modern Linux terminates this process-title view; Keenetic 4.9 does
+        # not. Bind only the observed command-byte shape inside this disposable
+        # VM; birth, executable and process lifecycle still come from /proc.
+        command=directory/'command';command.write_bytes(b'nginx: worker process')
+        mounted=subprocess.run(['/bin/busybox','mount','-o','bind',str(command),f'/proc/{vendor.pid}/cmdline'],capture_output=True)
+        self.assertEqual(mounted.returncode,0,mounted.stderr)
+        try:
+            self.assertNotEqual(proc(vendor.pid)['cmd'][-1:],b'\0')
+            self.invoke(0);owner.wait(timeout=3);self.assertIsNone(vendor.poll())
+        finally:
+            subprocess.run(['/bin/busybox','umount',f'/proc/{vendor.pid}/cmdline'],check=True)
+            vendor.kill();vendor.wait(timeout=3);shutil.rmtree(directory)
+
     def test_live_foreign_pid_projection_is_preserved(self):
         self.native('broray-lighttpd','hold-web');self.daemon()
         xray=self.native('xray','preserve-xray')

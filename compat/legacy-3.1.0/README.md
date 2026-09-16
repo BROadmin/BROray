@@ -38,6 +38,30 @@ not a public API accepting arbitrary paths or commands.
 
 ## Evidence
 
+Latest: `legacy-recovery-wrapper-linux-20260916` has 24 process tests and 14
+policy/wrapper tests PASS, including four unchanged archived daemon loops
+(Home/monitor health dependencies are fixtures). The Keenetic 4.9 process-title
+case uses bound command bytes inside the disposable VM; birth/executable and
+all other process behavior are real Linux. Wrapper architecture detection is
+stubbed for the x86 VM; this is not signed delivery acceptance.
+
+`physical-legacy-native-20260916-02`: 8 ARM prefix checks PASS. This explicitly
+scoped fixture build excludes installed processes from its inventory. It proves
+ptrace/fsync/rename, identity refusals and fixture Xray heartbeat continuity,
+not complete installed-app quiescence or real VPN. Namespaces are archived and
+retired; installed r07 Xray identity/config/channel/global fence unchanged.
+
+The first ARM run correctly retained the fence because Keenetic's system nginx
+exposes a process title without final NUL. A raw-byte observation and failing
+Linux reproduction are saved. Capture now preserves those bounded raw bytes;
+managed target argv validation remains strict. The failed fixture exited
+cooperatively without signals; its state was archived before retirement.
+
+`recover.sh` creates a fresh private session per attempt and verifies copied
+bundle hashes. It retries only pre-callback refusals. Signature verification
+must happen before this wrapper is executed; download/signature delivery is
+still a separate gate.
+
 `legacy-recovery-policy-linux-20260916-03`: 23 native-process tests and 10
 archived-source policy tests PASS. These use real Linux ptrace/processes but
 fake daemon bodies and fake Xray; they do not prove physical VPN continuity or
