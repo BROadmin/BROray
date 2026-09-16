@@ -106,7 +106,8 @@ class AutoSwitchJobs(unittest.TestCase):
         self.shell('. "$BRORAY_ROOT/lib/server-import.sh"; broray_server_import_dispatch "$(cat "$TEST_PAYLOAD")" subscription second 0')
         (self.app/'config/active-server').write_text(self.server+'\n')
         (self.app/'run/connection-monitor.pid').write_text(str(os.getpid()))
-        (self.app/'run/connection-status.json').write_text('{"available":false}')
+        # Use the actual current monitor shape, not the legacy boolean alone.
+        (self.app/'run/connection-status.json').write_text('{"available":true,"up":false,"checked_at":1,"packet_loss_percent":100}')
         # Deterministic persistent-runtime liveness; no real VPN in this test.
         fixture=self.app/'bin/pidof';fixture.write_text('#!/bin/ash\nprintf "1\\n"\n');fixture.chmod(0o755)
         self.shell('"$BRORAY_OPS_ASH" "$BRORAY_ROOT/bin/broray-server-auto-switch" --dry-run',timeout=120)
@@ -115,6 +116,69 @@ class AutoSwitchJobs(unittest.TestCase):
         self.assertEqual((self.app/'config/active-server').read_text(),self.server+'\n')
         self.assertEqual(len(self.states()),1);self.assertEqual(self.states()[0]['state'],'completed')
         self.assertTrue((self.app/'run/server-quality/subscription-second-0000.json').exists());self.assert_drained()
+
+    def test_distinct_down_samples_reach_threshold_and_up_resets(self):
+        self.set_config(enabled=True,failureThreshold=3)
+        self.shell('. "$BRORAY_ROOT/lib/server-import.sh"; broray_server_import_dispatch "$(cat "$TEST_PAYLOAD")" subscription second 0')
+        (self.app/'config/active-server').write_text(self.server+'\n')
+        (self.app/'run/connection-monitor.pid').write_text(str(os.getpid()))
+        fixture=self.app/'bin/pidof';fixture.write_text('#!/bin/ash\nprintf "1\\n"\n');fixture.chmod(0o755)
+        monitor=self.app/'run/connection-status.json'
+        def cycle(tick,up=False):
+            monitor.write_text(json.dumps(dict(available=True,up=up,checked_at=tick,packet_loss_percent=0 if up else 100)))
+            self.shell('"$BRORAY_OPS_ASH" "$BRORAY_ROOT/bin/broray-server-auto-switch" --dry-run',timeout=120)
+            return self.auto_state()
+        first=cycle(1);self.assertEqual(first['status'],'waiting-threshold');self.assertEqual(first['consecutiveFailures'],1)
+        same=cycle(1);self.assertEqual(same['consecutiveFailures'],1,'Repeated snapshot counted as a new failure')
+        second=cycle(2);self.assertEqual(second['consecutiveFailures'],2)
+        third=cycle(3);self.assertEqual(third['status'],'dry-run');self.assertEqual(third['candidateCount'],1)
+        up=cycle(4,True);self.assertEqual(up['status'],'healthy');self.assertEqual(up['consecutiveFailures'],0)
+        self.assertEqual((self.app/'config/active-server').read_text(),self.server+'\n');self.assert_drained()
+
+    def test_down_monitor_reaches_activation_and_enters_cooldown(self):
+        self.set_config(enabled=True,failureThreshold=1,cooldownMinutes=10)
+        self.shell('. "$BRORAY_ROOT/lib/server-import.sh"; broray_server_import_dispatch "$(cat "$TEST_PAYLOAD")" subscription second 0')
+        (self.app/'config/active-server').write_text(self.server+'\n')
+        (self.app/'run/connection-monitor.pid').write_text(str(os.getpid()))
+        monitor=self.app/'run/connection-status.json'
+        monitor.write_text('{"available":true,"up":false,"checked_at":1}')
+        runtime=self.app/'runtime/xray';runtime.parent.mkdir(exist_ok=True)
+        shutil.copy2(ROOT/'.local/bin/linux-auto-runtime',runtime);runtime.chmod(0o755)
+        settings=self.app/'config/system/settings.json';settings.write_text(json.dumps(
+          json.loads(settings.read_text())|{'xray':{'binaryPath':str(runtime)}}))
+        process=subprocess.Popen([str(runtime),'run','-c',str(self.app/'config/config.json')])
+        def stop_runtime():
+            if process.poll() is None:process.terminate()
+            process.wait(timeout=5)
+        self.addCleanup(stop_runtime)
+        fixture=self.app/'bin/pidof';fixture.write_text('#!/bin/ash\nprintf "%s\\n" '+str(process.pid)+'\n');fixture.chmod(0o755)
+        # Keep the real coordinator, candidate probe, config generation and
+        # protected activation. Only runtime liveness/transport/init are fake.
+        init=self.app/'bin/fixture-init';init.write_text('''#!/bin/ash
+jq -e '.phase=="committing" and .cancelability=="protected"' "$BRORAY_STATE_ROOT/operations/$BRORAY_BACKGROUND_OPERATION_ID/state.json" >/dev/null || exit 91
+jq -e '.supervisors==[]' "$BRORAY_STATE_ROOT/operations/$BRORAY_BACKGROUND_OPERATION_ID/supervisors.json" >/dev/null || exit 92
+jq -r '.inbounds[0].port' "$BRORAY_ROOT/config/config.json" >"$TEST_PORT"
+echo restart >>"$BRORAY_ROOT/restarts"
+''');init.chmod(0o755);self.env['BRORAY_INIT']=str(init)
+        xray=self.app/'bin/fixture-xray'
+        xray.write_text(xray.read_text().replace('case " $* " in', 'case "$1" in version) echo "Xray 26.9.9 (fixture)"; exit 0 ;; esac\ncase " $* " in'))
+        try:
+            self.shell(self.once(),timeout=180)
+        except AssertionError as error:
+            self.fail((str(error),self.auto_state(),self.states(),
+              [(str(p.relative_to(self.app)),p.read_text(errors='replace')[-3000:])
+               for p in self.app.rglob('*') if p.is_file() and
+               (p.suffix in ('.err','.log') or p.name=='restarts')]))
+        state=self.auto_state();self.assertEqual(state['status'],'switched',state)
+        self.assertEqual(state['lastSwitchFrom'],self.server);self.assertEqual(state['lastSwitchTo'],'subscription-second-0000')
+        self.assertEqual((self.app/'config/active-server').read_text().strip(),'subscription-second-0000')
+        self.assertEqual(json.loads((self.app/'config/config.json').read_text())['outbounds'][0]['protocol'],'vless')
+        self.assertEqual((self.app/'restarts').read_text(),'restart\n');self.assert_drained()
+        # Isolate the cooldown assertion from the separate 60-second attempt guard.
+        cache=self.app/'run/server-auto-switch-state.json';d=json.loads(cache.read_text());d['lastAttemptEpoch']=0;cache.write_text(json.dumps(d))
+        monitor.write_text('{"available":true,"up":false,"checked_at":2}')
+        self.shell(self.once(),timeout=75);self.assertEqual(self.auto_state()['status'],'cooldown')
+        self.assertEqual((self.app/'restarts').read_text(),'restart\n');self.assert_drained()
 
 if __name__=='__main__':
     assert ctypes.CDLL(None).prctl(36,1,0,0,0)==0

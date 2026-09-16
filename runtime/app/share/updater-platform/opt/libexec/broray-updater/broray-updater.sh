@@ -1666,6 +1666,7 @@ routes_snapshot_binding_valid()
 routes_owner_interface()
 {
     local owner config schema interface description write_sha running_sha startup_sha
+    local host port xray_config addresses local_count
     owner="$1"
     config="$2"
 
@@ -1678,8 +1679,14 @@ routes_owner_interface()
       .protocol == "socks5" and
       (.upstream | type) == "object" and
       (.upstream | keys) == ["host", "port"] and
-      .upstream.host == "192.168.1.1" and
-      .upstream.port == 2080 and
+      (.upstream.host | type) == "string" and
+      (.upstream.host | split(".") | length == 4 and all(.[];
+        length >= 1 and length <= 3 and
+        (explode | all(.[]; . >= 48 and . <= 57)) and
+        (tonumber >= 0 and tonumber <= 255))) and
+      (.upstream.port | type) == "number" and
+      .upstream.port >= 1 and .upstream.port <= 65535 and
+      .upstream.port == (.upstream.port | floor) and
       (
         if .schemaVersion == 1 then
           (keys == ["interfaceName", "owner", "protocol", "schemaVersion",
@@ -1732,6 +1739,24 @@ routes_owner_interface()
       .managedInterface == $interface and
       .managedMetric == 1200
     ' "$config" >/dev/null 2>&1 || return 1
+
+    # Bind the ownership receipt to the configured SOCKS endpoint and a live
+    # local address. The LAN need not be 192.168.1.1, and a provider's upstream
+    # router address must never be accepted merely because it is RFC1918.
+    host="$(jq -r '.upstream.host' "$owner")" || return 1
+    port="$(jq -r '.upstream.port' "$owner")" || return 1
+    xray_config="$APP_ROOT/config/config.json"
+    [ -f "$xray_config" ] && [ ! -L "$xray_config" ] || return 1
+    jq -e --arg host "$host" --argjson port "$port" '
+      type == "object" and (.inbounds | type) == "array" and
+      ([.inbounds[] | select(.protocol == "socks")] |
+       length == 1 and .[0].listen == $host and .[0].port == $port)
+    ' "$xray_config" >/dev/null 2>&1 || return 1
+    addresses="$(ip -4 addr show 2>/dev/null)" || return 1
+    local_count="$(printf '%s\n' "$addresses" | awk -v wanted="$host" '
+      $1 == "inet" {value=$2; sub(/\/.*/, "", value); if (value==wanted) count++}
+      END {print count+0}')" || return 1
+    [ "$local_count" = 1 ] || return 1
     printf '%s\n' "$interface"
 }
 

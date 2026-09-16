@@ -1,14 +1,20 @@
 """Reproduce unchanged updater admission on a complete abandoned legacy fence."""
-import hashlib, json, subprocess, tempfile, unittest
+import hashlib, json, subprocess, tarfile, tempfile, unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
-SOURCE=ROOT/'implementation/runtime/app/share/updater-platform/opt/libexec/broray-updater/broray-updater.sh'
+ARCHIVE=ROOT/'references/3.1.0-r09c02/broray-compact-updater-platform-5.tar.gz'
 
 class LegacyBaseline(unittest.TestCase):
     def test_old_updater_blocks_even_when_legacy_owner_is_absent(self):
-        self.assertEqual(hashlib.sha256(SOURCE.read_bytes()).hexdigest(),
+        # This reproduces the historical updater. Current source can receive
+        # endpoint fixes without silently changing the baseline under test.
+        self.assertEqual(hashlib.sha256(ARCHIVE.read_bytes()).hexdigest(),
+                         'eaf2eafb62d1b108fe576d1fda09ae7a5d15ad90f71272abc23f321d397611b0')
+        with tarfile.open(ARCHIVE) as archive:
+            raw=archive.extractfile('opt/libexec/broray-updater/broray-updater.sh').read()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
                          'a3c094b3a5e82ac82be7ec8b53c90f4023351a94eb6ba945b99501c0876e2c4a')
-        source=SOURCE.read_text()
+        source=raw.decode()
         function=source[source.index('global_operation_lock_classify()'):source.index('\nconflicting_operation_admission_clear()')]
         directory=Path(tempfile.mkdtemp(prefix='legacy-admission-'))
         lock=directory/'global-operation.lock';lock.mkdir()

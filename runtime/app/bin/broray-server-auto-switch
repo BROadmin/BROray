@@ -535,14 +535,14 @@ monitor_state()
 
     MONITOR_HEALTH="$(
         jq -r '
-            if ((.available | type) == "boolean")
-            then (.available | tostring)
-            elif ((.connected | type) == "boolean")
-            then (.connected | tostring)
-            elif ((.healthy | type) == "boolean")
-            then (.healthy | tostring)
-            else "unknown"
-            end
+            # Current monitor: available means that a target is configured;
+            # up is the result of the connectivity measurement.
+            (if has("up") then .up
+             elif has("connected") then .connected
+             elif has("healthy") then .healthy
+             elif has("available") then .available
+             else null end) |
+            if type == "boolean" then tostring else "unknown" end
         ' "$MONITOR_STATUS"
     )"
 
