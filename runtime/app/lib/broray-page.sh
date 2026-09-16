@@ -3301,9 +3301,17 @@ EOF_UNINSTALL_BUNDLES
         return 1
     }
 
+    uninstall_lighttpd_managed=true
+    if [ -f "$BRORAY_LIGHTTPD_GUARD" ] && [ ! -L "$BRORAY_LIGHTTPD_GUARD" ] &&
+       [ -x "$BRORAY_LIGHTTPD_GUARD" ] &&
+       /opt/bin/ash "$BRORAY_LIGHTTPD_GUARD" uninstall-unmanaged >>"$BRORAY_LOG" 2>&1
+    then
+        uninstall_lighttpd_managed=false
+    fi
     if [ ! -f "$BRORAY_LIGHTTPD_GUARD" ] || [ -L "$BRORAY_LIGHTTPD_GUARD" ] ||
        [ ! -x "$BRORAY_LIGHTTPD_GUARD" ] ||
-       ! /opt/bin/ash "$BRORAY_LIGHTTPD_GUARD" uninstall-preflight >>"$BRORAY_LOG" 2>&1
+       { [ "$uninstall_lighttpd_managed" = true ] &&
+         ! /opt/bin/ash "$BRORAY_LIGHTTPD_GUARD" uninstall-preflight >>"$BRORAY_LOG" 2>&1; }
     then
         broray_system_status_write "$operation_id" uninstall error preflight 100 \
             'Удаление отменено: исходное состояние Lighttpd нельзя восстановить однозначно.' \
@@ -3572,7 +3580,8 @@ EOF_UNINSTALL_BUNDLES
     fi
 
     uninstall_opkg_committed=true
-    if ! /opt/bin/ash "$BRORAY_LIGHTTPD_GUARD" uninstall-restore >>"$BRORAY_LOG" 2>&1; then
+    if [ "$uninstall_lighttpd_managed" = true ] &&
+       ! /opt/bin/ash "$BRORAY_LIGHTTPD_GUARD" uninstall-restore >>"$BRORAY_LOG" 2>&1; then
         broray_system_uninstall_finalization_marker_write \
             LIGHTTPD_BASELINE_RESTORE_FAILED lighttpd-restore >/dev/null 2>&1 || true
         return 1

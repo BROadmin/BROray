@@ -126,6 +126,69 @@
       "testedAt": "2026-09-16T12:43:41Z",
       "status": "incompatible",
       "evidence": "Physical ARM64 live-xray-matrix-r10-20260916: config/start pass, external HTTPS 0/2; restart not reached. Incompatible with tested profile, not every Xray configuration. VLESS/XHTTP/REALITY. Installed r10; tested Xray generation/runtime components unchanged in r11 (early-ack coordinator fix and registry only). Isolated RAM cores; installation transaction not covered because /opt reserve was insufficient."
+    },
+    {
+      "candidateId": "3.1.1-r12c01",
+      "architecture": "arm64",
+      "xrayTag": "v26.9.9",
+      "archiveSha256": "3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c",
+      "testedAt": "2026-09-16T12:43:41Z",
+      "status": "compatible",
+      "evidence": "Physical ARM64 live-xray-matrix-r10-20260916: config/start/restart and external HTTPS 3/3 pass. VLESS/XHTTP/REALITY. Installed r10; tested Xray generation/runtime components unchanged in r11 (early-ack coordinator fix and registry only). Isolated RAM cores; installation transaction not covered because /opt reserve was insufficient. r12 only changes shared Lighttpd uninstall classification; Xray configuration/runtime code is identical to r11."
+    },
+    {
+      "candidateId": "3.1.1-r12c01",
+      "architecture": "arm64",
+      "xrayTag": "v26.9.8",
+      "archiveSha256": "6721edb5b80e046536abc8235bd0977a2c69ade88ad42c01c0df368beba070dc",
+      "testedAt": "2026-09-16T12:43:41Z",
+      "status": "compatible",
+      "evidence": "Physical ARM64 live-xray-matrix-r10-20260916: config/start/restart and external HTTPS 3/3 pass. VLESS/XHTTP/REALITY. Installed r10; tested Xray generation/runtime components unchanged in r11 (early-ack coordinator fix and registry only). Isolated RAM cores; installation transaction not covered because /opt reserve was insufficient. r12 only changes shared Lighttpd uninstall classification; Xray configuration/runtime code is identical to r11."
+    },
+    {
+      "candidateId": "3.1.1-r12c01",
+      "architecture": "arm64",
+      "xrayTag": "v26.7.28",
+      "archiveSha256": "f5698bb218ada3b4022db26fafc39601c5f53b46b19eb76c9616325985807501",
+      "testedAt": "2026-09-16T12:43:41Z",
+      "status": "compatible",
+      "evidence": "Physical ARM64 live-xray-matrix-r10-20260916: config/start/restart and external HTTPS 3/3 pass. VLESS/XHTTP/REALITY. Installed r10; tested Xray generation/runtime components unchanged in r11 (early-ack coordinator fix and registry only). Isolated RAM cores; installation transaction not covered because /opt reserve was insufficient. r12 only changes shared Lighttpd uninstall classification; Xray configuration/runtime code is identical to r11."
+    },
+    {
+      "candidateId": "3.1.1-r12c01",
+      "architecture": "arm64",
+      "xrayTag": "v26.7.11",
+      "archiveSha256": "89cfe01674d7c9f6847b7dd9389537be9acb3b9dc3c6cb9fdeba87a3e4e57fc1",
+      "testedAt": "2026-09-16T12:43:41Z",
+      "status": "compatible",
+      "evidence": "Physical ARM64 live-xray-matrix-r10-20260916: config/start/restart and external HTTPS 3/3 pass. VLESS/XHTTP/REALITY. Installed r10; tested Xray generation/runtime components unchanged in r11 (early-ack coordinator fix and registry only). Isolated RAM cores; installation transaction not covered because /opt reserve was insufficient. r12 only changes shared Lighttpd uninstall classification; Xray configuration/runtime code is identical to r11."
+    },
+    {
+      "candidateId": "3.1.1-r12c01",
+      "architecture": "arm64",
+      "xrayTag": "v26.6.27",
+      "archiveSha256": "13a251379bea366c2cf10363ad71e75734193d401f26f518bf0c25e5c8f8c931",
+      "testedAt": "2026-09-16T12:43:41Z",
+      "status": "compatible",
+      "evidence": "Physical ARM64 live-xray-matrix-r10-20260916: config/start/restart and external HTTPS 3/3 pass. VLESS/XHTTP/REALITY. Installed r10; tested Xray generation/runtime components unchanged in r11 (early-ack coordinator fix and registry only). Isolated RAM cores; installation transaction not covered because /opt reserve was insufficient. r12 only changes shared Lighttpd uninstall classification; Xray configuration/runtime code is identical to r11."
+    },
+    {
+      "candidateId": "3.1.1-r12c01",
+      "architecture": "arm64",
+      "xrayTag": "v26.3.27",
+      "archiveSha256": "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c",
+      "testedAt": "2026-09-16T12:43:41Z",
+      "status": "compatible",
+      "evidence": "Physical ARM64 live-xray-matrix-r10-20260916: config/start/restart and external HTTPS 3/3 pass. VLESS/XHTTP/REALITY. Installed r10; tested Xray generation/runtime components unchanged in r11 (early-ack coordinator fix and registry only). Isolated RAM cores; installation transaction not covered because /opt reserve was insufficient. r12 only changes shared Lighttpd uninstall classification; Xray configuration/runtime code is identical to r11."
+    },
+    {
+      "candidateId": "3.1.1-r12c01",
+      "architecture": "arm64",
+      "xrayTag": "v26.2.6",
+      "archiveSha256": "b52d8263453fbd6f4747fd6a1ecf70cd43a664243615dc892ea4674c01b2b5ee",
+      "testedAt": "2026-09-16T12:43:41Z",
+      "status": "incompatible",
+      "evidence": "Physical ARM64 live-xray-matrix-r10-20260916: config/start pass, external HTTPS 0/2; restart not reached. Incompatible with tested profile, not every Xray configuration. VLESS/XHTTP/REALITY. Installed r10; tested Xray generation/runtime components unchanged in r11 (early-ack coordinator fix and registry only). Isolated RAM cores; installation transaction not covered because /opt reserve was insufficient. r12 only changes shared Lighttpd uninstall classification; Xray configuration/runtime code is identical to r11."
     }
   ]
 }

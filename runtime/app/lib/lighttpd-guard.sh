@@ -522,6 +522,21 @@ broray_lighttpd_guard_other_dependents()
     ' "$BRORAY_LIGHTTPD_OPKG_STATUS" 2>/dev/null
 }
 
+broray_lighttpd_guard_uninstall_unmanaged()
+{
+    # Compact clean bootstrap uses a separate BROray web service. It neither
+    # adopts nor owns the shared Entware service. Missing ownership alone is
+    # insufficient: require its exact package contract and intact stock assets.
+    [ ! -e "$BRORAY_LIGHTTPD_GUARD_ROOT" ] && [ ! -L "$BRORAY_LIGHTTPD_GUARD_ROOT" ] || return 1
+    guard_compact_control="$BRORAY_LIGHTTPD_INFO_ROOT/broray.control"
+    broray_lighttpd_guard_regular "$guard_compact_control" || return 1
+    [ "$(broray_lighttpd_guard_info_value "$guard_compact_control" Package)" = broray ] || return 1
+    [ "$(broray_lighttpd_guard_info_value "$guard_compact_control" X-BROray-Canonical-Lifecycle)" = compact-app-rename/1 ] || return 1
+    [ "$(broray_lighttpd_guard_info_value "$guard_compact_control" X-BROray-Distribution-Role)" = metadata-only-clean-bootstrap ] || return 1
+    grep -q '^[[:space:]]*ENABLED=yes[[:space:]]*$' "$BRORAY_LIGHTTPD_INIT" || return 1
+    broray_lighttpd_guard_assets_valid
+}
+
 broray_lighttpd_guard_uninstall_preflight()
 {
     broray_lighttpd_guard_receipt_valid ||
@@ -581,6 +596,7 @@ broray_lighttpd_guard_main()
         status) broray_lighttpd_guard_status ;;
         rollback) broray_lighttpd_guard_restore_original ;;
         uninstall-preflight) broray_lighttpd_guard_uninstall_preflight ;;
+        uninstall-unmanaged) broray_lighttpd_guard_uninstall_unmanaged ;;
         uninstall-restore) broray_lighttpd_guard_uninstall_restore ;;
         *) printf '%s\n' 'usage: lighttpd-guard.sh {adopt-transient BASELINE|finalize|maintain|status|rollback|uninstall-preflight|uninstall-restore}' >&2; return 2 ;;
     esac
