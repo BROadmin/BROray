@@ -67,6 +67,60 @@ printf '204 0.02'
         self.assertFalse((self.temp/'global.lock').is_symlink())
         for f in (self.state/'operations').glob('*/supervisors.json'):
             self.assertEqual(json.loads(f.read_text())['supervisors'],[])
+    def test_activation_rejected_config_keeps_runtime_and_releases_fence(self):
+        config=self.app/'config/config.json';before=b'{"outbounds":[{"protocol":"blackhole"}]}\n'
+        config.write_bytes(before)
+        self.env['BRORAY_XRAY_BINARY']='/bin/false'
+        p=self.shell('. "$BRORAY_ROOT/web-new/api/servers/common.sh"; broray_servers_api_lock activate; broray_servers_api_run broray_server_activate '+self.server,timeout=75)
+        self.assertIn(b'400 Bad Request',p.stdout)
+        self.assertEqual(config.read_bytes(),before)
+        self.assertFalse((self.app/'config/active-server').exists())
+        self.assertEqual(self.states()[0]['state'],'failed');self.assert_drained()
+    def activation_script(self):
+        return '. "$BRORAY_ROOT/lib/server-service.sh"; broray_server_refresh_keenetic_status() { :; }; broray_server_summary() { :; }; broray_interface_sync_description() { :; }; broray_job_begin routes servers:activate servers USER cooperative || exit $?; trap \'rc=$?; trap - EXIT; broray_job_exit "$rc" || rc=75; exit "$rc"\' EXIT; broray_server_activate '+self.server
+    def activation_fixture(self,validator):
+        config=self.app/'config/config.json';before=b'{"outbounds":[{"protocol":"blackhole"}]}\n';config.write_bytes(before)
+        xray=self.app/'bin/fixture-xray';xray.write_text('#!/bin/ash\n'+validator+'\n');xray.chmod(0o755)
+        init=self.app/'bin/fixture-init';init.write_text('''#!/bin/ash
+jq -e '.phase=="committing" and .cancelability=="protected"' "$BRORAY_STATE_ROOT/operations/$BRORAY_BACKGROUND_OPERATION_ID/state.json" >/dev/null || exit 91
+jq -e '.supervisors==[]' "$BRORAY_STATE_ROOT/operations/$BRORAY_BACKGROUND_OPERATION_ID/supervisors.json" >/dev/null || exit 92
+echo restart >>"$BRORAY_ROOT/restarts"
+[ "${TEST_RESTART_FAIL:-0}" = 0 ]
+''');init.chmod(0o755);self.env['BRORAY_INIT']=str(init)
+        return config,before
+    def test_activation_validates_before_protected_restart(self):
+        config,_=self.activation_fixture('exit 0')
+        self.shell(self.activation_script(),timeout=75)
+        self.assertEqual(json.loads(config.read_text())['outbounds'][0]['protocol'],'vless')
+        self.assertEqual((self.app/'config/active-server').read_text().strip(),self.server)
+        self.assertEqual((self.app/'restarts').read_text(),'restart\n')
+        self.assertEqual(self.states()[0]['state'],'completed');self.assert_drained()
+        self.assertEqual(list((self.app/'tmp').glob('server-activate-*')),[])
+    def test_activation_cancel_drains_validator_before_releasing(self):
+        config,before=self.activation_fixture('echo ready >"$TEST_READY"; trap "" TERM; sleep 60')
+        p=subprocess.Popen(['/bin/ash','-c',self.activation_script()],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        try:
+            self.wait_transport(p);state=self.states()[0]
+            self.assertEqual(state['phase'],'checking');self.assertEqual(state['cancelability'],'cooperative')
+            self.shell('. "$BRORAY_ROOT/lib/operation-client.sh"; broray_ops_call cancel '+state['operationId'])
+            out,err=self.collect(p);self.assertEqual(p.returncode,130,(out,err))
+            self.assertEqual(config.read_bytes(),before);self.assertFalse((self.app/'restarts').exists())
+            self.assertEqual(self.states()[0]['state'],'aborted');self.assert_drained()
+        finally:
+            if p.poll() is None:p.kill();self.collect(p)
+    def test_activation_restart_failure_retains_protected_fence(self):
+        config,before=self.activation_fixture('exit 0');self.env['TEST_RESTART_FAIL']='1'
+        self.shell(self.activation_script(),expected=75,timeout=75)
+        self.assertEqual(config.read_bytes(),before)
+        self.assertFalse((self.app/'config/active-server').exists())
+        self.assertTrue((self.temp/'global.lock').is_symlink())
+        state=self.states()[0];self.assertTrue(state['running']);self.assertEqual(state['cancelability'],'protected')
+    def test_activation_rollback_validation_never_downgrades_protection(self):
+        config,before=self.activation_fixture('exit 1')
+        script=self.activation_script().replace('broray_server_activate '+self.server,'broray_job_checkpoint committing; BRORAY_JOB_UNRESOLVED=true; broray_server_activate '+self.server)
+        self.shell(script,expected=75,timeout=75)
+        state=self.states()[0];self.assertEqual(state['phase'],'committing');self.assertEqual(state['cancelability'],'protected')
+        self.assertEqual(config.read_bytes(),before);self.assertTrue((self.temp/'global.lock').is_symlink())
     def test_check_requires_owned_operation(self):
         p=subprocess.run(['/bin/ash','-c','. "$BRORAY_ROOT/lib/server-service.sh"; BRORAY_XRAY=/bin/false; broray_server_check '+self.server],env=self.env,capture_output=True,timeout=25)
         self.assertFalse(self.quality.exists(),'Server check wrote persistent quality without an admitted owner')

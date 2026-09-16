@@ -899,6 +899,7 @@ broray_server_measure()
 
 broray_server_activate()
 {
+    local activate_server_id activate_job_dir activate_job_rc
     broray_job_require_owner || return $?
     activate_server_id="$1"
 
@@ -907,10 +908,31 @@ broray_server_activate()
         broray_die \
             "сервер $activate_server_id не найден"
 
-    broray_job_checkpoint committing || return $?
+    if [ "${BRORAY_JOB_UNRESOLVED:-false}" = true ]; then
+        # Auto-switch also calls activation while rolling back an already
+        # changed runtime. That domain transaction must never become
+        # cooperative, even when its replacement config is being validated.
+        broray_job_checkpoint committing || return $?
+        broray_xray_apply_server "$activate_server_id" || return $?
+        BRORAY_JOB_UNRESOLVED=false
+    else
+    broray_job_checkpoint checking || return $?
+    mkdir -p "$BRORAY_BASE/tmp" || return 1
+    activate_job_dir="$(mktemp -d "$BRORAY_BASE/tmp/server-activate-$BRORAY_BACKGROUND_OPERATION_ID-XXXXXX")" || return 1
+    chmod 700 "$activate_job_dir" || return 1
+    printf '%s\n' "$BRORAY_BACKGROUND_OPERATION_ID" >"$activate_job_dir/operation-id" || return 1
+    activate_job_rc=0
+    broray_ops_run_helper 30 -- "${BRORAY_OPS_ASH:-/opt/bin/ash}" \
+      "$BRORAY_BASE/lib/server-activate-prepare.sh" "$activate_job_dir" "$activate_server_id" || activate_job_rc=$?
+    if [ "$activate_job_rc" = 75 ]; then BRORAY_JOB_UNRESOLVED=true; return 75; fi
+    if [ "$activate_job_rc" != 0 ]; then rm -rf "$activate_job_dir"; return "$activate_job_rc"; fi
+    [ -f "$activate_job_dir/config.json" ] && [ ! -L "$activate_job_dir/config.json" ] || return 1
+    broray_job_checkpoint committing || { activate_job_rc=$?; rm -rf "$activate_job_dir"; return "$activate_job_rc"; }
     BRORAY_JOB_UNRESOLVED=true
-    broray_xray_apply_server "$activate_server_id" || return $?
+    broray_xray_apply_prepared_server "$activate_server_id" "$activate_job_dir/config.json" || return $?
     BRORAY_JOB_UNRESOLVED=false
+    rm -rf "$activate_job_dir" || return 1
+    fi
 
     # The activation response must describe the server that was just applied,
     # not a still-fresh cache entry captured for the previous active server.

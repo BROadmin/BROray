@@ -55,6 +55,19 @@ broray_xray_apply_server() {
         broray_die \
             "Xray отклонил конфигурацию сервера"
 
+    broray_xray_apply_prepared_server "$server_id" "$generated_config"
+}
+
+# Internal commit step. The managed activation caller has already validated
+# this private file under a drained supervisor and entered its protected phase.
+# Legacy transaction callers reach this only through apply_server above.
+broray_xray_apply_prepared_server() {
+    local server_id generated_config timestamp backup_config backup_active
+    local previous_server_id server_file server_name server_protocol server_address server_port
+    server_id="$1"; generated_config="$2"
+    [ -f "$generated_config" ] && [ ! -L "$generated_config" ] || return 1
+    mkdir -p "$BRORAY_BACKUP" || return 1
+
     timestamp="$(broray_timestamp)"
 
     backup_config="$BRORAY_BACKUP/config.server.$timestamp.json"
