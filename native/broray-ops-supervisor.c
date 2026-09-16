@@ -32,7 +32,6 @@ static unsigned long long owner_ticks,supervisor_ticks;
 static volatile sig_atomic_t interrupted=0;
 static void on_signal(int sig){(void)sig;interrupted=1;}
 static uint64_t milliseconds(void){struct timespec t;if(clock_gettime(CLOCK_MONOTONIC,&t))_exit(74);return (uint64_t)t.tv_sec*1000+t.tv_nsec/1000000;}
-static void pause_ms(int ms){struct timespec t={ms/1000,(ms%1000)*1000000L};nanosleep(&t,0);}
 static int safe_text(const char *s,size_t max){
     if(!s||!s[0]||strlen(s)>max)return 0;
     for(const unsigned char *p=(const unsigned char *)s;*p;p++)
@@ -79,7 +78,7 @@ static int register_supervisor(const char *ash,const char *control){
         close(output[0]);dup2(output[1],STDOUT_FILENO);close(output[1]);
         int null=open("/dev/null",O_RDONLY);if(null>=0){dup2(null,STDIN_FILENO);close(null);}
         char pid[24];snprintf(pid,sizeof pid,"%d",getppid());
-        execl(ash,ash,control,protected_route?"register-route":"register",pid,nonce,(char *)0);_exit(74);
+        execl(ash,ash,control,protected_route==2?"register-interface":protected_route?"register-route":"register",pid,nonce,(char *)0);_exit(74);
     }
     close(output[1]);char buffer[PATH_MAX+512];size_t length=0;
     for(;;){ssize_t n=read(output[0],buffer+length,sizeof buffer-length-1);if(n<0&&errno==EINTR)continue;if(n<=0)break;length+=(size_t)n;if(length==sizeof buffer-1)break;}
@@ -111,6 +110,7 @@ static int end_supervisor(int result,const char *state,int killing){
 int main(int argc,char **argv){
     if(argc==2&&!strcmp(argv[1],"--version")){puts("broray-ops-supervisor/2 ptrace-exitkill cooperative-helper protected-route");return 0;}
     if(argc>1&&!strcmp(argv[1],"--protected-route")){protected_route=1;argc--;argv++;}
+    else if(argc>1&&!strcmp(argv[1],"--protected-interface")){protected_route=2;argc--;argv++;}
     /* ash, control script, cancel-file, timeout seconds, cooperative grace,
        TERM grace, --, absolute command, command arguments */
     if(argc<9||strcmp(argv[7],"--")||argv[1][0]!='/'||argv[2][0]!='/'||argv[3][0]!='/'||argv[8][0]!='/')return 64;
@@ -127,7 +127,7 @@ int main(int argc,char **argv){
         close(gate[1]);char c;if(read(gate[0],&c,1)!=1)_exit(74);close(gate[0]);
         signal(SIGTERM,SIG_DFL);signal(SIGINT,SIG_DFL);signal(SIGHUP,SIG_DFL);
         setenv("BRORAY_OPS_SUPERVISED","ptrace/1",1);
-        if(protected_route)setenv("BRORAY_OPS_ROUTE_SUPERVISED","ptrace/1",1);
+        if(protected_route==1)setenv("BRORAY_OPS_ROUTE_SUPERVISED","ptrace/1",1);
         else unsetenv("BRORAY_OPS_ROUTE_SUPERVISED");
         execv(argv[8],argv+8);_exit(127);
     }
@@ -138,6 +138,11 @@ int main(int argc,char **argv){
     if(interrupted||(!protected_route&&cancellation(argv[3]))||owner_absent()){close(gate[1]);return end_supervisor(130,"cancelled_before_gate",1);}
     if(write(gate[1],"G",1)!=1){close(gate[1]);return end_supervisor(74,"gate_failed",1);}close(gate[1]);
     uint64_t deadline=milliseconds()+(uint64_t)durations[0]*1000,stop_at=0,term_at=0;
+    /* Keep SIGCHLD pending between waitpid and sigtimedwait. Waking on child
+       events avoids a fixed 10ms delay for each fork/exec/exit of the parser.
+       Only the parent blocks it: the helper retains its original signal mask. */
+    sigset_t child_events;sigemptyset(&child_events);sigaddset(&child_events,SIGCHLD);
+    if(sigprocmask(SIG_BLOCK,&child_events,NULL)<0)return end_supervisor(74,"signal_failed",1);
     int reason=0;
     for(;;){
         uint64_t now=milliseconds();
@@ -152,7 +157,7 @@ int main(int argc,char **argv){
         if(term_sent&&now-term_at>=(uint64_t)durations[2]*1000)return end_supervisor(reason,"killing",1);
         int status;pid_t pid=waitpid(-1,&status,__WALL|WNOHANG);
         if(pid<0){if(errno==EINTR)continue;return end_supervisor(74,"wait_failed",1);}
-        if(pid==0){pause_ms(10);continue;}
+        if(pid==0){struct timespec wait={0,10000000L};sigtimedwait(&child_events,NULL,&wait);continue;}
         if(WIFEXITED(status)||WIFSIGNALED(status)){
             remove_child(pid);
             if(pid==root_pid){int rc=WIFEXITED(status)?WEXITSTATUS(status):128+WTERMSIG(status);return end_supervisor(reason?reason:rc,count?"draining":"complete",count!=0);}

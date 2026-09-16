@@ -700,22 +700,28 @@ broray_interface_block_signature_exact()
       NR==1 { if ($0!=parent) invalid=1; next }
       NR==2 { next }
       NR==3 { if ($0!="    security-level public") invalid=1; next }
-      NR==4 { if ($0!="    proxy protocol socks5") invalid=1; next }
-      NR==5 { if ($0!=upstream) invalid=1; next }
-      NR==6 {
+      NR==4 && index($0,"    ip global ")==1 {
+        priority=substr($0,15)
+        if (priority !~ /^[1-9][0-9]*$/ || length(priority)>5 || priority+0>65534) invalid=1
+        globals=1
+        next
+      }
+      NR==4+globals { if ($0!="    proxy protocol socks5") invalid=1; next }
+      NR==5+globals { if ($0!=upstream) invalid=1; next }
+      NR==6+globals {
         if ($0=="    up") { admin_up++; next }
         if (binding_valid($0)) { bindings++; next }
         invalid=1
         next
       }
-      NR==7 {
+      NR==7+globals {
         if (bindings==1 && $0=="    up") { admin_up++; next }
         invalid=1
         next
       }
-      NR>7 { invalid=1 }
+      NR>7+globals { invalid=1 }
       END {
-        valid_length=(NR==6 || NR==7)
+        valid_length=(NR==6+globals || NR==7+globals)
         exit(!invalid && valid_length && admin_up==1 && bindings<=1 ? 0 : 1)
       }
     ' "$block"
@@ -737,6 +743,15 @@ broray_interface_block_sha256()
         if (token !~ /^[A-Za-z][A-Za-z0-9._\/-]*$/) return 0
         if (token ~ /\.\./ || token ~ /\/\//) return 0
         return 1
+      }
+      # Internet priority belongs to Keenetic connection policy, as does the
+      # dynamic connection binding below. Keep both settings in the actual
+      # configuration; fingerprint only the BROray-owned endpoint fields.
+      index($0, "    ip global ")==1 {
+        priority=substr($0,15)
+        if (NR!=4 || ++globals>1 || priority !~ /^[1-9][0-9]*$/ ||
+            length(priority)>5 || priority+0>65534) invalid=1
+        next
       }
       index($0, "    proxy connect via ")==1 {
         if (!binding_valid($0) || ++bindings>1) invalid=1

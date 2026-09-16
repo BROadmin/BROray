@@ -88,6 +88,7 @@ printf 200
         self.assertEqual(self.states()[0]['state'],'failed')
     def test_complete_update_uses_real_parser_and_commits_servers(self):
         path=self.record()
+        self.assertFalse((self.app/'run/subscriptions').exists())
         self.shell(self.job_script('broray_subscription_update test manual'),timeout=90)
         data=json.loads(path.read_text());self.assertEqual(data['lastUpdateStatus'],'success')
         self.assertEqual(data['lastUpdateResult']['accepted'],1)

@@ -5,4 +5,4 @@ broray_api_require_session
 broray_subscriptions_api_lock refresh
 subscription_id="$(broray_subscriptions_api_query id)"
 broray_subscriptions_api_run \
-    broray_subscription_update "$subscription_id" manual
+    broray_subscription_launch_update "$subscription_id" manual

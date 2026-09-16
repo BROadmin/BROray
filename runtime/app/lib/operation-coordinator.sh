@@ -1,5 +1,6 @@
 #!/opt/bin/ash
-# All writes run synchronously inside broray-ops-guard. No router/network calls.
+# All writes run synchronously inside broray-ops-guard. Explicit interface
+# recovery alone performs a bounded read-only router ownership check.
 set -u
 umask 077
 OPS_APP="${BRORAY_ROOT:-/opt/broray}"
@@ -172,8 +173,10 @@ ops_handoff()
         return 0
     fi
     ops_global_matches || ops_error OWNER_CHANGED
-    jq -e '.running==true and .acknowledged==true and .phase=="working" and
-      (.operation=="xray:install" or .operation=="xray:update" or .operation=="xray:reinstall")' "$OPS_CURRENT/state.json" >/dev/null || ops_error HANDOFF_NOT_ALLOWED
+    jq -e '.running==true and .acknowledged==true and
+      ((.phase=="working" and (.operation=="xray:install" or .operation=="xray:update" or .operation=="xray:reinstall")) or
+       (.scope=="system" and .bundleId=="subscriptions" and .source=="USER" and .phase=="waiting" and .cancelability=="cooperative" and
+        (.operation=="subscriptions:create" or .operation=="subscriptions:refresh")))' "$OPS_CURRENT/state.json" >/dev/null || ops_error HANDOFF_NOT_ALLOWED
     next="$(broray_ops_capture_owner "$4")" || ops_error OWNER_UNCONFIRMED
     ops_authorize "$1" "$2"; ops_owner_authorize "$3"
     ops_children_absent || ops_error CHILDREN_UNCONFIRMED
@@ -194,7 +197,12 @@ ops_accept_handoff()
 {
     local owner digest record
     ops_load "$1" || ops_error STATE_UNAVAILABLE 1
-    [ "$OPS_EXECUTOR" = "$OPS_CURRENT/executor.json" ] || ops_error HANDOFF_NOT_READY
+    if [ "$OPS_EXECUTOR" != "$OPS_CURRENT/executor.json" ]; then
+        # Handoff admission rejects this same immutable cancellation marker.
+        # A gated child can therefore stop waiting without racing a transfer.
+        [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED
+        ops_error HANDOFF_NOT_READY
+    fi
     ops_global_matches || ops_error OWNER_CHANGED
     jq -e '.running==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error OPERATION_FINISHED
     owner="$(broray_ops_capture_owner "$3")" || ops_error OWNER_UNCONFIRMED
@@ -202,7 +210,13 @@ ops_accept_handoff()
     jq -e --argjson owner "$owner" --arg digest "$digest" --arg nonce "$4" \
       '.owner==$owner and .previousTokenDigest==$digest and .handoffNonce==$nonce' "$OPS_EXECUTOR" >/dev/null || ops_error OWNER_CHANGED
     if ops_executor_pending; then
-        [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED
+        if [ -e "$OPS_CURRENT/cancel.json" ] || [ -L "$OPS_CURRENT/cancel.json" ]; then
+            # A subscription worker must accept its identity to acknowledge an
+            # early cancellation and finish. Helpers and commit remain gated
+            # by the existing cancellation checks; no work is admitted here.
+            jq -e '.scope=="system" and .phase=="waiting" and .bundleId=="subscriptions" and
+              (.operation=="subscriptions:create" or .operation=="subscriptions:refresh")' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCELLED
+        fi
         record="$(jq -c '.acknowledged=true' "$OPS_EXECUTOR")" || ops_error STATE_UNAVAILABLE 1
         ops_write "$OPS_EXECUTOR" "$record" || ops_error STATE_UNAVAILABLE 1
     fi
@@ -373,7 +387,9 @@ ops_supervisor_register()
     local owner records record dir directory context file nonce route_mode expected_exe
     ops_authorize "$1" "$2"
     route_mode="${5:-false}"
-    if [ "$route_mode" = true ]; then
+    if [ "$route_mode" = interface ]; then
+        jq -e '.scope=="system" and .operation=="keenetic:reconcile" and .source=="SYSTEM_RECOVERY" and .acknowledged==true and .cancelability=="protected"' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCEL_NOT_SUPPORTED
+    elif [ "$route_mode" = true ]; then
         jq -e '.scope=="routes" and .acknowledged==true and .cancelability=="protected" and .initialCancelability=="protected"' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCEL_NOT_SUPPORTED
         [ ! -e "$OPS_CURRENT/route-supervision.json" ] && [ ! -L "$OPS_CURRENT/route-supervision.json" ] || ops_error OPERATION_EXISTS
     else
@@ -382,7 +398,11 @@ ops_supervisor_register()
     fi
     nonce="$4"; ops_nonce_valid "$nonce" || ops_error INVALID_REQUEST 1
     owner="$(broray_ops_capture_owner "$3")" || ops_error OWNER_UNCONFIRMED 1
-    if [ "$route_mode" = true ]; then
+    if [ "$route_mode" = interface ]; then
+        expected_exe="$(readlink -f "${BRORAY_OPS_SUPERVISOR:-$OPS_APP/bin/broray-ops-supervisor}")" || ops_error OWNER_UNCONFIRMED 1
+        [ "$(printf '%s\n' "$owner" | jq -r .executable)" = "$expected_exe" ] &&
+          [ "$(tr '\000' '\n' <"$OPS_PROC/$3/cmdline" | sed -n '2p')" = --protected-interface ] || ops_error OWNER_UNCONFIRMED
+    elif [ "$route_mode" = true ]; then
         expected_exe="$(readlink -f "${BRORAY_OPS_SUPERVISOR:-$OPS_APP/bin/broray-ops-supervisor}")" || ops_error OWNER_UNCONFIRMED 1
         [ "$(printf '%s\n' "$owner" | jq -r .executable)" = "$expected_exe" ] &&
           [ "$(tr '\000' '\n' <"$OPS_PROC/$3/cmdline" | sed -n '2p')" = --protected-route ] || ops_error OWNER_UNCONFIRMED
@@ -411,6 +431,10 @@ ops_supervisor_register()
         context="$(jq -nc --arg id "$OPS_ID" --arg sid "$nonce" --argjson owner "$owner" \
           '{schemaVersion:1,kind:"protected-route-supervision",operationId:$id,supervisorId:$sid,owner:$owner}')" || ops_error STATE_UNAVAILABLE 1
         ops_write "$OPS_CURRENT/route-supervision.json" "$context" || ops_error STATE_UNAVAILABLE 1
+    elif [ "$route_mode" = interface ]; then
+        context="$(jq -nc --arg id "$OPS_ID" --arg sid "$nonce" --argjson owner "$owner" \
+          '{schemaVersion:1,kind:"protected-interface-supervision",operationId:$id,supervisorId:$sid,owner:$owner}')" || ops_error STATE_UNAVAILABLE 1
+        ops_write "$OPS_CURRENT/interface-supervision.json" "$context" || ops_error STATE_UNAVAILABLE 1
     fi
     jq -r --arg ledger "$dir/children.json" '[.owner.pid,.owner.startTicks,.owner.bootId,$ledger]|@tsv' "$OPS_EXECUTOR"
 }
@@ -493,6 +517,37 @@ ops_pending_domain()
     return 1
 }
 
+ops_interface_recover()
+{
+    local owner marker script file
+    [ "${verb:-}" = recover ] && [ "$OPS_EXECUTOR" = "$OPS_CURRENT/owner.json" ] || return 1
+    jq -e '.scope=="system" and .operation=="keenetic:reconcile" and .source=="SYSTEM_RECOVERY" and .acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null || return 1
+    owner="$(jq -c .owner "$OPS_EXECUTOR")"; broray_ops_classify_owner "$owner"
+    [ "$OPS_OWNER_STATUS" = STALE ] || return 1
+    # Old unsupervised jobs are safe to examine only after their entire boot
+    # has ended. New jobs carry a verified supervisor and child ledger.
+    if [ "$OPS_OWNER_REASON" != previous_boot ]; then
+        marker="$OPS_CURRENT/interface-supervision.json"
+        ops_file_safe "$marker" 4096 || return 1
+        jq -e --arg id "$OPS_ID" '.schemaVersion==1 and .kind=="protected-interface-supervision" and .operationId==$id' "$marker" >/dev/null || return 1
+        ops_nonce_valid "$(jq -r .supervisorId "$marker")" || return 1
+        # helpers-drain durably retires completed registry entries and their
+        # RAM ledgers. The permanent marker remains, as for route recovery.
+        owner="$(jq -c .owner "$marker")"; broray_ops_classify_owner "$owner"
+        [ "$OPS_OWNER_STATUS" = STALE ] || return 1
+    fi
+    ops_children_absent || return 1
+    ops_pending_domain && return 1
+    for file in "$OPS_APP/config/interface.json.operation" "$OPS_APP/config/interface.json.quarantine" "$OPS_APP/config/interface.json.create-reservation"; do
+        [ ! -e "$file" ] && [ ! -L "$file" ] || return 1
+    done
+    script="$OPS_APP/lib/interface.sh"
+    # Test substitution is restricted to a private application root.
+    if [ "$OPS_APP" != /opt/broray ]; then script="${BRORAY_RECONCILE_INTERFACE:-$script}"; fi
+    ops_file_safe "$script" 65536 || return 1
+    BRORAY_BASE="$OPS_APP" timeout 15 "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$script" ownership-check >/dev/null 2>&1
+}
+
 ops_recover_global()
 {
     local id owner status reason cancelability target
@@ -532,7 +587,7 @@ ops_recover_global()
     cancelability="$(jq -r -L "$OPS_APP/lib" 'include "operation-public"; if route_protected then "protected" else .cancelability end' "$OPS_CURRENT/state.json")"
     if ! ops_executor_pending && ! jq -e '.state=="starting" and .acknowledged==false' "$OPS_CURRENT/state.json" >/dev/null; then
         if [ "$cancelability" != cooperative ]; then
-            ops_route_recover || { OPS_RECOVERY_RESULT=protected_recovery; return 2; }
+            ops_route_recover || ops_interface_recover || { OPS_RECOVERY_RESULT=protected_recovery; return 2; }
         else
             ops_pending_domain && { OPS_RECOVERY_RESULT=domain_pending; return 2; }
         fi
@@ -883,6 +938,7 @@ case "$verb" in
     publish-json) [ "$#" = 8 ] || ops_error INVALID_REQUEST 1; ops_publish_json "$@" ;;
     supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" ;;
     route-supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" true ;;
+    interface-supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" interface ;;
     route-worker-check) [ "$#" = 3 ] || ops_error INVALID_REQUEST 1; ops_route_worker_check "$@" ;;
     handoff) [ "$#" = 5 ] || ops_error INVALID_REQUEST 1; ops_handoff "$@" ;;
     accept-handoff) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_accept_handoff "$@" ;;

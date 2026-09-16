@@ -365,7 +365,7 @@ broray_interface_check()
     local description
 
     broray_interface_owner_record_valid "$BRORAY_INTERFACE" || {
-        printf '%s\n' 'Полный R14C01 ownership receipt: нет' >&2
+        printf '%s\n' 'Запись владения BROray не прошла проверку полей или соответствия конфигурации Keenetic.' >&2
         return 1
     }
     broray_interface_owner_valid "$BRORAY_INTERFACE" || {

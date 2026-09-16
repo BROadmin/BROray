@@ -911,6 +911,16 @@ broray_subscription_provider_denial_marker()
     return 1
 }
 
+broray_subscription_parse_progress()
+{
+    local file temporary
+    [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || return 0
+    file="$BRORAY_SUB_RUN/progress-$BRORAY_BACKGROUND_OPERATION_ID.json"
+    temporary="$file.new.$$"
+    [ -d "$BRORAY_SUB_RUN" ] && [ ! -L "$BRORAY_SUB_RUN" ] && [ ! -L "$file" ] && [ ! -L "$temporary" ] || return 1
+    printf '{"processed":%s,"total":%s}\n' "$1" "${BRORAY_SUB_RECEIVED:-0}" >"$temporary" && mv -f "$temporary" "$file"
+}
+
 broray_subscription_stage_nodes()
 {
     stage_subscription_id="$1"
@@ -932,7 +942,9 @@ broray_subscription_stage_nodes()
     BRORAY_SUB_REJECTED=0
     BRORAY_SUB_DENIAL_MARKERS=0
     stage_index=0
+    broray_subscription_parse_progress 0 || return 1
     while IFS= read -r stage_uri || [ -n "$stage_uri" ]; do
+        broray_subscription_parse_progress "$stage_index" || return 1
         stage_index=$((stage_index + 1))
         if [ "$stage_uri" = 'broray-json-error://unsupported-node' ]; then
             BRORAY_SUB_REJECTED=$((BRORAY_SUB_REJECTED + 1))
@@ -1028,6 +1040,7 @@ broray_subscription_stage_nodes()
         rm -f "$stage_error" "$stage_output"
         stage_uri=""
     done < "$stage_nodes_file"
+    broray_subscription_parse_progress "$stage_index" || return 1
 
     rm -rf "$stage_raw_dir" "$stage_parse_tmp"
     if [ "$BRORAY_SUB_ACCEPTED" -eq 0 ]; then
@@ -1119,13 +1132,36 @@ broray_subscription_effective_status()
 
 broray_subscription_public_file()
 {
+    local public_operation public_op_id public_op_file public_progress public_progress_file public_cancel
     public_file="$1"
     public_include_url="${2:-false}"
     public_id="$(jq -r '.id' "$public_file")"
     public_count="$(broray_server_subscription_count "$public_id" 2>/dev/null || printf '0')"
     public_display_url="$(broray_subscription_mask_url "$(jq -r '.url' "$public_file")")"
     broray_subscription_effective_status "$public_file"
+    public_operation='{}'; public_progress='{}'
+    public_op_id="$(jq -r '.backgroundOperationId // empty' "$public_file")"
+    case "$public_op_id" in op-*)
+        case "$public_op_id" in *[!A-Za-z0-9._-]*) ;; *)
+            public_op_file="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}/operations/$public_op_id/state.json"
+            if [ -f "$public_op_file" ] && [ ! -L "$public_op_file" ]; then
+                public_cancel=false
+                if [ -f "${public_op_file%/*}/cancel.json" ] && [ ! -L "${public_op_file%/*}/cancel.json" ] &&
+                   jq -e '.cancelRequested==true' "${public_op_file%/*}/cancel.json" >/dev/null 2>&1; then public_cancel=true; fi
+                public_operation="$(jq -c --arg id "$public_op_id" --argjson cancelled "$public_cancel" '
+                  if .kind=="background" and .operationId==$id and (.operation|type)=="string" and (.operation|startswith("subscriptions:")) then
+                    {id:$id,running:(.running==true),phase:(.phase|if .=="fetching" or .=="parsing" or .=="committing" or .=="waiting" then . else "working" end),cancelRequested:$cancelled,canCancel:(.running==true and .cancelability=="cooperative" and ($cancelled|not))}
+                  else {} end' "$public_op_file" 2>/dev/null)" || public_operation='{}'
+            fi
+            public_progress_file="${BRORAY_SUB_RUN:-$BRORAY_BASE/run/subscriptions}/progress-$public_op_id.json"
+            if [ "$BRORAY_SUB_EFFECTIVE_STATUS" = running ] && [ -f "$public_progress_file" ] && [ ! -L "$public_progress_file" ]; then
+                public_progress="$(jq -ce 'select(.processed|type=="number") | select(.total|type=="number") | select(.processed>=0 and .processed<=.total and .total<=500) | {processed,total}' "$public_progress_file" 2>/dev/null)" || public_progress='{}'
+            fi
+            ;;
+        esac ;;
+    esac
     jq \
+        --argjson operation "$public_operation" --argjson progress "$public_progress" \
         --arg effectiveStatus "$BRORAY_SUB_EFFECTIVE_STATUS" --arg effectiveError "$BRORAY_SUB_EFFECTIVE_ERROR" \
         --arg effectiveCode "$BRORAY_SUB_EFFECTIVE_CODE" --arg effectiveFinished "$BRORAY_SUB_EFFECTIVE_FINISHED" \
         --arg displayUrl "$public_display_url" \
@@ -1138,6 +1174,8 @@ broray_subscription_public_file()
             (if $effectiveFinished!="" then .lastUpdatedAt=$effectiveFinished else . end)
          else . end) |
         . + {
+            updateOperation: $operation,
+            parseProgress: $progress,
             displayUrl: $displayUrl,
             serversCount: $serversCount
         } |
@@ -1370,6 +1408,10 @@ broray_subscription_create()
         "subscription=$create_id action=create url=$(broray_subscription_mask_url "$create_url")"
 
     if [ "$create_immediate" = "true" ]; then
+        if [ "${BRORAY_SUB_WEB_ASYNC:-false}" = true ]; then
+            broray_subscription_launch_update "$create_id" initial
+            return $?
+        fi
         create_refresh_rc=0
         broray_subscription_update "$create_id" initial >/dev/null 2>&1 || create_refresh_rc=$?
         case "$create_refresh_rc" in 130|75) return "$create_refresh_rc" ;; esac

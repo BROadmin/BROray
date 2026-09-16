@@ -4,6 +4,7 @@
 . "${BRORAY_ROOT:-/opt/broray}/lib/web-request-body.sh"
 . "${BRORAY_ROOT:-/opt/broray}/lib/subscription-service.sh"
 . "${BRORAY_ROOT:-/opt/broray}/lib/operation-job.sh"
+. "${BRORAY_ROOT:-/opt/broray}/lib/subscription-web-job.sh"
 
 broray_subscriptions_api_lock()
 {
@@ -59,7 +60,7 @@ broray_subscriptions_api_error_status()
         UPDATE_ALREADY_RUNNING|ACTIVE_SERVER_CONFLICT|SERVER_SYNC_BUSY|SERVER_ID_CONFLICT|OPERATION_CANCELLED)
             printf '%s\n' "409 Conflict"
             ;;
-        DOWNLOAD_TIMEOUT)
+        DOWNLOAD_TIMEOUT|PARSE_TIMEOUT)
             printf '%s\n' "504 Gateway Timeout"
             ;;
         OPERATION_UNRESOLVED)
@@ -95,6 +96,7 @@ broray_subscriptions_api_run()
         fi
         broray_subscriptions_api_response_json="$(cat "$broray_subscriptions_api_output_file")"
         rm -f "$broray_subscriptions_api_output_file" "$broray_subscriptions_api_error_file"
+        [ "${BRORAY_SUB_ASYNC_ACCEPTED:-false}" != true ] || printf 'Status: 202 Accepted\r\n'
         broray_api_success "$broray_subscriptions_api_response_json"
         exit 0
     else

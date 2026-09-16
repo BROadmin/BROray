@@ -2,6 +2,10 @@
   "baseline": "3.1.0-r09c02",
   "producerIntegration": "IN PROGRESS: subscriptions, servers and auto-switch; other producers and full application acceptance pending",
   "changedBaselineFiles": [
+    "app/lib/interface-owner.sh",
+    "app/lib/interface-core.sh",
+    "app/lib/interface.sh",
+    "app/web-new/api/subscriptions/refresh.cgi",
     "app/lib/parser-hysteria2.sh",
     "app/lib/lighttpd-guard.sh",
     "app/bin/broray-runtime-prepare",

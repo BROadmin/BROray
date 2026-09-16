@@ -9,5 +9,6 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 broray_subscriptions_api_read_body_to_file "$body_file"
+BRORAY_SUB_WEB_ASYNC=true
 broray_subscriptions_api_run broray_subscription_create "$body_file"
 rm -f "$body_file"

@@ -24,25 +24,42 @@ status_write()
 attempt=1
 while [ "$attempt" -le 10 ]; do
     broray_service_sleep 3 || exit 0
-    if ! broray_ops_begin system keenetic:reconcile '' SYSTEM_RECOVERY protected; then
+    if ! broray_ops_begin system keenetic:reconcile '' SYSTEM_RECOVERY cooperative; then
         status_write deferred "$attempt" admission || exit 74
         attempt=$((attempt+1)); continue
     fi
-    # Side effects stay under the protected operation. An interrupted or failed
-    # mutation retains the fence for domain recovery; it cannot be guessed safe.
+    # A read-only refusal is a failed check, not an unfinished network commit.
+    broray_ops_tick checking || exit 74
+    rc=0
+    BRORAY_BASE="$BRORAY_ROOT" broray_ops_run_helper 30 -- "$SVC_ASH" "$INTERFACE_SCRIPT" ownership-check >"$BRORAY_ROOT/run/interface-reconcile.log" 2>&1 || rc=$?
+    if [ "$rc" != 0 ]; then
+        status_write error "$attempt" ownership-check || exit 74
+        [ "$rc" != 75 ] || exit 75
+        broray_ops_finish failed OPERATION_FAILED || exit 74
+        exit 1
+    fi
     broray_ops_tick committing || exit 74
-    if BRORAY_BASE="$BRORAY_ROOT" "$SVC_ASH" "$INTERFACE_SCRIPT" check >/dev/null 2>&1 &&
-       BRORAY_BASE="$BRORAY_ROOT" "$SVC_ASH" "$INTERFACE_SCRIPT" sync-name >/dev/null 2>&1 &&
-       BRORAY_BASE="$BRORAY_ROOT" "$SVC_ASH" "$INTERFACE_SCRIPT" check >/dev/null 2>&1; then
-        status_write success "$attempt" sync-name || exit 74
+    rc=0
+    "${BRORAY_OPS_SUPERVISOR:-$BRORAY_ROOT/bin/broray-ops-supervisor}" --protected-interface \
+      "$SVC_ASH" "$BRORAY_ROOT/lib/operation-supervisor-control.sh" \
+      "${BRORAY_STATE_ROOT:-/opt/var/lib/broray}/operations/$BRORAY_BACKGROUND_OPERATION_ID/cancel.json" \
+      120 0 2 -- "$SVC_ASH" "$BRORAY_ROOT/lib/interface-reconcile-worker.sh" \
+      >>"$BRORAY_ROOT/run/interface-reconcile.log" 2>&1 || rc=$?
+    drained=false
+    for drain_attempt in 1 2 3 4 5; do
+        if broray_ops_call helpers-drain "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" >/dev/null; then drained=true; break; fi
+        sleep 1
+    done
+    [ "$drained" = true ] || { status_write error "$attempt" children-unconfirmed; exit 75; }
+    if [ "$rc" = 0 ]; then
+        status_write success "$attempt" reconcile || exit 74
         broray_ops_finish completed || exit 74
         exit 0
     fi
-    if BRORAY_BASE="$BRORAY_ROOT" "$SVC_ASH" "$INTERFACE_SCRIPT" repair >/dev/null 2>&1 &&
-       BRORAY_BASE="$BRORAY_ROOT" "$SVC_ASH" "$INTERFACE_SCRIPT" check >/dev/null 2>&1; then
-        status_write success "$attempt" repair || exit 74
-        broray_ops_finish completed || exit 74
-        exit 0
+    if [ "$rc" = 10 ]; then
+        status_write error "$attempt" configuration-confirmed || exit 74
+        broray_ops_finish failed OPERATION_FAILED || exit 74
+        exit 1
     fi
     status_write error "$attempt" recovery-required || exit 74
     exit 75

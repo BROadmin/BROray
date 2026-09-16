@@ -14,7 +14,8 @@
         refresh: "/api/subscriptions/refresh.cgi",
         remove: "/api/subscriptions/delete.cgi",
         servers: "/api/subscriptions/servers.cgi",
-        summary: "/api/subscriptions/summary.cgi"
+        summary: "/api/subscriptions/summary.cgi",
+        cancel: "/api/operations/cancel.cgi"
     };
 
     var state = {
@@ -59,6 +60,9 @@
         var payload;
         var apiError;
         var error;
+        var controller = new AbortController();
+        var timer = window.setTimeout(function () { controller.abort(); }, 30000);
+        request.signal = controller.signal;
 
         if (request.body && typeof request.body !== "string") {
             request.headers = Object.assign({}, request.headers, {
@@ -67,12 +71,16 @@
             request.body = JSON.stringify(request.body);
         }
 
-        response = await fetch(url, request);
-
         try {
+            response = await fetch(url, request);
             payload = await response.json();
         } catch (parseError) {
-            throw new Error("Сервер вернул некорректный ответ.");
+            if (parseError.name === "AbortError") {
+                throw new Error("Ответ роутера не получен за 30 секунд. Операция могла запуститься — проверьте список подписок перед повтором.");
+            }
+            throw new Error(response ? "Сервер вернул некорректный ответ." : "Не удалось связаться с роутером. Проверьте состояние подписки перед повтором.");
+        } finally {
+            window.clearTimeout(timer);
         }
 
         if (response.status === 401) {
@@ -80,14 +88,17 @@
             throw new Error("Сессия завершена.");
         }
 
-        if (!response.ok || payload.success === false) {
+        if (!payload || typeof payload !== "object" || !response.ok || payload.success === false || payload.ok === false) {
             apiError = payload && payload.error ? payload.error : null;
             error = new Error(
                 apiError && apiError.message
                     ? apiError.message
                     : "Операция завершилась ошибкой."
             );
-            error.code = apiError && apiError.code ? apiError.code : "HTTP_ERROR";
+            error.code = apiError && apiError.code ? apiError.code : (payload && payload.errorCode || "HTTP_ERROR");
+            if (error.code === "CANCEL_NOT_SUPPORTED") {
+                error.message = "Сейчас применяются изменения. Дождитесь завершения этого этапа.";
+            }
             error.status = response.status;
             throw error;
         }
@@ -260,6 +271,12 @@
 
         listElement.innerHTML = state.subscriptions.map(function (item) {
             var running = item.lastUpdateStatus === "running";
+            var operation = item.updateOperation || {};
+            var phase = ({fetching: "Загрузка подписки…", parsing: "Разбор серверов…", committing: "Сохранение серверов…", waiting: "Ожидание запуска…"})[operation.phase] || "Обновление подписки…";
+            var progress = item.parseProgress || {};
+            if (operation.phase === "parsing" && Number.isInteger(progress.processed) && Number.isInteger(progress.total)) {
+                phase += " Обработано " + progress.processed + " из " + progress.total + ".";
+            }
             var update = statusPresentation(item.lastUpdateStatus);
             var enabled = item.enabled
                 ? {label: "Активна", tone: "success"}
@@ -288,11 +305,12 @@
                     '<div><dt>Последнее обновление</dt><dd>' + escapeHtml(formatDate(item.lastUpdatedAt)) + '</dd></div>' +
                     '<div><dt>Следующее обновление</dt><dd>' + escapeHtml(formatDate(item.nextUpdateAt)) + '</dd></div>' +
                 '</dl>' +
-                '<div class="subscription-result">' + renderResult(item) + '</div>' +
+                '<div class="subscription-result" role="status">' + (running ? escapeHtml(phase) : renderResult(item)) + '</div>' +
                 renderWarnings(item) +
                 (item.lastError ? '<div class="subscription-error"><strong>Ошибка обновления</strong><span>' + escapeHtml(item.lastError) + '</span></div>' : '') +
                 '<div class="subscription-card-actions">' +
                     actionButton('button-primary', 'refresh', 'update', running ? 'Обновляется' : 'Обновить сейчас', running, running) +
+                    (running && operation.id ? actionButton('button-danger-outline', 'cancel-update', 'stop', operation.cancelRequested ? 'Останавливается…' : (operation.canCancel ? 'Остановить обновление' : 'Применяются изменения'), !operation.canCancel, false) : '') +
                     actionButton('button-secondary', 'servers', 'servers', serversOpen ? 'Скрыть серверы' : 'Показать серверы', false, false) +
                     actionButton('button-secondary', 'edit', 'edit', 'Изменить', running, false) +
                     actionButton('button-secondary', 'toggle-enabled', 'settings', item.enabled ? 'Отключить' : 'Включить', running, false) +
@@ -309,6 +327,7 @@
     async function loadAll(silent) {
         var result;
         var hasRunning;
+        window.clearTimeout(state.polling);
 
         if (!silent) {
             listElement.setAttribute("aria-busy", "true");
@@ -316,7 +335,10 @@
         }
 
         try {
-            result = await Promise.all([api(paths.list), api(paths.summary)]);
+            result = await Promise.allSettled([api(paths.list), api(paths.summary)]);
+            var failed = result.find(function (entry) { return entry.status === "rejected"; });
+            if (failed) { throw failed.reason; }
+            result = result.map(function (entry) { return entry.value; });
             state.subscriptions = Array.isArray(result[0]) ? result[0] : [];
             renderSummary(result[1] || {});
             renderSubscriptions();
@@ -332,10 +354,13 @@
         } catch (error) {
             listElement.setAttribute("aria-busy", "false");
             listElement.innerHTML = '<div class="subscription-error-panel"><h2>Не удалось загрузить подписки</h2><p>' + escapeHtml(error.message) + '</p></div>';
+            state.polling = window.setTimeout(function () { loadAll(true); }, 5000);
         }
     }
 
     function resetForm() {
+        var message = byId("subscription-form-message");
+        if (message) { message.textContent = ""; }
         state.editingId = null;
         form.reset();
         byId("subscription-form-title").textContent = "Добавить подписку";
@@ -371,6 +396,14 @@
     async function saveForm(event) {
         var submit = byId("subscription-submit");
         var body;
+        var result;
+        var message = byId("subscription-form-message");
+        if (!message) {
+            message = document.createElement("p");
+            message.id = "subscription-form-message";
+            message.setAttribute("role", "status");
+            form.appendChild(message);
+        }
 
         event.preventDefault();
         body = {
@@ -385,6 +418,7 @@
         }
 
         setButtonBusy(submit, true, "Сохранение…");
+        message.textContent = "Сохранение подписки…";
         try {
             if (state.editingId) {
                 await api(paths.update + "?id=" + encodeURIComponent(state.editingId), {
@@ -393,13 +427,15 @@
                 });
                 toast("Настройки подписки сохранены.");
             } else {
-                await api(paths.create, {method: "POST", body: body});
-                toast("Подписка добавлена.");
+                result = await api(paths.create, {method: "POST", body: body});
+                toast(result.accepted ? "Подписка сохранена. Обновление запущено; его можно остановить в карточке." : "Подписка добавлена.");
             }
             resetForm();
             await loadAll(false);
         } catch (error) {
+            message.textContent = error.message;
             toast(error.message, "error");
+            await loadAll(true);
         } finally {
             setButtonBusy(submit, false, "Сохранение…");
         }
@@ -426,6 +462,18 @@
                 body: {}
             });
             toast("Обновление подписки запущено.");
+        } catch (error) {
+            toast(error.message, "error");
+        } finally {
+            await loadAll(true);
+        }
+    }
+
+    async function cancelUpdate(item, button) {
+        setButtonBusy(button, true, "Остановка…");
+        try {
+            await api(paths.cancel, {method: "POST", headers: {"Accept": "application/json", "X-BROray-Request": "operations"}, body: {operationId: item.updateOperation.id}});
+            toast("Остановка запрошена. Дождитесь завершения операции.");
         } catch (error) {
             toast(error.message, "error");
         } finally {
@@ -512,6 +560,9 @@
             }
 
             switch (button.dataset.action) {
+                case "cancel-update":
+                    cancelUpdate(item, button);
+                    break;
                 case "refresh":
                     refreshSubscription(item.id, button);
                     break;

@@ -11,6 +11,7 @@ class Sidecar:
         Services.setUp(self)
         self.svc=self.state/'services'/self.service
         self.env.update({'BRORAY_HOME_SNAPSHOT_REFRESH':str(self.app/'bin/fixture-refresh'),
+          'BRORAY_OPS_SUPERVISOR':str(ROOT/'.local/bin/linux-supervisor'),
           'BRORAY_LIGHTTPD_GUARD':str(self.app/'bin/fixture-ok'),'BRORAY_MONITOR_SERVICE':str(self.app/'bin/fixture-ok'),
           'BRORAY_RECONCILE_INTERFACE':str(self.app/'bin/fixture-interface'),
           'BRORAY_OPS_UPDATER_ROOT':str(self.temp/'updater'),'BRORAY_LEGACY_GLOBAL_LOCK':str(self.temp/'legacy.lock')})
@@ -81,9 +82,12 @@ class HomeSnapshot(Sidecar,unittest.TestCase):
 class InterfaceReconcile(Sidecar,unittest.TestCase):
     service='interface-reconcile'
     def test_reconcile_completes_under_protected_admission(self):
-        p=self.direct();out,err=p.communicate(timeout=25);self.assertEqual(p.returncode,0,(out,err))
+        # Admission, two supervised phases and durable retirement run under QEMU.
+        started=time.monotonic()
+        p=self.direct();out,err=p.communicate(timeout=60);self.assertEqual(p.returncode,0,(out,err))
+        print('RECONCILE_COMPLETION_SECONDS='+str(round(time.monotonic()-started,3)),flush=True)
         calls=(self.app/'tmp/interface.calls').read_text().splitlines()
-        self.assertEqual(calls,['check','sync-name','check'])
+        self.assertEqual(calls,['ownership-check','check','sync-name','check'])
         self.assertFalse((self.temp/'global.lock').exists())
         self.assertEqual(self.record()['state'],'stopped')
     def test_stop_before_first_attempt_does_not_mutate(self):
@@ -96,7 +100,7 @@ class InterfaceReconcile(Sidecar,unittest.TestCase):
         self.call('stop');p.communicate(timeout=10)
         self.assertIn('state=deferred',(self.app/'run/interface-reconcile.status').read_text())
     def test_failed_mutation_preserves_protected_fence(self):
-        self.fixture('fixture-interface','echo "$1" >>"$BRORAY_ROOT/tmp/interface.calls"\nexit 1\n')
+        self.fixture('fixture-interface','echo "$1" >>"$BRORAY_ROOT/tmp/interface.calls"\nif [ "$1" = ownership-check ] && [ ! -e "$BRORAY_ROOT/tmp/mutated" ]; then exit 0; fi\n[ "$1" != repair ] || touch "$BRORAY_ROOT/tmp/mutated"\nexit 1\n')
         p=self.direct();out,err=p.communicate(timeout=25);self.assertEqual(p.returncode,75,(out,err))
         self.assertTrue((self.temp/'global.lock').is_symlink())
         self.assertIn('recovery-required',(self.app/'run/interface-reconcile.status').read_text())

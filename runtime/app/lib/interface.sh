@@ -44,6 +44,12 @@ broray_interface_main()
         check)
             broray_interface_check
             ;;
+        ownership-check)
+            for pending in "$BRORAY_INTERFACE_OPERATION_FILE" "$BRORAY_INTERFACE_QUARANTINE_FILE" "$BRORAY_INTERFACE_RESERVATION_FILE"; do
+                [ ! -e "$pending" ] && [ ! -L "$pending" ] || return 1
+            done
+            broray_interface_owner_valid "$BRORAY_INTERFACE"
+            ;;
         expected-name)
             broray_interface_expected_description
             ;;

@@ -4,6 +4,9 @@ broray_subscription_prepare_update()
 {
     local prep_mode prep_rc prep_timeout prep_result
     BRORAY_SUB_PREP_DRAINED=false
+    # Direct/scheduled updates can be the first operation after a clean boot;
+    # the CGI launcher is not responsible for creating their progress folder.
+    [ ! -L "$BRORAY_SUB_RUN" ] && mkdir -p "$BRORAY_SUB_RUN" || return 1
     BRORAY_SUB_PREP_DIR="$(mktemp -d "$BRORAY_BASE/tmp/subscription-op-$BRORAY_BACKGROUND_OPERATION_ID-XXXXXX")" || return 1
     chmod 700 "$BRORAY_SUB_PREP_DIR" || return 1
     printf '%s\n' "$BRORAY_BACKGROUND_OPERATION_ID" >"$BRORAY_SUB_PREP_DIR/operation-id" || return 1
@@ -22,7 +25,11 @@ broray_subscription_prepare_update()
         [ "$prep_rc" != 130 ] || return 130
         prep_result="$BRORAY_SUB_PREP_DIR/$prep_mode-result.json"
         if [ "$prep_rc" = 124 ]; then
-            broray_subscription_set_error DOWNLOAD_TIMEOUT "Превышено время подготовки подписки."
+            if [ "$prep_mode" = parse ]; then
+                broray_subscription_set_error PARSE_TIMEOUT "Превышено время разбора серверов подписки. Предыдущий список серверов сохранён."
+            else
+                broray_subscription_set_error DOWNLOAD_TIMEOUT "Превышено время загрузки подписки. Предыдущий список серверов сохранён."
+            fi
             return 1
         fi
         if [ ! -f "$prep_result" ] || [ -L "$prep_result" ] ||
@@ -46,10 +53,13 @@ broray_subscription_prepare_update()
 
 broray_subscription_cleanup_preparation()
 {
+    local progress_file
     [ "${BRORAY_SUB_PREP_DRAINED:-false}" = true ] || return 0
     case "${BRORAY_SUB_PREP_DIR:-}" in "$BRORAY_BASE/tmp/subscription-op-$BRORAY_BACKGROUND_OPERATION_ID-"*) ;; *) return 1 ;; esac
     [ -d "$BRORAY_SUB_PREP_DIR" ] && [ ! -L "$BRORAY_SUB_PREP_DIR" ] || return 1
     [ "$(cat "$BRORAY_SUB_PREP_DIR/operation-id")" = "$BRORAY_BACKGROUND_OPERATION_ID" ] || return 1
     rm -rf "$BRORAY_SUB_PREP_DIR" || return 1
+    progress_file="$BRORAY_SUB_RUN/progress-$BRORAY_BACKGROUND_OPERATION_ID.json"
+    if [ -f "$progress_file" ] && [ ! -L "$progress_file" ]; then rm -f "$progress_file"; fi
     unset BRORAY_SUB_PREP_DIR BRORAY_SUB_PREP_DRAINED
 }
