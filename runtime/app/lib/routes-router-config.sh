@@ -137,120 +137,11 @@ broray_routes_config_epoch()
 # All route-state readers share one bounded ndmc lane.  Page summaries and a
 # manual verification may otherwise issue overlapping `show running-config`
 # commands, which is especially unreliable on slower routers or large configs.
-broray_routes_config_ndmc_lock_acquire()
-{
-    local wait_seconds elapsed max_ticks fast_wait owner
-
-    wait_seconds="$1"
-    case "$wait_seconds" in ''|*[!0-9]*) return 1 ;; esac
-    [ "$wait_seconds" -gt 0 ] 2>/dev/null || return 1
-
-    mkdir -p "$(dirname "$BRORAY_ROUTES_CONFIG_NDMC_LOCK")" || return 1
-    elapsed=0
-    fast_wait=false
-    if command -v usleep >/dev/null 2>&1; then
-        fast_wait=true
-        max_ticks=$((wait_seconds * 10))
-    else
-        max_ticks="$wait_seconds"
-    fi
-
-    while [ "$elapsed" -le "$max_ticks" ]; do
-        if mkdir "$BRORAY_ROUTES_CONFIG_NDMC_LOCK" 2>/dev/null; then
-            if printf '%s\n' "$$" >"$BRORAY_ROUTES_CONFIG_NDMC_LOCK/pid"; then
-                return 0
-            fi
-            rm -rf "$BRORAY_ROUTES_CONFIG_NDMC_LOCK" 2>/dev/null || true
-            return 1
-        fi
-
-        owner="$(sed -n '1p' "$BRORAY_ROUTES_CONFIG_NDMC_LOCK/pid" 2>/dev/null)"
-        case "$owner" in
-            ''|*[!0-9]*)
-                if [ "$fast_wait" = true ]; then usleep 100000; else sleep 1; fi
-                owner="$(sed -n '1p' "$BRORAY_ROUTES_CONFIG_NDMC_LOCK/pid" 2>/dev/null)"
-                case "$owner" in
-                    ''|*[!0-9]*) rm -rf "$BRORAY_ROUTES_CONFIG_NDMC_LOCK" 2>/dev/null || true ;;
-                esac
-                ;;
-            *)
-                kill -0 "$owner" 2>/dev/null ||
-                    rm -rf "$BRORAY_ROUTES_CONFIG_NDMC_LOCK" 2>/dev/null || true
-                ;;
-        esac
-
-        [ "$elapsed" -lt "$max_ticks" ] || return 125
-        if [ "$fast_wait" = true ]; then usleep 100000; else sleep 1; fi
-        elapsed=$((elapsed + 1))
-    done
-    return 125
-}
-
-broray_routes_config_ndmc_lock_release()
-{
-    local owner
-
-    owner="$(sed -n '1p' "$BRORAY_ROUTES_CONFIG_NDMC_LOCK/pid" 2>/dev/null)"
-    [ "$owner" = "$$" ] || return 0
-    rm -rf "$BRORAY_ROUTES_CONFIG_NDMC_LOCK" 2>/dev/null || true
-}
-
 broray_routes_config_ndmc_capture()
 {
-    local ndmc_bin command_text output error limit pid elapsed rc max_ticks fast_wait wait_limit lock_rc
-
-    ndmc_bin="$1"
-    command_text="$2"
-    output="$3"
-    error="$4"
-    limit="${5:-$BRORAY_ROUTES_CONFIG_COMMAND_TIMEOUT}"
-
-    broray_routes_static_dispatch_authorize "$command_text" || return $?
-
-    case "$limit" in ''|*[!0-9]*) return 1 ;; esac
-    [ "$limit" -gt 0 ] 2>/dev/null || return 1
-    : >"$output" || return 1
-    : >"$error" || return 1
-
-    wait_limit="${BRORAY_ROUTES_CONFIG_NDMC_LOCK_WAIT:-$((limit + 5))}"
-    lock_rc=0
-    broray_routes_config_ndmc_lock_acquire "$wait_limit" || lock_rc=$?
-    if [ "$lock_rc" -ne 0 ]; then
-        printf 'ROUTES_CONFIG_NDMC_LOCK_FAILED rc=%s\n' "$lock_rc" >"$error"
-        return "$lock_rc"
-    fi
-
-    "$ndmc_bin" -c "$command_text" >"$output" 2>"$error" &
-    pid=$!
-    elapsed=0
-    fast_wait=false
-    if command -v usleep >/dev/null 2>&1; then
-        fast_wait=true
-        max_ticks=$((limit * 10))
-    else
-        max_ticks="$limit"
-    fi
-    while kill -0 "$pid" 2>/dev/null; do
-        if [ "$elapsed" -ge "$max_ticks" ]; then
-            kill "$pid" 2>/dev/null || true
-            sleep 1
-            kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
-            wait "$pid" 2>/dev/null || true
-            printf '%s\n' 'ROUTES_CONFIG_NDMC_TIMEOUT' >>"$error"
-            broray_routes_config_ndmc_lock_release
-            return 124
-        fi
-        if [ "$fast_wait" = true ]; then
-            usleep 100000
-        else
-            sleep 1
-        fi
-        elapsed=$((elapsed + 1))
-    done
-
-    if wait "$pid" 2>/dev/null; then rc=0; else rc=$?; fi
-    broray_routes_config_ndmc_lock_release
-    return "$rc"
+    broray_routes_static_dispatch_authorize "$2" || return $?
+    . "$BRORAY_ROOT/lib/routes-ndmc.sh" || return 1
+    broray_routes_ndmc_capture "$@"
 }
 
 broray_routes_config_cache_fresh()
@@ -601,73 +492,22 @@ broray_routes_config_fetch()
 
 broray_routes_config_get_cache()
 {
-    local cache_dir tmp owner_pid attempt
-
-    cache_dir="$(dirname "$BRORAY_ROUTES_CONFIG_CACHE")"
+    local cache_dir guard
+    cache_dir="${BRORAY_ROUTES_CONFIG_CACHE%/*}"
+    [ ! -L "$cache_dir" ] || return 1
     mkdir -p "$cache_dir" || return 1
-
-    if broray_routes_config_cache_fresh "$BRORAY_ROUTES_CONFIG_CACHE"; then
-        return 0
-    fi
-
-    if [ -d "$BRORAY_ROUTES_CONFIG_LOCK" ]; then
-        owner_pid="$(sed -n '1p' "$BRORAY_ROUTES_CONFIG_LOCK/pid" 2>/dev/null)"
-
-        case "$owner_pid" in
-            ''|*[!0-9]*)
-                rm -rf "$BRORAY_ROUTES_CONFIG_LOCK" 2>/dev/null || true
-                ;;
-            *)
-                if ! kill -0 "$owner_pid" 2>/dev/null; then
-                    rm -rf "$BRORAY_ROUTES_CONFIG_LOCK" 2>/dev/null || true
-                fi
-                ;;
-        esac
-    fi
-
-    if mkdir "$BRORAY_ROUTES_CONFIG_LOCK" 2>/dev/null; then
-        printf '%s\n' "$$" >"$BRORAY_ROUTES_CONFIG_LOCK/pid"
-        tmp="$BRORAY_ROUTES_CONFIG_CACHE.new.$$"
-
-        if broray_routes_config_fetch "$tmp"; then
-            mv -f "$tmp" "$BRORAY_ROUTES_CONFIG_CACHE" || {
-                rm -f "$tmp"
-                rm -rf "$BRORAY_ROUTES_CONFIG_LOCK" 2>/dev/null || true
-                return 1
-            }
-
-            chmod 600 "$BRORAY_ROUTES_CONFIG_CACHE" 2>/dev/null || true
-            rm -rf "$BRORAY_ROUTES_CONFIG_LOCK" 2>/dev/null || true
-            return 0
-        fi
-
-        rm -f "$tmp"
-        rm -rf "$BRORAY_ROUTES_CONFIG_LOCK" 2>/dev/null || true
-
-        [ -s "$BRORAY_ROUTES_CONFIG_CACHE" ] &&
-            jq -e '
-                (.source == "running-config") and
-                ((.routes | type) == "array") and
-                ((.serializationComplete | type) == "boolean")
-            ' "$BRORAY_ROUTES_CONFIG_CACHE" >/dev/null 2>&1
-        return $?
-    fi
-
-    attempt=0
-    while [ "$attempt" -lt 4 ]; do
-        sleep 1
-        if broray_routes_config_cache_fresh "$BRORAY_ROUTES_CONFIG_CACHE"; then
-            return 0
-        fi
-        attempt=$((attempt + 1))
-    done
-
-    [ -s "$BRORAY_ROUTES_CONFIG_CACHE" ] &&
-        jq -e '
-            (.source == "running-config") and
-            ((.routes | type) == "array") and
-            ((.serializationComplete | type) == "boolean")
-        ' "$BRORAY_ROUTES_CONFIG_CACHE" >/dev/null 2>&1
+    broray_routes_config_cache_fresh "$BRORAY_ROUTES_CONFIG_CACHE" && return 0
+    # Old directory generations have no provable ownership. Preserve them.
+    [ ! -e "$BRORAY_ROUTES_CONFIG_LOCK" ] && [ ! -L "$BRORAY_ROUTES_CONFIG_LOCK" ] || return 1
+    guard="${BRORAY_OPS_GUARD:-$BRORAY_ROOT/bin/broray-ops-guard}"
+    BRORAY_ROUTES_CONFIG_CACHE="$BRORAY_ROUTES_CONFIG_CACHE" \
+    BRORAY_ROUTES_CONFIG_LOCK="$BRORAY_ROUTES_CONFIG_LOCK" \
+    BRORAY_ROUTES_CONFIG_NDMC="$BRORAY_ROUTES_CONFIG_NDMC" \
+    BRORAY_ROUTES_CONFIG_NDMC_LOCK="$BRORAY_ROUTES_CONFIG_NDMC_LOCK" \
+    BRORAY_ROUTES_CONFIG_COMMAND_TIMEOUT="$BRORAY_ROUTES_CONFIG_COMMAND_TIMEOUT" \
+    BRORAY_ROUTES_CONFIG_TTL="$BRORAY_ROUTES_CONFIG_TTL" \
+    "$guard" "$BRORAY_ROUTES_CONFIG_LOCK.guard" "${BRORAY_OPS_ASH:-/opt/bin/ash}" \
+      "$BRORAY_ROOT/lib/routes-config-cache.sh"
 }
 
 broray_routes_config_snapshot()

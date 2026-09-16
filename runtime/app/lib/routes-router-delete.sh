@@ -131,70 +131,16 @@ broray_routes_delete_lock_release()
 
 broray_routes_delete_kill_active()
 {
-    [ -n "$BRORAY_ROUTES_DELETE_ACTIVE_PID" ] || return 0
-
-    if kill -0 "$BRORAY_ROUTES_DELETE_ACTIVE_PID" 2>/dev/null; then
-        kill "$BRORAY_ROUTES_DELETE_ACTIVE_PID" 2>/dev/null || true
-        sleep 1
-
-        if kill -0 "$BRORAY_ROUTES_DELETE_ACTIVE_PID" 2>/dev/null; then
-            kill -9 "$BRORAY_ROUTES_DELETE_ACTIVE_PID" 2>/dev/null || true
-        fi
-    fi
-
-    wait "$BRORAY_ROUTES_DELETE_ACTIVE_PID" 2>/dev/null || true
-    BRORAY_ROUTES_DELETE_ACTIVE_PID=""
+    # Commands run synchronously; the native runner drains its own children.
+    :
 }
 
 broray_routes_delete_ndmc()
 {
-    local command_text output_file error_file limit elapsed rc max_ticks fast_wait
-
-    command_text="$1"
-    output_file="$2"
-    error_file="$3"
-    limit="${4:-8}"
-
     command -v broray_routes_static_dispatch_authorize >/dev/null 2>&1 || return 126
-    broray_routes_static_dispatch_authorize "$command_text" || return $?
-
-    : >"$output_file"
-    : >"$error_file"
-
-    "$BRORAY_ROUTES_DELETE_NDMC" -c "$command_text" >"$output_file" 2>"$error_file" &
-    BRORAY_ROUTES_DELETE_ACTIVE_PID=$!
-    elapsed=0
-    fast_wait=false
-    if command -v usleep >/dev/null 2>&1; then
-        fast_wait=true
-        max_ticks=$((limit * 10))
-    else
-        max_ticks="$limit"
-    fi
-
-    while kill -0 "$BRORAY_ROUTES_DELETE_ACTIVE_PID" 2>/dev/null
-    do
-        if [ "$elapsed" -ge "$max_ticks" ]; then
-            broray_routes_delete_kill_active
-            return 124
-        fi
-
-        if [ "$fast_wait" = true ]; then
-            usleep 100000
-        else
-            sleep 1
-        fi
-        elapsed=$((elapsed + 1))
-    done
-
-    if wait "$BRORAY_ROUTES_DELETE_ACTIVE_PID" 2>/dev/null; then
-        rc=0
-    else
-        rc=$?
-    fi
-
-    BRORAY_ROUTES_DELETE_ACTIVE_PID=""
-    return "$rc"
+    broray_routes_static_dispatch_authorize "$1" || return $?
+    . "$BRORAY_ROOT/lib/routes-ndmc.sh" || return 1
+    broray_routes_ndmc_capture "$BRORAY_ROUTES_DELETE_NDMC" "$1" "$2" "$3" "${4:-8}"
 }
 
 broray_routes_delete_transaction_write()

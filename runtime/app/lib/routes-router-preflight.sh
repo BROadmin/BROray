@@ -60,22 +60,8 @@ broray_routes_preflight_lock_release()
 
 broray_routes_preflight_kill_active()
 {
-    local pid
-
-    pid="$BRORAY_ROUTES_PREFLIGHT_ACTIVE_PID"
-    [ -n "$pid" ] || return 0
-
-    if kill -0 "$pid" 2>/dev/null; then
-        kill "$pid" 2>/dev/null || true
-        sleep 1
-
-        if kill -0 "$pid" 2>/dev/null; then
-            kill -9 "$pid" 2>/dev/null || true
-        fi
-    fi
-
-    wait "$pid" 2>/dev/null || true
-    BRORAY_ROUTES_PREFLIGHT_ACTIVE_PID=""
+    # The synchronous native runner owns command termination and tree drain.
+    :
 }
 
 broray_routes_preflight_cleanup()
@@ -107,48 +93,9 @@ broray_routes_preflight_read_command_allowed()
 
 broray_routes_preflight_ndmc()
 {
-    local command_text output_file error_file limit elapsed timed_out result
-
-    command_text="$1"
-    output_file="$2"
-    error_file="$3"
-    limit="${4:-8}"
-
-    broray_routes_preflight_read_command_allowed "$command_text" || return 126
-
-    : >"$output_file"
-    : >"$error_file"
-
-    "$BRORAY_ROUTES_PREFLIGHT_NDMC" -c "$command_text" >"$output_file" 2>"$error_file" &
-    BRORAY_ROUTES_PREFLIGHT_ACTIVE_PID=$!
-    elapsed=0
-    timed_out=false
-
-    while kill -0 "$BRORAY_ROUTES_PREFLIGHT_ACTIVE_PID" 2>/dev/null
-    do
-        if [ "$elapsed" -ge "$limit" ]; then
-            timed_out=true
-            broray_routes_preflight_kill_active
-            break
-        fi
-
-        sleep 1
-        elapsed=$((elapsed + 1))
-    done
-
-    if [ "$timed_out" = true ]; then
-        BRORAY_ROUTES_PREFLIGHT_ACTIVE_PID=""
-        return 124
-    fi
-
-    if wait "$BRORAY_ROUTES_PREFLIGHT_ACTIVE_PID" 2>/dev/null; then
-        result=0
-    else
-        result=$?
-    fi
-
-    BRORAY_ROUTES_PREFLIGHT_ACTIVE_PID=""
-    return "$result"
+    broray_routes_preflight_read_command_allowed "$1" || return 126
+    . "$BRORAY_ROOT/lib/routes-ndmc.sh" || return 1
+    broray_routes_ndmc_capture "$BRORAY_ROUTES_PREFLIGHT_NDMC" "$1" "$2" "$3" "${4:-8}"
 }
 
 broray_routes_preflight_fetch_rci__shadowed_legacy_1_unused()

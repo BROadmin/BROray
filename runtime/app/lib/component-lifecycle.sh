@@ -1,9 +1,54 @@
 #!/opt/bin/ash
 
-# Единая точка оркестрации удаления. Здесь нет реализации маршрутов,
-# управляемый интерфейс Keenetic, серверов или Xray — вызываются только публичные интерфейсы модулей.
+# Оркестрация удаления внутри уже принадлежащей ему системной транзакции.
 
 BRORAY_LIFECYCLE_BASE="${BRORAY_LIFECYCLE_BASE:-${BRORAY_BASE:-/opt/broray}}"
+
+broray_lifecycle_uninstall_owner() {
+    [ -n "${operation_id:-}" ] || return 1
+    broray_system_global_control_validate uninstall "$operation_id" &&
+        broray_tx_control_owner_assert_self "$BRORAY_GLOBAL_LOCK/owner-identity.tsv"
+}
+
+# Internal synchronous calls must not enter a second background job beneath
+# the uninstall fence. The actual native OPKG control mutex spans the call;
+# its FIFO writer is inherited by descendants, so owner death cannot admit a
+# successor while an old component is still running. No public bypass flag.
+broray_lifecycle_component() {
+    local component component_rc
+    component="$1"; shift
+    case "$component" in route-delete|route-export|server-deactivate) ;; *) return 64 ;; esac
+    [ -z "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || return 1
+    broray_lifecycle_uninstall_owner || return 1
+    broray_tx_control_transition_begin || return 1
+    component_rc=1
+    if broray_tx_control_transition_assert && broray_lifecycle_uninstall_owner; then
+        component_rc=0
+        (
+            case "$component" in
+                route-delete)
+                    . "$BRORAY_LIFECYCLE_BASE/lib/routes-router-delete.sh" || exit 1
+                    trap broray_routes_delete_cleanup EXIT
+                    trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
+                    broray_routes_router_delete_run "$1"
+                    ;;
+                route-export)
+                    # Separate trap/lease scopes, as in the original CLI.
+                    (. "$BRORAY_LIFECYCLE_BASE/lib/routes-export-build.sh" &&
+                        broray_routes_export_build_run "$1") || exit $?
+                    . "$BRORAY_LIFECYCLE_BASE/lib/routes-router-sync.sh" || exit 1
+                    broray_routes_sync_apply "$1"
+                    ;;
+                server-deactivate)
+                    . "$BRORAY_LIFECYCLE_BASE/lib/server-service.sh" || exit 1
+                    broray_server_deactivate_commit
+                    ;;
+            esac
+        ) || component_rc=$?
+    fi
+    broray_tx_control_transition_end || return 1
+    return "$component_rc"
+}
 
 broray_lifecycle_routes_remove_all() {
     routes_cli="$BRORAY_LIFECYCLE_BASE/bin/broray-routes"
@@ -37,7 +82,7 @@ broray_lifecycle_routes_remove_all() {
         )" || return 1
 
         case "$installed" in
-            true) "$routes_cli" delete "$routes_bundle_id" || return 1 ;;
+            true) broray_lifecycle_component route-delete "$routes_bundle_id" || return 1 ;;
             false) ;;
             *) return 1 ;;
         esac
@@ -80,7 +125,7 @@ broray_lifecycle_web_publish_delete() {
 broray_lifecycle_servers_deactivate() {
     [ -x "$BRORAY_LIFECYCLE_BASE/bin/broray-servers" ] || return 0
     [ -s "$BRORAY_LIFECYCLE_BASE/config/active-server" ] || return 0
-    "$BRORAY_LIFECYCLE_BASE/bin/broray-servers" deactivate
+    broray_lifecycle_component server-deactivate
 }
 
 broray_lifecycle_xray_stop() {

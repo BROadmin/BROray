@@ -75,103 +75,16 @@ broray_routes_router_export_lock_release()
 
 broray_routes_router_export_kill_active()
 {
-    local pid watchdog
-
-    pid="$BRORAY_ROUTES_ROUTER_EXPORT_ACTIVE_PID"
-    watchdog="$BRORAY_ROUTES_ROUTER_EXPORT_WATCHDOG_PID"
-
-    if broray_routes_router_export_is_pid "$watchdog" &&
-       kill -0 "$watchdog" 2>/dev/null
-    then
-        kill "$watchdog" 2>/dev/null || true
-        wait "$watchdog" 2>/dev/null || true
-    fi
-
-    BRORAY_ROUTES_ROUTER_EXPORT_WATCHDOG_PID=""
-
-    if broray_routes_router_export_is_pid "$pid" &&
-       kill -0 "$pid" 2>/dev/null
-    then
-        kill "$pid" 2>/dev/null || true
-        sleep 1
-
-        if kill -0 "$pid" 2>/dev/null; then
-            kill -9 "$pid" 2>/dev/null || true
-        fi
-    fi
-
-    if broray_routes_router_export_is_pid "$pid"; then
-        wait "$pid" 2>/dev/null || true
-    fi
-
-    BRORAY_ROUTES_ROUTER_EXPORT_ACTIVE_PID=""
+    # Commands run synchronously; the native runner drains its own children.
+    :
 }
 
 broray_routes_router_export_ndmc()
 {
-    local command_text output_file error_file limit timeout_file
-    local command_pid watchdog_pid result timed_out
-
-    command_text="$1"
-    output_file="$2"
-    error_file="$3"
-    limit="${4:-8}"
-    timeout_file="$output_file.timeout"
-
     command -v broray_routes_static_dispatch_authorize >/dev/null 2>&1 || return 126
-    broray_routes_static_dispatch_authorize "$command_text" || return $?
-
-    : >"$output_file"
-    : >"$error_file"
-    rm -f "$timeout_file"
-
-    "$BRORAY_ROUTES_ROUTER_EXPORT_NDMC" -c "$command_text" \
-        >"$output_file" 2>"$error_file" &
-
-    command_pid=$!
-    BRORAY_ROUTES_ROUTER_EXPORT_ACTIVE_PID="$command_pid"
-
-    (
-        sleep "$limit"
-
-        if kill -0 "$command_pid" 2>/dev/null; then
-            : >"$timeout_file"
-            kill "$command_pid" 2>/dev/null || true
-            sleep 1
-
-            if kill -0 "$command_pid" 2>/dev/null; then
-                kill -9 "$command_pid" 2>/dev/null || true
-            fi
-        fi
-    ) &
-
-    watchdog_pid=$!
-    BRORAY_ROUTES_ROUTER_EXPORT_WATCHDOG_PID="$watchdog_pid"
-
-    if wait "$command_pid" 2>/dev/null; then
-        result=0
-    else
-        result=$?
-    fi
-
-    if kill -0 "$watchdog_pid" 2>/dev/null; then
-        kill "$watchdog_pid" 2>/dev/null || true
-    fi
-
-    wait "$watchdog_pid" 2>/dev/null || true
-
-    BRORAY_ROUTES_ROUTER_EXPORT_ACTIVE_PID=""
-    BRORAY_ROUTES_ROUTER_EXPORT_WATCHDOG_PID=""
-
-    timed_out=false
-    [ ! -f "$timeout_file" ] || timed_out=true
-    rm -f "$timeout_file"
-
-    if [ "$timed_out" = true ]; then
-        return 124
-    fi
-
-    return "$result"
+    broray_routes_static_dispatch_authorize "$1" || return $?
+    . "$BRORAY_ROOT/lib/routes-ndmc.sh" || return 1
+    broray_routes_ndmc_capture "$BRORAY_ROUTES_ROUTER_EXPORT_NDMC" "$1" "$2" "$3" "${4:-8}"
 }
 
 broray_routes_router_export_fetch_rci__shadowed_legacy_1_unused()

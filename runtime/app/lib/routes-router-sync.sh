@@ -124,61 +124,16 @@ broray_routes_sync_lock_release()
 
 broray_routes_sync_kill_active()
 {
-    [ -n "$BRORAY_SYNC_ACTIVE_PID" ] || return 0
-    if kill -0 "$BRORAY_SYNC_ACTIVE_PID" 2>/dev/null; then
-        kill "$BRORAY_SYNC_ACTIVE_PID" 2>/dev/null || true
-        sleep 1
-        kill -0 "$BRORAY_SYNC_ACTIVE_PID" 2>/dev/null && kill -9 "$BRORAY_SYNC_ACTIVE_PID" 2>/dev/null || true
-    fi
-    wait "$BRORAY_SYNC_ACTIVE_PID" 2>/dev/null || true
-    BRORAY_SYNC_ACTIVE_PID=""
+    # Commands run synchronously; the native runner drains its own children.
+    :
 }
 
 broray_routes_sync_ndmc()
 {
-    local command_text output error limit elapsed rc ndmc_bin max_ticks fast_wait
-
-    command_text="$1"
-    output="$2"
-    error="$3"
-    limit="${4:-10}"
     command -v broray_routes_static_dispatch_authorize >/dev/null 2>&1 || return 126
-    broray_routes_static_dispatch_authorize "$command_text" || return $?
-    : >"$output"
-    : >"$error"
-
-    case "$BRORAY_SYNC_NDMC" in
-        */*) ndmc_bin="$BRORAY_SYNC_NDMC" ;;
-        *) ndmc_bin="$(command -v "$BRORAY_SYNC_NDMC" 2>/dev/null || true)" ;;
-    esac
-    [ -n "$ndmc_bin" ] && [ -x "$ndmc_bin" ] || return 127
-
-    "$ndmc_bin" -c "$command_text" >"$output" 2>"$error" &
-    BRORAY_SYNC_ACTIVE_PID=$!
-    elapsed=0
-    fast_wait=false
-    if command -v usleep >/dev/null 2>&1; then
-        fast_wait=true
-        max_ticks=$((limit * 10))
-    else
-        max_ticks="$limit"
-    fi
-    while kill -0 "$BRORAY_SYNC_ACTIVE_PID" 2>/dev/null; do
-        if [ "$elapsed" -ge "$max_ticks" ]; then
-            broray_routes_sync_kill_active
-            return 124
-        fi
-        if [ "$fast_wait" = true ]; then
-            usleep 100000
-        else
-            sleep 1
-        fi
-        elapsed=$((elapsed + 1))
-    done
-
-    if wait "$BRORAY_SYNC_ACTIVE_PID" 2>/dev/null; then rc=0; else rc=$?; fi
-    BRORAY_SYNC_ACTIVE_PID=""
-    return "$rc"
+    broray_routes_static_dispatch_authorize "$1" || return $?
+    . "$BRORAY_ROOT/lib/routes-ndmc.sh" || return 1
+    broray_routes_ndmc_capture "$BRORAY_SYNC_NDMC" "$1" "$2" "$3" "${4:-10}"
 }
 
 broray_routes_sync_save_config()

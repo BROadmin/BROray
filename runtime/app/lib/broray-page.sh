@@ -2967,22 +2967,24 @@ broray_system_worker_uninstall() {
             while IFS= read -r restore_bundle
             do
                 [ -n "$restore_bundle" ] || continue
-                "$BRORAY_BASE/bin/broray-routes" export "$restore_bundle" \
+                broray_lifecycle_component route-export "$restore_bundle" \
                     >>"$BRORAY_LOG" 2>&1 || restore_failed=true
             done <"$uninstall_bundles"
         fi
 
-        if [ -n "$uninstall_active" ]; then
-            "$BRORAY_BASE/bin/broray-servers" activate "$uninstall_active" \
-                >>"$BRORAY_LOG" 2>&1 || restore_failed=true
-            if [ "$uninstall_xray_running" != true ]; then
+        # The verified snapshot already restored config.json, active-server
+        # and policy. Start that exact configuration; a new activation job
+        # would conflict with our uninstall fence and regenerate the snapshot.
+        # Do not hold the native OPKG FIFO across a persistent daemon start.
+        if broray_lifecycle_uninstall_owner; then
+            if [ "$uninstall_xray_running" = true ]; then
+                /opt/bin/ash "$BRORAY_INIT_ROOT/S24broray" restart \
+                    >>"$BRORAY_LOG" 2>&1 || restore_failed=true
+            else
                 /opt/bin/ash "$BRORAY_INIT_ROOT/S24broray" stop \
                     >>"$BRORAY_LOG" 2>&1 || restore_failed=true
             fi
-        elif [ "$uninstall_xray_running" = true ]; then
-            /opt/bin/ash "$BRORAY_INIT_ROOT/S24broray" start \
-                >>"$BRORAY_LOG" 2>&1 || restore_failed=true
-        fi
+        else restore_failed=true; fi
 
         broray_system_uninstall_aux_services_restore || restore_failed=true
 

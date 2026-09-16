@@ -1005,6 +1005,14 @@ broray_server_deactivate()
 {
     broray_job_checkpoint committing || return $?
     BRORAY_JOB_UNRESOLVED=true
+    broray_server_deactivate_commit || return $?
+    BRORAY_JOB_UNRESOLVED=false
+}
+
+# Shared commit body. The public worker enters its protected phase above;
+# uninstall calls it only under its verified owner and native control mutex.
+broray_server_deactivate_commit()
+{
     previous_active_id=""
 
     if [ -f "$BRORAY_ACTIVE_SERVER_FILE" ]; then
@@ -1038,8 +1046,6 @@ broray_server_deactivate()
     rm -f \
         "$BRORAY_ACTIVE_SERVER_FILE" \
         "$BRORAY_INTERFACE_STATUS" || return 1
-    BRORAY_JOB_UNRESOLVED=false
-
     jq -n \
         --arg previousActiveServerId "$previous_active_id" \
         --arg updatedAt "$(broray_server_now)" '{
