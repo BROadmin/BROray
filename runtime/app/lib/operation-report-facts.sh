@@ -77,7 +77,7 @@ ops_report_services()
 {
     local name data records
     records='[]'
-    for name in subscriptions auto-switch connection-monitor; do
+    for name in subscriptions auto-switch connection-monitor home-snapshot interface-reconcile; do
         data="$(ops_report_service "$name" 2>/dev/null)" || data=''
         if [ -z "$data" ]; then
             data="$(jq -nc --arg name "$name" '{service:$name,state:"ambiguous",running:null,ready:false,complete:false,errorCode:"SERVICE_STATUS_UNAVAILABLE"}')" || return 1
@@ -85,4 +85,65 @@ ops_report_services()
         records="$(jq -nc --argjson records "$records" --argjson data "$data" '$records+[$data]')" || return 1
     done
     printf '%s\n' "$records"
+}
+
+# Read the already-collected Home cache without invoking its refresh path.
+# Its PID is only a candidate; it is never proof that a service is running.
+ops_report_home()
+{
+    local module file now
+    module="$1"
+    case "$module" in xray|broray) ;; *) return 1 ;; esac
+    file="$OPS_APP/run/home-snapshots/$module.json"
+    ops_report_file_safe "$file" 131072 || return 1
+    now="$(date '+%s')"
+    jq -ces -L "$OPS_APP/lib" --arg module "$module" --argjson now "$now" '
+      include "operation-public"; include "operation-report-public";
+      select(length==1) | .[0] |
+      select(.schemaVersion==1 and .module==$module and (.data|type)=="object" and
+        (.capturedEpoch|type)=="number" and .capturedEpoch==(.capturedEpoch|floor) and
+        .capturedEpoch>0 and .capturedEpoch<=$now and ($now-.capturedEpoch)<=600 and
+        (.capturedAt|timestamp)!=null) |
+      {cache:{capturedAt:(.capturedAt|timestamp),ageSeconds:($now-.capturedEpoch),
+        freshness:(if ($now-.capturedEpoch)<=90 then "fresh" else "stale" end)},
+       data:(if $module=="xray" then
+         {pid:(.data.pid|diagnostic_pid),version:(.data.version|version_value)}
+       else .data.lastOperation | updater_public end)}' "$file" 2>/dev/null
+}
+
+ops_report_xray()
+(
+    local cached pid owner started after identity state
+    cached="$(ops_report_home xray)" || cached='{"cache":null,"data":{"pid":null,"version":null}}'
+    pid="$(printf '%s\n' "$cached" | jq -r '.data.pid // empty')"
+    identity=null; state=unknown
+    # Use the actual kernel and exact persistent executable/config pair. Do
+    # not accept test owners, the cached running boolean, or a validator PID.
+    OPS_PROC=/proc
+    unset BRORAY_OPS_TEST_IDENTITIES
+    BRORAY_XRAY_BINARY="$OPS_APP/runtime/xray"
+    BRORAY_XRAY_CONFIG="$OPS_APP/config/config.json"
+    . "$OPS_APP/lib/xray-process.sh" || exit 1
+    if [ -n "$pid" ]; then
+        owner="$(broray_ops_capture_owner "$pid")" || owner=''
+        started="$(broray_xray_runtime_identity "$pid")" || started=''
+        after="$(broray_ops_capture_owner "$pid")" || after=''
+        if [ -n "$owner" ] && [ "$owner" = "$after" ] && [ -n "$started" ] &&
+          [ "$(printf '%s\n' "$owner" | jq -r '.startTicks')" = "$started" ]; then
+            identity="$(printf '%s\n' "$owner" | jq -c '{verified:true,pid,startTicks,sameBoot:true,role:"persistent-xray"}')"
+            state=running
+        fi
+    fi
+    jq -nc --argjson cached "$cached" --argjson identity "$identity" --arg state "$state" '
+      {state:$state,identity:$identity,cachedVersion:$cached.data.version,cache:$cached.cache,
+       complete:($identity!=null),errorCode:(if $identity==null then "XRAY_IDENTITY_UNCONFIRMED" else null end)}'
+)
+
+ops_report_updater()
+{
+    local cached
+    cached="$(ops_report_home broray)" || cached='{"cache":null,"data":null}'
+    jq -nc --argjson cached "$cached" '
+      {lastOperation:$cached.data,cache:$cached.cache,liveState:"unknown",
+       complete:($cached.data!=null),errorCode:(if $cached.data==null then "UPDATER_STATUS_UNAVAILABLE" else null end)}'
 }

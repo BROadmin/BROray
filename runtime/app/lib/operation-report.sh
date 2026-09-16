@@ -2,7 +2,7 @@
 # Read cached, bounded facts only. No config/log text, network probes or repairs.
 ops_report()
 {
-    local snapshot journal build arch kernel uptime request pending report automation services
+    local snapshot journal build arch kernel uptime request pending report automation services xray updater
     . "$OPS_APP/lib/operation-report-facts.sh" || return 1
     snapshot="$(ops_status)" || snapshot='{"ok":false,"complete":false,"operations":[],"errors":["STATE_UNAVAILABLE"],"automationPaused":null,"globalFence":"unknown"}'
     journal="$(ops_journal_snapshot)" || journal='{"complete":false,"events":[],"errors":["JOURNAL_UNAVAILABLE"],"truncated":false}'
@@ -22,18 +22,28 @@ ops_report()
     pending=clear; ops_pending_domain && pending=pending
     automation="$(ops_report_automation)" || automation='{"autoSwitch":null,"serverCheck":null,"subscriptionUpdate":null,"complete":false,"errors":["AUTOMATION_SETTINGS_UNAVAILABLE"]}'
     services="$(ops_report_services)" || services='[]'
+    xray="$(ops_report_xray)" || xray='{"state":"unknown","identity":null,"complete":false,"errorCode":"XRAY_IDENTITY_UNCONFIRMED"}'
+    updater="$(ops_report_updater)" || updater='{"lastOperation":null,"complete":false,"errorCode":"UPDATER_STATUS_UNAVAILABLE"}'
     report="$(jq -nc --arg now "$(ops_now)" --arg arch "$arch" --argjson uptime "$uptime" \
       --argjson build "$build" --argjson snapshot "$snapshot" --argjson journal "$journal" \
       --arg kernel "$kernel" --argjson automation "$automation" --argjson services "$services" \
+      --argjson xray "$xray" --argjson updater "$updater" \
       --arg request "$request" --arg pending "$pending" '
       {schemaVersion:1,reportKind:"broray-diagnostics",capturedAt:$now,redactionPolicy:"allowlist-v1",
-       complete:false,unavailable:(["keeneticOS","serviceIdentities","vpnContinuity"]+
+       complete:false,snapshotConsistent:false,consistency:{operations:"serialized",runtime:"sampled"},
+       summary:(([$snapshot.operations[]|select(.running!=false)]|length|tostring)+" активных операций; "+
+         ([$services[]|select(.complete==true)]|length|tostring)+" из 5 фоновых служб проверены. Сетевая непрерывность этим отчётом не проверяется."),
+       unavailable:(["keeneticOS","vpnContinuity","updaterLiveIdentity"]+
+         (if ($services|length)==5 and all($services[];.complete==true) then [] else ["serviceStates"] end)+
+         (if $xray.complete then [] else ["xrayIdentity"] end)+
+         (if $updater.complete then [] else ["updaterStatus"] end)+
          (if $kernel=="" then ["kernel"] else [] end)+
          (if $automation.complete then [] else ["automationSettings"] end)),
        build:{appVersion:$build.appVersion,candidateId:$build.candidateId,webuiBuild:$build.webuiBuild},
        platform:{architecture:$arch,kernel:(if $kernel=="" then null else $kernel end),uptimeSeconds:$uptime},
-       services:{xray:"unknown",scheduler:([$services[]|select(.service=="subscriptions")|.state][0] // "unknown"),updater:"unknown"},
+       services:{xray:$xray.state,scheduler:([$services[]|select(.service=="subscriptions")|.state][0] // "unknown"),updater:"unknown"},
        serviceDetails:$services,
+       runtimeDetails:{xray:$xray,updater:$updater},
        automation:{paused:$snapshot.automationPaused,subscriptionUpdate:$automation.subscriptionUpdate,
          serverCheck:$automation.serverCheck,autoSwitch:$automation.autoSwitch},
        automationDetails:($automation|del(.autoSwitch,.serverCheck,.subscriptionUpdate)),
@@ -41,7 +51,8 @@ ops_report()
        fences:{global:$snapshot.globalFence,updaterRequest:$request,domainPending:$pending},
        events:$journal.events,journal:{complete:$journal.complete,truncated:$journal.truncated},
        snapshotComplete:$snapshot.complete,errors:(($snapshot.errors+$journal.errors+$automation.errors+
-         [$services[]|select(.complete!=true)|.errorCode])|unique)}')" || return 1
+         [$services[]|select(.complete!=true)|.errorCode]+
+         [$xray,$updater|select(.complete!=true)|.errorCode])|unique)}')" || return 1
     [ "$(printf '%s' "$report" | wc -c)" -le 1048576 ] || return 1
     printf '%s\n' "$report"
 }
