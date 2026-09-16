@@ -875,7 +875,7 @@
 
         setField(card, "operation-progress-title", operationProgressTitle(progress));
         setField(card, "operation-progress-counter", current + " из " + total);
-        setField(card, "operation-progress-message", progress.message || "Операция выполняется.");
+        setField(card, "operation-progress-message", (progress.message || "Операция выполняется.") + (progress.running ? " Остановка операций с маршрутами недоступна." : ""));
         route = progress.currentRoute ? "Текущий маршрут: " + progress.currentRoute : "";
         var routeNode = card.querySelector('[data-field="operation-progress-route"]');
         if (routeNode) {
@@ -896,8 +896,8 @@
         var stopButton = card.querySelector('[data-action="stop"]');
         var resumeButton = card.querySelector('[data-action="resume"]');
         if (stopButton) {
-            stopButton.hidden = !progress.running;
-            stopButton.disabled = Boolean(progress.stopRequested);
+            stopButton.hidden = true;
+            stopButton.disabled = true;
             setButtonLabel(stopButton, progress.stopRequested ? "Остановка запрошена…" : "Остановить после текущего маршрута", "stop");
         }
         if (resumeButton) {
@@ -1098,8 +1098,8 @@
 
         deleteButton.disabled = busy || progressResumable || !state.installedVersion;
         if (stopButton) {
-            stopButton.hidden = !progressRunning;
-            stopButton.disabled = Boolean(progress && progress.stopRequested);
+            stopButton.hidden = true;
+            stopButton.disabled = true;
         }
         if (resumeButton) {
             resumeButton.hidden = !progressResumable;
@@ -1549,37 +1549,9 @@
         });
     }
 
-    function requestStop(bundle, buttonNode) {
-        if (!bundle || !buttonNode || busyBundles[bundle.id]) return Promise.resolve(null);
-        busyBundles[bundle.id] = "stop";
-        buttonNode.setAttribute("aria-busy", "true");
-        setButtonLabel(buttonNode, "Остановка…", "stop");
-        renderAll();
-
-        return withTimeout(request("/api/routes/stop.cgi?bundleId=" + encodeURIComponent(bundle.id), {
-            method: "POST",
-            credentials: "same-origin",
-            headers: {"Accept": "application/json"},
-            body: {}
-        }), REQUEST_TIMEOUT_MS).then(function (progress) {
-            window.BROrayUI.toast(
-                progress && progress.message ? progress.message : "Запрошена безопасная остановка после текущего маршрута.",
-                "success"
-            );
-            if (window.BROrayRoutesOperationUI) return window.BROrayRoutesOperationUI.refresh();
-            return progress;
-        }).catch(function (error) {
-            if (error && (error.status === 401 || error.code === "AUTH_REQUIRED" || error.code === "SESSION_REQUIRED")) {
-                window.BROrayUI.redirectToLogin();
-                return null;
-            }
-            window.BROrayUI.toast(error && error.message ? error.message : "Не удалось запросить остановку операции.", "error");
-            return null;
-        }).then(function (value) {
-            delete busyBundles[bundle.id];
-            buttonNode.removeAttribute("aria-busy");
-            return refreshAllStatesAfterOperation().then(function () { return value; });
-        });
+    function requestStop() {
+        window.BROrayUI.toast("Остановка операций с маршрутами недоступна. Дождитесь завершения операции.", "warning");
+        return Promise.resolve(null);
     }
 
     function onAction(event) {

@@ -47,6 +47,12 @@
     "app/lib/routes-router-sync.sh",
     "app/lib/routes-router-delete.sh",
     "app/lib/routes-user-import.sh",
-    "app/lib/routes-api-operation.sh"
+    "app/lib/routes-api-operation.sh",
+    "app/bin/broray-routes",
+    "app/lib/routes-operation-progress.sh",
+    "app/lib/routes-page-summary.sh",
+    "app/web-new/api/routes/stop.cgi",
+    "app/web-new/assets/js/routes-operation.js",
+    "app/web-new/assets/js/routes-catalog.js"
   ]
 }

@@ -72,7 +72,7 @@
 
         byId("routes-operation-float-title").textContent = operationTitle(data) + (data.bundleName ? " · " + data.bundleName : "");
         byId("routes-operation-float-counter").textContent = counterText;
-        byId("routes-operation-float-message").textContent = progress.message || "Операция выполняется.";
+        byId("routes-operation-float-message").textContent = (progress.message || "Операция выполняется.") + (data.running ? " Остановка операций с маршрутами недоступна." : "");
         byId("routes-operation-float-current").textContent = progress.currentRoute ? "Текущий маршрут: " + progress.currentRoute : "";
         byId("routes-operation-float-current").hidden = !progress.currentRoute;
 
@@ -95,8 +95,8 @@
 
         stop = byId("routes-operation-float-stop");
         resume = byId("routes-operation-float-resume");
-        stop.hidden = !data.running || data.canStop === false;
-        stop.disabled = Boolean(progress.stopRequested);
+        stop.hidden = true;
+        stop.disabled = true;
         resume.hidden = !data.resumable || data.running;
         resume.disabled = data.running;
 
@@ -170,20 +170,7 @@
     }
 
     function requestStop() {
-        if (!current || !current.bundleId || !current.running) return;
-        var button = byId("routes-operation-float-stop");
-        button.disabled = true;
-        request("/api/routes/stop.cgi?bundleId=" + encodeURIComponent(current.bundleId), {
-            method: "POST",
-            credentials: "same-origin",
-            body: {}
-        }).then(function () {
-            window.BROrayUI.toast("Остановка будет выполнена после текущего маршрута.", "warning");
-            return refresh();
-        }).catch(function (error) {
-            button.disabled = false;
-            window.BROrayUI.toast(error && error.message ? error.message : "Не удалось запросить остановку.", "error");
-        });
+        window.BROrayUI.toast("Остановка операций с маршрутами недоступна. Дождитесь завершения операции.", "warning");
     }
 
     function requestResume() {

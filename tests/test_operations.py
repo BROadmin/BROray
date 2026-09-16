@@ -295,7 +295,11 @@ class Operations(unittest.TestCase):
     def test_report_excludes_secrets_and_marks_unavailable_components(self):
         a=self.begin();result=self.call('report');raw=json.dumps(result)
         self.assertEqual(result['reportKind'],'broray-diagnostics')
-        self.assertFalse(result['complete']);self.assertIn('serviceIdentities',result['unavailable'])
+        self.assertFalse(result['complete'])
+        self.assertEqual({s['service'] for s in result['serviceDetails']},
+                         {'subscriptions','auto-switch','connection-monitor','home-snapshot','interface-reconcile'})
+        self.assertIn('updaterLiveIdentity',result['unavailable'])
+        self.assertIn('vpnContinuity',result['unavailable'])
         self.assertNotIn(a['token'],raw);self.assertNotIn(self.launch,raw);self.assertNotIn(self.owner['commandDigest'],raw)
         self.assertEqual(result['fences']['global'],'managed_active')
         self.assertLess(len(raw.encode()),1048576)

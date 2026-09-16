@@ -150,6 +150,7 @@ broray_routes_progress_write()
         {
             schemaVersion: 2,
             kind: "routes",
+            canStop: false,
             bundleId: $bundleId,
             operation: $operation,
             phase: $phase,
@@ -347,49 +348,15 @@ broray_routes_progress_pause()
 
 broray_routes_progress_stop_requested()
 {
-    local bundle stop_file
-
-    bundle="${1:-$BRORAY_ROUTES_PROGRESS_BUNDLE}"
-    broray_routes_progress_bundle_valid "$bundle" || return 1
-    stop_file="$BRORAY_ROUTES_PROGRESS_DIR/$bundle.stop"
-    [ -f "$stop_file" ]
+    # Route work is protected throughout. Ignore old user cancellation markers.
+    return 1
 }
 
 broray_routes_progress_request_stop()
 {
-    local bundle file stop_file temp now
-
-    bundle="${1:-}"
-    broray_routes_progress_bundle_valid "$bundle" || return 1
-    file="$BRORAY_ROUTES_PROGRESS_DIR/$bundle.json"
-    stop_file="$BRORAY_ROUTES_PROGRESS_DIR/$bundle.stop"
-    [ -r "$file" ] || return 2
-    jq -e '.running == true and (.operation != null)' "$file" >/dev/null 2>&1 || return 3
-
-    mkdir -p "$BRORAY_ROUTES_PROGRESS_DIR" || return 1
-    now="$(broray_routes_progress_now)"
-    temp="$stop_file.new.$$"
-    jq -n --arg bundleId "$bundle" --arg requestedAt "$now" --argjson requestedByPid "$$" '
-        {
-            schemaVersion: 1,
-            bundleId: $bundleId,
-            requestedAt: $requestedAt,
-            requestedByPid: $requestedByPid
-        }
-    ' >"$temp" || { rm -f "$temp"; return 1; }
-    chmod 644 "$temp" 2>/dev/null || true
-    mv -f "$temp" "$stop_file" || return 1
-
-    temp="$file.new.$$"
-    jq --arg now "$now" '
-        .stopRequested = true |
-        .phase = "stopping" |
-        .message = "Остановка запрошена. Текущий маршрут будет завершён." |
-        .updatedAt = $now
-    ' "$file" >"$temp" || { rm -f "$temp"; return 1; }
-    chmod 644 "$temp" 2>/dev/null || true
-    mv -f "$temp" "$file" || return 1
-    return 0
+    broray_routes_progress_bundle_valid "${1:-}" || return 1
+    # Retain the legacy entry point for old callers, without a state write.
+    return 4
 }
 
 broray_routes_progress_resume_values()
@@ -431,6 +398,7 @@ broray_routes_progress_idle_json()
         {
             schemaVersion: 2,
             kind: "routes",
+            canStop: false,
             bundleId: $bundleId,
             operation: null,
             phase: "idle",
@@ -523,6 +491,7 @@ broray_routes_progress_read()
         --argjson percent "$percent" \
         --arg currentRoute "$current_route" \
         --argjson interrupted "$interrupted" '
+        .canStop = false |
         .current = $current |
         .percent = $percent |
         .currentRoute = (

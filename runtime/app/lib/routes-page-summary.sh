@@ -177,6 +177,7 @@ broray_routes_page_operation_status()
         {
             schemaVersion:1,
             generatedAt:$generatedAt,
+            canStop:false,
             active:(($g.active // false) or ($p.running // false) or ($p.resumable // false)),
             pending:($g.pending // false),
             resumable:($p.resumable // $g.resumable // false),

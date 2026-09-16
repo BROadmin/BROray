@@ -13,6 +13,12 @@ def operation_id:
       (.[2]|length)>0 and (.[2]|length)<=10 and (.[2]|ascii_digits) and
       (.[2]|tonumber)>1 and (.[2]|tonumber)<=2147483647 and
       (.[3]|length)==12 and (.[3]|ascii_hex) then $value else null end end;
+def route_action:
+  if type!="string" then false
+  else startswith("custom:") or startswith("preflight:") or
+    (. as $v | ["check","download","build-export","verify","plan","export","delete","resume","route_operation"]|index($v)!=null) end;
+def route_protected:
+  .scope=="routes" or (.operation|route_action) or (.type|route_action);
 def operation_type:
   if type!="string" then "unknown"
   elif startswith("subscriptions:") then "subscription_update"
@@ -21,7 +27,7 @@ def operation_type:
   elif startswith("xray:") then "xray_maintenance"
   elif startswith("dot:") then "dns_operation"
   elif startswith("keenetic:") then "router_operation"
-  elif . as $v | ["check","download","verify","plan","export","delete","resume"]|index($v) then "route_operation"
+  elif route_action then "route_operation"
   else enum(["subscription_update","server_operation","auto_switch","xray_maintenance","dns_operation","router_operation","route_operation"];"unknown") end;
 def source: enum(["USER","SCHEDULER","SUBSCRIPTION_AUTO","SERVER_CHECK_AUTO","AUTO_SWITCH","UPDATER","SYSTEM_RECOVERY"];"UNKNOWN");
 def error_code: enum(["CANCELLED","OPERATION_FAILED","OWNER_DISAPPEARED","OWNER_CHANGED","OPERATION_BUSY","DOMAIN_OPERATION_BUSY","STATE_UNAVAILABLE","AUTOMATION_PAUSED","CHILDREN_UNCONFIRMED","CANCEL_NOT_SUPPORTED","OWNER_UNCONFIRMED","OWNER_PUBLICATION_FAILED"];null);
@@ -31,7 +37,7 @@ def operation_public:
    phase:(.phase|enum(["starting","working","checking","fetching","parsing","committing","switching","waiting","recovering","finished"];"unknown")),
    running:(if .running|type=="boolean" then .running else null end),
    revision:(if .revision|type=="number" then .revision else null end),
-   cancelability:(.cancelability|enum(["cooperative","protected"];"protected")),
+   cancelability:(if route_protected then "protected" else (.cancelability|enum(["cooperative","protected"];"protected")) end),
    cancelRequested:(.cancelRequested==true),
    startedAt:(.startedAt|timestamp),updatedAt:(.updatedAt|timestamp),finishedAt:(.finishedAt|timestamp),
    errorCode:(.errorCode|error_code),

@@ -35,11 +35,11 @@
                 row.appendChild(node("strong",types[op.type] || "Фоновая операция"));
                 [["Источник",sources[op.source] || "Неизвестен"],["Этап",phases[op.phase] || "Неизвестен"],["Начало",date(op.startedAt)],["Владелец",op.ownerStatus === "ACTIVE" ? "Подтверждён" : "Требуется проверка"]].forEach(function (fact) { var div=node("div"); div.append(node("dt",fact[0]),node("dd",fact[1])); facts.append(div); });
                 row.appendChild(facts);
-                if (op.cancelability === "cooperative" && op.operationId) {
+                if (op.type !== "route_operation" && op.cancelability === "cooperative" && op.operationId) {
                     var actions=node("div",undefined,"bg-actions"), button=node("button",op.cancelRequested ? "Остановка запрошена" : "Остановить операцию","button button-secondary");
                     button.type="button"; button.dataset.operation=op.operationId; button.disabled=busy || unknown || op.cancelRequested;
                     button.addEventListener("click",function () { mutate("cancel",{operationId:op.operationId}); }); actions.append(button); row.append(actions);
-                } else row.appendChild(node("p","Выполняется защищённый этап. Остановка недоступна до его завершения.","section-note"));
+                } else row.appendChild(node("p",op.type === "route_operation" ? "Остановка операций с маршрутами недоступна. Дождитесь завершения операции." : "Выполняется защищённый этап. Остановка недоступна до его завершения.","section-note"));
                 byId("bg-list").appendChild(row);
             });
             if (focused) { var restored=Array.from(byId("bg-list").querySelectorAll("button")).find(function (el) { return el.dataset.operation===focused; }); if (restored) restored.focus({preventScroll:true}); }
@@ -72,7 +72,7 @@
             var data=await request(endpoint,payload);
             var message="Настройка автоматики сохранена.";
             if (endpoint === "cancel") message=data.alreadyFinished ? "Операция уже завершена." : "Остановка запрошена. Ожидаем завершения текущего шага.";
-            if (endpoint === "stop-background") message="Новые автоматические задачи поставлены на паузу. Для доступных операций запрошена остановка; защищённые этапы сохраняются.";
+            if (endpoint === "stop-background") message="Новые автоматические задачи поставлены на паузу. Для доступных операций запрошена остановка; операции с маршрутами и защищённые этапы продолжаются.";
             if (endpoint === "recover") message="Проверка завершена. Подтверждённые остаточные блокировки обработаны.";
             text("bg-feedback",message);
         } catch (error) {

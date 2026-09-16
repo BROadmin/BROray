@@ -39,7 +39,6 @@ usage()
     echo "  broray-routes plan <bundleId>" >&2
     echo "  broray-routes export <bundleId>" >&2
     echo "  broray-routes delete <bundleId>" >&2
-    echo "  broray-routes stop <bundleId>" >&2
     echo "  broray-routes resume <bundleId>" >&2
     exit 2
 }
@@ -146,22 +145,8 @@ case "${1:-}" in
         ;;
     stop)
         [ "$#" -eq 2 ] || usage
-        [ -r "$PROGRESS_LIBRARY" ] || {
-            echo "ОШИБКА: модуль прогресса маршрутов недоступен." >&2
-            exit 1
-        }
-        . "$PROGRESS_LIBRARY"
-        if broray_routes_progress_request_stop "$2"; then
-            echo "Запрошена остановка после текущего маршрута."
-        else
-            rc=$?
-            case "$rc" in
-                2) echo "ОШИБКА: состояние операции не найдено." >&2 ;;
-                3) echo "ОШИБКА: операция с этим набором сейчас не выполняется." >&2 ;;
-                *) echo "ОШИБКА: не удалось запросить остановку операции." >&2 ;;
-            esac
-            exit 1
-        fi
+        echo "ОШИБКА: Остановка операций с маршрутами недоступна. Дождитесь завершения операции." >&2
+        exit 1
         ;;
     resume)
         [ "$#" -eq 2 ] || usage

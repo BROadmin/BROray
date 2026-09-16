@@ -371,7 +371,7 @@ ops_supervisor_register()
 {
     local owner records record dir directory context file nonce
     ops_authorize "$1" "$2"
-    jq -e '.acknowledged==true and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCEL_NOT_SUPPORTED
+    jq -e -L "$OPS_APP/lib" 'include "operation-public"; (route_protected|not) and .acknowledged==true and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCEL_NOT_SUPPORTED
     [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED
     nonce="$4"; ops_nonce_valid "$nonce" || ops_error INVALID_REQUEST 1
     owner="$(broray_ops_capture_owner "$3")" || ops_error OWNER_UNCONFIRMED 1
@@ -457,7 +457,7 @@ ops_recover_global()
     ops_publication_recover || { OPS_RECOVERY_RESULT=publication_unconfirmed; return 2; }
     # Absence of an executor is not proof that a protected domain commit can
     # be discarded. Route/updater/Xray state stays under its original owner.
-    cancelability="$(jq -r '.cancelability' "$OPS_CURRENT/state.json")"
+    cancelability="$(jq -r -L "$OPS_APP/lib" 'include "operation-public"; if route_protected then "protected" else .cancelability end' "$OPS_CURRENT/state.json")"
     if ! ops_executor_pending && ! jq -e '.state=="starting" and .acknowledged==false' "$OPS_CURRENT/state.json" >/dev/null; then
         if [ "$cancelability" != cooperative ]; then OPS_RECOVERY_RESULT=protected_recovery; return 2; fi
         ops_pending_domain && { OPS_RECOVERY_RESULT=domain_pending; return 2; }
@@ -480,6 +480,10 @@ ops_begin()
     [ "${#action}" -le 64 ] && [ "${#bundle}" -le 64 ] || ops_error INVALID_ACTION 1
     case "$source" in USER|SCHEDULER|SUBSCRIPTION_AUTO|SERVER_CHECK_AUTO|AUTO_SWITCH|UPDATER|SYSTEM_RECOVERY) ;; *) ops_error INVALID_SOURCE 1 ;; esac
     case "$cancelability" in cooperative|protected) ;; *) ops_error INVALID_CANCEL_MODE 1 ;; esac
+    # Route work is protected for its entire lifetime, including preparation.
+    # Enforce centrally even when an older caller asks for cooperative mode.
+    cancelability="$(jq -nr -L "$OPS_APP/lib" --arg scope "$scope" --arg action "$action" --arg mode "$cancelability" \
+      'include "operation-public"; {scope:$scope,operation:$action} | if route_protected then "protected" else $mode end')" || ops_error STATE_UNAVAILABLE 1
     ops_prune || ops_error STATE_UNAVAILABLE 1
     ops_prune_launch_stages
     owner="$(broray_ops_capture_owner "$pid")" || ops_error OWNER_UNCONFIRMED 1
@@ -619,7 +623,7 @@ ops_cancel()
 {
     ops_load "$1" || ops_error STATE_UNAVAILABLE 1
     jq -e '.running==true' "$OPS_CURRENT/state.json" >/dev/null 2>&1 || { printf '%s\n' '{"ok":true,"alreadyFinished":true}'; return 0; }
-    jq -e '.cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null 2>&1 || ops_error CANCEL_NOT_SUPPORTED
+    jq -e -L "$OPS_APP/lib" 'include "operation-public"; (route_protected|not) and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null 2>&1 || ops_error CANCEL_NOT_SUPPORTED
     if ops_file_safe "$OPS_CURRENT/cancel.json" 4096 && jq -e '.cancelRequested==true' "$OPS_CURRENT/cancel.json" >/dev/null; then
         printf '%s\n' '{"ok":true,"cancelRequested":true}'; return 0
     fi
@@ -763,7 +767,7 @@ case "$verb" in
         esac
         case "$3" in committing|switching) ops_children_absent || ops_error CHILDREN_UNCONFIRMED ;; esac
         if [ "$(jq -r '.phase' "$OPS_CURRENT/state.json")" != "$3" ]; then
-            mode="$(jq -r '.initialCancelability' "$OPS_CURRENT/state.json")"
+            mode="$(jq -r -L "$OPS_APP/lib" 'include "operation-public"; if route_protected then "protected" else .initialCancelability end' "$OPS_CURRENT/state.json")"
             case "$3" in committing|switching) mode=protected ;; esac
             ops_state_transition running "$3" '' "$mode" || ops_error STATE_UNAVAILABLE 1
             ops_event phase_changed >/dev/null 2>&1 || true
