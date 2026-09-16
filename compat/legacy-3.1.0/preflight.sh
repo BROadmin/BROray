@@ -81,8 +81,16 @@ domain_check() {
             absent "$operation" && continue
             canonical_dir "$operation" || fail UPDATER_STATE_UNSAFE
             regular "$operation/state.json" 32768 || fail UPDATER_STATE_UNSAFE
-            jq -e '.schemaVersion==1 and .engine=="broray-updater/5" and .running==false and
-                ((.state=="success") or (.state=="failed" and (.mutationStarted==false or .rollbackPerformed==true)))' "$operation/state.json" >/dev/null || fail UPDATER_TRANSACTION_PENDING
+            # A downgrade retains completed coordinator history. Its declared
+            # resourceLocks are historical; the actual fence is checked apart.
+            jq -e --arg id "${operation##*/}" 'type=="object" and (
+                (.schemaVersion==1 and .engine=="broray-updater/5" and .running==false and
+                    ((.state=="success") or (.state=="failed" and (.mutationStarted==false or .rollbackPerformed==true)))) or
+                (.schemaVersion==2 and .kind=="background" and .operationId==$id and
+                    .running==false and .phase=="finished" and (.resourceLocks|type)=="array" and
+                    (.revision|type)=="number" and
+                    (.state=="completed" or .state=="failed" or .state=="aborted" or .state=="recovered")))' \
+                "$operation/state.json" >/dev/null || fail UPDATER_TRANSACTION_PENDING
         done
     fi
     scope="$(cat "$FENCE/scope")"; action="$(cat "$FENCE/action")"; bundle="$(cat "$FENCE/bundle")"

@@ -82,6 +82,28 @@ class LegacyPolicy(LegacyPrototype):
         Path('/opt/var/lib/broray/last-operation').write_text('update-fixture\n')
         self.refusal('UPDATER_TRANSACTION_PENDING')
 
+    def test_policy_completed_background_history_after_downgrade_is_retained(self):
+        saved={}
+        for terminal in ['completed','failed','aborted','recovered']:
+            directory=Path('/opt/var/lib/broray/operations')/('background-'+terminal);directory.mkdir(parents=True)
+            history={'schemaVersion':2,'kind':'background','operationId':directory.name,'revision':4,
+                     'running':False,'phase':'finished','state':terminal,'resourceLocks':['global']}
+            state=directory/'state.json';state.write_text(json.dumps(history)+'\n');saved[state]=state.read_bytes()
+        self.invoke(0)
+        for state,before in saved.items():self.assertEqual(state.read_bytes(),before)
+
+    def test_policy_mismatched_background_history_is_refused(self):
+        directory=Path('/opt/var/lib/broray/operations/background-fixture');directory.mkdir(parents=True)
+        history={'schemaVersion':2,'kind':'background','operationId':'other','revision':4,
+                 'running':False,'phase':'finished','state':'completed','resourceLocks':['global']}
+        (directory/'state.json').write_text(json.dumps(history)+'\n')
+        self.refusal('UPDATER_TRANSACTION_PENDING')
+
+    def test_policy_incomplete_background_history_remains_blocking(self):
+        directory=Path('/opt/var/lib/broray/operations/background-fixture');directory.mkdir(parents=True)
+        (directory/'state.json').write_text('{"schemaVersion":2,"kind":"background","running":true,"phase":"committing","state":"running","resourceLocks":[]}\n')
+        self.refusal('UPDATER_TRANSACTION_PENDING')
+
     def test_policy_xray_install_is_preserved_for_domain_recovery(self):
         (self.lock/'scope').write_text('routes\n');(self.lock/'action').write_text('xray:install\n');(self.lock/'bundle').write_text('xray\n')
         self.refusal('PROTECTED_OR_UNSUPPORTED_ACTION')

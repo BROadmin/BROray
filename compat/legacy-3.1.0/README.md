@@ -38,6 +38,15 @@ not a public API accepting arbitrary paths or commands.
 
 ## Evidence
 
+`legacy-recovery-downgrade-history-linux-20260916`: 17 policy/wrapper checks
+PASS. Two preserved baseline attempts reproduce refusal of completed schema-2
+background history after downgrade. The callback now retains valid terminal
+coordinator records, using the coordinator's finished-history shape and exact
+directory operationId. Historical resourceLocks are not live ownership.
+Running/incomplete or mismatched records still refuse; the actual global fence,
+protected transactions and process inventory are checked independently.
+This changes the compatibility policy only; the native guard is unchanged.
+
 Latest: `legacy-recovery-wrapper-linux-20260916` has 24 process tests and 14
 policy/wrapper tests PASS, including four unchanged archived daemon loops
 (Home/monitor health dependencies are fixtures). The Keenetic 4.9 process-title
