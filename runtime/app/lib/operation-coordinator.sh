@@ -694,6 +694,28 @@ ops_recover_orphans()
     done
 }
 
+ops_initialize_previous_boot()
+{
+    local target id owner
+    # Initialization also runs during updates and service restarts. Only an
+    # immutable identity from a different kernel boot permits startup cleanup.
+    # Keep pause policy and every same-boot/live/ambiguous record unchanged.
+    [ ! -e "$OPS_UPDATER/request.lock" ] && [ ! -L "$OPS_UPDATER/request.lock" ] || return 0
+    [ ! -e "$OPS_LEGACY" ] && [ ! -L "$OPS_LEGACY" ] || return 0
+    [ -L "$OPS_GLOBAL" ] || return 0
+    target="$(readlink "$OPS_GLOBAL")"
+    case "$target" in "$OPS_ROOT/"*/fence) ;; *) return 0 ;; esac
+    id="${target#"$OPS_ROOT/"}"; id="${id%/fence}"
+    ops_load "$id" && ops_global_matches || return 0
+    owner="$(jq -c .owner "$OPS_EXECUTOR")"; broray_ops_classify_owner "$owner"
+    [ "$OPS_OWNER_STATUS:$OPS_OWNER_REASON" = STALE:previous_boot ] || return 0
+    # Protected domain commits still require their explicit consistency path.
+    # This is the same safe cooperative recovery used by the next begin call.
+    jq -e -L "$OPS_APP/lib" 'include "operation-public";
+      (route_protected|not) and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null || return 0
+    ops_recover_global || return 0
+}
+
 ops_cancel()
 {
     ops_load "$1" || ops_error STATE_UNAVAILABLE 1
@@ -837,9 +859,10 @@ done
 verb="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$verb" in
     initialize)
-        # Runtime preparation creates only the guarded directory skeleton.
-        # Existing operations, fences, pause state and recovery are untouched.
+        # Preserve existing policy and current-boot work. A prior-boot
+        # cooperative owner cannot survive and follows the normal recovery.
         [ "$#" = 0 ] || ops_error INVALID_REQUEST 1
+        ops_initialize_previous_boot
         printf '%s\n' '{"ok":true}' ;;
     begin) [ "$#" = 7 ] || ops_error INVALID_REQUEST 1; ops_begin "$@" ;;
     ack) [ "$#" = 3 ] || ops_error INVALID_REQUEST 1; ops_ack "$@" ;;
