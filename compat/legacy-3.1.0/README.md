@@ -38,6 +38,12 @@ not a public API accepting arbitrary paths or commands.
 
 ## Evidence
 
+Full physical c02 delivery verified the signature through Keenetic Web CLI,
+then stopped before creating a recovery session: Entware BusyBox `od` lacks
+`-A`/`-N`. The global fence and application stayed unchanged. The wrapper now
+uses the same `hexdump` nonce invocation as the installed coordinator. Evidence:
+`legacy-full-cycle-20260916/webcli-first-result.txt`. Full recovery remains open.
+
 `legacy-recovery-downgrade-history-linux-20260916`: 17 policy/wrapper checks
 PASS. Two preserved baseline attempts reproduce refusal of completed schema-2
 background history after downgrade. The callback now retains valid terminal

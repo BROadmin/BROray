@@ -15,7 +15,7 @@ parent=/opt/var/lib/broray/legacy-recovery
 if [ ! -e "$parent" ] && [ ! -L "$parent" ]; then mkdir -m 700 "$parent"; fi
 [ -d "$parent" ] && [ ! -L "$parent" ] && [ "$(readlink -f "$parent")" = "$parent" ] || exit 73
 for attempt in $(seq 1 15); do
-    nonce="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+    nonce="$(hexdump -n 16 -v -e '1/1 "%02x"' /dev/urandom)"
     case "$nonce" in ''|*[!0-9a-f]*) exit 74 ;; esac
     [ "${#nonce}" = 32 ] || exit 74
     session="$parent/$nonce"
