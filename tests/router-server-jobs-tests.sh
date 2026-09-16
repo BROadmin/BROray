@@ -112,7 +112,7 @@ pass cancel_preserves_quality_and_drains_probe_tree
 
 case_dir inherited
 old_quality
-broray_job_begin routes servers:check servers USER cooperative
+broray_job_begin system servers:check servers USER cooperative
 rc=0; ( broray_server_check "$SERVER" ) || rc=$?
 [ "$rc" = 2 ]; cmp -s "$QUALITY" "$R/before.json"
 broray_job_finish completed

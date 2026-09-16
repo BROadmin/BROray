@@ -34,7 +34,7 @@ broray_ops_finish completed
 WORKER
 
 case_dir retries
-broray_ops_begin routes xray:update xray USER cooperative
+broray_ops_begin system xray:update xray USER cooperative
 ID="$BRORAY_BACKGROUND_OPERATION_ID"; OLD_TOKEN="$BRORAY_BACKGROUND_OPERATION_TOKEN"
 cp "$R/state/operations/$ID/owner.json" "$R/generation-before.json"
 HANDOFF_NONCE="$(hexdump -n 16 -v -e '1/1 "%02x"' /dev/urandom)"; export HANDOFF_NONCE
@@ -60,7 +60,7 @@ cmp -s "$R/handoff.json" "$R/handoff-after-finish.json"; pass retry_after_worker
 unset BRORAY_BACKGROUND_OPERATION_ID BRORAY_BACKGROUND_OPERATION_TOKEN BRORAY_BACKGROUND_LAUNCH_NONCE
 
 case_dir parent_client
-broray_ops_begin routes xray:update xray USER cooperative
+broray_ops_begin system xray:update xray USER cooperative
 HANDOFF_NONCE="$(hexdump -n 16 -v -e '1/1 "%02x"' /dev/urandom)"; export HANDOFF_NONCE
 /opt/bin/ash "$T/worker.sh" & worker=$!
 broray_ops_handoff_to "$worker" "$HANDOFF_NONCE"

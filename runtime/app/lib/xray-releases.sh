@@ -202,7 +202,7 @@ broray_xray_install_dispatch() {
         broray_xray_update_install "$@"
         return $?
     fi
-    broray_job_begin routes "xray:$1" xray USER cooperative || return $?
+    broray_job_begin system "xray:$1" xray USER cooperative || return $?
     trap 'broray_xray_job_exit "$?"' EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT

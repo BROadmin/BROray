@@ -12,7 +12,7 @@ if [ -e "$RUN/xray-web-operation.pid" ] || [ -L "$RUN/xray-web-operation.pid" ];
     broray_api_error '409 Conflict' XRAY_LEGACY_OWNER_UNCONFIRMED 'Владелец предыдущей операции Xray не подтверждён. Откройте диагностику операций.'
 fi
 launch_rc=0
-broray_job_begin routes "xray:$MODE" xray USER cooperative || launch_rc=$?
+broray_job_begin system "xray:$MODE" xray USER cooperative || launch_rc=$?
 case "$launch_rc" in
   0) ;;
   2) broray_api_error '409 Conflict' OPERATION_BUSY 'Другая конфликтующая операция BROray уже выполняется.' ;;

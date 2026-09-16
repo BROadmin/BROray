@@ -77,7 +77,7 @@ printf '204 0.02'
         self.assertFalse((self.app/'config/active-server').exists())
         self.assertEqual(self.states()[0]['state'],'failed');self.assert_drained()
     def activation_script(self):
-        return '. "$BRORAY_ROOT/lib/server-service.sh"; broray_server_refresh_keenetic_status() { :; }; broray_server_summary() { :; }; broray_interface_sync_description() { :; }; broray_job_begin routes servers:activate servers USER cooperative || exit $?; trap \'rc=$?; trap - EXIT; broray_job_exit "$rc" || rc=75; exit "$rc"\' EXIT; broray_server_activate '+self.server
+        return '. "$BRORAY_ROOT/lib/server-service.sh"; broray_server_refresh_keenetic_status() { :; }; broray_server_summary() { :; }; broray_interface_sync_description() { :; }; broray_job_begin system servers:activate servers USER cooperative || exit $?; trap \'rc=$?; trap - EXIT; broray_job_exit "$rc" || rc=75; exit "$rc"\' EXIT; broray_server_activate '+self.server
     def activation_fixture(self,validator):
         config=self.app/'config/config.json';before=b'{"outbounds":[{"protocol":"blackhole"}]}\n';config.write_bytes(before)
         xray=self.app/'bin/fixture-xray';xray.write_text('#!/bin/ash\n'+validator+'\n');xray.chmod(0o755)
@@ -159,7 +159,7 @@ echo restart >>"$BRORAY_ROOT/restarts"
             if p.poll() is None:p.kill();self.collect(p)
     def test_inherited_subshell_cannot_publish_quality(self):
         before=self.old_quality()
-        script='. "$BRORAY_ROOT/lib/server-service.sh"; broray_job_begin routes servers:check servers USER cooperative || exit $?; trap \'broray_job_exit "$?"\' EXIT; (broray_server_check '+self.server+')'
+        script='. "$BRORAY_ROOT/lib/server-service.sh"; broray_job_begin system servers:check servers USER cooperative || exit $?; trap \'broray_job_exit "$?"\' EXIT; (broray_server_check '+self.server+')'
         self.shell(script,expected=2)
         self.assertEqual(self.quality.read_bytes(),before);self.assert_drained()
     def test_import_cli_stages_and_commits_under_own_job(self):

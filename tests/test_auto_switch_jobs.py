@@ -7,7 +7,16 @@ class AutoSwitchJobs(unittest.TestCase):
     collect=ServerJobs.collect
     states=ServerJobs.states
     reap_adopted_helpers=ServerJobs.reap_adopted_helpers
-    wait_transport=ServerJobs.wait_transport
+    def wait_transport(self,p):
+        # This path publishes scheduler state and a full catalog before the
+        # first probe. Keep its readiness budget separate from a single probe.
+        deadline=time.monotonic()+90
+        while not (self.temp/'transport-ready').exists():
+            if p.poll() is not None:self.fail((p.returncode,*p.communicate()))
+            if time.monotonic()>deadline:
+                self.fail(('automatic probe did not start',self.states(),
+                  [(str(f.relative_to(self.app)),f.read_text(errors='replace')[-4000:]) for f in (self.app/'tmp').glob('*.err')]))
+            time.sleep(.05)
     assert_drained=ServerJobs.assert_drained
     old_quality=ServerJobs.old_quality
     def setUp(self):

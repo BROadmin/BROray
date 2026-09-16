@@ -20,7 +20,7 @@ if [ "$worker_action" = check ]; then
     case "${2:-manual}" in scheduled) worker_source=SERVER_CHECK_AUTO ;; auto-switch) worker_source=AUTO_SWITCH ;; esac
 fi
 worker_rc=0
-broray_job_begin routes "servers:$worker_action" servers "$worker_source" cooperative || worker_rc=$?
+broray_job_begin system "servers:$worker_action" servers "$worker_source" cooperative || worker_rc=$?
 case "$worker_rc" in 0) ;; 2) exit 76 ;; *) exit "$worker_rc" ;; esac
 worker_exit()
 {

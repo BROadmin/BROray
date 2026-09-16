@@ -63,7 +63,7 @@ activate() {
   broray_server_refresh_keenetic_status() { :; }
   broray_server_summary() { :; }
   broray_interface_sync_description() { :; }
-  broray_job_begin routes servers:activate servers USER cooperative || exit $?
+  broray_job_begin system servers:activate servers USER cooperative || exit $?
   trap '\''rc=$?; trap - EXIT; broray_job_exit "$rc" || rc=75; exit "$rc"'\'' EXIT
   broray_server_activate subscription-good-0000
   '
@@ -110,7 +110,7 @@ case_dir rollback_rejected
 rc=0
 /opt/bin/ash -c '
   . "$BRORAY_ROOT/lib/server-service.sh"
-  broray_job_begin routes servers:activate servers USER cooperative || exit $?
+  broray_job_begin system servers:activate servers USER cooperative || exit $?
   trap '\''rc=$?; trap - EXIT; broray_job_exit "$rc" || rc=75; exit "$rc"'\'' EXIT
   broray_job_checkpoint committing
   BRORAY_JOB_UNRESOLVED=true

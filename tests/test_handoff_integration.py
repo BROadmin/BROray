@@ -69,7 +69,7 @@ broray_ops_finish aborted CANCELLED''')
         worker=self.temp/'child.sh';worker.write_text('set -eu\n. "$BRORAY_ROOT/lib/operation-client.sh"\nbroray_ops_accept_handoff "$TEST_HANDOFF_NONCE"\necho yes >"$TEST_WORK/done"\nbroray_ops_finish completed\n')
         parent=self.temp/'parent.sh';parent.write_text('''set -eu
 . "$BRORAY_ROOT/lib/operation-client.sh"
-broray_ops_begin routes xray:update xray USER protected
+broray_ops_begin system xray:update xray USER protected
 /bin/ash "$TEST_WORK/child.sh" & child=$!
 broray_ops_handoff_to "$child" "$TEST_HANDOFF_NONCE"
 [ -z "${BRORAY_BACKGROUND_OPERATION_ID:-}" ]

@@ -50,7 +50,7 @@ broray_ops_accept_handoff "$TEST_NONCE"
 echo yes >"$TEST_WORK/accepted"
 broray_ops_finish completed
 ''')
-        self.run_script('''broray_ops_begin routes xray:update xray USER protected
+        self.run_script('''broray_ops_begin system xray:update xray USER protected
 TEST_NONCE=11111111111111111111111111111111; export TEST_NONCE
 /bin/ash "$TEST_WORK/worker.sh" & worker=$!
 broray_ops_handoff_to "$worker" "$TEST_NONCE"

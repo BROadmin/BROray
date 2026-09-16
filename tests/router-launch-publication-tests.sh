@@ -98,7 +98,7 @@ TEST_LAUNCH_ROOT="$T"; export TEST_LAUNCH_ROOT
 for DROP_METHOD in handoff accept-handoff; do
   for DROP_KIND in empty malformed; do
     case_dir "response_${DROP_METHOD}_$DROP_KIND"
-    broray_ops_begin routes xray:update xray USER protected
+    broray_ops_begin system xray:update xray USER protected
     HANDOFF_NONCE="$(nonce)"; export HANDOFF_NONCE
     /opt/bin/ash "$T/response-worker.sh" & worker=$!
     broray_ops_handoff_to "$worker" "$HANDOFF_NONCE"
