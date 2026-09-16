@@ -88,6 +88,17 @@ broray_parse_hysteria2()
             ;;
     esac
 
+    # Split the optional root path before interpreting auth, host and port.
+    # Keep percent-encoded delimiters intact until their component is decoded.
+    case "$authority" in
+        */*)
+            uri_path="/${authority#*/}"
+            authority="${authority%%/*}"
+            [ "$uri_path" = / ] ||
+                broray_die "путь в ссылке Hysteria2 не поддерживается"
+            ;;
+    esac
+
     case "$authority" in
         *@*)
             encoded_auth="${authority%@*}"
