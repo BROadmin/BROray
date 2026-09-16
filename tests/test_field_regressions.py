@@ -1,4 +1,4 @@
-"""Field regressions: real shell/jq with isolated network and monitor fixtures."""
+"""Updater field regressions: real shell/jq with isolated network fixtures."""
 import json,os,subprocess,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
@@ -85,18 +85,6 @@ esac
         p=self.routes_call('routes_capture');self.assertNotEqual(p.returncode,0)
         self.assertEqual(self.running.read_bytes(),before);self.assertFalse(self.commands.exists())
         self.assertFalse((self.operation/'managed-routes.before').exists())
-    def monitor(self,document):
-        source=(APP/'bin/broray-server-auto-switch').read_text();body=source[source.index('monitor_state()\n'):source.index('\nbuild_candidates()\n')]
-        status=self.base/'monitor.json';status.write_text(json.dumps(document));pid=self.base/'monitor.pid';pid.write_text(str(os.getpid()))
-        script=body+'\nMONITOR_STATUS="$1"; MONITOR_PIDFILE="$2"; monitor_state; printf "%s\\n" "$MONITOR_HEALTH"\n'
-        p=subprocess.run(['/bin/ash','-c',script,'test',str(status),str(pid)],capture_output=True,timeout=10);self.assertEqual(p.returncode,0,p.stderr);return p.stdout.decode().strip()
-    def test_monitor_down_is_not_hidden_by_available(self):
-        self.assertEqual(self.monitor(dict(available=True,up=False,ping_ms=None,packet_loss_percent=100,quality='Нет связи',breaks=5)),'false')
-    def test_monitor_up_takes_precedence(self):
-        self.assertEqual(self.monitor(dict(available=False,up=True,connected=False,healthy=False)),'true')
-    def test_monitor_legacy_fallback_precedence(self):
-        for d,want in [({'connected':False,'available':True},'false'),({'healthy':False,'available':True},'false'),({'available':True},'true'),({'available':False},'false'),({},'unknown'),({'up':'false','available':True},'unknown')]:
-            with self.subTest(document=d):self.assertEqual(self.monitor(d),want)
 if __name__=='__main__':
     result=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(FieldRegressions))
     out=ROOT/'docs/evidence/field-regressions-tests.json';out.write_text(json.dumps(dict(status='PASS' if result.wasSuccessful() else 'FAIL',testsRun=result.testsRun,routerAccessed=False,environment='real ash/jq, isolated files and network fixtures'),indent=2)+'\n')

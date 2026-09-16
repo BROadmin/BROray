@@ -1,6 +1,14 @@
 # Field report after 3.1.1-r12
 
-## Confirmed source defects
+## Correction after the follow-up report
+
+The proposed `up`-first auto-switch fix below was **incorrect and never
+published**. `up` measures ICMP replies, not the working VPN transport. Its
+earlier passing tests only verified that narrower, insufficient contract.
+It is superseded by [active SOCKS health](ACTIVE-PROXY-HEALTH.md). The updater
+LAN-address correction remains valid. Historical evidence is preserved.
+
+## Original source findings
 
 1. The persistent updater's `routes_owner_interface()` checks the ownership
    receipt against literal `192.168.1.1:2080`. This rejects an otherwise valid
@@ -9,14 +17,14 @@
    it captures routes. Delivery must reconcile the persistent platform first
    using the existing signed universal installer's platform transaction.
 2. The connection monitor emits `available=true, up=false` for an address with
-   failed connectivity. The auto-switch consumer reads `available` first and
+   failed ICMP replies. The auto-switch consumer reads `available` first and
    ignores `up`, resets failure count and exits as healthy. Previous integration
    coverage used legacy `available=false`, missing the current producer shape.
 
 The original incident's global-lock cause is still not established. These two
 defects do not prove that removing a lock was safe or sufficient.
 
-## Correction contract
+## Initial correction contract (auto-switch part superseded)
 
 - Derive the SOCKS host and port from the validated ownership receipt. Require
   agreement with exactly one SOCKS inbound in the current regular Xray config
@@ -78,7 +86,7 @@ own signed metadata and physical update/rollback validation before publication.
   caused rollback, so it was replaced in the test, not allowed in production.
   This is not a real VPN outage or a physical Xray restart test.
 
-Final coverage: 13 field methods and 1 activation method in the final VM,
+Initial-stage coverage: 13 field methods and 1 activation method in the final VM,
 9 previously passing auto-switch job methods with identical auto-switch source,
 1 archived legacy baseline method, and 6 browser scenarios. Source checks passed
 for 273 shell files, 36 JSON files and 33 JavaScript files. The bundled platform

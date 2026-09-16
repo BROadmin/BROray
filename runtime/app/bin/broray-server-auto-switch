@@ -21,6 +21,7 @@ BRORAY_LEGACY_GLOBAL_LOCK="$SYSTEM_LOCK"
 BRORAY_SERVER_SKIP_KEENETIC_REFRESH=true
 export BRORAY_ROUTES_API_LOCK BRORAY_LEGACY_GLOBAL_LOCK BRORAY_SERVER_SKIP_KEENETIC_REFRESH
 . "$ROOT/lib/server-service.sh"
+. "$ROOT/lib/active-proxy-health.sh" || exit 74
 . "$ROOT/lib/service-lifecycle.sh"
 umask 077
 
@@ -38,8 +39,6 @@ routes_resumable_pending()
 
 SERVERS_BIN="$ROOT/bin/broray-servers"
 BRORAY_BIN="$ROOT/bin/broray"
-MONITOR_STATUS="$ROOT/run/connection-status.json"
-MONITOR_PIDFILE="$ROOT/run/connection-monitor.pid"
 UPDATE_LOCK="${BRORAY_XRAY_UPDATE_LOCK:-$ROOT/run/xray-update/xray.lock}"
 HOME_SNAPSHOT="${BRORAY_HOME_SNAPSHOT_REFRESH:-$ROOT/bin/broray-home-snapshot}"
 
@@ -225,7 +224,8 @@ load_state()
     S_STATUS="initializing"
     S_ACTIVE_ID=""
     S_FAILURES=0
-    S_MONITOR_FINGERPRINT=""
+    S_PROXY_CONTEXT=""
+    S_ACTIVE_HEALTH=null
     S_LAST_EVALUATION_AT=""
     S_LAST_EVALUATION_EPOCH=0
     S_LAST_ATTEMPT_EPOCH=0
@@ -259,7 +259,8 @@ load_state()
     S_STATUS="$(jq -r '.status // "initializing"' "$STATE")"
     S_ACTIVE_ID="$(jq -r '.activeServerId // empty' "$STATE")"
     S_FAILURES="$(jq -r '.consecutiveFailures // 0' "$STATE")"
-    S_MONITOR_FINGERPRINT="$(jq -r '.lastMonitorFingerprint // empty' "$STATE")"
+    S_PROXY_CONTEXT="$(jq -r '.lastProxyContext // empty' "$STATE")"
+    S_ACTIVE_HEALTH="$(jq -c '.activeHealth // null' "$STATE")"
     S_LAST_EVALUATION_AT="$(jq -r '.lastEvaluationAt // empty' "$STATE")"
     S_LAST_EVALUATION_EPOCH="$(jq -r '.lastEvaluationEpoch // 0' "$STATE")"
     S_LAST_ATTEMPT_EPOCH="$(jq -r '.lastAttemptEpoch // 0' "$STATE")"
@@ -323,7 +324,7 @@ state_signature()
     {
         printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' \
             "$S_ENABLED" "$S_STATUS" "$S_ACTIVE_ID" "$S_FAILURES" \
-            "$S_MONITOR_FINGERPRINT" "$S_LAST_ATTEMPT_EPOCH" "$S_LAST_ATTEMPT_AT" \
+            "$S_PROXY_CONTEXT" "$S_LAST_ATTEMPT_EPOCH" "$S_LAST_ATTEMPT_AT" \
             "$S_LAST_SWITCH_EPOCH" "$S_LAST_SWITCH_AT" "$S_LAST_SWITCH_FROM" \
             "$S_LAST_SWITCH_TO" "$S_LAST_SWITCH_NAME" "$S_LAST_REASON" \
             "$S_LAST_ERROR" "$S_CANDIDATE_COUNT"
@@ -366,7 +367,8 @@ save_state()
         --arg status "$S_STATUS" \
         --arg activeServerId "$S_ACTIVE_ID" \
         --argjson consecutiveFailures "$S_FAILURES" \
-        --arg lastMonitorFingerprint "$S_MONITOR_FINGERPRINT" \
+        --argjson activeHealth "$S_ACTIVE_HEALTH" \
+        --arg lastProxyContext "$S_PROXY_CONTEXT" \
         --arg lastEvaluationAt "$S_LAST_EVALUATION_AT" \
         --argjson lastEvaluationEpoch "$S_LAST_EVALUATION_EPOCH" \
         --argjson lastAttemptEpoch "$S_LAST_ATTEMPT_EPOCH" \
@@ -405,11 +407,13 @@ save_state()
             ),
 
             consecutiveFailures: $consecutiveFailures,
+            activeHealth: $activeHealth,
+            lastMonitorFingerprint: null,
 
-            lastMonitorFingerprint: (
-                if $lastMonitorFingerprint == ""
+            lastProxyContext: (
+                if $lastProxyContext == ""
                 then null
-                else $lastMonitorFingerprint
+                else $lastProxyContext
                 end
             ),
 
@@ -516,40 +520,10 @@ save_state()
     S_LOADED_SIGNATURE="$CURRENT_SIGNATURE"
 }
 
-monitor_state()
+active_proxy_state()
 {
-    MONITOR_HEALTH="unknown"
-    MONITOR_FINGERPRINT=""
-
-    MONITOR_PID="$(cat "$MONITOR_PIDFILE" 2>/dev/null || true)"
-
-    if [ -z "$MONITOR_PID" ] ||
-       ! kill -0 "$MONITOR_PID" 2>/dev/null
-    then
-        return
-    fi
-
-    if ! jq -e 'type == "object"' "$MONITOR_STATUS" >/dev/null 2>&1; then
-        return
-    fi
-
-    MONITOR_HEALTH="$(
-        jq -r '
-            # Current monitor: available means that a target is configured;
-            # up is the result of the connectivity measurement.
-            (if has("up") then .up
-             elif has("connected") then .connected
-             elif has("healthy") then .healthy
-             elif has("available") then .available
-             else null end) |
-            if type == "boolean" then tostring else "unknown" end
-        ' "$MONITOR_STATUS"
-    )"
-
-    MONITOR_FINGERPRINT="$(
-        sha256sum "$MONITOR_STATUS" 2>/dev/null |
-            awk '{print $1}'
-    )"
+    broray_active_proxy_measure "$1" || return $?
+    S_ACTIVE_HEALTH="$ACTIVE_PROXY_RESULT"
 }
 
 build_candidates()
@@ -925,6 +899,7 @@ run_cycle_inner()
 
     if [ "$CFG_ENABLED" != "true" ]; then
         S_STATUS="disabled"
+        S_ACTIVE_HEALTH=null
         S_FAILURES=0
         S_CANDIDATE_COUNT=0
         S_LAST_REASON="Автовыбор выключен"
@@ -949,13 +924,14 @@ run_cycle_inner()
 
     if [ "$S_ACTIVE_ID" != "$ACTIVE_ID" ]; then
         S_FAILURES=0
-        S_MONITOR_FINGERPRINT=""
+        S_PROXY_CONTEXT=""
     fi
 
     S_ACTIVE_ID="$ACTIVE_ID"
 
     if [ -z "$ACTIVE_ID" ]; then
         S_STATUS="manual-off"
+        S_ACTIVE_HEALTH=null
         S_FAILURES=0
         S_CANDIDATE_COUNT=0
         S_LAST_REASON="VPN отключён вручную"
@@ -969,6 +945,7 @@ run_cycle_inner()
         S_STATUS="paused"
         S_FAILURES=0
         S_CANDIDATE_COUNT=0
+        S_ACTIVE_HEALTH=null
         S_LAST_REASON="Xray остановлен; автоматический запуск запрещён"
         S_LAST_ERROR=""
         save_state
@@ -976,35 +953,36 @@ run_cycle_inner()
         return 0
     fi
 
-    monitor_state
+    active_proxy_state "$ACTIVE_ID" || return $?
 
-    if [ "$MONITOR_HEALTH" = "unknown" ]; then
+    if [ "$ACTIVE_PROXY_HEALTH" = "unknown" ]; then
         S_STATUS="paused"
-        S_LAST_REASON="Монитор соединения не подтвердил состояние"
+        S_FAILURES=0
+        S_PROXY_CONTEXT=""
+        S_LAST_REASON="Не удалось проверить трафик через активный VPN"
         S_LAST_ERROR=""
         save_state
         rm -f "$SUMMARY_FILE" "$SUMMARY_ERR"
         return 0
     fi
 
-    if [ "$MONITOR_HEALTH" = "true" ]; then
+    if [ "$ACTIVE_PROXY_HEALTH" = "true" ]; then
         S_STATUS="healthy"
         S_FAILURES=0
-        S_MONITOR_FINGERPRINT=""
+        S_PROXY_CONTEXT=""
         S_CANDIDATE_COUNT=0
-        S_LAST_REASON="Активное соединение работает"
+        S_LAST_REASON="Проверка трафика через активный VPN успешна"
         S_LAST_ERROR=""
         save_state
         rm -f "$SUMMARY_FILE" "$SUMMARY_ERR"
         return 0
     fi
 
-    if [ -n "$MONITOR_FINGERPRINT" ] &&
-       [ "$MONITOR_FINGERPRINT" != "$S_MONITOR_FINGERPRINT" ]
-    then
-        S_FAILURES=$((S_FAILURES + 1))
-        S_MONITOR_FINGERPRINT="$MONITOR_FINGERPRINT"
-    fi
+    # Exactly one complete failed proxy sample per cycle. A changed server,
+    # runtime process or configuration starts a new sequence of failures.
+    if [ "$ACTIVE_PROXY_CONTEXT" != "$S_PROXY_CONTEXT" ]; then S_FAILURES=0; fi
+    S_PROXY_CONTEXT="$ACTIVE_PROXY_CONTEXT"
+    S_FAILURES=$((S_FAILURES + 1))
 
     if [ "$S_FAILURES" -lt "$CFG_THRESHOLD" ]; then
         S_STATUS="waiting-threshold"
@@ -1072,6 +1050,7 @@ run_cycle_inner()
         S_STATUS="paused"
         S_FAILURES=0
         S_CANDIDATE_COUNT=0
+        S_ACTIVE_HEALTH=null
         S_LAST_REASON="Xray остановлен; автоматический запуск запрещён"
         S_LAST_ERROR=""
         save_state
@@ -1133,12 +1112,23 @@ run_cycle_inner()
         return 0
     fi
 
-    monitor_state
+    active_proxy_state "$ACTIVE_ID" || return $?
 
-    if [ "$MONITOR_HEALTH" = "true" ]; then
+    if [ "$ACTIVE_PROXY_HEALTH" = "true" ]; then
         S_STATUS="recovered"
         S_FAILURES=0
         S_LAST_REASON="Соединение восстановилось до переключения"
+        S_LAST_ERROR=""
+        save_state
+        rm -f "$SUMMARY_FILE" "$SUMMARY_ERR" "$CANDIDATE_FILE"
+        return 0
+    fi
+
+    if [ "$ACTIVE_PROXY_HEALTH" != false ] || [ "$ACTIVE_PROXY_CONTEXT" != "$S_PROXY_CONTEXT" ]; then
+        S_STATUS="paused"
+        S_FAILURES=0
+        S_PROXY_CONTEXT=""
+        S_LAST_REASON="Состояние активного VPN изменилось во время проверки"
         S_LAST_ERROR=""
         save_state
         rm -f "$SUMMARY_FILE" "$SUMMARY_ERR" "$CANDIDATE_FILE"
@@ -1181,6 +1171,8 @@ run_cycle_inner()
         S_STATUS="switched"
         S_ACTIVE_ID="$SELECTED_ID"
         S_FAILURES=0
+        S_PROXY_CONTEXT=""
+        S_ACTIVE_HEALTH=null
         S_LAST_SWITCH_EPOCH="$(date '+%s')"
         S_LAST_SWITCH_AT="$(now_iso)"
         S_LAST_SWITCH_FROM="$ACTIVE_ID"

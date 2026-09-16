@@ -38,6 +38,28 @@ class AutoSwitchJobs(unittest.TestCase):
     def set_config(self,**fields):
         self.config.write_text(json.dumps(json.loads(self.config.read_text())|fields))
     def auto_state(self):return json.loads((self.app/'run/server-auto-switch-state.json').read_text())
+    def active_runtime_fixture(self):
+        self.current=self.app/'config/config.json'
+        self.current.write_text('{"inbounds":[{"protocol":"socks","listen":"127.0.0.1","port":2080,"settings":{"auth":"noauth"}}],"outbounds":[{"protocol":"blackhole"}]}')
+        runtime=self.app/'runtime/xray';runtime.parent.mkdir(exist_ok=True)
+        shutil.copy2(ROOT/'.local/bin/linux-auto-runtime',runtime);runtime.chmod(0o755)
+        settings=self.app/'config/system/settings.json';settings.write_text(json.dumps(
+          json.loads(settings.read_text())|{'xray':{'binaryPath':str(runtime)}}))
+        process=subprocess.Popen([str(runtime),'run','-c',str(self.app/'config/config.json')])
+        def stop_runtime():
+            if process.poll() is None:process.terminate()
+            process.wait(timeout=5)
+        self.addCleanup(stop_runtime)
+        fixture=self.app/'bin/pidof';fixture.write_text('#!/bin/ash\nprintf "%s\\n" '+str(process.pid)+'\n');fixture.chmod(0o755)
+        ip=self.app/'bin/ip';ip.write_text('#!/bin/ash\nprintf "    inet 127.0.0.1/8\\n"\n');ip.chmod(0o755)
+        curl=self.app/'bin/curl';original=curl.read_text()
+        curl.write_text('''#!/bin/ash
+case "$*" in
+  *'--proxy socks5h://127.0.0.1:2080'*)
+    [ "${TEST_ACTIVE_MODE:-timeout}" = working ] || exit 28
+    printf 204; exit 0 ;;
+esac
+'''+original.removeprefix('#!/bin/ash\n'))
     def test_paused_auto_switch_does_not_run_cycle(self):
         self.shell('. "$BRORAY_ROOT/lib/operation-client.sh"; broray_ops_call pause')
         p=self.shell('"$BRORAY_OPS_ASH" "$BRORAY_ROOT/bin/broray-server-auto-switch" --once')
@@ -108,8 +130,8 @@ class AutoSwitchJobs(unittest.TestCase):
         (self.app/'run/connection-monitor.pid').write_text(str(os.getpid()))
         # Use the actual current monitor shape, not the legacy boolean alone.
         (self.app/'run/connection-status.json').write_text('{"available":true,"up":false,"checked_at":1,"packet_loss_percent":100}')
-        # Deterministic persistent-runtime liveness; no real VPN in this test.
-        fixture=self.app/'bin/pidof';fixture.write_text('#!/bin/ash\nprintf "1\\n"\n');fixture.chmod(0o755)
+        # Real runtime identity with deterministic proxy transport; no real VPN.
+        self.active_runtime_fixture()
         self.shell('"$BRORAY_OPS_ASH" "$BRORAY_ROOT/bin/broray-server-auto-switch" --dry-run',timeout=120)
         state=self.auto_state();self.assertEqual(state['status'],'dry-run')
         self.assertEqual(state['candidateCount'],1)
@@ -117,23 +139,46 @@ class AutoSwitchJobs(unittest.TestCase):
         self.assertEqual(len(self.states()),1);self.assertEqual(self.states()[0]['state'],'completed')
         self.assertTrue((self.app/'run/server-quality/subscription-second-0000.json').exists());self.assert_drained()
 
-    def test_distinct_down_samples_reach_threshold_and_up_resets(self):
+    def test_proxy_failures_reach_threshold_and_success_resets(self):
         self.set_config(enabled=True,failureThreshold=3)
         self.shell('. "$BRORAY_ROOT/lib/server-import.sh"; broray_server_import_dispatch "$(cat "$TEST_PAYLOAD")" subscription second 0')
         (self.app/'config/active-server').write_text(self.server+'\n')
         (self.app/'run/connection-monitor.pid').write_text(str(os.getpid()))
-        fixture=self.app/'bin/pidof';fixture.write_text('#!/bin/ash\nprintf "1\\n"\n');fixture.chmod(0o755)
+        self.active_runtime_fixture()
         monitor=self.app/'run/connection-status.json'
-        def cycle(tick,up=False):
-            monitor.write_text(json.dumps(dict(available=True,up=up,checked_at=tick,packet_loss_percent=0 if up else 100)))
-            self.shell('"$BRORAY_OPS_ASH" "$BRORAY_ROOT/bin/broray-server-auto-switch" --dry-run',timeout=120)
+        def cycle(mode='timeout'):
+            self.env['TEST_ACTIVE_MODE']=mode
+            # Leave the ICMP snapshot unchanged across all proxy measurements.
+            monitor.write_text('{"available":true,"up":true,"checked_at":1}')
+            self.shell('"$BRORAY_OPS_ASH" "$BRORAY_ROOT/bin/broray-server-auto-switch" --dry-run',timeout=150)
             return self.auto_state()
-        first=cycle(1);self.assertEqual(first['status'],'waiting-threshold');self.assertEqual(first['consecutiveFailures'],1)
-        same=cycle(1);self.assertEqual(same['consecutiveFailures'],1,'Repeated snapshot counted as a new failure')
-        second=cycle(2);self.assertEqual(second['consecutiveFailures'],2)
-        third=cycle(3);self.assertEqual(third['status'],'dry-run');self.assertEqual(third['candidateCount'],1)
-        up=cycle(4,True);self.assertEqual(up['status'],'healthy');self.assertEqual(up['consecutiveFailures'],0)
+        first=cycle();self.assertEqual(first['status'],'waiting-threshold');self.assertEqual(first['consecutiveFailures'],1)
+        second=cycle();self.assertEqual(second['consecutiveFailures'],2)
+        third=cycle();self.assertEqual(third['status'],'dry-run');self.assertEqual(third['candidateCount'],1)
+        up=cycle('working');self.assertEqual(up['status'],'healthy');self.assertEqual(up['consecutiveFailures'],0)
         self.assertEqual((self.app/'config/active-server').read_text(),self.server+'\n');self.assert_drained()
+
+    def test_active_recovery_during_candidate_probe_prevents_switch(self):
+        self.set_config(enabled=True,failureThreshold=1)
+        self.shell('. "$BRORAY_ROOT/lib/server-import.sh"; broray_server_import_dispatch "$(cat "$TEST_PAYLOAD")" subscription second 0')
+        (self.app/'config/active-server').write_text(self.server+'\n')
+        self.active_runtime_fixture()
+        self.env['TEST_RECOVERED']=str(self.temp/'active-recovered')
+        curl=self.app/'bin/curl';original=curl.read_text()
+        curl.write_text('''#!/bin/ash
+case "$*" in
+  *'--proxy socks5h://127.0.0.1:2080'*)
+    [ ! -f "$TEST_RECOVERED" ] || export TEST_ACTIVE_MODE=working ;;
+  *https://*) touch "$TEST_RECOVERED" ;;
+esac
+'''+original.removeprefix('#!/bin/ash\n'))
+        self.shell(self.once(),timeout=150)
+        state=self.auto_state();self.assertEqual(state['status'],'recovered',state)
+        self.assertEqual(state['consecutiveFailures'],0)
+        self.assertEqual(state['activeHealth']['status'],'healthy')
+        self.assertEqual((self.app/'config/active-server').read_text(),self.server+'\n')
+        self.assertEqual(json.loads(self.current.read_text())['outbounds'][0]['protocol'],'blackhole')
+        self.assertFalse((self.app/'restarts').exists());self.assert_drained()
 
     def test_down_monitor_reaches_activation_and_enters_cooldown(self):
         self.set_config(enabled=True,failureThreshold=1,cooldownMinutes=10)
@@ -142,16 +187,7 @@ class AutoSwitchJobs(unittest.TestCase):
         (self.app/'run/connection-monitor.pid').write_text(str(os.getpid()))
         monitor=self.app/'run/connection-status.json'
         monitor.write_text('{"available":true,"up":false,"checked_at":1}')
-        runtime=self.app/'runtime/xray';runtime.parent.mkdir(exist_ok=True)
-        shutil.copy2(ROOT/'.local/bin/linux-auto-runtime',runtime);runtime.chmod(0o755)
-        settings=self.app/'config/system/settings.json';settings.write_text(json.dumps(
-          json.loads(settings.read_text())|{'xray':{'binaryPath':str(runtime)}}))
-        process=subprocess.Popen([str(runtime),'run','-c',str(self.app/'config/config.json')])
-        def stop_runtime():
-            if process.poll() is None:process.terminate()
-            process.wait(timeout=5)
-        self.addCleanup(stop_runtime)
-        fixture=self.app/'bin/pidof';fixture.write_text('#!/bin/ash\nprintf "%s\\n" '+str(process.pid)+'\n');fixture.chmod(0o755)
+        self.active_runtime_fixture()
         # Keep the real coordinator, candidate probe, config generation and
         # protected activation. Only runtime liveness/transport/init are fake.
         init=self.app/'bin/fixture-init';init.write_text('''#!/bin/ash
@@ -170,6 +206,7 @@ echo restart >>"$BRORAY_ROOT/restarts"
                for p in self.app.rglob('*') if p.is_file() and
                (p.suffix in ('.err','.log') or p.name=='restarts')]))
         state=self.auto_state();self.assertEqual(state['status'],'switched',state)
+        self.assertIsNone(state['activeHealth'],'Previous server health must not describe the newly activated server')
         self.assertEqual(state['lastSwitchFrom'],self.server);self.assertEqual(state['lastSwitchTo'],'subscription-second-0000')
         self.assertEqual((self.app/'config/active-server').read_text().strip(),'subscription-second-0000')
         self.assertEqual(json.loads((self.app/'config/config.json').read_text())['outbounds'][0]['protocol'],'vless')
