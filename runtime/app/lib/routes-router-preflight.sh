@@ -8,6 +8,8 @@ BRORAY_ROUTES_PREFLIGHT_RCI_URL="${BRORAY_ROUTES_RCI_URL:-http://127.0.0.1:79/rc
 BRORAY_ROUTES_PREFLIGHT_ACTIVE_PID=""
 BRORAY_ROUTES_PREFLIGHT_ACTIVE_WORK=""
 
+. "${BRORAY_ROOT:-/opt/broray}/lib/routes-resource-lock.sh" || return 1
+
 broray_routes_preflight_now()
 {
     date '+%Y-%m-%dT%H:%M:%S%z'
@@ -44,39 +46,16 @@ broray_routes_preflight_is_pid()
 
 broray_routes_preflight_lock_acquire()
 {
-    local lock_parent lock_pid
-
-    lock_parent="$(dirname "$BRORAY_ROUTES_PREFLIGHT_LOCK")"
-    mkdir -p "$lock_parent" || return 1
-
-    if mkdir "$BRORAY_ROUTES_PREFLIGHT_LOCK" 2>/dev/null; then
-        printf '%s\n' "$$" >"$BRORAY_ROUTES_PREFLIGHT_LOCK/pid"
-        printf '%s\n' "preflight" >"$BRORAY_ROUTES_PREFLIGHT_LOCK/action"
-        printf '%s\n' "$BRORAY_ROUTES_PREFLIGHT_BUNDLE" >"$BRORAY_ROUTES_PREFLIGHT_LOCK/bundle"
-        return 0
-    fi
-
-    lock_pid="$(sed -n '1p' "$BRORAY_ROUTES_PREFLIGHT_LOCK/pid" 2>/dev/null)"
-
-    if broray_routes_preflight_is_pid "$lock_pid" && kill -0 "$lock_pid" 2>/dev/null; then
-        return 2
-    fi
-
-    rm -rf "$BRORAY_ROUTES_PREFLIGHT_LOCK" 2>/dev/null || return 1
-
-    if mkdir "$BRORAY_ROUTES_PREFLIGHT_LOCK" 2>/dev/null; then
-        printf '%s\n' "$$" >"$BRORAY_ROUTES_PREFLIGHT_LOCK/pid"
-        printf '%s\n' "preflight" >"$BRORAY_ROUTES_PREFLIGHT_LOCK/action"
-        printf '%s\n' "$BRORAY_ROUTES_PREFLIGHT_BUNDLE" >"$BRORAY_ROUTES_PREFLIGHT_LOCK/bundle"
-        return 0
-    fi
-
-    return 1
+    broray_route_resource_acquire "$BRORAY_ROUTES_PREFLIGHT_LOCK" "preflight" "${BRORAY_ROUTES_PREFLIGHT_BUNDLE:-}" || return $?
+    BRORAY_ROUTES_PREFLIGHT_LOCK_TOKEN="$BRORAY_ROUTE_RESOURCE_TOKEN"
+    return 0
 }
 
 broray_routes_preflight_lock_release()
 {
-    rm -rf "$BRORAY_ROUTES_PREFLIGHT_LOCK" 2>/dev/null || true
+    broray_route_resource_release "$BRORAY_ROUTES_PREFLIGHT_LOCK" "${BRORAY_ROUTES_PREFLIGHT_LOCK_TOKEN:-}" || return $?
+    BRORAY_ROUTES_PREFLIGHT_LOCK_TOKEN=''
+    return 0
 }
 
 broray_routes_preflight_kill_active()

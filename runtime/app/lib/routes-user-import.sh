@@ -15,6 +15,8 @@ BRORAY_USER_ROUTES_LOCK="${BRORAY_USER_ROUTES_LOCK:-$BRORAY_ROUTES_ROOT/locks/op
 BRORAY_USER_ROUTES_ACTIVE_WORK=""
 BRORAY_USER_ROUTES_LOCK_HELD=false
 
+. "${BRORAY_ROOT:-/opt/broray}/lib/routes-resource-lock.sh" || return 1
+
 broray_user_routes_now()
 {
     date '+%Y-%m-%dT%H:%M:%S%z'
@@ -45,8 +47,7 @@ broray_user_routes_cleanup()
     fi
 
     if [ "$BRORAY_USER_ROUTES_LOCK_HELD" = true ]; then
-        rm -rf "$BRORAY_USER_ROUTES_LOCK" 2>/dev/null || true
-        BRORAY_USER_ROUTES_LOCK_HELD=false
+        broray_user_routes_lock_release || return $?
     fi
 }
 
@@ -88,35 +89,10 @@ broray_user_routes_token_valid()
 
 broray_user_routes_lock_acquire()
 {
-    lock_pid=""
-    mkdir -p "$(dirname "$BRORAY_USER_ROUTES_LOCK")" || return 1
-
-    if mkdir "$BRORAY_USER_ROUTES_LOCK" 2>/dev/null; then
-        printf '%s\n' "$$" >"$BRORAY_USER_ROUTES_LOCK/pid"
-        printf '%s\n' "user-import" >"$BRORAY_USER_ROUTES_LOCK/action"
-        BRORAY_USER_ROUTES_LOCK_HELD=true
-        return 0
-    fi
-
-    lock_pid="$(sed -n '1p' "$BRORAY_USER_ROUTES_LOCK/pid" 2>/dev/null)"
-    case "$lock_pid" in
-        ''|*[!0-9]*) lock_pid="" ;;
-    esac
-
-    if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
-        return 2
-    fi
-
-    rm -rf "$BRORAY_USER_ROUTES_LOCK" 2>/dev/null || return 1
-
-    if mkdir "$BRORAY_USER_ROUTES_LOCK" 2>/dev/null; then
-        printf '%s\n' "$$" >"$BRORAY_USER_ROUTES_LOCK/pid"
-        printf '%s\n' "user-import" >"$BRORAY_USER_ROUTES_LOCK/action"
-        BRORAY_USER_ROUTES_LOCK_HELD=true
-        return 0
-    fi
-
-    return 1
+    broray_route_resource_acquire "$BRORAY_USER_ROUTES_LOCK" "user-import" "" || return $?
+    BRORAY_USER_ROUTES_LOCK_TOKEN="$BRORAY_ROUTE_RESOURCE_TOKEN"
+    BRORAY_USER_ROUTES_LOCK_HELD=true
+    return 0
 }
 
 broray_user_routes_prepare_runtime()
@@ -1342,8 +1318,7 @@ broray_user_routes_commit()
     rm -rf "$preview_dir"
     BRORAY_USER_ROUTES_ACTIVE_WORK=""
     rm -rf "$work"
-    rm -rf "$BRORAY_USER_ROUTES_LOCK" 2>/dev/null || true
-    BRORAY_USER_ROUTES_LOCK_HELD=false
+    broray_user_routes_lock_release || return $?
 
     jq -n \
         --arg id "$bundle_id" \
@@ -1607,6 +1582,13 @@ broray_user_routes_remove()
         }
     '
 
-    rm -rf "$BRORAY_USER_ROUTES_LOCK" 2>/dev/null || true
+    broray_user_routes_lock_release || return $?
+}
+
+broray_user_routes_lock_release()
+{
+    broray_route_resource_release "$BRORAY_USER_ROUTES_LOCK" "${BRORAY_USER_ROUTES_LOCK_TOKEN:-}" || return $?
+    BRORAY_USER_ROUTES_LOCK_TOKEN=''
     BRORAY_USER_ROUTES_LOCK_HELD=false
+    return 0
 }

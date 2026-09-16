@@ -34,6 +34,8 @@ BRORAY_ROUTES_DELETE_PROGRESS_LIBRARY="${BRORAY_ROUTES_DELETE_PROGRESS_LIBRARY:-
 [ -r "$BRORAY_ROUTES_DELETE_PROGRESS_LIBRARY" ] &&
     . "$BRORAY_ROUTES_DELETE_PROGRESS_LIBRARY"
 
+. "${BRORAY_ROOT:-/opt/broray}/lib/routes-resource-lock.sh" || return 1
+
 broray_routes_delete_progress_begin()
 {
     command -v broray_routes_progress_begin >/dev/null 2>&1 || return 0
@@ -113,48 +115,18 @@ broray_routes_delete_is_pid()
 
 broray_routes_delete_lock_acquire()
 {
-    local bundle_id owner_pid now
-
-    bundle_id="$1"
-    mkdir -p "$(dirname "$BRORAY_ROUTES_DELETE_LOCK")" || return 1
-
-    if mkdir "$BRORAY_ROUTES_DELETE_LOCK" 2>/dev/null; then
-        :
-    else
-        owner_pid="$(cat "$BRORAY_ROUTES_DELETE_LOCK/pid" 2>/dev/null || true)"
-
-        if broray_routes_delete_is_pid "$owner_pid" &&
-           kill -0 "$owner_pid" 2>/dev/null
-        then
-            broray_routes_delete_error \
-                "Другая операция с маршрутами уже выполняется."
-            return 1
-        fi
-
-        rm -rf "$BRORAY_ROUTES_DELETE_LOCK" 2>/dev/null || return 1
-        mkdir "$BRORAY_ROUTES_DELETE_LOCK" 2>/dev/null || {
-            broray_routes_delete_error \
-                "Не удалось получить блокировку маршрутов."
-            return 1
-        }
-    fi
-
-    now="$(broray_routes_delete_now)"
-    printf '%s\n' "$$" >"$BRORAY_ROUTES_DELETE_LOCK/pid" || return 1
-    printf '%s\n' "delete" >"$BRORAY_ROUTES_DELETE_LOCK/operation" || return 1
-    printf '%s\n' "$bundle_id" >"$BRORAY_ROUTES_DELETE_LOCK/bundle" || return 1
-    printf '%s\n' "$now" >"$BRORAY_ROUTES_DELETE_LOCK/startedAt" || return 1
-
+    broray_route_resource_acquire "$BRORAY_ROUTES_DELETE_LOCK" "delete" "${1:-}" || return $?
+    BRORAY_ROUTES_DELETE_LOCK_TOKEN="$BRORAY_ROUTE_RESOURCE_TOKEN"
     BRORAY_ROUTES_DELETE_LOCK_OWNED=true
     return 0
 }
 
 broray_routes_delete_lock_release()
 {
-    if [ "$BRORAY_ROUTES_DELETE_LOCK_OWNED" = true ]; then
-        rm -rf "$BRORAY_ROUTES_DELETE_LOCK" 2>/dev/null || true
-        BRORAY_ROUTES_DELETE_LOCK_OWNED=false
-    fi
+    broray_route_resource_release "$BRORAY_ROUTES_DELETE_LOCK" "${BRORAY_ROUTES_DELETE_LOCK_TOKEN:-}" || return $?
+    BRORAY_ROUTES_DELETE_LOCK_TOKEN=''
+    BRORAY_ROUTES_DELETE_LOCK_OWNED=false
+    return 0
 }
 
 broray_routes_delete_kill_active()

@@ -11,6 +11,8 @@ BRORAY_ROUTES_TMP="$BRORAY_ROUTES_ROOT/tmp"
 BRORAY_ROUTES_ACTIVE_WORK=""
 BRORAY_ROUTES_ACTIVE_BUNDLE=""
 
+. "${BRORAY_ROOT:-/opt/broray}/lib/routes-resource-lock.sh" || return 1
+
 broray_routes_check_now()
 {
     date '+%Y-%m-%dT%H:%M:%S%z'
@@ -102,41 +104,16 @@ broray_routes_is_pid()
 
 broray_routes_lock_acquire()
 {
-    local lock_parent lock_pid
-
-    lock_parent="$(dirname "$BRORAY_ROUTES_LOCK")"
-    mkdir -p "$lock_parent" || return 1
-
-    if mkdir "$BRORAY_ROUTES_LOCK" 2>/dev/null; then
-        printf '%s\n' "$$" >"$BRORAY_ROUTES_LOCK/pid"
-        printf '%s\n' "check" >"$BRORAY_ROUTES_LOCK/action"
-        printf '%s\n' "$BRORAY_ROUTES_ACTIVE_BUNDLE" >"$BRORAY_ROUTES_LOCK/bundle"
-        return 0
-    fi
-
-    lock_pid="$(sed -n '1p' "$BRORAY_ROUTES_LOCK/pid" 2>/dev/null)"
-
-    if broray_routes_is_pid "$lock_pid" &&
-       kill -0 "$lock_pid" 2>/dev/null
-    then
-        return 2
-    fi
-
-    rm -rf "$BRORAY_ROUTES_LOCK" 2>/dev/null || return 1
-
-    if mkdir "$BRORAY_ROUTES_LOCK" 2>/dev/null; then
-        printf '%s\n' "$$" >"$BRORAY_ROUTES_LOCK/pid"
-        printf '%s\n' "check" >"$BRORAY_ROUTES_LOCK/action"
-        printf '%s\n' "$BRORAY_ROUTES_ACTIVE_BUNDLE" >"$BRORAY_ROUTES_LOCK/bundle"
-        return 0
-    fi
-
-    return 1
+    broray_route_resource_acquire "$BRORAY_ROUTES_LOCK" "check" "${BRORAY_ROUTES_ACTIVE_BUNDLE:-}" || return $?
+    BRORAY_ROUTES_LOCK_TOKEN="$BRORAY_ROUTE_RESOURCE_TOKEN"
+    return 0
 }
 
 broray_routes_lock_release()
 {
-    rm -rf "$BRORAY_ROUTES_LOCK" 2>/dev/null || true
+    broray_route_resource_release "$BRORAY_ROUTES_LOCK" "${BRORAY_ROUTES_LOCK_TOKEN:-}" || return $?
+    BRORAY_ROUTES_LOCK_TOKEN=''
+    return 0
 }
 
 broray_routes_check_cleanup()

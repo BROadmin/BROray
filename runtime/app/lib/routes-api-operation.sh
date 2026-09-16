@@ -132,38 +132,9 @@ broray_routes_api_stale_action_known()
 
 broray_routes_api_lock_reclaim_stale()
 {
-    local owner scope action bundle file count archive_root archive
-
-    [ -d "$BRORAY_ROUTES_API_LOCK" ] && [ ! -L "$BRORAY_ROUTES_API_LOCK" ] || return 1
-    count=0
-    for file in "$BRORAY_ROUTES_API_LOCK"/*; do
-        [ -f "$file" ] && [ ! -L "$file" ] || return 1
-        case "${file##*/}" in pid|scope|action|bundle|startedAt) ;; *) return 1 ;; esac
-        count=$((count + 1))
-    done
-    [ "$count" -eq 5 ] || return 1
-    owner="$(sed -n '1p' "$BRORAY_ROUTES_API_LOCK/pid" 2>/dev/null || true)"
-    scope="$(sed -n '1p' "$BRORAY_ROUTES_API_LOCK/scope" 2>/dev/null || true)"
-    action="$(sed -n '1p' "$BRORAY_ROUTES_API_LOCK/action" 2>/dev/null || true)"
-    bundle="$(sed -n '1p' "$BRORAY_ROUTES_API_LOCK/bundle" 2>/dev/null || true)"
-    broray_routes_api_is_pid "$owner" || return 1
-    [ "$scope" = routes ] || return 1
-    broray_routes_api_stale_action_known "$action" || return 1
-    case "$bundle" in *[!A-Za-z0-9._-]*|????????????????????????????????????????????????????????????????*) return 1 ;; esac
-    kill -0 "$owner" 2>/dev/null && return 1
-    { [ ! -e "$BRORAY_UPDATER_REQUEST_LOCK" ] && [ ! -L "$BRORAY_UPDATER_REQUEST_LOCK" ]; } || return 1
-    { [ ! -e "$BRORAY_LEGACY_GLOBAL_LOCK" ] && [ ! -L "$BRORAY_LEGACY_GLOBAL_LOCK" ]; } || return 1
-    broray_routes_api_pending_find && return 1
-
-    archive_root="$BRORAY_ROUTES_API_STALE_LOCK_ROOT"
-    mkdir -p "$archive_root" || return 1
-    [ -d "$archive_root" ] && [ ! -L "$archive_root" ] || return 1
-    archive="$archive_root/$(date '+%Y%m%dT%H%M%S%z').$$"
-    [ ! -e "$archive" ] && [ ! -L "$archive" ] || return 1
-    mv "$BRORAY_ROUTES_API_LOCK" "$archive" 2>/dev/null || return 1
-    printf '%s\n' "$(broray_routes_api_now)" >"$archive/reclaimedAt" || return 1
-    printf '%s\n' "$$" >"$archive/reclaimedByPid" || return 1
-    return 0
+    # A five-file record cannot prove boot, process birth or child completion.
+    # Preserve it for explicit legacy/domain recovery even if its PID is absent.
+    return 1
 }
 
 broray_routes_api_lock_acquire()
@@ -191,21 +162,6 @@ broray_routes_api_lock_acquire()
 
     mkdir -p "$(dirname "$BRORAY_ROUTES_API_LOCK")" || return 1
     if mkdir "$BRORAY_ROUTES_API_LOCK" 2>/dev/null; then
-        if [ -e "$BRORAY_UPDATER_REQUEST_LOCK" ] || [ -L "$BRORAY_UPDATER_REQUEST_LOCK" ] ||
-           [ -e "$BRORAY_LEGACY_GLOBAL_LOCK" ] || [ -L "$BRORAY_LEGACY_GLOBAL_LOCK" ]
-        then
-            rmdir "$BRORAY_ROUTES_API_LOCK" 2>/dev/null || true
-            return 2
-        fi
-        broray_routes_api_lock_write "$action" "$bundle" || {
-            rm -rf "$BRORAY_ROUTES_API_LOCK" 2>/dev/null || true
-            return 1
-        }
-        BRORAY_ROUTES_API_LOCK_HELD=true
-        return 0
-    fi
-
-    if broray_routes_api_lock_reclaim_stale && mkdir "$BRORAY_ROUTES_API_LOCK" 2>/dev/null; then
         if [ -e "$BRORAY_UPDATER_REQUEST_LOCK" ] || [ -L "$BRORAY_UPDATER_REQUEST_LOCK" ] ||
            [ -e "$BRORAY_LEGACY_GLOBAL_LOCK" ] || [ -L "$BRORAY_LEGACY_GLOBAL_LOCK" ]
         then

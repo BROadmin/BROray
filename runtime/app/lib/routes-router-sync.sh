@@ -36,6 +36,8 @@ BRORAY_SYNC_VERIFY_BATCH_SIZE="${BRORAY_SYNC_VERIFY_BATCH_SIZE:-16}"
 [ -r "$BRORAY_SYNC_CONFIG_LIBRARY" ] && . "$BRORAY_SYNC_CONFIG_LIBRARY"
 [ -r "$BRORAY_SYNC_PROGRESS_LIBRARY" ] && . "$BRORAY_SYNC_PROGRESS_LIBRARY"
 
+. "${BRORAY_ROOT:-/opt/broray}/lib/routes-resource-lock.sh" || return 1
+
 broray_routes_sync_progress_begin()
 {
     command -v broray_routes_progress_begin >/dev/null 2>&1 || return 0
@@ -106,39 +108,18 @@ broray_routes_sync_is_pid()
 
 broray_routes_sync_lock_acquire()
 {
-    local owner
-
-    mkdir -p "$(dirname "$BRORAY_SYNC_LOCK")" || return 1
-
-    if mkdir "$BRORAY_SYNC_LOCK" 2>/dev/null; then
-        printf '%s\n' "$$" >"$BRORAY_SYNC_LOCK/pid" || return 1
-        printf '%s\n' "sync" >"$BRORAY_SYNC_LOCK/action" || return 1
-        BRORAY_SYNC_LOCK_HELD=true
-        return 0
-    fi
-
-    owner="$(sed -n '1p' "$BRORAY_SYNC_LOCK/pid" 2>/dev/null)"
-    if broray_routes_sync_is_pid "$owner" && kill -0 "$owner" 2>/dev/null; then
-        return 2
-    fi
-
-    rm -rf "$BRORAY_SYNC_LOCK" 2>/dev/null || return 1
-    if mkdir "$BRORAY_SYNC_LOCK" 2>/dev/null; then
-        printf '%s\n' "$$" >"$BRORAY_SYNC_LOCK/pid" || return 1
-        printf '%s\n' "sync" >"$BRORAY_SYNC_LOCK/action" || return 1
-        BRORAY_SYNC_LOCK_HELD=true
-        return 0
-    fi
-
-    return 1
+    broray_route_resource_acquire "$BRORAY_SYNC_LOCK" "sync" "" || return $?
+    BRORAY_SYNC_LOCK_TOKEN="$BRORAY_ROUTE_RESOURCE_TOKEN"
+    BRORAY_SYNC_LOCK_HELD=true
+    return 0
 }
 
 broray_routes_sync_lock_release()
 {
-    if [ "$BRORAY_SYNC_LOCK_HELD" = true ]; then
-        rm -rf "$BRORAY_SYNC_LOCK" 2>/dev/null || true
-        BRORAY_SYNC_LOCK_HELD=false
-    fi
+    broray_route_resource_release "$BRORAY_SYNC_LOCK" "${BRORAY_SYNC_LOCK_TOKEN:-}" || return $?
+    BRORAY_SYNC_LOCK_TOKEN=''
+    BRORAY_SYNC_LOCK_HELD=false
+    return 0
 }
 
 broray_routes_sync_kill_active()
