@@ -3,8 +3,16 @@
 # not recover a crashed route transaction or replace global job admission.
 broray_route_resource_request()
 {
-    local lock parent guard ash pid rest rc
+    local lock parent guard ash pid rest rc job
     lock="$1"; shift
+    job=null
+    # Resolve membership before taking the resource guard: the coordinator
+    # takes its own guard, and recovery uses the opposite dependency below it.
+    # The controller rechecks the actual traced caller before publication.
+    if [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ]; then
+        . "${BRORAY_ROOT:-/opt/broray}/lib/route-job.sh" || return 1
+        job="$(broray_route_worker_check)" || return 1
+    fi
     parent="${lock%/*}"
     case "$lock" in /*/operation.lock) ;; *) return 1 ;; esac
     [ ! -L "$parent" ] || return 1
@@ -14,7 +22,7 @@ broray_route_resource_request()
     ash="${BRORAY_OPS_ASH:-/opt/bin/ash}"
     IFS=' ' read -r pid rest </proc/self/stat || return 1
     rc=0
-    "$guard" "$parent/resource.control.guard" "$ash" \
+    BRORAY_ROUTE_RESOURCE_JOB_CONTEXT="$job" "$guard" "$parent/resource.control.guard" "$ash" \
       "${BRORAY_ROOT:-/opt/broray}/lib/routes-resource-control.sh" "$lock" "$pid" "$@" || rc=$?
     case "$rc" in 0) return 0 ;; 2|75) return 2 ;; *) return 1 ;; esac
 }
