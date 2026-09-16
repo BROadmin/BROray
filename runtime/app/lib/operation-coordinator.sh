@@ -400,7 +400,17 @@ ops_supervisor_register()
 
 ops_pending_domain()
 {
-    local file pointer id
+    local file pointer id resume_bundle resource
+    resume_bundle=''
+    # Only the existing continuation and its confirmation may pass a paused
+    # record for the same bundle. This does not waive global/process ownership
+    # or permit an old route resource generation to be removed.
+    case "${1:-}" in
+      resume|preflight:resume)
+        case "${2:-}" in ''|*[!a-z0-9_-]*) ;; *)
+            [ "${#2}" -le 63 ] && resume_bundle="$2" ;;
+        esac ;;
+    esac
     [ ! -e "$OPS_UPDATER/request.lock" ] && [ ! -L "$OPS_UPDATER/request.lock" ] || return 0
     [ ! -e "$OPS_LEGACY" ] && [ ! -L "$OPS_LEGACY" ] || return 0
     pointer="$OPS_STATE/last-operation"
@@ -417,7 +427,15 @@ ops_pending_domain()
         [ -e "$file" ] || [ -L "$file" ] || continue
         ops_file_safe "$file" || return 0
         jq -e 'type=="object" and (.running|type)=="boolean" and (.resumable|type)=="boolean"' "$file" >/dev/null 2>&1 || return 0
-        jq -e '.running==true or .resumable==true' "$file" >/dev/null 2>&1 && return 0
+        if jq -e '.running==true or .resumable==true' "$file" >/dev/null 2>&1; then
+            [ -n "$resume_bundle" ] && [ "$file" = "$OPS_APP/routes/operations/$resume_bundle.json" ] || return 0
+            jq -e --arg bundle "$resume_bundle" '
+              (.schemaVersion==1 or .schemaVersion==2) and .kind=="routes" and .bundleId==$bundle and
+              .running==false and .resumable==true and
+              (.operation=="install" or .operation=="update" or .operation=="restore" or .operation=="delete")' "$file" >/dev/null || return 0
+            resource="$OPS_APP/routes/locks/operation.lock"
+            [ ! -e "$resource" ] && [ ! -L "$resource" ] || return 0
+        fi
     done
     return 1
 }
@@ -503,7 +521,7 @@ ops_begin()
         if ! ops_global_matches; then
             [ ! -e "$OPS_GLOBAL" ] && [ ! -L "$OPS_GLOBAL" ] || ops_error OPERATION_BUSY
             jq -e '.state=="starting" and .acknowledged==false' "$OPS_CURRENT/state.json" >/dev/null || ops_error OWNER_CHANGED
-            ops_pending_domain && ops_error DOMAIN_OPERATION_BUSY
+            ops_pending_domain "$action" "$bundle" && ops_error DOMAIN_OPERATION_BUSY
             "$OPS_GUARD" --publish-fence "$OPS_CURRENT/fence" "$OPS_GLOBAL" || ops_error OWNER_PUBLICATION_FAILED 1
         fi
         jq -c '{ok:true,operationId,token}' "$OPS_CURRENT/owner.json"
@@ -513,7 +531,7 @@ ops_begin()
         ops_file_safe "$OPS_AUTOMATION" 4096 || ops_error AUTOMATION_STATE_INVALID
         jq -e '.paused==false' "$OPS_AUTOMATION" >/dev/null 2>&1 || ops_error AUTOMATION_PAUSED
     fi
-    ops_pending_domain && ops_error DOMAIN_OPERATION_BUSY
+    ops_pending_domain "$action" "$bundle" && ops_error DOMAIN_OPERATION_BUSY
     rc=0; ops_recover_global || rc=$?
     [ "$rc" = 0 ] || ops_error OPERATION_BUSY
     nonce="$(hexdump -n 16 -v -e '1/1 "%02x"' /dev/urandom 2>/dev/null)"
@@ -552,7 +570,7 @@ ops_begin()
     ops_launch_test_point published_directory
     rc=0; "$OPS_GUARD" --publish-fence "$fence" "$OPS_GLOBAL" || rc=$?
     [ "$rc" = 0 ] || { ops_state_transition aborted finished OWNER_PUBLICATION_FAILED; ops_error OWNER_PUBLICATION_FAILED 1; }
-    if ops_pending_domain; then
+    if ops_pending_domain "$action" "$bundle"; then
         ops_state_transition aborted finished DOMAIN_OPERATION_BUSY && ops_retire_global || ops_error STATE_UNAVAILABLE 1
         ops_error DOMAIN_OPERATION_BUSY
     fi
@@ -590,7 +608,7 @@ ops_ack()
     if jq -e '.acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null; then
         printf '%s\n' '{"ok":true,"acknowledged":true}'; return 0
     fi
-    ops_pending_domain && ops_error DOMAIN_OPERATION_BUSY
+    ops_pending_domain "$(jq -r '.operation' "$OPS_CURRENT/state.json")" "$(jq -r '.bundleId' "$OPS_CURRENT/state.json")" && ops_error DOMAIN_OPERATION_BUSY
     [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED
     ops_state_transition running working || ops_error STATE_UNAVAILABLE 1
     ops_event started >/dev/null 2>&1 || true
