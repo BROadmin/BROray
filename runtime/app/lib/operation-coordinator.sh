@@ -666,7 +666,15 @@ ops_ack()
         printf '%s\n' '{"ok":true,"acknowledged":true}'; return 0
     fi
     ops_pending_domain "$(jq -r '.operation' "$OPS_CURRENT/state.json")" "$(jq -r '.bundleId' "$OPS_CURRENT/state.json")" && ops_error DOMAIN_OPERATION_BUSY
-    [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED
+    if [ -e "$OPS_CURRENT/cancel.json" ] || [ -L "$OPS_CURRENT/cancel.json" ]; then
+        # This exact live owner has not received admission to do any work.
+        # Rejecting ack alone would strand its starting fence after it exits.
+        # Settle only this generation, without signalling or admitting work.
+        ops_children_absent || ops_error CHILDREN_UNCONFIRMED
+        ops_publication_ready || ops_error PUBLICATION_UNCONFIRMED 75
+        ops_state_transition aborted finished CANCELLED && ops_retire_global || ops_error STATE_UNAVAILABLE 1
+        ops_error CANCELLED
+    fi
     ops_state_transition running working || ops_error STATE_UNAVAILABLE 1
     ops_event started >/dev/null 2>&1 || true
     printf '%s\n' '{"ok":true,"acknowledged":true}'
