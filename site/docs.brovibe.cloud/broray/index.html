@@ -3,8 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>BROray 3.1.0 — установка и руководство</title>
-    <meta name="description" content="Официальное руководство BROray 3.1.0: требования, проверенная установка, обновление, WebUI, KeenDNS, маршруты, DNS-over-TLS, диагностика и история версий.">
+    <title>BROray 3.1.1 — установка и руководство</title>
+    <meta name="description" content="Официальное руководство BROray 3.1.1: требования, проверенная установка, обновление, WebUI, KeenDNS, маршруты, DNS-over-TLS, диагностика и история версий.">
     <link rel="canonical" href="https://docs.brovibe.cloud/broray/">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -53,12 +53,12 @@
 <section id="status" class="release-banner">
     <div>
         <p class="eyebrow">Публичный релиз</p>
-        <h1>BROray 3.1.0</h1>
+        <h1>BROray 3.1.1</h1>
         <p class="lead">Локальный клиент Xray и менеджер сетевых политик для совместимых маршрутизаторов Keenetic.</p>
     </div>
     <div class="release-state">
         <span class="status-dot" aria-hidden="true"></span>
-        Stable · опубликован 10 сентября 2026
+        Stable · опубликован 16 сентября 2026
     </div>
 </section>
 
@@ -71,36 +71,36 @@
 <section id="about">
     <h2>Статус и состав релиза</h2>
     <div class="meta" aria-label="Версии компонентов">
-        <span class="badge accent">BROray 3.1.0-r09</span>
+        <span class="badge accent">BROray 3.1.1-r12</span>
         <span class="badge">OPKG 3.0.0-r14</span>
-        <span class="badge">WebUI-3.1.0-r09c02</span>
+        <span class="badge">WebUI-3.1.1-r12c01</span>
         <span class="badge">Updater v5</span>
         <span class="badge">aarch64-3.10</span>
         <span class="badge">Xray 26.9.9</span>
     </div>
 
     <p>
-        Технический кандидат текущего Stable — <code>3.1.0-r09c02</code>, release —
-        <code>3.1.0-r09</code>. Пакет OPKG остаётся <code>3.0.0-r14</code> и не
+        Технический кандидат текущего Stable — <code>3.1.1-r12c01</code>, release —
+        <code>3.1.1-r12</code>. Пакет OPKG остаётся <code>3.0.0-r14</code> и не
         участвует в выборе обновления. Stable опубликован из физически проверенных
         application и updater-platform байтов без их пересборки.
     </p>
 
     <div class="note">
         <span class="note-title">Новый выпуск проверен</span>
-        Проверены выбор версий Xray, матрица шести разрешённых версий и действия WebUI.
-        На конечном <code>3.1.0-r09c02</code> выполнена чистая установка: Xray
-        <strong>26.9.9 устанавливается автоматически</strong>, промежуточного приложения нет.
+        Пройдены обновление, откат, удаление, чистая установка и перезагрузка с сохранением пользовательских данных.
+        Проверены семь версий Xray: шесть совместимы с испытанным профилем, 26.2.6 не передаёт трафик.
+        При чистой установке Xray <strong>26.9.9 устанавливается автоматически</strong>.
         <strong>Обычное обновление BROray сохраняет установленную версию Xray.</strong>
         Подробности и границы испытаний приведены в
-        <a href="https://github.com/BROadmin/BROray/blob/main/docs/RELEASE-3.1.0.md">описании релиза</a>.
+        <a href="https://github.com/BROadmin/BROray/blob/main/docs/RELEASE-3.1.1.md">описании релиза</a>.
     </div>
 
     <div class="fact-grid">
-        <div class="fact"><strong>6 версий</strong><span>физическая матрица Xray</span></div>
-        <div class="fact"><strong>13 групп</strong><span>проверок WebUI пройдено</span></div>
-        <div class="fact"><strong>4 из 4</strong><span>сборки побайтно совпали</span></div>
-        <div class="fact"><strong>PASS</strong><span>чистая установка с Xray 26.9.9</span></div>
+        <div class="fact"><strong>7 версий</strong><span>физическая проверка Xray</span></div>
+        <div class="fact"><strong>6 совместимы</strong><span>VLESS/XHTTP/REALITY на ARM64</span></div>
+        <div class="fact"><strong>Восстановление</strong><span>проверка владельцев блокировок</span></div>
+        <div class="fact"><strong>PASS</strong><span>установка, откат и перезагрузка</span></div>
     </div>
 
     <div class="note">
@@ -132,9 +132,8 @@
     </div>
     <p class="muted">
         Совместимость определяется фактическими возможностями устройства во время
-        предварительной проверки. Основной полный gate выполнен на KN-2710 с
-        KeeneticOS 5.1.4. Владелец проекта также подтвердил успешные установку и
-        обновление на KN-2710, KN-3812, KN-3811, KN-1812, KN-1811 и KN-1012.
+        предварительной проверки. Приёмка 3.1.1 выполнена на Keenetic Peak KN-2710,
+        KeeneticOS 5.01.C.4.0-1, ARM64.
         Релиз не привязан к конкретному роутеру, серийному номеру или SSH-ключу.
     </p>
 </section>
@@ -145,7 +144,7 @@
         Рекомендуемый путь: <strong>BROray → Проверить обновление → Установить обновление</strong>.
         Поддерживается любая исправная версия от <code>3.0.0-r1</code>. Более старый
         release обновляется, равный завершается без изменений, более новый не понижается.
-        Если BROray ещё не установлен, этот же установщик выполняет чистую установку 3.1.0.
+        Если BROray ещё не установлен, этот же установщик выполняет чистую установку 3.1.1.
     </p>
     <p>
         Для обычного обновления не запускайте <code>opkg update</code>: установленный
@@ -193,7 +192,7 @@ curl -q \
   -fsSL \
   -H 'Cache-Control: no-cache, no-store' \
   -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.1.0-r09/INSTALL-ON-ROUTER.sh' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.1.1-r12/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 
 [ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
@@ -204,15 +203,15 @@ sh "$T"
 
     <p>Если текущий Stable уже установлен, завершение содержит:</p>
     <pre><code>UPDATE_DECISION=already-current
-INSTALLED_RELEASE=3.1.0-r09
-CURRENT_RELEASE=3.1.0-r09
+INSTALLED_RELEASE=3.1.1-r12
+CURRENT_RELEASE=3.1.1-r12
 RELEASE_MUTATION=NONE
 ENVIRONMENT_RECONCILED=YES</code></pre>
 
     <div class="note">
         <span class="note-title">Чистая установка</span>
         Stable-установщик сам проверяет чистое состояние и сразу разворачивает
-        <code>3.1.0-r09c02</code>. OPKG <code>3.0.0-r14</code> используется только
+        <code>3.1.1-r12c01</code>. OPKG <code>3.0.0-r14</code> используется только
         как регистрационный якорь; промежуточное приложение <code>r14c68</code>
         не устанавливается и не запускается.
         Полный проверяемый блок приведён в
@@ -223,7 +222,7 @@ ENVIRONMENT_RECONCILED=YES</code></pre>
         <span class="note-title">Переход с BROray 2.x</span>
         Прямое обновление с 2.x не поддерживается. Сохраните нужные данные,
         завершите штатное удаление старой ветки и запустите чистую установку текущей
-        3.1.0 универсальным Stable-установщиком.
+        3.1.1 универсальным Stable-установщиком.
         Не используйте <code>opkg upgrade</code>, <code>opkg --force-reinstall</code>
         или ручную замену файлов приложения.
     </div>
@@ -236,7 +235,7 @@ ENVIRONMENT_RECONCILED=YES</code></pre>
         <code>broray-webcli-bootstrap-3.0.0-r14c68-b1</code>. После проверки подписи
         он устанавливает точную базовую версию <code>3.0.0-r14c68</code>. Затем
         только для этого варианта выполните обычное обновление через WebUI до текущего Stable
-        <code>3.1.0-r09</code>. Физическая проверка базового пути на Keenetic aarch64 —
+        <code>3.1.1-r12</code>. Физическая проверка базового пути на Keenetic aarch64 —
         <strong>PASS</strong>.
     </p>
 
@@ -361,14 +360,16 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 </section>
 
 <section id="new">
-    <h2>Что нового в BROray 3.1.0</h2>
+    <h2>Что нового в BROray 3.1.1</h2>
     <ul class="check-list">
-        <li>На странице Xray можно выбрать и установить конкретную официальную версию, а также переустановить текущую.</li>
-        <li>Две последние стабильные версии и до пяти предварительных по переключателю. Установленная и последняя проверенная совместимая версии остаются доступны без дублирования.</li>
-        <li>Три статуса: «Совместима с BROray», «Не проверялась на совместимость с BROray», «Несовместима с BROray». Совместимость указана для текущей сборки BROray, без привязки к модели роутера.</li>
-        <li>При чистой установке устанавливается Xray <strong>26.9.9</strong>. При обновлении BROray установленное ядро сохраняется.</li>
-        <li>Исправлены ложное определение остановки Xray во время проверки конфигурации, загрузка SOCKS-хелперов, фильтр предварительных версий и повторяющиеся подписи.</li>
-        <li><strong>26.2.6 несовместима и заблокирована для установки.</strong> Проверки конфигурации, SHA-256, запуска и возврат прежнего ядра при неудачной замене сохранены.</li>
+        <li>Состояние фоновых операций, журнал, остановка отменяемых задач и пауза автоматики.</li>
+        <li>Восстановление блокировок после аварии и перезагрузки с проверкой владельца и дочерних процессов; защищённые маршрутные этапы не прерываются.</li>
+        <li>Исправлена блокировка при отмене до подтверждения запуска.</li>
+        <li>Диагностический отчёт одной кнопкой без личных ссылок подписок и конфигураций.</li>
+        <li>Импорт VLESS из JSON-профилей Xray, включая обезличенный образец Axo.</li>
+        <li>Русская подпись «Не в каталоге BROray» без дублирующего «Член каталога».</li>
+        <li>Исправлены удаление с сохранением общего Lighttpd, восстановление DoT из сохранённых данных и последовательная настройка ProxyN.</li>
+        <li>Проверены все семь версий Xray: шесть передают трафик, 26.2.6 несовместима с проверенным VLESS/XHTTP/REALITY-профилем.</li>
     </ul>
     <h3 id="xray-version">Как выбрать версию Xray</h3>
     <ol class="steps">
@@ -408,6 +409,9 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 
 <section id="history">
     <h2>История версий</h2>
+
+    <h3>3.1.1</h3>
+    <p>Управление фоновыми операциями, восстановление блокировок, журнал, диагностический отчёт и импорт JSON-подписок Xray. Исправлены удаление и восстановление сохранённых настроек.</p>
 
     <h3>3.1.0</h3>
     <p><strong>Исправлено:</strong> определение рабочего процесса Xray, проверка SOCKS при замене ядра, фильтр предварительных версий и повторяющиеся подписи.</p>
@@ -461,6 +465,8 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 
 <section id="diagnostics">
     <h2>Проверка и диагностика</h2>
+    <p>На странице BROray доступны фоновые операции, журнал и скачивание диагностического отчёта. Можно остановить отменяемые задачи и поставить автоматические запуски на паузу. Защищённые этапы маршрутов не прерываются.</p>
+    <p>Восстановление освобождает блокировку только после проверки владельца и дочерних процессов. Если операция активна или её состояние неоднозначно, блокировка сохраняется. Восстановление самих маршрутов выполняется на страницах маршрутов.</p>
     <pre><button class="copy" type="button" aria-label="Копировать команды диагностики">Копировать</button><code>/opt/broray/bin/broray-system info
 /opt/bin/broray-updaterctl version
 /opt/bin/broray-updaterctl check
@@ -470,8 +476,8 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 /opt/etc/init.d/S24broray status
 /opt/etc/init.d/S25broray-web status</code></pre>
     <p>
-        Для текущего Stable ожидаются release <code>3.1.0-r09</code>, кандидат
-        <code>3.1.0-r09c02</code>, WebUI <code>WebUI-3.1.0-r09c02</code>, пакет
+        Для текущего Stable ожидаются release <code>3.1.1-r12</code>, кандидат
+        <code>3.1.1-r12c01</code>, WebUI <code>WebUI-3.1.1-r12c01</code>, пакет
         <code>3.0.0-r14</code>, <code>broray-updater/5</code>, канал Stable и
         отсутствие доступного обновления.
     </p>
@@ -512,7 +518,7 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 
 <footer class="site-footer">
     <div class="footer-inner">
-        <span>BROvibe Docs · BROray 3.1.0</span>
+        <span>BROvibe Docs · BROray 3.1.1</span>
         <a href="#content">Наверх ↑</a>
     </div>
 </footer>

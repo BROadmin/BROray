@@ -152,7 +152,7 @@ curl -q \
   -fsSL \
   -H 'Cache-Control: no-cache, no-store' \
   -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.1.0-r09/INSTALL-ON-ROUTER.sh' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.1.1-r12/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 
 [ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
@@ -170,7 +170,7 @@ sh "$T"
 
 ```text
 BRORAY_INSTALL=PASS
-CANDIDATE=3.1.0-r09c02
+CANDIDATE=3.1.1-r12c01
 STABLE=YES
 ```
 
@@ -237,8 +237,8 @@ https://broray.<KeenDNS-домен-роутера>/
 
 ```text
 UPDATE_DECISION=already-current
-INSTALLED_RELEASE=3.1.0-r09
-CURRENT_RELEASE=3.1.0-r09
+INSTALLED_RELEASE=3.1.1-r12
+CURRENT_RELEASE=3.1.1-r12
 RELEASE_MUTATION=NONE
 ENVIRONMENT_RECONCILED=YES
 ```
