@@ -69,14 +69,24 @@
     async function mutate(endpoint, payload) {
         if (busy) return; busy=true; render(snapshot,false); text("bg-feedback","Выполняется запрос…");
         try {
-            var data=await request(endpoint,payload);
+            var data;
+            for (var attempt=0; ; attempt++) {
+                try { data=await request(endpoint,payload); break; }
+                catch (pending) {
+                    if (endpoint !== "recover" || !pending.data || pending.data.errorCode !== "RECOVERY_BLOCKED" || pending.data.retryable !== true || attempt >= 5) throw pending;
+                    text("bg-feedback","Автоматика на паузе. Ожидаем завершения фоновых задач; блокировка пока сохранена…");
+                    await new Promise(function (resolve) { setTimeout(resolve,1000); });
+                }
+            }
             var message="Настройка автоматики сохранена.";
             if (endpoint === "cancel") message=data.alreadyFinished ? "Операция уже завершена." : "Остановка запрошена. Ожидаем завершения текущего шага.";
             if (endpoint === "stop-background") message="Новые автоматические задачи поставлены на паузу. Для доступных операций запрошена остановка; операции с маршрутами и защищённые этапы продолжаются.";
-            if (endpoint === "recover") message="Проверка завершена. Подтверждённые остаточные блокировки обработаны.";
+            if (endpoint === "recover") message="Проверка завершена. Подтверждённые остаточные блокировки обработаны. Автоматика остаётся на паузе.";
             text("bg-feedback",message);
         } catch (error) {
-            text("bg-feedback",endpoint === "recover" ? "Блокировка сохранена: завершение владельца или его задач не подтверждено. Скачайте диагностический отчёт." : error.status === 409 ? "Операция перешла на защищённый этап или занята другой задачей. Обновите состояние." : "Запрос не подтверждён. Обновите состояние перед повторным действием.");
+            var reasons={ACTIVE:"Операция ещё выполняется. Дождитесь её завершения и повторите проверку.",children_unconfirmed:"Завершение дочерних задач ещё не подтверждено. Повторите проверку после их завершения.",protected_recovery:"Осталось незавершённое изменение. Для маршрутов используйте существующие «Продолжить» или «Восстановить в Keenetic» после проверки блокировки.",legacy_owner_ambiguous:"У старой блокировки недостаточно сведений о владельце. Требуется восстановление совместимости с прежней версией.",updater_pending:"Есть незавершённое обновление BROray. Проверьте его состояние на странице обновления.",legacy_domain_pending:"Сохранилась блокировка прежнего механизма операций. Требуется проверка совместимости.",domain_pending:"Есть незавершённая операция. Проверьте состояние на соответствующей странице.",AMBIGUOUS:"Не удалось подтвердить владельца операции.",publication_unconfirmed:"Завершение сохранения данных не подтверждено.",orphan_unconfirmed:"Завершение одной из задач не подтверждено."};
+            var detail=error.data && reasons[error.data.result];
+            text("bg-feedback",endpoint === "recover" ? (error.data && error.data.automationPaused === true ? "Автоматика на паузе. " : "")+"Блокировка сохранена. "+(detail || "Восстановление не подтверждено.")+" Скачайте диагностический отчёт." : error.status === 409 ? "Операция перешла на защищённый этап или занята другой задачей. Обновите состояние." : "Запрос не подтверждён. Обновите состояние перед повторным действием.");
         } finally { busy=false; await refresh(); await journal(); }
     }
     async function report(copy) {

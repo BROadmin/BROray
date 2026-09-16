@@ -651,6 +651,52 @@ ops_stop_background()
     jq -nc --argjson results "$results" '{ok:true,automationPaused:true,operations:$results}'
 }
 
+ops_emergency_recover()
+{
+    local stopped rc retryable pointer id file
+    # Pause and cancellation publication precede any retirement under the same
+    # short guard. The worker needs this guard to finish, so never wait here.
+    rc=0; stopped="$(ops_stop_background)" || rc=$?
+    if [ "$rc" != 0 ]; then printf '%s\n' "$stopped"; return "$rc"; fi
+    rc=0; ops_recover_global || rc=$?
+    if [ "$rc" = 0 ]; then ops_recover_orphans || { rc=2; OPS_RECOVERY_RESULT=orphan_unconfirmed; }; fi
+    # The updater owns these records. Their presence cannot be hidden by an
+    # absent background fence and never authorizes this manager to delete them.
+    if [ "$rc" = 0 ]; then
+        if [ -e "$OPS_UPDATER/request.lock" ] || [ -L "$OPS_UPDATER/request.lock" ]; then
+            rc=2; OPS_RECOVERY_RESULT=updater_pending
+        elif [ -e "$OPS_LEGACY" ] || [ -L "$OPS_LEGACY" ]; then
+            rc=2; OPS_RECOVERY_RESULT=legacy_domain_pending
+        fi
+    fi
+    if [ "$rc" = 0 ]; then
+        pointer="$OPS_STATE/last-operation"
+        if [ -e "$pointer" ] || [ -L "$pointer" ]; then
+            if ! ops_file_safe "$pointer" 128; then
+                rc=2; OPS_RECOVERY_RESULT=updater_pending
+            else
+                id="$(sed -n '1p' "$pointer")"; file="$OPS_ROOT/$id/state.json"
+                if ! ops_id_valid "$id" || ! ops_file_safe "$file" ||
+                   ! jq -e 'type=="object" and .running==false' "$file" >/dev/null 2>&1; then
+                    rc=2; OPS_RECOVERY_RESULT=updater_pending
+                fi
+            fi
+        fi
+    fi
+    retryable=false
+    case "$OPS_RECOVERY_RESULT" in ACTIVE|children_unconfirmed)
+        # A bounded UI recheck is useful only for a cancellable operation.
+        if [ -n "${OPS_CURRENT:-}" ] && ops_file_safe "$OPS_CURRENT/state.json" &&
+           jq -e -L "$OPS_APP/lib" 'include "operation-public"; (route_protected|not) and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null 2>&1; then
+            retryable=true
+        fi ;;
+    esac
+    jq -nc --arg result "$OPS_RECOVERY_RESULT" --argjson rc "$rc" --argjson retry "$retryable" --argjson stopped "$stopped" \
+      '{ok:($rc==0),result:$result,automationPaused:true,operations:$stopped.operations,retryable:$retry,
+        errorCode:(if $rc==0 then null elif $rc==2 then "RECOVERY_BLOCKED" else "STATE_UNAVAILABLE" end)}'
+    return "$rc"
+}
+
 ops_status()
 {
     local file dir id owner status rows errors count item paused fence cancelled
@@ -782,10 +828,7 @@ case "$verb" in
     stop-background) [ "$#" = 0 ] || ops_error INVALID_REQUEST 1; ops_stop_background ;;
     recover)
         [ "$#" = 0 ] || ops_error INVALID_REQUEST 1
-        rc=0; ops_recover_global || rc=$?
-        if [ "$rc" = 0 ]; then ops_recover_orphans || { rc=2; OPS_RECOVERY_RESULT=orphan_unconfirmed; }; fi
-        jq -nc --arg result "$OPS_RECOVERY_RESULT" --argjson rc "$rc" '{ok:($rc==0),result:$result}'
-        exit "$rc" ;;
+        ops_emergency_recover; exit $? ;;
     pause|resume)
         [ "$#" = 0 ] || ops_error INVALID_REQUEST 1
         paused=true; [ "$verb" != resume ] || paused=false

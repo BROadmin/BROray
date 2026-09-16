@@ -107,7 +107,10 @@ class RouteHTTP(HTTP):
 if __name__=='__main__':
     if os.name=='nt':raise SystemExit('Run in isolated Linux guest')
     (Path('/opt/bin')).mkdir(parents=True,exist_ok=True)
-    Path('/opt/broray').symlink_to(APP,target_is_directory=True)
+    if Path('/opt/broray').is_symlink():
+        assert Path('/opt/broray').resolve() == APP.resolve()
+    else:
+        Path('/opt/broray').symlink_to(APP,target_is_directory=True)
     subprocess.run([str(BB),'--install','-s','/opt/bin'],check=True)
     jq=Path('/opt/bin/jq')
     if not jq.exists():jq.symlink_to('/usr/bin/jq')

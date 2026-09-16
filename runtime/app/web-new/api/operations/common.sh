@@ -59,7 +59,7 @@ broray_operations_api()
     if [ "$rc" != 0 ] || printf '%s\n' "$response" | jq -e '.ok==false' >/dev/null; then
         code="$(printf '%s\n' "$response" | jq -r '.errorCode // "STATE_UNAVAILABLE"')"
         http='503 Service Unavailable'
-        case "$code" in OPERATION_BUSY|DOMAIN_OPERATION_BUSY|CANCEL_NOT_SUPPORTED) http='409 Conflict' ;; esac
+        case "$code" in OPERATION_BUSY|DOMAIN_OPERATION_BUSY|CANCEL_NOT_SUPPORTED|RECOVERY_BLOCKED) http='409 Conflict' ;; esac
     elif [ "$method" = POST ] && [ "$verb" != automation ]; then http='202 Accepted'; fi
     printf 'Status: %s\r\n' "$http"
     if [ "$verb" = report ]; then printf 'Content-Disposition: attachment; filename="BROray-diagnostics.json"\r\n'; fi
