@@ -27,6 +27,7 @@ BRORAY_ROUTES_PROGRESS_STOP_REQUESTED=false
 BRORAY_ROUTES_PROGRESS_STOPPED_BY_USER=false
 BRORAY_ROUTES_PROGRESS_ERROR_ROUTE=""
 BRORAY_ROUTES_PROGRESS_RESUMED=false
+BRORAY_ROUTES_PROGRESS_JOB=""
 
 broray_routes_progress_now()
 {
@@ -127,6 +128,7 @@ broray_routes_progress_write()
     temp="$BRORAY_ROUTES_PROGRESS_FILE.new.$$"
 
     jq -n \
+        --arg backgroundOperationId "$BRORAY_ROUTES_PROGRESS_JOB" \
         --arg bundleId "$BRORAY_ROUTES_PROGRESS_BUNDLE" \
         --arg operation "$BRORAY_ROUTES_PROGRESS_OPERATION" \
         --arg phase "$BRORAY_ROUTES_PROGRESS_PHASE" \
@@ -150,6 +152,7 @@ broray_routes_progress_write()
         {
             schemaVersion: 2,
             kind: "routes",
+            backgroundOperationId: (if $backgroundOperationId=="" then null else $backgroundOperationId end),
             canStop: false,
             bundleId: $bundleId,
             operation: $operation,
@@ -183,14 +186,15 @@ broray_routes_progress_write()
         return 1
     }
 
-    chmod 644 "$temp" 2>/dev/null || true
+    if [ -n "$BRORAY_ROUTES_PROGRESS_JOB" ]; then chmod 600 "$temp" || return 1
+    else chmod 644 "$temp" 2>/dev/null || true; fi
     mv -f "$temp" "$BRORAY_ROUTES_PROGRESS_FILE" || return 1
     broray_routes_progress_counter_write
 }
 
 broray_routes_progress_begin()
 {
-    local bundle operation total message initial_current resumed
+    local bundle operation total message initial_current resumed context
 
     bundle="${1:-}"
     operation="${2:-}"
@@ -208,6 +212,14 @@ broray_routes_progress_begin()
     broray_routes_progress_uint "$initial_current" || return 1
     [ "$initial_current" -le "$total" ] || return 1
     case "$resumed" in true|false) ;; *) resumed=false ;; esac
+
+    BRORAY_ROUTES_PROGRESS_JOB=''
+    if [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ]; then
+        . "$BRORAY_ROOT/lib/route-job.sh" || return 1
+        context="$(broray_route_worker_check)" || return 1
+        printf '%s\n' "$context" | jq -e --arg bundle "$bundle" '.bundleId==$bundle' >/dev/null || return 1
+        BRORAY_ROUTES_PROGRESS_JOB="$BRORAY_BACKGROUND_OPERATION_ID"
+    fi
 
     BRORAY_ROUTES_PROGRESS_BUNDLE="$bundle"
     BRORAY_ROUTES_PROGRESS_OPERATION="$operation"

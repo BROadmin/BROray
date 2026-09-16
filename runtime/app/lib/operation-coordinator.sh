@@ -17,6 +17,7 @@ OPS_RAM="${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}"
 . "$OPS_APP/lib/operation-journal.sh"
 . "$OPS_APP/lib/operation-report.sh"
 . "$OPS_APP/lib/operation-publication.sh"
+. "$OPS_APP/lib/operation-route-recovery.sh"
 
 ops_error()
 {
@@ -472,13 +473,21 @@ ops_pending_domain()
         ops_file_safe "$file" || return 0
         jq -e 'type=="object" and (.running|type)=="boolean" and (.resumable|type)=="boolean"' "$file" >/dev/null 2>&1 || return 0
         if jq -e '.running==true or .resumable==true' "$file" >/dev/null 2>&1; then
+            if [ -n "${3:-}" ] && [ "$file" = "$OPS_APP/routes/operations/${2:-}.json" ] &&
+               jq -e --arg id "$3" --arg bundle "${2:-}" '.backgroundOperationId==$id and .bundleId==$bundle and .kind=="routes" and .schemaVersion==2' "$file" >/dev/null; then
+                continue
+            fi
             [ -n "$resume_bundle" ] && [ "$file" = "$OPS_APP/routes/operations/$resume_bundle.json" ] || return 0
             jq -e --arg bundle "$resume_bundle" '
               (.schemaVersion==1 or .schemaVersion==2) and .kind=="routes" and .bundleId==$bundle and
               .running==false and .resumable==true and
               (.operation=="install" or .operation=="update" or .operation=="restore" or .operation=="delete")' "$file" >/dev/null || return 0
             resource="$OPS_APP/routes/locks/operation.lock"
-            [ ! -e "$resource" ] && [ ! -L "$resource" ] || return 0
+            # Recovery already proved this resource belongs to its dead job.
+            # An older committed continuation for this bundle is preserved.
+            if [ -z "${3:-}" ]; then
+                [ ! -e "$resource" ] && [ ! -L "$resource" ] || return 0
+            fi
         fi
     done
     return 1
@@ -507,6 +516,7 @@ ops_recover_global()
     if jq -e '.running==false' "$OPS_CURRENT/state.json" >/dev/null 2>&1; then
         ops_publication_ready || { OPS_RECOVERY_RESULT=publication_unconfirmed; return 2; }
         ops_children_absent || { OPS_RECOVERY_RESULT=children_unconfirmed; return 2; }
+        ops_route_finish_ready || { OPS_RECOVERY_RESULT=domain_pending; return 2; }
         ops_retire_global || return 1
         OPS_RECOVERY_RESULT=terminal_lock_retired
         return 0
@@ -521,8 +531,11 @@ ops_recover_global()
     # be discarded. Route/updater/Xray state stays under its original owner.
     cancelability="$(jq -r -L "$OPS_APP/lib" 'include "operation-public"; if route_protected then "protected" else .cancelability end' "$OPS_CURRENT/state.json")"
     if ! ops_executor_pending && ! jq -e '.state=="starting" and .acknowledged==false' "$OPS_CURRENT/state.json" >/dev/null; then
-        if [ "$cancelability" != cooperative ]; then OPS_RECOVERY_RESULT=protected_recovery; return 2; fi
-        ops_pending_domain && { OPS_RECOVERY_RESULT=domain_pending; return 2; }
+        if [ "$cancelability" != cooperative ]; then
+            ops_route_recover || { OPS_RECOVERY_RESULT=protected_recovery; return 2; }
+        else
+            ops_pending_domain && { OPS_RECOVERY_RESULT=domain_pending; return 2; }
+        fi
     fi
     ops_state_transition aborted recovering OWNER_DISAPPEARED || return 1
     ops_retire_global || return 1
@@ -856,6 +869,7 @@ case "$verb" in
         case "$3" in completed|failed|aborted) ;; *) ops_error INVALID_STATE 1 ;; esac
         case "$4" in ''|CANCELLED|OPERATION_FAILED) ;; *) ops_error INVALID_ERROR_CODE 1 ;; esac
         ops_children_absent || ops_error CHILDREN_UNCONFIRMED
+        ops_route_finish_ready || ops_error DOMAIN_OPERATION_BUSY
         if jq -e '.running==false' "$OPS_CURRENT/state.json" >/dev/null; then
             if ops_global_matches; then ops_retire_global || ops_error STATE_UNAVAILABLE 1; fi
             printf '%s\n' '{"ok":true,"alreadyFinished":true}'; exit 0
