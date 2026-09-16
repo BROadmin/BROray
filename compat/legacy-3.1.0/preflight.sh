@@ -28,6 +28,19 @@ safe_tree() {
     unsafe="$(find "$1" -xdev -type f ! -links 1 -print -quit)" || return 1
     [ -z "$unsafe" ]
 }
+terminal_background_tree() {
+    # Finished coordinator jobs retain this one link as archived evidence.
+    # It must point exactly to the same job's ordinary fence directory.
+    retired="$1/retired-lock"
+    if [ -L "$retired" ]; then
+        [ "$(readlink "$retired")" = "$1/fence" ] || return 1
+        canonical_dir "$1/fence" || return 1
+    fi
+    unsafe="$(find "$1" -xdev ! -type d ! -type f ! \( -type l -path "$retired" \) -print -quit)" || return 1
+    [ -z "$unsafe" ] || return 1
+    unsafe="$(find "$1" -xdev -type f ! -links 1 -print -quit)" || return 1
+    [ -z "$unsafe" ]
+}
 case "$S" in /opt/var/lib/broray/legacy-recovery/*) ;; *) fail SESSION_INVALID ;; esac
 canonical_dir "$S" || fail SESSION_INVALID
 case "$PHASE" in check|finalize) ;; *) fail PHASE_INVALID ;; esac
@@ -76,7 +89,7 @@ domain_check() {
             ((.state=="success") or (.state=="failed" and (.mutationStarted==false or .rollbackPerformed==true)))' "$status" >/dev/null || fail UPDATER_TRANSACTION_PENDING
     fi
     if ! absent "$STATE/operations"; then
-        safe_tree "$STATE/operations" || fail UPDATER_STATE_UNSAFE
+        canonical_dir "$STATE/operations" || fail UPDATER_STATE_UNSAFE
         for operation in "$STATE/operations"/* "$STATE/operations"/.[!.]* "$STATE/operations"/..?*; do
             absent "$operation" && continue
             canonical_dir "$operation" || fail UPDATER_STATE_UNSAFE
@@ -91,6 +104,11 @@ domain_check() {
                     (.revision|type)=="number" and
                     (.state=="completed" or .state=="failed" or .state=="aborted" or .state=="recovered")))' \
                 "$operation/state.json" >/dev/null || fail UPDATER_TRANSACTION_PENDING
+            if jq -e '.schemaVersion==2 and .kind=="background"' "$operation/state.json" >/dev/null; then
+                terminal_background_tree "$operation" || fail UPDATER_STATE_UNSAFE
+            else
+                safe_tree "$operation" || fail UPDATER_STATE_UNSAFE
+            fi
         done
     fi
     scope="$(cat "$FENCE/scope")"; action="$(cat "$FENCE/action")"; bundle="$(cat "$FENCE/bundle")"

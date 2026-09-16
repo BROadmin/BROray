@@ -99,6 +99,25 @@ class LegacyPolicy(LegacyPrototype):
         (directory/'state.json').write_text(json.dumps(history)+'\n')
         self.refusal('UPDATER_TRANSACTION_PENDING')
 
+    def terminal_history_with_retired_link(self,target=None):
+        directory=Path('/opt/var/lib/broray/operations/background-fixture');directory.mkdir(parents=True)
+        history={'schemaVersion':2,'kind':'background','operationId':directory.name,'revision':4,
+                 'running':False,'phase':'finished','state':'completed','resourceLocks':['global']}
+        (directory/'state.json').write_text(json.dumps(history)+'\n')
+        (directory/'fence').mkdir();(directory/'fence/owner.json').write_text('{}\n')
+        (directory/'retired-lock').symlink_to(target or directory/'fence',target_is_directory=True)
+        return directory
+
+    def test_policy_terminal_retired_fence_link_is_retained(self):
+        directory=self.terminal_history_with_retired_link();before=os.readlink(directory/'retired-lock')
+        self.invoke(0)
+        self.assertEqual(os.readlink(directory/'retired-lock'),before)
+        self.assertEqual((directory/'fence/owner.json').read_text(),'{}\n')
+
+    def test_policy_terminal_foreign_retired_link_is_refused(self):
+        directory=self.terminal_history_with_retired_link('/tmp')
+        self.refusal('UPDATER_STATE_UNSAFE');self.assertEqual(os.readlink(directory/'retired-lock'),'/tmp')
+
     def test_policy_incomplete_background_history_remains_blocking(self):
         directory=Path('/opt/var/lib/broray/operations/background-fixture');directory.mkdir(parents=True)
         (directory/'state.json').write_text('{"schemaVersion":2,"kind":"background","running":true,"phase":"committing","state":"running","resourceLocks":[]}\n')

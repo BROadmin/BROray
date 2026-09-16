@@ -178,6 +178,28 @@ class LegacyPrototype(unittest.TestCase):
         projection=self.app/'run/home-snapshotd.pid';projection.write_text(f'{xray.pid}\n')
         self.invoke(75);self.assert_preserved();self.assertTrue(projection.exists())
 
+    def proxy_master_title_case(self,title,expected):
+        self.native('broray-lighttpd','hold-web');owner=self.daemon()
+        binary=self.app/'run/web-new/native-auth/broray-ndm-auth-nginx'
+        binary.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(FIXTURE,binary);binary.chmod(0o700)
+        proxy=self.start([str(binary)])
+        command=self.session/'proxy-command';command.write_bytes(title)
+        subprocess.run(['/bin/busybox','mount','-o','bind',str(command),f'/proc/{proxy.pid}/cmdline'],check=True)
+        try:
+            self.register(proxy,'hold-proxy',0)
+            self.invoke(expected)
+            self.assertIsNone(proxy.poll());self.assertNotIn(proc(proxy.pid)['state'],['T','t'])
+            if expected==0:owner.wait(timeout=3)
+            else:self.assert_preserved()
+        finally:
+            subprocess.run(['/bin/busybox','umount',f'/proc/{proxy.pid}/cmdline'],check=True)
+
+    def test_private_proxy_master_without_final_nul_is_pinned_and_resumed(self):
+        self.proxy_master_title_case(b'nginx: master process /opt/broray/run/web-new/native-auth/broray-ndm-auth-nginx -p / -c /opt/broray/run/web-new/native-auth/nginx.conf',0)
+
+    def test_private_proxy_unknown_master_command_is_refused(self):
+        self.proxy_master_title_case(b'nginx: master process /opt/broray/run/web-new/native-auth/broray-ndm-auth-nginx -p / -c /tmp/unknown.conf',75)
+
     def test_replaced_projection_retains_global_fence(self):
         web=self.native('broray-lighttpd','hold-web');owner=self.daemon()
         projection=self.app/'run/home-snapshotd.pid';projection.write_text(f'{owner.pid}\n')

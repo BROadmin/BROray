@@ -150,12 +150,16 @@ static int args(const struct task *t,const char **items,int capacity) {
 }
 static int role_valid(const struct task *t) {
     if(!strcmp(t->role,"hold-proxy")) {
-        /* Nginx replaces argv with a process title and pads its old argv
-         * region with NULs. Those empty fields are not extra arguments. */
+        /* Keenetic 4.9 exposes the master title without a final NUL, while
+         * workers may retain NUL padding. Accept only the frozen service's
+         * complete title and executable, preserving exact raw identity. */
+        const char *master="nginx: master process /opt/broray/run/web-new/native-auth/broray-ndm-auth-nginx -p / -c /opt/broray/run/web-new/native-auth/nginx.conf";
+        const char *worker="nginx: worker process";
         size_t first=strnlen(t->cmd,(size_t)t->length);
-        if(first==(size_t)t->length||strcmp(t->exe,"/opt/broray/run/web-new/native-auth/broray-ndm-auth-nginx")||t->seconds)return 0;
-        if(strncmp(t->cmd,"nginx: master process ",22)&&strcmp(t->cmd,"nginx: worker process"))return 0;
-        for(size_t i=first+1;i<(size_t)t->length;i++)if(t->cmd[i])return 0;
+        if(strcmp(t->exe,"/opt/broray/run/web-new/native-auth/broray-ndm-auth-nginx")||t->seconds)return 0;
+        if(!((first==strlen(master)&&!memcmp(t->cmd,master,first))||
+             (first==strlen(worker)&&!memcmp(t->cmd,worker,first))))return 0;
+        for(size_t i=first;i<(size_t)t->length;i++)if(t->cmd[i])return 0;
         return 1;
     }
     const char *a[8];int n=args(t,a,8);

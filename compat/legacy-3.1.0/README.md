@@ -38,6 +38,22 @@ not a public API accepting arbitrary paths or commands.
 
 ## Evidence
 
+The real downgrade history also retains `retired-lock` links to each completed
+job's own `fence` directory. The saved router archive contains 13 such links;
+`legacy-recovery-retired-history-baseline-20260916` reproduces the previous
+false refusal. Only a validated terminal background record may retain that
+exact self-contained link. Other links and special/hardlinked objects refuse.
+The history and retired fence contents are never rewritten by recovery.
+
+Full c03 Web CLI recovery stopped before callbacks because the exact private
+nginx master has a 134-byte process title with no NUL. The gate retained the
+fence and detached held processes; persistent Xray identity stayed unchanged.
+The raw layout and all 15 sessions are retained in physical cycle evidence.
+The new Linux baseline reproduces this refusal. Role validation now accepts
+the exact frozen master command or worker title, with optional NUL padding;
+other commands/config paths are refused. Generic argv roles remain strict.
+No ptrace, termination, callback, process inventory or fence code was changed.
+
 Full physical c02 delivery verified the signature through Keenetic Web CLI,
 then stopped before creating a recovery session: Entware BusyBox `od` lacks
 `-A`/`-N`. The global fence and application stayed unchanged. The wrapper now
