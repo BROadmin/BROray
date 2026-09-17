@@ -589,3 +589,7 @@ Isolated branch `codex/broray-integration-01-12`; verified O=B=`725c53f3ae2077e9
 Import: `fa9d0a85837c1141f5b2544d6aaffeb797ff74b5`. Separate checkpoints register 13 build allowlist paths, document a measured QEMU test observation window, and add two async subscription cross-contract tests. No runtime rewrite or manifest bypass. See `docs/INTEGRATION-01-12.md`.
 
 Local diagnostic candidate reservation: `3.1.1-r13c03`. Authoritative test outcomes, failed/interrupted runs, final F, build proofs, candidate SHA-256 and checkpoint journal are recorded separately under workspace `artifacts/BROray-INTEGRATION-01-12-20260917/`. Publication remains held; router installation, GitHub and website changes are excluded. The DoT delete confirmation race remains open.
+
+### 2026-09-18 — cancellation integration assertion
+
+The new cross-contract test incorrectly expected CANCELLED to be persisted in the subscription record. Existing read-only presentation derives it from the aborted operation. Corrected the test to use broray_subscription_get, additionally asserting that the read leaves persisted bytes unchanged. No runtime change. Failed run and rerun are retained in the integration evidence.

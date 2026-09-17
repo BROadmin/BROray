@@ -107,7 +107,11 @@ broray_subscription_launch_update test manual
             self.wait(self.terminal, timeout=90)
         after = json.loads(path.read_bytes())
         self.assertEqual(self.states()[0]['state'], 'aborted')
-        self.assertEqual(after['lastUpdateResult']['errorCode'], 'CANCELLED')
+        saved = path.read_bytes()
+        public = json.loads(self.shell('. "$BRORAY_ROOT/lib/subscription-service.sh"; '
+                                       'broray_subscription_get test').stdout)
+        self.assertEqual(public['lastUpdateResult']['errorCode'], 'CANCELLED')
+        self.assertEqual(path.read_bytes(), saved)
         self.assertEqual(after['providerMetadata'], {'schemaVersion': 1, 'title': 'Old provider'})
         self.assertEqual(self.snapshot(), before)
         self.assert_clean()
