@@ -67,6 +67,19 @@
     "app/web-new/assets/js/routes-catalog.js",
     "app/share/xray-compatibility.json",
     "app/share/updater-platform/SHA256SUMS",
-    "app/share/updater-platform/opt/libexec/broray-updater/broray-updater.sh"
+    "app/share/updater-platform/opt/libexec/broray-updater/broray-updater.sh",
+    "app/lib/network.sh",
+    "app/lib/package-setup.sh",
+    "app/lib/package-transaction.sh",
+    "app/lib/parser-shadowsocks.sh",
+    "app/web-new/api/routes/dot-common.sh",
+    "app/web-new/assets/js/common.js",
+    "app/web-new/assets/js/home.js",
+    "app/web-new/assets/js/routes-custom-page.js",
+    "app/web-new/dns.html",
+    "app/web-new/routes-custom.html",
+    "app/web-new/routes-import.html",
+    "app/web-new/subscriptions.html",
+    "init/S25broray-web"
   ]
 }
