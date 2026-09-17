@@ -101,7 +101,12 @@ class InterfaceReconcile(Sidecar,unittest.TestCase):
         self.assertIn('state=deferred',(self.app/'run/interface-reconcile.status').read_text())
     def test_failed_mutation_preserves_protected_fence(self):
         self.fixture('fixture-interface','echo "$1" >>"$BRORAY_ROOT/tmp/interface.calls"\nif [ "$1" = ownership-check ] && [ ! -e "$BRORAY_ROOT/tmp/mutated" ]; then exit 0; fi\n[ "$1" != repair ] || touch "$BRORAY_ROOT/tmp/mutated"\nexit 1\n')
-        p=self.direct();out,err=p.communicate(timeout=25);self.assertEqual(p.returncode,75,(out,err))
+        # The protected failure path includes both supervised phases. QEMU
+        # measured 39.245s with unchanged result/fence assertions; match the
+        # existing successful-reconcile observation window, not runtime limits.
+        started=time.monotonic()
+        p=self.direct();out,err=p.communicate(timeout=60);self.assertEqual(p.returncode,75,(out,err))
+        print('RECONCILE_FAILURE_COMPLETION_SECONDS='+str(round(time.monotonic()-started,3)),flush=True)
         self.assertTrue((self.temp/'global.lock').is_symlink())
         self.assertIn('recovery-required',(self.app/'run/interface-reconcile.status').read_text())
         self.call('stop');self.assertTrue((self.temp/'global.lock').is_symlink())
