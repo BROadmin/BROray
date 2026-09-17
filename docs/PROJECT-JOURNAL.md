@@ -580,3 +580,12 @@ SHA-256: 35ab785ce5b79f755971db88adb4ca2a542ccff9e5733a1e066f0291c6c4d9c3
 ## Следующее обязательное действие проекта на 9 сентября 2026 года
 
 Собирать обратную связь по обновлениям и чистым установкам Stable `3.0.1-r09`. Stable не изменять без воспроизводимого дефекта. Следующие изменения ветки обязаны сохранять решение D-20260829-01 и не менять updater-v5 без отдельного согласования; проектирование модульной 3.5.0 вести отдельно.
+
+
+## BROray integration 01-12 / 2026-09-17
+
+Isolated branch `codex/broray-integration-01-12`; verified O=B=`725c53f3ae2077e9f1abb8db0129554abc59c320`. Applied only the verified cumulative stage12 package (78 exact files, 18 required Git blobs). Original checkout remains unchanged.
+
+Import: `fa9d0a85837c1141f5b2544d6aaffeb797ff74b5`. Separate checkpoints register 13 build allowlist paths, document a measured QEMU test observation window, and add two async subscription cross-contract tests. No runtime rewrite or manifest bypass. See `docs/INTEGRATION-01-12.md`.
+
+Local diagnostic candidate reservation: `3.1.1-r13c03`. Authoritative test outcomes, failed/interrupted runs, final F, build proofs, candidate SHA-256 and checkpoint journal are recorded separately under workspace `artifacts/BROray-INTEGRATION-01-12-20260917/`. Publication remains held; router installation, GitHub and website changes are excluded. The DoT delete confirmation race remains open.
