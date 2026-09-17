@@ -30,6 +30,18 @@
     var summaryRequest = null;
     var summaryController = null;
 
+    function showPreparationFeedback(error, phase) {
+        if (error && (error.status === 401 || error.code === "AUTH_REQUIRED" || error.code === "SESSION_REQUIRED")) {
+            window.BROrayUI.redirectToLogin(); return;
+        }
+        if (window.BROrayActionFeedback) window.BROrayActionFeedback.show("routes-feedback",
+            window.BROrayActionFeedback.describe(error, phase), function () { return load(); });
+        else window.BROrayUI.toast(error && error.message || "Не удалось завершить проверку.", "error");
+    }
+    function clearPreparationFeedback() {
+        if (window.BROrayActionFeedback) window.BROrayActionFeedback.clear("routes-feedback");
+    }
+
     function byId(id) {
         return document.getElementById(id);
     }
@@ -648,6 +660,8 @@
     }
 
     function prepareLong(bundle, action) {
+        var mutationStarted = false;
+        clearPreparationFeedback();
         busyActions[bundle.id] = "preflight";
         render();
         if (window.BROrayRoutesOperationUI) {
@@ -678,7 +692,7 @@
                 );
             }
             return confirmPreflight(bundle, preflight).then(function (confirmed) {
-                if (confirmed) return executeLong(bundle, action, preflight.token);
+                if (confirmed) { mutationStarted = true; return executeLong(bundle, action, preflight.token); }
                 if (window.BROrayRoutesOperationUI) window.BROrayRoutesOperationUI.clearPending(false);
                 return false;
             });
@@ -687,7 +701,7 @@
             render();
             if (window.BROrayRoutesOperationUI) window.BROrayRoutesOperationUI.clearPending(false);
             if (error && error.status === 401) return window.BROrayUI.redirectToLogin();
-            toast(globalMessage(error), "error");
+            showPreparationFeedback(error, mutationStarted ? "mutation" : "preflight");
             return false;
         });
     }

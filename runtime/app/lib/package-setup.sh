@@ -273,9 +273,17 @@ load_preserved_local_address()
     printf 'LAN-IP preserved: %s\n' "$BRORAY_SETUP_LAN_IP"
 }
 
+broray_setup_web_lan_ip()
+(
+    BRORAY_NETWORK_ROOT="$BRORAY_SETUP_TARGET"
+    . "$BRORAY_SETUP_TARGET/lib/network.sh" || exit 1
+    broray_detect_webui_lan_ip
+)
+
 configure_lighttpd()
 {
-    local lighttpd_file lighttpd_temp
+    local lighttpd_file lighttpd_temp web_lan
+    web_lan="$(broray_setup_web_lan_ip)" || fail "Не удалось определить адрес WebUI"
     lighttpd_file="$BRORAY_SETUP_TARGET/config/lighttpd.conf"
     lighttpd_temp="$lighttpd_file.opkg-new"
 
@@ -285,7 +293,7 @@ server.modules = (
 )
 
 server.document-root = "$BRORAY_SETUP_TARGET/web-new"
-server.bind = "$BRORAY_SETUP_LAN_IP"
+server.bind = "$web_lan"
 server.port = 8080
 server.max-request-size = 5120
 
@@ -418,12 +426,13 @@ migrate_dns_config()
 
 configure_web_proxy()
 {
-    local web_publish_library
+    local web_publish_library web_lan
     [ "$BRORAY_SETUP_SKIP_KEENETIC" = 1 ] && return 0
+    web_lan="$(broray_setup_web_lan_ip)" || fail "Не удалось определить адрес WebUI"
     web_publish_library="$BRORAY_SETUP_TARGET/lib/web-publish.sh"
     [ -r "$web_publish_library" ] || fail "Не найден $web_publish_library"
     mkdir -p "$BRORAY_SETUP_TARGET/run" || fail "Не удалось подготовить runtime LAN-IP"
-    printf '%s\n' "$BRORAY_SETUP_LAN_IP" >"$BRORAY_SETUP_TARGET/run/lan-ip" ||
+    printf '%s\n' "$web_lan" >"$BRORAY_SETUP_TARGET/run/lan-ip" ||
         fail "Не удалось передать LAN-IP ownership-safe HTTP Proxy модулю"
     chmod 600 "$BRORAY_SETUP_TARGET/run/lan-ip" 2>/dev/null || true
 
@@ -638,17 +647,18 @@ broray_setup_local_http_probe()
 
 validate_webui()
 {
-    local attempt
+    local attempt web_lan
     [ "$BRORAY_SETUP_SKIP_SERVICES" = 1 ] && return 0
+    web_lan="$(broray_setup_web_lan_ip)" || fail "Не удалось определить адрес WebUI"
     attempt=1
     while [ "$attempt" -le 15 ]; do
-        if broray_setup_local_http_probe "$BRORAY_SETUP_LAN_IP" 5 >/dev/null 2>&1; then
+        if broray_setup_local_http_probe "$web_lan" 5 >/dev/null 2>&1; then
             return 0
         fi
         sleep 1
         attempt=$((attempt + 1))
     done
-    fail "WebUI не отвечает по адресу http://$BRORAY_SETUP_LAN_IP:8080/"
+    fail "WebUI не отвечает по адресу http://$web_lan:8080/"
 }
 
 validate_runtime_contracts()
@@ -685,7 +695,7 @@ validate_no_reboot_soak()
 print_result()
 {
     printf '\n%s %s установлен через OPKG\n' "$BRORAY_SETUP_PRODUCT" "$BRORAY_SETUP_VERSION"
-    printf 'WebUI: http://%s:8080/\n' "$BRORAY_SETUP_LAN_IP"
+    printf 'WebUI: http://%s:8080/\n' "$(broray_setup_web_lan_ip)"
     printf 'Сборка: WebUI-3.0.0-r15c16, канал staging\n'
 }
 

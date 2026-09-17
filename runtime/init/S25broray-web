@@ -146,20 +146,21 @@ broray_web_prepare_runtime_binary()
 
 broray_web_configure_bind()
 {
-    local lan
-
+    local lan temporary binds ports
     lan="$1"
+    broray_network_ipv4_valid "$lan" || return 1
     [ -f "$CONF" ] && [ ! -L "$CONF" ] || return 1
-    if grep -q '^server\.bind[[:space:]]*=' "$CONF"; then
-        sed -i \
-            "s|^server\.bind[[:space:]]*=.*|server.bind = \"$lan\"|" \
-            "$CONF" || return 1
-    else
-        sed -i \
-            "/^server\.port/i server.bind = \"$lan\"" \
-            "$CONF" || return 1
-    fi
-    "$RUNTIME_BINARY" -tt -f "$CONF"
+    binds="$(awk '/^server\.bind[[:space:]]*=/{n++} END{print n+0}' "$CONF")"
+    ports="$(awk '/^server\.port[[:space:]]*=/{n++} END{print n+0}' "$CONF")"
+    [ "$binds" -le 1 ] && [ "$ports" = 1 ] || return 1
+    temporary="$(mktemp "${CONF%/*}/.lighttpd-bind.XXXXXXXXXX")" || return 1
+    if ! awk -v lan="$lan" -v binds="$binds" '
+      /^server\.bind[[:space:]]*=/ {print "server.bind = \"" lan "\"";next}
+      /^server\.port[[:space:]]*=/ {if(binds==0)print "server.bind = \"" lan "\""}
+      {print}' "$CONF" >"$temporary";then rm -f "$temporary";return 1;fi
+    if ! "$RUNTIME_BINARY" -tt -f "$temporary";then rm -f "$temporary";return 1;fi
+    if cmp -s "$temporary" "$CONF";then rm -f "$temporary";return 0;fi
+    chmod 600 "$temporary" && mv -f "$temporary" "$CONF" || { rm -f "$temporary";return 1; }
 }
 
 start()
@@ -179,8 +180,9 @@ start()
         echo "Не найден $NETWORK" >&2
         return 1
     }
+    BRORAY_NETWORK_ROOT="$BASE"
     . "$NETWORK"
-    lan="$(broray_save_lan_ip)" || return 1
+    lan="$(broray_detect_webui_lan_ip)" || return 1
 
     if [ -e "$PIDFILE" ] || [ -L "$PIDFILE" ]; then
         pid="$(broray_web_pid_read 2>/dev/null || true)"
@@ -189,6 +191,10 @@ start()
             return 1
         }
         if broray_web_process_identity_twice "$pid"; then
+            [ "$(broray_web_lan_ip)" = "$lan" ] || {
+                echo "Привязка WebUI изменена. Нужен штатный перезапуск; работающий процесс не изменён." >&2
+                return 1
+            }
             if broray_web_http_healthy; then
                 echo "BROray WebUI уже запущен, PID $pid"
                 return 0
@@ -205,6 +211,7 @@ start()
 
     broray_web_prepare_runtime_binary || return 1
     broray_web_configure_bind "$lan" || return 1
+    broray_network_store_lan_ip "$lan" || return 1
     "$RUNTIME_BINARY" -f "$CONF" || return 1
     sleep 1
 

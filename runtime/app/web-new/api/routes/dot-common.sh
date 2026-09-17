@@ -3,6 +3,7 @@
 BRORAY_ROOT="${BRORAY_ROOT:-/opt/broray}"
 . "$BRORAY_ROOT/web-new/api/auth-common.sh"
 . "$BRORAY_ROOT/lib/web-request-body.sh"
+. "$BRORAY_ROOT/lib/dot-auto.sh"
 
 BRORAY_DOT_CLI="${BRORAY_DOT_CLI:-$BRORAY_ROOT/bin/broray-routes-dot}"
 BRORAY_DOT_API_LOCK_LIBRARY="${BRORAY_DOT_API_LOCK_LIBRARY:-$BRORAY_ROOT/lib/routes-api-operation.sh}"
@@ -110,7 +111,7 @@ broray_dot_api_run()
             broray_dot_api_release
             broray_api_error "500 Internal Server Error" DOT_RESPONSE_INVALID "Модуль DNS-over-TLS вернул некорректный ответ." "$details"
         }
-        data="$(jq -c . "$output")"
+        data="$(jq -c --argjson auto "$(broray_dot_auto_view)" '. + {autoCheck:$auto}' "$output")"
         rm -f "$output" "$error"
         broray_dot_api_release
         broray_api_success "$data"

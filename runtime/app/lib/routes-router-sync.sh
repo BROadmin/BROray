@@ -108,7 +108,7 @@ broray_routes_sync_is_pid()
 
 broray_routes_sync_lock_acquire()
 {
-    broray_route_resource_acquire "$BRORAY_SYNC_LOCK" "sync" "" || return $?
+    broray_route_resource_acquire "$BRORAY_SYNC_LOCK" "sync" "${BRORAY_SYNC_BUNDLE:-}" || return $?
     BRORAY_SYNC_LOCK_TOKEN="$BRORAY_ROUTE_RESOURCE_TOKEN"
     BRORAY_SYNC_LOCK_HELD=true
     return 0

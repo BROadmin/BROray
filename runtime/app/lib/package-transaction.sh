@@ -8669,6 +8669,14 @@ broray_tx_restore_apply()
     broray_tx_event restore-applied
 }
 
+broray_tx_web_lan_ip()
+(
+    BRORAY_NETWORK_ROOT="$BRORAY_TX_APP_ROOT"
+    . "$BRORAY_TX_APP_ROOT/lib/network.sh" || exit 1
+    if command -v broray_detect_webui_lan_ip >/dev/null 2>&1; then broray_detect_webui_lan_ip
+    else broray_detect_lan_ip; fi
+)
+
 broray_tx_restore_postcheck()
 {
     broray_tx_event restore-postcheck || return 1
@@ -8687,7 +8695,7 @@ broray_tx_restore_postcheck()
         [ -f "$BRORAY_TX_APP_ROOT/config/config.json" ] || broray_tx_fail restore-postcheck-xray-config-missing || return 1
         XRAY_LOCATION_ASSET="$BRORAY_TX_APP_ROOT/bin" "$BRORAY_TX_APP_ROOT/bin/xray" run -test -c "$BRORAY_TX_APP_ROOT/config/config.json" >/dev/null 2>&1 || broray_tx_fail restore-postcheck-xray-config-test || return 1
         broray_tx_service_state_postcheck || broray_tx_fail restore-postcheck-service-state || return 1
-        broray_tx_lan="$(jq -r '.listenAddress // empty' "$BRORAY_TX_APP_ROOT/config/system/settings.json")"
+        broray_tx_lan="$(broray_tx_web_lan_ip)"
         [ -n "$broray_tx_lan" ] && broray_tx_local_http_probe "$broray_tx_lan" 8 >/dev/null 2>&1 || broray_tx_fail restore-postcheck-webui-http || return 1
     fi
     broray_tx_event restore-postcheck-pass
@@ -9748,7 +9756,7 @@ broray_tx_postcheck_application()
         [ -f "$BRORAY_TX_APP_ROOT/config/config.json" ] || broray_tx_fail postcheck-xray-config-missing || return 1
         XRAY_LOCATION_ASSET="$BRORAY_TX_APP_ROOT/bin" "$BRORAY_TX_APP_ROOT/bin/xray" run -test -c "$BRORAY_TX_APP_ROOT/config/config.json" >/dev/null 2>&1 || broray_tx_fail postcheck-xray-config-test || return 1
         broray_tx_service_state_postcheck || broray_tx_fail postcheck-service-semantic-state || return 1
-        broray_tx_lan="$(jq -r '.listenAddress // empty' "$BRORAY_TX_APP_ROOT/config/system/settings.json")"
+        broray_tx_lan="$(broray_tx_web_lan_ip)"
         [ -n "$broray_tx_lan" ] && broray_tx_local_http_probe "$broray_tx_lan" 8 >/dev/null 2>&1 || broray_tx_fail postcheck-webui-http || return 1
         ndmc -c 'show running-config' 2>/dev/null | grep -Eq 'Proxy[0-9]+' || broray_tx_fail postcheck-managed-proxy || return 1
         ndmc -c 'show running-config' 2>/dev/null | grep -Eq 'ip http proxy broray' || broray_tx_fail postcheck-http-proxy || return 1

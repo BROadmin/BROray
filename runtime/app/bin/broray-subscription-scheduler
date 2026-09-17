@@ -5,6 +5,7 @@ PATH="$ROOT/bin:/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
 . "$ROOT/lib/subscription-service.sh"
+. "$ROOT/lib/dot-auto.sh"
 
 LOG_FILE="${BRORAY_SUBSCRIPTION_LOG_FILE:-$ROOT/logs/subscription-scheduler.log}"
 INTERVAL_SECONDS="${BRORAY_SUB_SCHEDULER_INTERVAL:-60}"
@@ -14,7 +15,7 @@ export BRORAY_ROUTES_API_LOCK
 
 scheduler_cycle()
 {
-    local due_file due_now
+    local due_file due_now subscription_rc=0
     due_now="$(broray_subscription_now_epoch)"
     for due_file in "$BRORAY_SUB_DIR"/*.json; do
         [ -f "$due_file" ] && [ ! -L "$due_file" ] || continue
@@ -22,14 +23,28 @@ scheduler_cycle()
           (.nextUpdateEpoch|type)=="number" and .nextUpdateEpoch>0 and .nextUpdateEpoch<=$now' "$due_file" >/dev/null 2>&1; then
             # A fresh exec has its own PID/birth identity and exit traps. The
             # daemon cannot be mistaken for a completed or hung update job.
-            broray_service_run_job "$ROOT/bin/broray-subscription-scheduler" --job
-            return $?
+            broray_service_run_job "$ROOT/bin/broray-subscription-scheduler" --job || subscription_rc=$?
+            break
         fi
     done
-    return 0
+    if broray_dot_auto_due; then
+        broray_service_run_job "$ROOT/bin/broray-subscription-scheduler" --dot-job || subscription_rc=$?
+    fi
+    return "$subscription_rc"
 }
 
 case "${1:-}" in
+    --dot-job)
+        job_rc=0
+        broray_job_begin system dot:auto-check dns-over-tls SCHEDULER cooperative || job_rc=$?
+        [ "$job_rc" != 2 ] || exit 0
+        [ "$job_rc" = 0 ] || exit "$job_rc"
+        trap 'broray_dot_auto_exit "$?"' EXIT
+        trap 'exit 129' HUP
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        broray_dot_auto_run
+        exit $? ;;
     --job)
         job_rc=0
         broray_job_begin system subscriptions:scheduler subscriptions SUBSCRIPTION_AUTO cooperative || job_rc=$?

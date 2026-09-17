@@ -10,6 +10,8 @@ BRORAY_STATUS_LIBRARY="${BRORAY_STATUS_LIBRARY:-$BRORAY_BASE/lib/status-contract
 . "$BRORAY_STATUS_LIBRARY"
 . "$BRORAY_BASE/lib/operation-job.sh"
 . "$BRORAY_BASE/lib/subscription-job.sh"
+. "$BRORAY_BASE/lib/subscription-http.sh"
+. "$BRORAY_BASE/lib/subscription-device-info.sh"
 BRORAY_SUB_DIR="${BRORAY_SUB_DIR:-$BRORAY_SUB_BASE/config/subscriptions}"
 BRORAY_SUB_RUN="${BRORAY_SUB_RUN:-$BRORAY_SUB_BASE/run/subscriptions}"
 BRORAY_SUB_TMP="${BRORAY_SUB_TMP:-$BRORAY_SUB_BASE/tmp}"
@@ -18,7 +20,7 @@ BRORAY_SUB_MAX_BYTES="${BRORAY_SUB_MAX_BYTES:-2097152}"
 BRORAY_SUB_MAX_NODES="${BRORAY_SUB_MAX_NODES:-500}"
 BRORAY_SUB_MIN_INTERVAL="${BRORAY_SUB_MIN_INTERVAL:-5}"
 BRORAY_SUB_MAX_INTERVAL="${BRORAY_SUB_MAX_INTERVAL:-10080}"
-BRORAY_SUB_USER_AGENT="BROray/3.0.0"
+BRORAY_SUB_USER_AGENT="${BRORAY_SUB_USER_AGENT:-}"
 
 BRORAY_SUB_ERROR_CODE=""
 BRORAY_SUB_ERROR_MESSAGE=""
@@ -124,6 +126,8 @@ broray_subscription_validate_file()
         --argjson max "$BRORAY_SUB_MAX_INTERVAL" '
         type == "object" and
         .schemaVersion == 1 and
+        ((has("sendDeviceInfo")|not) or (.sendDeviceInfo|type)=="boolean") and
+        ((has("httpUserAgent")|not) or (.httpUserAgent|type=="string" and length<=128 and all(explode[]; .>=32 and .<=126))) and
         (((.id | type) == "string") and ((.id | length) > 0)) and
         (((.name | type) == "string") and ((.name | length) > 0) and ((.name | length) <= 128)) and
         (((.url | type) == "string") and ((.url | length) > 0) and ((.url | length) <= 4096)) and
@@ -582,6 +586,7 @@ broray_subscription_resolve_redirect()
         http://*|https://*)
             printf '%s\n' "$redirect_location"
             ;;
+        \?*) printf '%s%s\n' "${redirect_base%%\?*}" "$redirect_location" ;;
         //*)
             redirect_scheme="${redirect_base%%://*}"
             printf '%s:%s\n' "$redirect_scheme" "$redirect_location"
@@ -601,30 +606,27 @@ broray_subscription_resolve_redirect()
     esac
 }
 
-broray_subscription_header_true()
-{
-    header_true_file="$1"
-    header_true_name="$2"
-    awk -v wanted="$header_true_name" '
-        {
-            line=$0
-            sub(/\r$/, "", line)
-            name=line
-            sub(/:.*/, "", name)
-            if (tolower(name) != tolower(wanted)) next
-            value=line
-            sub(/^[^:]*:[[:space:]]*/, "", value)
-            if (tolower(value) == "true") found=1
-        }
-        END { exit(found ? 0 : 1) }
-    ' "$header_true_file"
-}
-
 broray_subscription_fetch()
 {
     fetch_url="$1"
     fetch_output="$2"
     fetch_client_hwid="${3:-}"
+    fetch_user_agent="${4:-${BRORAY_SUB_USER_AGENT:-}}"
+    fetch_send_device="${5:-false}"
+    case "$fetch_send_device" in true|false) ;; *)
+        broray_subscription_set_error INVALID_DEVICE_INFO_SETTING 'Разрешение отправки сведений об устройстве должно быть логическим.'; return 1 ;;
+    esac
+    fetch_device_origin=''; fetch_device_share="$fetch_send_device"
+    fetch_device_os=''; fetch_device_model=''; fetch_device_version=''; fetch_device_app=''
+    BRORAY_SUB_FETCH_CONTENT_TYPE=''; BRORAY_SUB_FETCH_BYTES=0; BRORAY_SUB_FETCH_FINAL_URL=''
+    [ -n "$fetch_user_agent" ] || fetch_user_agent="$(broray_subscription_default_user_agent)"
+    broray_subscription_user_agent_valid "$fetch_user_agent" || {
+        broray_subscription_set_error INVALID_USER_AGENT 'User-Agent должен содержать не более 128 печатных ASCII-символов.'; return 1;
+    }
+    if [ -n "${BRORAY_SUB_PROVIDER_METADATA_FILE:-}" ]; then
+        [ ! -L "$BRORAY_SUB_PROVIDER_METADATA_FILE" ] || return 1
+        printf '{"schemaVersion":1}\n' > "$BRORAY_SUB_PROVIDER_METADATA_FILE" || return 1
+    fi
     command -v curl >/dev/null 2>&1 || {
         broray_subscription_set_error \
             "HTTP_ERROR" \
@@ -651,6 +653,17 @@ broray_subscription_fetch()
             rm -f "$fetch_headers" "$fetch_body" "$fetch_error"
             return 1
         }
+        if [ "$fetch_send_device" = true ]; then
+            fetch_origin="$BRORAY_SUB_URL_SCHEME:$(printf '%s' "$BRORAY_SUB_URL_HOST" | tr 'A-Z' 'a-z'):$BRORAY_SUB_URL_PORT"
+            if [ -z "$fetch_device_origin" ]; then
+                fetch_device_origin="$fetch_origin"
+                fetch_device_info="$(broray_subscription_device_info 2>/dev/null)" || fetch_device_info='{}'
+                fetch_device_os="$(printf '%s' "$fetch_device_info" | jq -r '.os // empty')"
+                fetch_device_model="$(printf '%s' "$fetch_device_info" | jq -r '.model // empty')"
+                fetch_device_version="$(printf '%s' "$fetch_device_info" | jq -r '.osVersion // empty')"
+                fetch_device_app="$(printf '%s' "$fetch_device_info" | jq -r '.appVersion // empty')"
+            elif [ "$fetch_origin" != "$fetch_device_origin" ]; then fetch_device_share=false; fi
+        fi
         fetch_resolve="$BRORAY_SUB_URL_HOST:$BRORAY_SUB_URL_PORT:$BRORAY_SUB_RESOLVED_IP"
         case "$BRORAY_SUB_RESOLVED_IP" in
             *:*)
@@ -660,7 +673,7 @@ broray_subscription_fetch()
         : > "$fetch_headers"
         : > "$fetch_error"
         set -- \
-            curl \
+            curl --disable --globoff \
             --silent \
             --show-error \
             --noproxy '*' \
@@ -668,12 +681,23 @@ broray_subscription_fetch()
             --connect-timeout 10 \
             --max-time 35 \
             --max-redirs 0 \
-            --user-agent "$BRORAY_SUB_USER_AGENT" \
+            --user-agent "$fetch_user_agent" \
             --resolve "$fetch_resolve"
+        set -- "$@" --header 'Accept: application/json, text/plain, */*'
+        fetch_compressed=false
+        if broray_subscription_compression_safe; then
+            set -- "$@" --compressed; fetch_compressed=true
+        else set -- "$@" --header 'Accept-Encoding: identity'; fi
         if [ -n "$fetch_client_hwid" ]; then
             set -- "$@" --header "x-hwid: $fetch_client_hwid"
         fi
-        if curl --help all 2>/dev/null | grep -q -- '--max-filesize'; then
+        if [ "$fetch_device_share" = true ]; then
+            [ -z "$fetch_device_os" ] || set -- "$@" --header "X-Device-OS: $fetch_device_os"
+            [ -z "$fetch_device_model" ] || set -- "$@" --header "X-Device-Model: $fetch_device_model"
+            [ -z "$fetch_device_version" ] || set -- "$@" --header "X-Ver-OS: $fetch_device_version"
+            [ -z "$fetch_device_app" ] || set -- "$@" --header "X-App-Version: $fetch_device_app"
+        fi
+        if curl --disable --help all 2>/dev/null | grep -q -- '--max-filesize'; then
             set -- "$@" --max-filesize "$BRORAY_SUB_MAX_BYTES"
         fi
         fetch_status="$(
@@ -719,24 +743,22 @@ broray_subscription_fetch()
             return 1
         fi
 
+        fetch_header_bytes="$(wc -c < "$fetch_headers" | tr -d ' ')"
+        if [ "$fetch_header_bytes" -gt 65536 ]; then
+            broray_subscription_set_error CONTENT_TOO_LARGE 'Заголовки ответа подписки превышают допустимый размер.'
+            rm -f "$fetch_headers" "$fetch_body" "$fetch_error"; return 1
+        fi
+        case "$fetch_status" in
+            2??|4??|5??) if broray_subscription_http_denial "$fetch_headers"; then
+                rm -f "$fetch_headers" "$fetch_body" "$fetch_error"; return 1; fi ;;
+        esac
+        fetch_encoding="$(broray_subscription_header_value "$fetch_headers" content-encoding)" || fetch_encoding=ambiguous
+        if [ "$fetch_compressed" = false ] && [ -n "$fetch_encoding" ] && [ "$fetch_encoding" != identity ]; then
+            broray_subscription_set_error UNSUPPORTED_CONTENT 'Сервер прислал сжатый ответ; для безопасной распаковки требуется curl 8.20 или новее.'
+            rm -f "$fetch_headers" "$fetch_body" "$fetch_error"; return 1
+        fi
         case "$fetch_status" in
             2??)
-                if broray_subscription_header_true \
-                    "$fetch_headers" "x-hwid-max-devices-reached"; then
-                    broray_subscription_set_error \
-                        "SUBSCRIPTION_DEVICE_LIMIT_REACHED" \
-                        "Провайдер отклонил подписку: достигнут лимит зарегистрированных устройств."
-                    rm -f "$fetch_headers" "$fetch_body" "$fetch_error"
-                    return 1
-                fi
-                if broray_subscription_header_true \
-                    "$fetch_headers" "x-hwid-not-supported"; then
-                    broray_subscription_set_error \
-                        "SUBSCRIPTION_DEVICE_ID_REJECTED" \
-                        "Провайдер не принял анонимный идентификатор клиента подписки."
-                    rm -f "$fetch_headers" "$fetch_body" "$fetch_error"
-                    return 1
-                fi
                 mv "$fetch_body" "$fetch_output" || {
                     broray_subscription_set_error \
                         "INTERNAL_ERROR" \
@@ -744,10 +766,11 @@ broray_subscription_fetch()
                     rm -f "$fetch_headers" "$fetch_body" "$fetch_error"
                     return 1
                 }
-                BRORAY_SUB_FETCH_CONTENT_TYPE="$(
-                    awk 'BEGIN{IGNORECASE=1} /^Content-Type:/ {line=$0} END{sub(/\r$/, "", line); sub(/^[^:]*:[[:space:]]*/, "", line); print line}' \
-                        "$fetch_headers"
-                )"
+                BRORAY_SUB_FETCH_CONTENT_TYPE="$(broray_subscription_header_value "$fetch_headers" content-type)" || BRORAY_SUB_FETCH_CONTENT_TYPE=''
+                broray_subscription_metadata_collect http "$fetch_headers" || {
+                    rm -f "$fetch_headers" "$fetch_error" "$fetch_output"
+                    broray_subscription_set_error INTERNAL_ERROR 'Не удалось подготовить сведения о подписке.'; return 1;
+                }
                 BRORAY_SUB_FETCH_BYTES="$fetch_bytes"
                 BRORAY_SUB_FETCH_FINAL_URL="$fetch_current"
                 rm -f "$fetch_headers" "$fetch_error"
@@ -762,10 +785,7 @@ broray_subscription_fetch()
                     rm -f "$fetch_headers" "$fetch_body" "$fetch_error"
                     return 1
                 fi
-                fetch_location="$(
-                    awk 'BEGIN{IGNORECASE=1} /^Location:/ {line=$0} END{sub(/\r$/, "", line); sub(/^[^:]*:[[:space:]]*/, "", line); print line}' \
-                        "$fetch_headers"
-                )"
+                fetch_location="$(broray_subscription_header_value "$fetch_headers" location)" || fetch_location=''
                 [ -n "$fetch_location" ] || {
                     broray_subscription_set_error \
                         "HTTP_ERROR" \
@@ -773,6 +793,7 @@ broray_subscription_fetch()
                     rm -f "$fetch_headers" "$fetch_body" "$fetch_error"
                     return 1
                 }
+                fetch_previous="$fetch_current"
                 fetch_current="$(
                     broray_subscription_resolve_redirect \
                         "$fetch_current" "$fetch_location"
@@ -780,6 +801,10 @@ broray_subscription_fetch()
                     rm -f "$fetch_headers" "$fetch_body" "$fetch_error"
                     return 1
                 }
+                case "$fetch_previous:$fetch_current" in https://*:http://*)
+                    broray_subscription_set_error HTTP_ERROR 'Переход с HTTPS на незащищённый HTTP отклонён.'
+                    rm -f "$fetch_headers" "$fetch_body" "$fetch_error"; return 1 ;;
+                esac
                 rm -f "$fetch_body"
                 ;;
             *)
@@ -827,6 +852,8 @@ broray_subscription_extract_nodes()
 
     tr -d '\r' < "$extract_input" > "$extract_normalized"
     sed -i '1s/^\xef\xbb\xbf//' "$extract_normalized" 2>/dev/null || true
+    broray_subscription_metadata_collect body "$extract_normalized" || return 1
+    broray_subscription_strip_metadata "$extract_normalized" "$extract_normalized.clean" && mv "$extract_normalized.clean" "$extract_normalized" || return 1
 
     if grep -Eiq '<!doctype[[:space:]]+html|<html([[:space:]>])' \
         "$extract_normalized"; then
@@ -846,6 +873,10 @@ broray_subscription_extract_nodes()
         # documents as garbage bytes. Recognize JSON before trying Base64.
         if ! grep -Eq '^[[:space:]]*(\{|\[)' "$extract_normalized" &&
             broray_subscription_decode_base64 "$extract_normalized" "$extract_decoded"; then
+            tr -d '\r' < "$extract_decoded" > "$extract_decoded.clean" && mv "$extract_decoded.clean" "$extract_decoded" || return 1
+            sed -i '1s/^\xef\xbb\xbf//' "$extract_decoded" 2>/dev/null || true
+            broray_subscription_metadata_collect body "$extract_decoded" || return 1
+            broray_subscription_strip_metadata "$extract_decoded" "$extract_decoded.clean" && mv "$extract_decoded.clean" "$extract_decoded" || return 1
             extract_json_input="$extract_decoded"
         fi
         if grep -Eq '^(vless|vmess|trojan|ss|hysteria2|hy2|tuic|socks|socks5|http|https)://' "$extract_json_input"; then
@@ -1176,6 +1207,7 @@ broray_subscription_public_file()
         . + {
             updateOperation: $operation,
             parseProgress: $progress,
+            sendDeviceInfo: (.sendDeviceInfo==true),
             displayUrl: $displayUrl,
             serversCount: $serversCount
         } |
@@ -1280,6 +1312,14 @@ broray_subscription_validate_body()
             "Тело запроса должно быть JSON-объектом."
         return 1
     }
+    jq -e '
+((has("httpUserAgent")|not) or (.httpUserAgent|type=="string" and length<=128 and all(explode[]; .>=32 and .<=126)))
+' "$body_json_file" >/dev/null 2>&1 || {
+        broray_subscription_set_error INVALID_USER_AGENT 'User-Agent должен содержать не более 128 печатных ASCII-символов.'; return 1;
+    }
+    jq -e '((has("sendDeviceInfo")|not) or (.sendDeviceInfo|type)=="boolean")' "$body_json_file" >/dev/null 2>&1 || {
+        broray_subscription_set_error INVALID_DEVICE_INFO_SETTING 'Разрешение отправки сведений об устройстве должно быть логическим.'; return 1;
+    }
     return 0
 }
 
@@ -1296,6 +1336,8 @@ broray_subscription_create()
     create_enabled="$(jq -r 'if has("enabled") then .enabled else true end' "$create_body")"
     create_auto="$(jq -r 'if has("autoUpdateEnabled") then .autoUpdateEnabled else true end' "$create_body")"
     create_interval="$(jq -r '.updateIntervalMinutes // 360' "$create_body")"
+    create_send_device="$(jq -r '.sendDeviceInfo == true' "$create_body")"
+    create_http_ua="$(jq -r '.httpUserAgent // ""' "$create_body")"
     create_immediate="$(jq -r 'if has("updateImmediately") then .updateImmediately else false end' "$create_body")"
 
     [ -n "$create_name" ] && [ "${#create_name}" -le 128 ] || {
@@ -1364,6 +1406,8 @@ broray_subscription_create()
         --arg name "$create_name" \
         --arg url "$create_url" \
         --arg clientHwid "$create_client_hwid" \
+        --argjson sendDeviceInfo "$create_send_device" \
+        --arg httpUserAgent "$create_http_ua" \
         --argjson enabled "$create_enabled" \
         --argjson autoUpdateEnabled "$create_auto" \
         --argjson updateIntervalMinutes "$create_interval" \
@@ -1376,6 +1420,8 @@ broray_subscription_create()
             name: $name,
             url: $url,
             clientHwid: $clientHwid,
+            httpUserAgent: $httpUserAgent,
+            sendDeviceInfo: $sendDeviceInfo,
             enabled: $enabled,
             autoUpdateEnabled: $autoUpdateEnabled,
             updateIntervalMinutes: $updateIntervalMinutes,
@@ -1445,6 +1491,8 @@ broray_subscription_update_settings()
     settings_enabled="$(jq -r --argjson old "$(jq '.enabled' "$settings_path")" 'if has("enabled") then .enabled else $old end' "$settings_body")"
     settings_auto="$(jq -r --argjson old "$(jq '.autoUpdateEnabled' "$settings_path")" 'if has("autoUpdateEnabled") then .autoUpdateEnabled else $old end' "$settings_body")"
     settings_interval="$(jq -r --argjson old "$(jq '.updateIntervalMinutes' "$settings_path")" 'if has("updateIntervalMinutes") then .updateIntervalMinutes else $old end' "$settings_body")"
+    settings_send_device="$(jq -r --slurpfile old "$settings_path" 'if has("sendDeviceInfo") then .sendDeviceInfo else ($old[0].sendDeviceInfo==true) end' "$settings_body")"
+    settings_http_ua="$(jq -r --slurpfile old "$settings_path" 'if has("httpUserAgent") then .httpUserAgent else ($old[0].httpUserAgent // "") end' "$settings_body")"
     settings_old_enabled="$(jq -r '.enabled' "$settings_path")"
 
     [ -n "$settings_name" ] && [ "${#settings_name}" -le 128 ] || {
@@ -1512,6 +1560,8 @@ broray_subscription_update_settings()
     settings_temp="$BRORAY_SUB_TMP/subscription-settings.$$.json"
     jq \
         --arg name "$settings_name" \
+        --argjson sendDeviceInfo "$settings_send_device" \
+        --arg httpUserAgent "$settings_http_ua" \
         --arg url "$settings_url" \
         --argjson enabled "$settings_enabled" \
         --argjson autoUpdateEnabled "$settings_auto" \
@@ -1519,7 +1569,10 @@ broray_subscription_update_settings()
         --arg nextUpdateAt "$BRORAY_SUB_NEXT_AT" \
         --argjson nextUpdateEpoch "$BRORAY_SUB_NEXT_EPOCH" \
         --arg updatedAt "$settings_now" '
+        (if .url!=$url then del(.providerMetadata) else . end) |
         .name = $name |
+        .httpUserAgent = $httpUserAgent |
+        .sendDeviceInfo = $sendDeviceInfo |
         .url = $url |
         .enabled = $enabled |
         .autoUpdateEnabled = $autoUpdateEnabled |
@@ -1670,6 +1723,9 @@ broray_subscription_update()
 
     update_prepare_rc=0
     broray_subscription_prepare_update || update_prepare_rc=$?
+    # A rejected row cannot be interpreted as a deletion instruction.
+    update_sync_policy=replace
+    if [ "${BRORAY_SUB_REJECTED:-0}" -gt 0 ]; then update_sync_policy=retain-unmatched; fi
     case "$update_prepare_rc" in
         130) broray_subscription_cleanup_preparation; return 130 ;;
         75) return 75 ;;
@@ -1682,7 +1738,7 @@ broray_subscription_update()
         broray_ops_cancel_requested && return 130
         return 1
     elif ! broray_server_subscription_sync \
-        "$update_subscription_id" "$update_stage" "$update_enabled" "$update_id" \
+        "$update_subscription_id" "$update_stage" "$update_enabled" "$update_id" "$update_sync_policy" \
         > "$update_sync" 2> "$update_sync_error"; then
         update_error_line="$(tail -n 1 "$update_sync_error")"
         update_fail_code="$(printf '%s' "$update_error_line" | cut -d: -f2)"
@@ -1746,6 +1802,9 @@ broray_subscription_update()
             updated: $sync.updated,
             unchanged: $sync.unchanged,
             removed: $sync.removed,
+            retained: ($sync.retained // 0),
+            catalogTotal: ($sync.total // $sync.accepted),
+            deletionPolicy: ($sync.deletionPolicy // "replace"),
             warnings: ($warnings + ($sync.warnings // [])),
             durationMs: $durationMs,
             trigger: $trigger,
@@ -1772,17 +1831,20 @@ broray_subscription_update()
     update_save="$BRORAY_SUB_TMP/subscription-success.$$.json"
     jq \
         --arg status "$update_status" \
+        --argjson providerMetadata "$BRORAY_SUB_PROVIDER_METADATA" \
         --arg now "$update_finished_at" \
         --argjson epoch "$update_finished_epoch" \
         --argjson received "${BRORAY_SUB_ACCEPTED:-0}" \
+        --argjson catalogTotal "$(jq ' .total // .accepted ' "$update_sync")" \
         --argjson result "$(cat "$update_result")" \
         --arg nextAt "$BRORAY_SUB_NEXT_AT" \
         --argjson nextEpoch "$BRORAY_SUB_NEXT_EPOCH" '
+        .providerMetadata = ($providerMetadata + {updatedAt:$now}) |
         .lastUpdateStatus = $status |
         .lastUpdatedAt = $now |
         .lastUpdatedEpoch = $epoch |
         .lastError = null |
-        .serversReceived = $received |
+        .serversReceived = $catalogTotal |
         .lastUpdateResult = $result |
         .nextUpdateAt = (if $nextAt == "" then null else $nextAt end) |
         .nextUpdateEpoch = (if $nextEpoch == 0 then null else $nextEpoch end) |

@@ -427,12 +427,78 @@ broray_server_subscription_restore_backup()
     return 0
 }
 
+# Merge only in private sync work, before any live catalog write.
+# A rejected row has no trustworthy identity: retain ALL unmatched old keys.
+broray_server_subscription_merge_partial()
+{
+    local input merged file id key old_path old_hash target limit
+    BRORAY_SYNC_RETAIN_ERROR=SERVER_SYNC_CONFLICT
+    input="$sync_stage_dir"; merged="$sync_work/merged"
+    limit="${BRORAY_SUB_MAX_NODES:-500}"
+    case "$limit" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$limit" -ge 1 ] && [ "$limit" -le 500 ] || return 1
+    mkdir "$merged" || return 1
+    # Ambiguous old identities must not be guessed or collapsed during repair.
+    awk -F '\t' 'seen[$1]++ {bad=1} END {exit bad}' "$sync_maps/old.tsv" || return 1
+    for file in "$input"/*.json; do
+        [ -f "$file" ] || continue
+        [ ! -L "$file" ] || return 1
+        id="$(jq -er '.id' "$file")" || return 1
+        case "$id" in ''|.|..|*[!A-Za-z0-9._-]*) return 1 ;; esac
+        [ "${file##*/}" = "$id.json" ] || return 1
+        cp "$file" "$merged/$id.json" || return 1
+    done
+    while IFS="$(printf '\t')" read -r key old_path old_hash; do
+        [ -n "$key" ] || continue
+        if awk -F '\t' -v key="$key" '$1==key {found=1} END {exit !found}' "$sync_maps/new.tsv"; then continue; fi
+        [ -f "$old_path" ] && [ ! -L "$old_path" ] || return 1
+        ( broray_server_validate "$old_path" >/dev/null 2>&1 ) || return 1
+        id="$(jq -er '.id' "$old_path")" || return 1
+        case "$id" in ''|.|..|*[!A-Za-z0-9._-]*) return 1 ;; esac
+        [ "${old_path##*/}" = "$id.json" ] || return 1
+        target="$merged/$id.json"
+        [ ! -e "$target" ] && [ ! -L "$target" ] || return 1
+        case "$old_path" in
+            "$BRORAY_SERVER_SUB_LIVE/"*) file="$sync_backup/live/$id.json" ;;
+            "$sync_disabled_dir/"*) file="$sync_backup/disabled/$id.json" ;;
+            *) return 1 ;;
+        esac
+        cp "$file" "$target" || return 1
+        chmod 600 "$target" || return 1
+        sync_retained=$((sync_retained + 1))
+        if [ $((sync_stage_count + sync_retained)) -gt "$limit" ]; then
+            BRORAY_SYNC_RETAIN_ERROR=PARTIAL_UPDATE_LIMIT
+            return 1
+        fi
+        printf '%s\t%s\t%s\n' "$key" "$target" "$old_hash" >> "$sync_maps/new.tsv" || return 1
+    done < "$sync_maps/old.tsv"
+    # Do not overwrite a foreign source even if a filename happens to collide.
+    for file in "$merged"/*.json; do
+        [ -f "$file" ] || continue
+        id="${file##*/}"
+        for target in "$BRORAY_SERVER_SUB_LIVE/$id" "$sync_disabled_dir/$id"; do
+            [ ! -L "$target" ] || return 1
+            if [ -e "$target" ]; then
+                broray_server_subscription_file_matches "$target" "$sync_subscription_id" || return 1
+            fi
+        done
+    done
+    sync_stage_dir="$merged"
+    return 0
+}
+
 broray_server_subscription_sync()
 {
+    local sync_policy sync_retained sync_catalog_total BRORAY_SYNC_RETAIN_ERROR
     sync_subscription_id="$1"
     sync_stage_dir="$2"
     sync_enabled="$3"
     sync_update_id="$4"
+    sync_policy="${5:-replace}"
+    case "$sync_policy" in replace|retain-unmatched) ;; *)
+        broray_server_subscription_error SERVER_SYNC_CONFLICT "Неизвестная политика обновления серверов."
+        return 1 ;;
+    esac
 
     broray_server_subscription_validate_id "$sync_subscription_id" || return 1
     [ -d "$sync_stage_dir" ] || {
@@ -579,6 +645,13 @@ broray_server_subscription_sync()
         fi
     done
 
+    sync_retained=0
+    if [ "$sync_policy" = retain-unmatched ] && ! broray_server_subscription_merge_partial; then
+        rm -rf "$sync_work"
+        broray_server_subscription_release_lock
+        broray_server_subscription_error "$BRORAY_SYNC_RETAIN_ERROR" "Не удалось безопасно объединить частичный ответ с прежними серверами. Прежний каталог сохранён."
+        return 1
+    fi
     sync_removed=0
     while IFS="$(printf '\t')" read -r sync_old_key sync_old_path sync_old_hash; do
         [ -n "$sync_old_key" ] || continue
@@ -755,7 +828,8 @@ broray_server_subscription_sync()
     rmdir "$BRORAY_SERVER_SUB_DISABLED/$sync_subscription_id" \
         2>/dev/null || true
 
-    sync_total="$(wc -l < "$sync_maps/new.tsv" | tr -d ' ')"
+    sync_total="$sync_stage_count"
+    sync_catalog_total="$(wc -l < "$sync_maps/new.tsv" | tr -d ' ')"
     rm -rf "$sync_work"
     broray_server_subscription_release_lock
 
@@ -763,6 +837,7 @@ broray_server_subscription_sync()
         --arg subscriptionId "$sync_subscription_id" \
         --arg updateId "$sync_update_id" \
         --argjson accepted "$sync_total" \
+        --argjson retained "$sync_retained" --argjson total "$sync_catalog_total" --arg deletionPolicy "$sync_policy" \
         --argjson added "$sync_added" \
         --argjson updated "$sync_updated" \
         --argjson unchanged "$sync_unchanged" \
@@ -777,7 +852,10 @@ broray_server_subscription_sync()
             updated: $updated,
             unchanged: $unchanged,
             removed: $removed,
-            warnings: [],
+            retained: $retained,
+            total: $total,
+            deletionPolicy: $deletionPolicy,
+            warnings: (if $retained>0 then ["Сохранено прежних серверов: " + ($retained|tostring) + ". Ответ разобран не полностью; отсутствие этих серверов не подтверждено. Их параметры могут быть устаревшими. Удаление отсутствующих серверов возможно после обновления без отклонённых узлов."] else [] end),
             activeServerImpact: $activeServerImpact
         }
     '

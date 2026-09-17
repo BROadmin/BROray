@@ -14,6 +14,7 @@
     <link rel="manifest" href="/manifest.json?v=WebUI-3.1.0-r09c02">
     <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.1.0-r09c02">
     <script src="/assets/js/theme-init.js?v=WebUI-3.1.0-r09c02"></script>
+    <link rel="stylesheet" href="/assets/css/action-feedback.css?v=WebUI-3.1.0-r09c02">
 </head>
 <body class="app-body page-dns" data-page="dns" data-webui-build="WebUI-3.1.0-r09c02">
     <div id="app" class="app-layout" hidden>
@@ -162,6 +163,12 @@
             Для каждого сервера отображаются адрес, TLS-домен, результат TLS/SNI-проверки
             и фактическое присутствие в конфигурации Keenetic.
         </p>
+        <p class="section-note dns-duration-note">Время TLS/SNI-проверки приблизительное: текущий модуль измеряет его с точностью до секунды. Это длительность проверки, а не ping.</p>
+        <label class="subscription-switch-row" for="dns-auto-check">
+            <input id="dns-auto-check" type="checkbox" disabled aria-describedby="dns-auto-hint">
+            <span>Автоматически проверять выбранные DoT-серверы</span>
+        </label>
+        <p id="dns-auto-hint" class="section-note" role="status">Получение настроек автопроверки…</p>
         <div id="dns-server-list" class="dns-server-list" aria-live="polite"></div>
     </section>
 
@@ -181,52 +188,43 @@
             <button id="dns-test" class="button button-secondary" type="button" data-icon="status">Проверить выбранные</button>
             <button id="dns-apply" class="button button-secondary" type="button" data-icon="download">Установить в Keenetic</button>
             <button id="dns-refresh" class="button button-secondary" type="button" data-icon="update">Обновить состояние</button>
-            <button id="dns-delete" class="button button-danger-outline" type="button" data-icon="delete">Удалить записи BROray</button>
+            <button id="dns-delete" class="button button-danger-outline" type="button" data-icon="delete">Удалить выбранные DoT-записи</button>
         </div>
+        <p class="section-note" id="dns-delete-hint" role="status"></p>
     </section>
 
-    <section class="dns-servers-card ui-card" aria-labelledby="dns-actual-title">
-        <div class="section-heading dns-section-heading">
-            <div>
-                <span class="eyebrow">Установлено в Keenetic</span>
-                <h2 id="dns-actual-title">Все фактические DoT-записи</h2>
-            </div>
-        </div>
+    <details class="dns-servers-card ui-card" id="dns-actual-details">
+        <summary class="dns-technical-summary" id="dns-actual-title">Все DoT-записи в роутере</summary>
         <p class="section-note">
             Каждая запись проверяется по точной идентичности адрес + эффективный порт + SNI.
-            Совпадение с каталогом BROray не означает принадлежность BROray и не разрешает удаление.
+            Происхождение записи не защищает её от удаления при выборе. Перед удалением проверьте точный список в подтверждении.
         </p>
         <p id="dns-actual-empty" class="dns-official-note" hidden>В конфигурации Keenetic нет DoT-записей.</p>
         <div id="dns-actual-list" class="dns-server-list" aria-live="polite"></div>
-    </section>
+    </details>
 
-    <section class="dns-details-card ui-card" aria-labelledby="dns-details-title">
-        <div class="section-heading dns-section-heading">
-            <div>
-                <span class="eyebrow">Фактическая конфигурация</span>
-                <h2 id="dns-details-title">Keenetic</h2>
-            </div>
-        </div>
+    <details class="dns-details-card ui-card" id="dns-technical-details">
+        <summary class="dns-technical-summary" id="dns-details-title">Технические сведения Keenetic</summary>
         <dl class="dns-details-grid">
             <div><dt>Выбрано серверов</dt><dd id="dns-detail-selected">—</dd></div>
-            <div><dt>Записей BROray в Keenetic</dt><dd id="dns-detail-managed">—</dd></div>
+            <div><dt>Записи с историей установки BROray</dt><dd id="dns-detail-managed">—</dd></div>
             <div><dt>Внешние DoT-записи</dt><dd id="dns-detail-external-dot">—</dd></div>
             <div><dt>DoH-записи</dt><dd id="dns-detail-doh">—</dd></div>
             <div><dt>Всего DoT/DoH</dt><dd id="dns-detail-total">—</dd></div>
             <div><dt>Официальный максимум Keenetic</dt><dd id="dns-detail-capacity">8</dd></div>
             <div><dt>Протокол записи Keenetic CLI</dt><dd id="dns-detail-write-protocol">—</dd></div>
             <div><dt>Право удаления DoT</dt><dd id="dns-detail-delete-gate">—</dd></div>
-            <div><dt>Изолированные legacy receipts</dt><dd id="dns-detail-quarantined">—</dd></div>
+            <div><dt>Исторические записи без полной проверки</dt><dd id="dns-detail-quarantined">—</dd></div>
             <div><dt>Последняя проверка</dt><dd id="dns-detail-tested-at">—</dd></div>
             <div><dt>Последняя установка</dt><dd id="dns-detail-applied-at">—</dd></div>
         </dl>
         <p class="dns-official-note">
             Keenetic использует адрес DNS-сервера, эффективный порт и TLS-домен (SNI).
-            Если порт не указан, его эффективное значение — 853. Удаление разрешается
-            только для записи с полным R14C01 receipt, точным совпадением всех атрибутов
-            и уникальным селектором адрес + порт. Внешние и legacy-записи сохраняются.
+            Если порт не указан, его эффективное значение — 853. Удаление проверяется по сохранённому выбору,
+            точному совпадению всех параметров и единственной записи с данным адресом и портом.
+            Происхождение выбранной записи не ограничивает её удаление. Не выбранные DoT и все DoH-записи сохраняются.
         </p>
-    </section>
+    </details>
 </main>
             <footer class="workspace-footer">
                 <span>BROray · Менеджер Xray для Keenetic</span>
@@ -279,6 +277,7 @@
     </div>
 
     <script src="/assets/js/common.js?v=WebUI-3.1.0-r09c02"></script>
+    <script src="/assets/js/action-feedback.js?v=WebUI-3.1.0-r09c02"></script>
     <script src="/assets/js/icons.js?v=WebUI-3.1.0-r09c02"></script>
     <script src="/assets/js/app-shell.js?v=WebUI-3.1.0-r09c02"></script>
     <script src="/assets/js/theme.js?v=WebUI-3.1.0-r09c02"></script>

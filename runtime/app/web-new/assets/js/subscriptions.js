@@ -205,7 +205,8 @@
             "обновлено " + (result.updated || 0),
             "удалено " + (result.removed || 0),
             "отклонено " + (result.rejected || 0)
-        ].join(" · ");
+        ].join(" · ") + (Number.isSafeInteger(result.retained) && result.retained > 0
+            ? " · сохранено прежних " + result.retained : "");
     }
 
     function renderNodes(subscriptionId) {
@@ -307,6 +308,7 @@
                 '</dl>' +
                 '<div class="subscription-result" role="status">' + (running ? escapeHtml(phase) : renderResult(item)) + '</div>' +
                 renderWarnings(item) +
+                (window.BRORAYSubscriptionProvider ? window.BRORAYSubscriptionProvider.render(item) : "") +
                 (item.lastError ? '<div class="subscription-error"><strong>Ошибка обновления</strong><span>' + escapeHtml(item.lastError) + '</span></div>' : '') +
                 '<div class="subscription-card-actions">' +
                     actionButton('button-primary', 'refresh', 'update', running ? 'Обновляется' : 'Обновить сейчас', running, running) +
@@ -366,6 +368,7 @@
         byId("subscription-form-title").textContent = "Добавить подписку";
         byId("subscription-enabled").checked = true;
         byId("subscription-auto").checked = true;
+        byId("subscription-device-info").checked = false;
         byId("subscription-immediate").checked = true;
         byId("subscription-interval").value = "360";
         byId("subscription-immediate-row").hidden = false;
@@ -381,9 +384,11 @@
             byId("subscription-form-title").textContent = "Изменить подписку";
             byId("subscription-name").value = item.name || "";
             byId("subscription-url").value = item.url || "";
+            byId("subscription-user-agent").value = item.httpUserAgent || "";
             byId("subscription-interval").value = item.updateIntervalMinutes || 360;
             byId("subscription-enabled").checked = item.enabled === true;
             byId("subscription-auto").checked = item.autoUpdateEnabled === true;
+            byId("subscription-device-info").checked = item.sendDeviceInfo === true;
             byId("subscription-immediate-row").hidden = true;
             formPanel.hidden = false;
             byId("subscription-name").focus();
@@ -409,6 +414,8 @@
         body = {
             name: byId("subscription-name").value.trim(),
             url: byId("subscription-url").value.trim(),
+            httpUserAgent: byId("subscription-user-agent").value,
+            sendDeviceInfo: byId("subscription-device-info").checked,
             updateIntervalMinutes: Number(byId("subscription-interval").value),
             enabled: byId("subscription-enabled").checked,
             autoUpdateEnabled: byId("subscription-auto").checked

@@ -83,6 +83,14 @@ broray_generate_server_config()
                 }
                 +
                 (
+                    # VLESS import already stores Host in transport.host.
+                    # Keep it for XHTTP too; otherwise URI and JSON both lose it.
+                    if (($s.transport.host // "") | length) > 0
+                    then {host: $s.transport.host}
+                    else {} end
+                )
+                +
+                (
                     if (($s.xhttp.extra // {}) | length) > 0
                     then {
                         extra: ($s.xhttp.extra // {})

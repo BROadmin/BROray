@@ -57,24 +57,148 @@
         return payload;
     }
 
-    function toast(message, type) {
-        const root = document.getElementById("toast-root");
+    // UI-TOAST-01: the existing public toast(message, type) API stays intact.
+    var toastRecords = [];
+    var toastHistory = [];
+    var toastEventsInstalled = false;
+    var TOAST_VISIBLE_MS = 6000;
+    var TOAST_MAX_VISIBLE = 2;
+    var TOAST_HISTORY_LIMIT = 10;
 
-        if (!root) {
-            return;
+    function toastKind(type) {
+        if (!type) return "success";
+        return ["success", "warning", "error", "info"].indexOf(type) >= 0 ? type : "info";
+    }
+    function toastLabel(kind) {
+        return {success:"Успех", warning:"Предупреждение", error:"Ошибка", info:"Информация"}[kind];
+    }
+    function toastIcon(kind) {
+        var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("class", "toast-icon");
+        svg.setAttribute("aria-hidden", "true");
+        svg.setAttribute("focusable", "false");
+        var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", kind === "success" ? "M4 12l5 5L20 6" :
+            kind === "info" ? "M12 10v9M12 5v.2" : "M12 4v10M12 19v.2");
+        svg.appendChild(path);
+        return svg;
+    }
+    function rememberToast(text, kind) {
+        var main = document.querySelector("main.workspace-content") || document.querySelector("main");
+        if (!main) return false;
+        var panel = document.getElementById("page-notification-history");
+        if (!panel) {
+            panel = document.createElement("section");
+            panel.id = "page-notification-history";
+            panel.className = "page-notification-history ui-card";
+            panel.setAttribute("aria-labelledby", "page-notification-title");
+            var title = document.createElement("h2");
+            title.id = "page-notification-title";
+            title.textContent = "Сообщения этой страницы";
+            var explanation = document.createElement("p");
+            explanation.className = "page-notification-note";
+            explanation.textContent = "Здесь остаются последние 10 предупреждений, ошибок и длинных сообщений. Это история уведомлений, не текущее состояние. Очищается при переходе со страницы.";
+            var list = document.createElement("ol");
+            list.className = "page-notification-list";
+            list.setAttribute("aria-live", "off");
+            panel.append(title, explanation, list);
+            main.appendChild(panel);
         }
-
-        const element = document.createElement("div");
-
-        element.className =
-            "toast toast-" + (type || "success");
-        element.textContent = message;
-
+        var list = panel.querySelector(".page-notification-list");
+        if (!list) return false;
+        var existing = toastHistory.find(function (record) { return record.text === text && record.kind === kind; });
+        if (existing) {
+            list.prepend(existing.element);
+            toastHistory = toastHistory.filter(function (record) { return record !== existing; });
+            toastHistory.push(existing);
+            return true;
+        }
+        var entry = document.createElement("li");
+        entry.className = "page-notification-entry page-notification-" + kind;
+        var label = document.createElement("strong");
+        label.textContent = toastLabel(kind) + ": ";
+        var body = document.createElement("span");
+        body.textContent = text;
+        entry.append(label, body);
+        list.prepend(entry);
+        toastHistory.push({text:text, kind:kind, element:entry});
+        while (toastHistory.length > TOAST_HISTORY_LIMIT) toastHistory.shift().element.remove();
+        return true;
+    }
+    function removeToast(record) {
+        if (record.timer !== null) window.clearTimeout(record.timer);
+        record.timer = null;
+        record.element.remove();
+        toastRecords = toastRecords.filter(function (item) { return item !== record; });
+    }
+    function scheduleToast(record) {
+        if (document.hidden || record.timer !== null) return;
+        record.started = performance.now();
+        record.timer = window.setTimeout(function () { removeToast(record); }, record.remaining);
+    }
+    function retainOverflow(record) {
+        if (record.preview || record.message.scrollHeight > record.message.clientHeight + 1) {
+            if (rememberToast(record.text, record.kind)) record.note.hidden = false;
+        }
+    }
+    function toastVisibilityChanged() {
+        toastRecords.forEach(function (record) {
+            if (document.hidden && record.timer !== null) {
+                record.remaining = Math.max(0, record.remaining - (performance.now() - record.started));
+                window.clearTimeout(record.timer);
+                record.timer = null;
+            } else if (!document.hidden) scheduleToast(record);
+        });
+    }
+    function toast(message, type) {
+        var root = document.getElementById("toast-root");
+        var text = message == null ? "" : String(message);
+        if (!root || !text.trim()) return;
+        var kind = toastKind(type);
+        if (kind === "error" || kind === "warning") rememberToast(text, kind);
+        var duplicate = toastRecords.find(function (record) { return record.text === text && record.kind === kind; });
+        if (duplicate && duplicate.element.isConnected) return duplicate.element;
+        toastRecords.slice().forEach(function (record) { if (!record.element.isConnected) removeToast(record); });
+        while (toastRecords.length >= TOAST_MAX_VISIBLE) removeToast(toastRecords[0]);
+        var element = document.createElement("div");
+        element.className = "toast toast-" + kind;
+        var copy = document.createElement("div");
+        copy.className = "toast-copy";
+        var label = document.createElement("span");
+        label.className = "toast-kind";
+        label.textContent = toastLabel(kind) + ": ";
+        var body = document.createElement("div");
+        var characters = Array.from(text);
+        body.className = "toast-message" + (characters.length > 160 ? " toast-message-long" : "");
+        body.textContent = characters.length > 240 ? characters.slice(0, 240).join("") + "…" : text;
+        var note = document.createElement("span");
+        note.className = "toast-note";
+        note.textContent = "Полный текст — в сообщениях страницы.";
+        note.hidden = true;
+        copy.append(label, body, note);
+        element.append(toastIcon(kind), copy);
+        root.setAttribute("aria-live", "polite");
+        root.setAttribute("aria-atomic", "false");
+        root.setAttribute("aria-relevant", "additions");
         root.appendChild(element);
-
-        window.setTimeout(function () {
-            element.remove();
-        }, 4000);
+        var record = {element:element, message:body, note:note, text:text, kind:kind,
+            preview:characters.length > 240, timer:null, started:0, remaining:TOAST_VISIBLE_MS};
+        toastRecords.push(record);
+        retainOverflow(record);
+        scheduleToast(record);
+        if (!toastEventsInstalled) {
+            toastEventsInstalled = true;
+            document.addEventListener("visibilitychange", toastVisibilityChanged);
+            window.addEventListener("resize", function () { toastRecords.forEach(retainOverflow); });
+            window.addEventListener("pagehide", function () {
+                toastRecords.slice().forEach(removeToast);
+                toastHistory = [];
+                var panel = document.getElementById("page-notification-history");
+                if (panel) panel.remove();
+            });
+        }
+        return element;
     }
 
     function redirectToLogin() {

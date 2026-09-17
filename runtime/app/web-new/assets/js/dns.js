@@ -7,6 +7,7 @@
     var status = null;
     var selected = Object.create(null);
     var busy = false;
+    var autoSaving = false;
     var selectionInitialized = false;
     var pollTimer = null;
 
@@ -41,10 +42,15 @@
         date = new Date(value);
         return isNaN(date.getTime()) ? String(value) : date.toLocaleString("ru-RU");
     }
-    function testFresh(test) {
-        if (!test || test.ok !== true || !test.testedEpoch) return false;
-        return (Date.now() - Number(test.testedEpoch) * 1000) <= TEST_TTL_MS;
+    function testTimeFresh(test) {
+        if (!test || typeof test.testedEpoch !== "number" || !isFinite(test.testedEpoch) || test.testedEpoch <= 0) return false;
+        var age = Date.now() - test.testedEpoch * 1000;
+        return age >= 0 && age <= TEST_TTL_MS;
     }
+    function testFresh(test) {
+        return Boolean(test && test.ok === true && testTimeFresh(test));
+    }
+
     function selectedIds() {
         return Object.keys(selected).filter(function (id) { return selected[id] === true; });
     }
@@ -121,7 +127,7 @@
     }
     function mutationBlockText() {
         var reason = status && status.mutationBlockedReason;
-        if (status && status.writeProtocolEnabled !== true) return "протокол записи Keenetic CLI не включён в эти bytes";
+        if (status && status.writeProtocolEnabled !== true) return "изменение настроек недоступно в этой сборке";
         if (reason === "recovery-required") return "нужно завершить восстановление предыдущей транзакции";
         if (reason === "keenetic-unavailable") return "Keenetic CLI недоступен";
         if (reason === "dot-observation-underdetermined") return "фактические DoT-записи нельзя однозначно сверить";
@@ -130,10 +136,48 @@
     function quarantinedReceipts() {
         return status && Array.isArray(status.quarantinedReceipts) ? status.quarantinedReceipts : [];
     }
-    function deleteAvailable() {
-        return mutationAvailable() && status.deleteEligible === true &&
-            status.runningConfigAvailable === true && selectedIds().length > 0;
+    function savedSelectionMatches() {
+        // delete.cgi reads saved config, NOT checkbox values or the request body.
+        return status && Array.isArray(status.selectedIds) &&
+            JSON.stringify(status.selectedIds.slice().sort()) === JSON.stringify(selectedIds().sort());
     }
+    function deletionPreview() {
+        if (!status || !mutationAvailable() || status.deleteEligible !== true ||
+            !savedSelectionMatches() || !selectedIds().length) return null;
+        var actual = status.actual && status.actual.dot;
+        if (!Array.isArray(actual) || !Array.isArray(status.servers)) return null;
+        var ids = selectedIds().sort();
+        var entries = [];
+        for (var i = 0; i < ids.length; i += 1) {
+            var servers = status.servers.filter(function (server) { return server.id === ids[i]; });
+            if (servers.length !== 1) return null;
+            var server = servers[0];
+            var matches = actual.filter(function (entry) {
+                return entry.address === server.address && effectivePort(entry) === effectivePort(server);
+            });
+            if (!matches.length) continue;
+            var entry = matches[0];
+            if (matches.length !== 1 || entry.deleteEligible !== true || entry.valid !== true ||
+                Number(entry.unknownTokenCount || 0) !== 0 || !sameEntry(entry, server) ||
+                (entry.spki || "") !== (server.spki || "") ||
+                (entry.interface || entry.on || "") !== (server.interface || server.on || "") ||
+                (entry.domain || "") !== (server.domain || "")) return null;
+            entries.push({address:entry.address, port:effectivePort(entry), sni:entry.sni,
+                spki:entry.spki || "", interface:entry.interface || entry.on || "", domain:entry.domain || ""});
+        }
+        if (!entries.length) return null;
+        return {entries:entries, signature:JSON.stringify({ids:ids, entries:entries, doh:status.actual.dohCount})};
+    }
+    function deleteAvailable() {
+        return deletionPreview() !== null;
+    }
+    function deleteHint() {
+        if (!status) return "Дождитесь чтения настроек роутера.";
+        if (!savedSelectionMatches()) return "Выбор изменён только на экране. Перед удалением нажмите «Проверить выбранные», чтобы передать выбор BROray. Это не устанавливает DNS-серверы в роутер.";
+        if (!deleteAvailable()) return "Удаление недоступно: выбранные записи отсутствуют или их состояние нельзя безопасно подтвердить. Обновите состояние.";
+        return "Будут удалены только записи из списка подтверждения, в том числе добавленные не через BROray. Не выбранные DoT и все DoH-записи сохраняются.";
+    }
+
     function recommendedAction() {
         if (!status || busy || !observationDeterminate()) return null;
         if (!selectedIds().length) return "test";
@@ -156,15 +200,22 @@
         badge.textContent = text;
         badge.setAttribute("data-icon", icon || "dns");
     }
-    function testPresentation(server) {
-        if (!server.test) return {text: "Не проверен", className: "status-neutral"};
-        if (!testFresh(server.test)) return {text: "Проверка устарела", className: "status-warning"};
-        if (server.test.ok === true) {
-            return {text: server.test.latencyMs !== null ? "TLS/SNI: OK · " + server.test.latencyMs + " мс" : "TLS/SNI: OK", className: "status-success"};
-        }
-        if (server.test.status === "unavailable") return {text: "OpenSSL недоступен", className: "status-warning"};
-        return {text: "TLS/SNI: ошибка", className: "status-error"};
+    function testDuration(test) {
+        // This backend reports differences of whole-second wall-clock readings.
+        // Do not label them as millisecond ping measurements.
+        var value = test && test.latencyMs;
+        if (typeof value !== "number" || !isFinite(value) || value < 0 || value % 1000 !== 0) return "";
+        return value === 0 ? " · время < 1 с" : " · время ≈ " + (value / 1000) + " с";
     }
+    function testPresentation(server) {
+        if (!server.test) return {text:"Не проверен", className:"status-neutral"};
+        if (server.test.ok === false && server.test.status === "failed") return {text:"TLS/SNI: ошибка" + (testTimeFresh(server.test) ? "" : " · последняя проверка"), className:"status-error"};
+        if (!testTimeFresh(server.test)) return {text:status && status.autoCheck && status.autoCheck.enabled ? "Ожидает перепроверки" : "Проверка устарела", className:status && status.autoCheck && status.autoCheck.enabled ? "status-neutral" : "status-warning"};
+        if (server.test.ok === true) return {text:"TLS/SNI: OK" + testDuration(server.test), className:"status-success"};
+        if (server.test.status === "unavailable") return {text:"TLS-проверка недоступна", className:"status-warning"};
+        return {text:"TLS/SNI: ошибка", className:"status-error"};
+    }
+
     function valueOrDash(value) {
         return value === null || value === undefined || value === "" ? "—" : String(value);
     }
@@ -289,11 +340,13 @@
         var present = presentSelectedCount();
         if (!status) return {text:"Получение состояния…", kind:"neutral", badge:"Загрузка…"};
         if (status.runningConfigAvailable !== true) return {text:"Не удалось прочитать фактическую конфигурацию Keenetic. Состояние установки неизвестно; установка и удаление заблокированы.", kind:"error", badge:"Состояние неизвестно"};
-        if (!observationDeterminate() || installationState() === "unknown") return {text:"Фактические DoT-записи прочитаны не полностью или не удалось однозначно разобрать и сверить их с runtime. Состояние установки неизвестно; установка и удаление заблокированы.", kind:"error", badge:"Состояние неизвестно"};
+        if (!observationDeterminate() || installationState() === "unknown") return {text:"Фактические DoT-записи прочитаны не полностью или не удалось однозначно разобрать и сверить их с работающим роутером. Состояние установки неизвестно; установка и удаление заблокированы.", kind:"error", badge:"Состояние неизвестно"};
         if (!ids.length) return {text:"Выберите один или несколько серверов. Для устойчивой работы рекомендуется несколько серверов разных провайдеров.", kind:"neutral", badge:"Требуется выбор"};
         if (selectionOverLimit()) return {text:"Сохранено " + ids.length + " выбранных серверов, но Keenetic поддерживает максимум " + Number(status.maxServers || 8) + ". Фактически BROray управляет " + Number((status.effectiveIds || []).length || (status.managed || []).length) + ". Снимите выбор минимум с " + (ids.length - Number(status.maxServers || 8)) + " сервера. Текущая конфигурация Keenetic не изменяется.", kind:"warning", badge:"Выбор превышает лимит"};
         if (capacityExceeded()) return {text:"После экспорта будет " + projectedTotal() + " из " + Number(status.maxServers || 8) + " DoT/DoH-серверов. Снимите выбор минимум с " + (projectedTotal() - Number(status.maxServers || 8)) + " сервера или удалите лишнюю внешнюю запись в Keenetic.", kind:"error", badge:"Превышен лимит Keenetic"};
         if (selectionMatches()) {
+            if (selectedServers().some(function (server) { return server.test && server.test.ok === false && server.test.status === "failed"; })) return {text:"Настройки установлены, но последняя TLS/SNI-проверка выявила ошибку. " + (status.autoCheck && status.autoCheck.enabled ? "Повтор выполняется автоматически, когда автоматика BROray доступна." : "Повторите проверку."), kind:"error", badge:"Ошибка проверки"};
+            if (tested !== ids.length && status.testAvailable === true && status.autoCheck && status.autoCheck.enabled === true && savedSelectionMatches()) return {text:"Установлено " + present + " из " + ids.length + ". Настройки роутера подтверждены; свежая TLS/SNI-проверка ожидается автоматически. Это не подтверждение доступности серверов.", kind:"neutral", badge:"Установлено"};
             if (tested === ids.length) return {text:"Установлено " + present + " из " + ids.length + ". Фактическая конфигурация Keenetic соответствует выбранной.", kind:"success", badge:"Установлено"};
             if (status.testAvailable !== true) return {text:"Установлено " + present + " из " + ids.length + ". Фактическая конфигурация Keenetic соответствует выбранной, но OpenSSL недоступен для повторной TLS/SNI-проверки.", kind:"warning", badge:"Установлено"};
             return {text:"Установлено " + present + " из " + ids.length + ". Фактическая конфигурация Keenetic соответствует выбранной. TLS/SNI-проверка актуальна для " + tested + " из " + ids.length + ".", kind:"warning", badge:"Установлено"};
@@ -338,13 +391,14 @@
         setText("dns-detail-doh", Number(status.actual.dohCount || 0));
         setText("dns-detail-total", Number(status.actual.totalSecure || 0) + " из " + Number(status.maxServers || 8));
         setText("dns-detail-capacity", Number(status.maxServers || 8));
-        setText("dns-detail-write-protocol", status.writeProtocolEnabled === true ? "Включён в R14C01 bytes" : "Не включён — изменения заблокированы");
+        setText("dns-detail-write-protocol", status.writeProtocolEnabled === true ? "Доступен в этой сборке" : "Не включён — изменения заблокированы");
         setText("dns-detail-delete-gate", deleteAvailable() ? "Разрешено для точных выбранных записей" : valueOrDash(status.deleteBlockedReason || "Удаление заблокировано"));
         setText("dns-detail-quarantined", quarantinedReceipts().length);
         setText("dns-detail-tested-at", formatDate(status.lastTestedAt));
         setText("dns-detail-applied-at", formatDate(status.lastAppliedAt));
         setText("dns-summary-message", message.text);
         setText("dns-notice-message", message.text);
+        setText("dns-delete-hint", deleteHint());
         setText("dns-selection-hint", ids.length ? "Выбрано: " + ids.length + " · максимум: " + Number(status.maxServers || 8) : "Выберите серверы");
         setText("dns-action-state", message.badge);
 
@@ -365,6 +419,7 @@
         buttonVariant(buttons.apply, recommended === "apply");
         buttonVariant(buttons.refresh, false);
         renderOperation();
+        renderAutoCheck();
         if (window.BROrayIcons) window.BROrayIcons.scan(document);
     }
     function initializeSelection(data) {
@@ -376,6 +431,14 @@
         if (error && (error.status === 401 || error.code === "AUTH_REQUIRED" || error.code === "SESSION_REQUIRED")) {
             window.BROrayUI.redirectToLogin();
             return;
+        }
+        if (window.BROrayActionFeedback && (!document.getElementById("dns-feedback") || !document.getElementById("dns-feedback").hasChildNodes())) {
+            window.BROrayActionFeedback.show("dns-feedback", {
+                title:"Проверьте состояние DNS-over-TLS",
+                message:"Не удалось завершить действие. Его результат нужно проверить в роутере.",
+                next:"Нажмите «Обновить состояние». Техническая причина приведена ниже.",
+                details:[error && error.code, error && error.message, error && error.details].filter(Boolean).join("\n")
+            });
         }
         window.BROrayUI.toast(error && error.message ? error.message : "Операция DNS-over-TLS завершилась ошибкой.", "error");
     }
@@ -399,6 +462,7 @@
     function runAction(action, payload) {
         var endpoint = action === "test" ? "dot-test.cgi" : action === "apply" ? "dot-apply.cgi" : "dot-delete.cgi";
         var title = action === "test" ? "Проверка TLS/SNI" : action === "apply" ? "Установка в Keenetic" : "Удаление выбранных записей";
+        if (window.BROrayActionFeedback) window.BROrayActionFeedback.clear("dns-feedback");
         setBusy(true, title, "Подождите. После завершения состояние обновится автоматически.");
         return request("/api/routes/" + endpoint, {
             method:"POST",
@@ -407,8 +471,15 @@
             body: payload ? JSON.stringify(payload) : undefined
         }).then(function (data) {
             status = data;
-            if (action === "test") window.BROrayUI.toast("TLS/SNI-проверка выбранных серверов завершена.", "success");
+            if (action === "test") window.BROrayUI.toast(
+                "TLS/SNI-проверка завершена: подтверждено " + testedSelectedCount() + " из " + selectedIds().length + ".",
+                allSelectedTested() ? "success" : "warning");
             if (action === "apply") window.BROrayUI.toast("DNS-over-TLS установлен и фактически проверен в Keenetic.", "success");
+            if (action === "delete") {
+                selected = Object.create(null);
+                selectionInitialized = false;
+                initializeSelection(data);
+            }
             if (action === "delete") window.BROrayUI.toast("Точные выбранные DNS-over-TLS записи удалены. Остальные DoT/DoH сохранены.", "success");
         }).catch(handleError).then(function () {
             busy = false;
@@ -442,21 +513,65 @@
             return null;
         }).catch(handleError);
     }
-    function onDelete() {
-        if (busy || !status || !deleteAvailable()) return;
-        confirmAction({
-            eyebrow:"Опасное действие",
-            title:"Удалить выбранные записи DNS-over-TLS",
-            message:"Будут удалены точные выбранные записи независимо от их происхождения. Не выбранные DoT/DoH-записи сохранятся.",
-            confirmText:"Удалить",
-            cancelText:"Отмена",
-            variant:"danger",
-            icon:"delete"
-        }).then(function (confirmed) {
-            if (confirmed) return runAction("delete", null);
-            return null;
-        }).catch(handleError);
+    function readDeleteStatus() {
+        // Read-only refresh. No delayed response is allowed to overwrite status.
+        return new Promise(function (resolve, reject) {
+            var done = false;
+            var controller = typeof AbortController === "function" ? new AbortController() : null;
+            var timer = window.setTimeout(function () {
+                if (done) return;
+                done = true;
+                if (controller) controller.abort();
+                reject(new Error("Роутер не ответил на проверку перед удалением."));
+            }, 15000);
+            request("/api/routes/dot-status.cgi?force=1", {method:"GET", credentials:"same-origin", signal:controller ? controller.signal : undefined}).then(function (data) {
+                if (done) return;
+                done = true; window.clearTimeout(timer);
+                status = data; render(); resolve(data);
+            }, function (error) {
+                if (done) return;
+                done = true; window.clearTimeout(timer); reject(error);
+            });
+        });
     }
+    function onDelete() {
+        if (busy || !deleteAvailable()) return;
+        var preview;
+        var sent = false;
+        if (window.BROrayActionFeedback) window.BROrayActionFeedback.clear("dns-feedback");
+        stopBackgroundRefresh();
+        setBusy(true, "Проверка перед удалением", "Получение списка записей из роутера…");
+        return readDeleteStatus().then(function () {
+            preview = deletionPreview();
+            if (!preview) throw new Error("Выбор или настройки изменились. Обновите состояние и проверьте выбранные серверы.");
+            return confirmAction({
+                eyebrow:"Опасное действие",
+                title:"Удалить выбранные DoT-записи?",
+                message:"Будут удалены следующие записи из роутера:\n" + preview.entries.map(function (entry) {
+                    return entry.address + ":" + entry.port + " · TLS-домен: " + entry.sni;
+                }).join("\n") + "\n\nЗаписи удаляются независимо от того, кто их добавил. Не выбранные DoT и все DoH-записи сохраняются. Эти DNS-серверы перестанут использоваться роутером. Если других рабочих DNS-серверов нет, доступ по именам сайтов может пропасть.",
+                confirmText:"Удалить перечисленные записи", cancelText:"Отмена", variant:"danger", icon:"delete"
+            });
+        }).then(function (confirmed) {
+            if (!confirmed) return null;
+            return readDeleteStatus().then(function () {
+                var current = deletionPreview();
+                if (!current || current.signature !== preview.signature) throw new Error("Список записей изменился после подтверждения. Удаление не отправлено. Проверьте новый список.");
+                sent = true;
+                return runAction("delete", null);
+            });
+        }).catch(function (error) {
+            if (error && (error.status === 401 || error.code === "AUTH_REQUIRED" || error.code === "SESSION_REQUIRED")) { handleError(error); return; }
+            if (window.BROrayActionFeedback) window.BROrayActionFeedback.show("dns-feedback", {
+                title:"Удаление не выполнено",
+                message:sent ? "Результат удаления не подтверждён. Обновите состояние." : "Запрос на удаление не отправлен.",
+                next:"Обновите состояние и повторно откройте подтверждение удаления.",
+                details:error && error.message || "Причина не получена."
+            });
+            handleError(error);
+        }).then(function () { busy = false; render(); startBackgroundRefresh(); });
+    }
+
     function reveal(session) {
         var app = byId("app");
         var loader = byId("page-loader");
@@ -492,7 +607,36 @@
         }
         loadStatus(true, false).catch(function () { return null; }).then(startBackgroundRefresh);
     }
+    function renderAutoCheck() {
+        var toggle = byId("dns-auto-check");
+        var info = status && status.autoCheck;
+        if (!toggle) return;
+        toggle.disabled = busy || autoSaving || !info || info.settingsValid !== true;
+        if (!autoSaving) toggle.checked = Boolean(info && info.enabled === true);
+        var message = "Не удалось получить настройки автопроверки.";
+        if (info && info.settingsValid === true) {
+            if (!info.enabled) message = "Автопроверка выключена. Кнопка «Проверить выбранные» остаётся доступной.";
+            else if (info.paused === true) message = "Автопроверка приостановлена общей паузой BROray.";
+            else if (info.paused === null) message = "Состояние общей автоматики не подтверждено. Проверьте страницу BROray.";
+            else if (!info.savedIds.length) message = "Нет сохранённых серверов для автопроверки.";
+            else if (!savedSelectionMatches()) message = "Автоматически проверяется сохранённый выбор. Чтобы изменить его, нажмите «Проверить выбранные».";
+            else if (info.last && info.last.status === "error") message = "Последняя автопроверка не завершена. BROray повторит попытку; прежние результаты не объявляются свежими.";
+            else message = "Повторная проверка каждые 5 минут, даже при закрытой странице. Занятые операции имеют приоритет. Настройки DNS в роутере не меняются.";
+        }
+        setText("dns-auto-hint", autoSaving ? "Сохранение настройки…" : message);
+    }
+    function onAutoCheckChange() {
+        if (busy || autoSaving) { renderAutoCheck(); return; }
+        var enabled = byId("dns-auto-check").checked;
+        autoSaving = true; renderAutoCheck();
+        request("/api/routes/dot-auto-settings.cgi", {method:"POST", credentials:"same-origin",
+            headers:{"Accept":"application/json", "Content-Type":"application/json", "X-BROray-Request":"operations"}, body:JSON.stringify({enabled:enabled})
+        }).then(function (data) { if (status) status.autoCheck = data; })
+        .catch(handleError).then(function () { autoSaving = false; render(); });
+    }
+
     function initialize() {
+        byId("dns-auto-check").addEventListener("change", onAutoCheckChange);
         byId("dns-test").addEventListener("click", onTest);
         byId("dns-apply").addEventListener("click", onApply);
         byId("dns-refresh").addEventListener("click", function () {

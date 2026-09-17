@@ -114,6 +114,18 @@
 
     var busyBundles = Object.create(null);
 
+    function showPreparationFeedback(error, phase) {
+        if (error && (error.status === 401 || error.code === "AUTH_REQUIRED" || error.code === "SESSION_REQUIRED")) {
+            window.BROrayUI.redirectToLogin(); return;
+        }
+        if (window.BROrayActionFeedback) window.BROrayActionFeedback.show("routes-feedback",
+            window.BROrayActionFeedback.describe(error, phase), function () { return loadAllStates(); });
+        else window.BROrayUI.toast(error && error.message || "Не удалось завершить проверку.", "error");
+    }
+    function clearPreparationFeedback() {
+        if (window.BROrayActionFeedback) window.BROrayActionFeedback.clear("routes-feedback");
+    }
+
     function byId(id) {
         return document.getElementById(id);
     }
@@ -489,7 +501,7 @@
         }
 
         if (verificationRequired(state)) {
-            return "Маршруты скачаны. Нажмите «Подготовить к установке», чтобы проверить локальные данные и их фактическое состояние в Keenetic.";
+            return "Файлы скачаны. Эта загрузка не изменяет маршруты в роутере. Нажмите «Подготовить к установке», затем подтвердите установку в Keenetic.";
         }
 
         action = keeneticAction(state);
@@ -1393,6 +1405,7 @@
     }
 
     function executeOperation(bundle, action, buttonNode, preflightToken) {
+        clearPreparationFeedback();
         var isLongOperation = action === "export" || action === "delete" || action === "resume";
         var timeout = isLongOperation ? LONG_OPERATION_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
         var url = "/api/routes/" + action + ".cgi?bundleId=" + encodeURIComponent(bundle.id);
@@ -1423,7 +1436,8 @@
             if (newState && newState.operationProgress && newState.operationProgress.resumable) {
                 window.BROrayUI.toast(newState.operationProgress.message || "Операция приостановлена и может быть продолжена.", "warning");
             } else if (action === "verify" && newState && newState.verifyResult && newState.verifyResult.success === false) {
-                window.BROrayUI.toast(newState.verifyResult.message || "Подготовка набора выявила проблему.", "warning");
+                showPreparationFeedback({code:newState.verifyResult.errorCode || newState.verifyResult.code,
+                    message:newState.verifyResult.message, details:newState.verifyResult.details || newState.verifyResult}, "verify");
             } else {
                 window.BROrayUI.toast(successMessage(action, bundle), "success");
             }
@@ -1432,7 +1446,7 @@
                 window.BROrayUI.redirectToLogin();
                 return;
             }
-            window.BROrayUI.toast(error && error.message ? error.message : "Операция с маршрутами завершилась ошибкой.", "error");
+            showPreparationFeedback(error, action === "verify" ? "verify" : "mutation");
         }).then(function () {
             delete busyBundles[bundle.id];
             if (operationRunning === bundle.id) operationRunning = false;
@@ -1490,6 +1504,8 @@
     }
 
     function prepareLongOperation(bundle, action, buttonNode) {
+        var mutationStarted = false;
+        clearPreparationFeedback();
         var originalIcon = buttonNode.getAttribute("data-icon");
         busyBundles[bundle.id] = "preflight";
         operationRunning = bundle.id;
@@ -1534,6 +1550,7 @@
                     if (window.BROrayRoutesOperationUI) window.BROrayRoutesOperationUI.clearPending(false);
                     return null;
                 }
+                mutationStarted = true;
                 return executeOperation(bundle, action, buttonNode, preflight.token);
             });
         }).catch(function (error) {
@@ -1544,7 +1561,7 @@
             setButtonLabel(buttonNode, operationText(action, bundle.id).replace("…", ""), originalIcon);
             renderAll();
             if (window.BROrayRoutesOperationUI) window.BROrayRoutesOperationUI.clearPending(false);
-            window.BROrayUI.toast(error && error.message ? error.message : "Предварительная проверка не завершена.", "error");
+            showPreparationFeedback(error, mutationStarted ? "mutation" : "preflight");
             return null;
         });
     }

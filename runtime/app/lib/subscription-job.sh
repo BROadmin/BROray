@@ -3,6 +3,7 @@
 broray_subscription_prepare_update()
 {
     local prep_mode prep_rc prep_timeout prep_result
+    BRORAY_SUB_PROVIDER_METADATA='{"schemaVersion":1}'
     BRORAY_SUB_PREP_DRAINED=false
     # Direct/scheduled updates can be the first operation after a clean boot;
     # the CGI launcher is not responsible for creating their progress folder.
@@ -45,6 +46,14 @@ broray_subscription_prepare_update()
             return 1
         fi
     done
+    # Metadata may enter persistent state only after both supervised helpers drain.
+    prep_result="$BRORAY_SUB_PREP_DIR/provider-metadata.json"
+    if [ ! -f "$prep_result" ] || [ -L "$prep_result" ] || [ "$(wc -c < "$prep_result")" -gt 65536 ] ||
+       ! jq -e 'type=="object" and .schemaVersion==1' "$prep_result" >/dev/null 2>&1; then
+        broray_subscription_set_error INTERNAL_ERROR 'Не удалось подтвердить сведения провайдера.'; return 1
+    fi
+    BRORAY_SUB_PROVIDER_METADATA="$(jq -c . "$prep_result")" || return 1
+    prep_result="$BRORAY_SUB_PREP_DIR/parse-result.json"
     BRORAY_SUB_RECEIVED="$(jq -r '.received' "$prep_result")"
     BRORAY_SUB_PARSED="$(jq -r '.parsed' "$prep_result")"
     BRORAY_SUB_ACCEPTED="$(jq -r '.accepted' "$prep_result")"

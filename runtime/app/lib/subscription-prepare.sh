@@ -11,13 +11,16 @@ case "$PREP_MODE" in fetch|parse) ;; *) exit 64 ;; esac
 [ "$(cat "$PREP_DIR/operation-id")" = "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || exit 73
 . "${BRORAY_ROOT:-/opt/broray}/lib/subscription-service.sh"
 BRORAY_SUB_TMP="$PREP_DIR"
+BRORAY_SUB_PROVIDER_METADATA_FILE="$PREP_DIR/provider-metadata.json"
 prep_rc=0
 case "$PREP_MODE" in
   fetch)
     [ -f "$PREP_INPUT" ] && [ ! -L "$PREP_INPUT" ] || exit 74
     prep_url="$(jq -er '.url' "$PREP_INPUT")" || exit 74
     prep_hwid="$(jq -er '.clientHwid' "$PREP_INPUT")" || exit 74
-    broray_subscription_fetch "$prep_url" "$PREP_DIR/download" "$prep_hwid" || prep_rc=$?
+    prep_ua="$(jq -r '.httpUserAgent // ""' "$PREP_INPUT")" || exit 74
+    prep_send_device="$(jq -r '.sendDeviceInfo == true' "$PREP_INPUT")" || exit 74
+    broray_subscription_fetch "$prep_url" "$PREP_DIR/download" "$prep_hwid" "$prep_ua" "$prep_send_device" || prep_rc=$?
     ;;
   parse)
     broray_subscription_extract_nodes "$PREP_DIR/download" "$PREP_DIR/nodes" || prep_rc=$?

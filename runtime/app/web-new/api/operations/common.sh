@@ -10,14 +10,16 @@ broray_operations_api()
     broray_api_require_session
     [ -z "${QUERY_STRING:-}" ] || broray_api_error '400 Bad Request' INVALID_REQUEST 'Параметры запроса не поддерживаются.'
     if [ "$method" = POST ]; then
-        # A custom header plus an exact same-host Origin prevents form and
-        # cross-origin requests. No CORS or JSONP is enabled on these endpoints.
+        # Preserve session + custom-header checks. Validate a rewritten Host
+        # against the exact live KeenDNS publication, never forwarded headers.
         [ "${HTTP_X_BRORAY_REQUEST:-}" = operations ] || broray_api_error '403 Forbidden' CSRF_REJECTED 'Обновите страницу и повторите действие.'
-        [ -n "${HTTP_HOST:-}" ] || broray_api_error '403 Forbidden' ORIGIN_REJECTED 'Источник запроса не подтверждён.'
-        case "${HTTP_ORIGIN:-}" in
-            "http://$HTTP_HOST"|"https://$HTTP_HOST") ;;
-            *) broray_api_error '403 Forbidden' ORIGIN_REJECTED 'Источник запроса не подтверждён.' ;;
-        esac
+        [ -f /opt/broray/lib/operations-origin.sh ] &&
+        [ ! -L /opt/broray/lib/operations-origin.sh ] ||
+            broray_api_error '503 Service Unavailable' ORIGIN_VALIDATION_UNAVAILABLE 'Проверка источника запроса недоступна.'
+        . /opt/broray/lib/operations-origin.sh ||
+            broray_api_error '503 Service Unavailable' ORIGIN_VALIDATION_UNAVAILABLE 'Проверка источника запроса недоступна.'
+        broray_operations_origin_allowed ||
+            broray_api_error '403 Forbidden' ORIGIN_REJECTED 'Источник запроса не подтверждён.'
         case "${CONTENT_TYPE:-}" in application/json|'application/json; charset=utf-8') ;;
             *) broray_api_error '415 Unsupported Media Type' INVALID_CONTENT_TYPE 'Требуется JSON.' ;;
         esac

@@ -1,0 +1,11 @@
+/* Scoped presentation additions. Existing theme colours and typography remain. */
+.action-feedback { padding: 1.25rem; margin-bottom: 1rem; border: 1px solid currentColor; }
+.action-feedback h2 { margin-top: 0; }
+.action-feedback p { overflow-wrap: anywhere; }
+.action-feedback-details { margin: 0.75rem 0; }
+.action-feedback-details pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 18rem; overflow: auto; }
+.action-feedback-details summary, .dns-technical-summary { cursor: pointer; padding: 0.65rem 0; font-weight: 600; }
+.action-feedback-details summary:focus-visible, .dns-technical-summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.page-dns #confirm-message { white-space: pre-line; overflow-wrap: anywhere; }
+.page-dns #confirm-root .modal { max-height: calc(100dvh - 2rem); overflow-y: auto; }
+.page-dns .dns-duration-note, .page-dns #dns-delete-hint { margin: 0.75rem 0 0; overflow-wrap: anywhere; }

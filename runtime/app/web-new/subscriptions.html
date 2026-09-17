@@ -151,6 +151,12 @@
                 <span>URL подписки</span>
                 <input id="subscription-url" name="url" type="url" maxlength="4096" autocomplete="off" spellcheck="false" placeholder="https://example.com/subscription?token=…" required>
             </label>
+            <details class="subscription-field subscription-field-wide">
+                <summary>Совместимость с провайдером</summary>
+                <label for="subscription-user-agent">User-Agent</label>
+                <input id="subscription-user-agent" name="httpUserAgent" type="text" maxlength="128" pattern="[ -~]*" autocomplete="off" spellcheck="false" placeholder="Автоматически: BROray и его версия">
+                <p>Изменяйте только по рекомендации провайдера. Пустое поле — обычный режим BROray. Идентификатор устройства не меняется.</p>
+            </details>
             <div class="subscription-switches" aria-label="Параметры подписки">
                 <label class="subscription-switch-row" for="subscription-enabled">
                     <input id="subscription-enabled" type="checkbox" checked>
@@ -160,6 +166,11 @@
                     <input id="subscription-auto" type="checkbox" checked>
                     <span>Автообновление включено</span>
                 </label>
+                <label class="subscription-switch-row" for="subscription-device-info">
+                    <input id="subscription-device-info" type="checkbox" aria-describedby="subscription-device-info-hint">
+                    <span>Сообщать провайдеру модель и версию роутера</span>
+                </label>
+                <small id="subscription-device-info-hint">При обновлении подписки отправляются KeeneticOS, модель и версии прошивки и BROray. Без серийного номера и MAC-адреса. Идентификатор клиента (HWID) не меняется. Сведения сохраняются у провайдера; отключение не удаляет ранее отправленные данные.</small>
                 <label id="subscription-immediate-row" class="subscription-switch-row" for="subscription-immediate">
                     <input id="subscription-immediate" type="checkbox" checked>
                     <span>Обновить после добавления</span>
@@ -239,6 +250,7 @@
     <script src="/assets/js/app-shell.js?v=WebUI-3.1.0-r09c02"></script>
     <script src="/assets/js/theme.js?v=WebUI-3.1.0-r09c02"></script>
     <script src="/assets/js/dialogs.js?v=WebUI-3.1.0-r09c02"></script>
+    <script src="/assets/js/subscription-provider.js?v=WebUI-3.1.0-r09c02"></script>
     <script src="/assets/js/subscriptions.js?v=WebUI-3.1.0-r09c02"></script>
 </body>
 </html>

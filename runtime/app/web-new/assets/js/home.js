@@ -6,6 +6,19 @@
 
     var app = document.getElementById("app");
     var loader = document.getElementById("page-loader");
+    var REFRESH_INTERVAL_MS = 30000;
+    var REQUEST_TIMEOUT_MS = 15000;
+    var MAX_RETRY_MS = 120000;
+    var refreshTimer = null;
+    var activeRequest = null;
+    var refreshPending = false;
+    var authenticated = false;
+    var stopped = false;
+    var suspended = false;
+    var retryDelay = REFRESH_INTERVAL_MS;
+    var lastReceivedAt = null;
+    var refreshButton = byId("refresh-status");
+    var refreshFeedback = null;
 
     function byId(id) { return document.getElementById(id); }
     function setText(id, value) {
@@ -67,26 +80,46 @@
             running: "выполняется"
         }[value] || "состояние не определено";
     }
-    async function request(url) {
-        var response = await fetch(url, {
-            credentials: "same-origin",
-            cache: "no-store",
-            headers: {"Accept": "application/json"}
-        });
-        var payload;
-        try {
-            payload = await response.json();
-        } catch (error) {
-            throw new Error("Backend вернул некорректный JSON.");
+    function requestError(code, message) {
+        var error = new Error(message);
+        error.code = code;
+        return error;
+    }
+    function ensureCurrent(task) {
+        if (task !== activeRequest || task.cancelled || stopped || suspended || document.hidden) {
+            throw requestError("INTERRUPTED", "Запрос отменён.");
         }
-        if (response.status === 401) {
+    }
+    async function request(url, task) {
+        // One deadline covers both headers and JSON, including initial authentication.
+        var result = await Promise.race([(async function () {
+            var response = await fetch(url, {
+                credentials: "same-origin",
+                cache: "no-store",
+                headers: {"Accept": "application/json"},
+                signal: task.controller.signal
+            });
+            // An expired session may have a non-JSON body. Handle the status first.
+            if (response.status === 401) return {unauthorized: true};
+            var payload;
+            try { payload = await response.json(); }
+            catch (error) { throw new Error("Сервер вернул некорректный ответ."); }
+            if (!response.ok || !payload || typeof payload !== "object" || Array.isArray(payload) ||
+                payload.success === false || payload.ok === false) {
+                throw new Error(payload && payload.error && payload.error.message
+                    ? payload.error.message : "Не удалось получить данные.");
+            }
+            return {data: payload.success === true ? payload.data : payload};
+        })(), task.interrupted]);
+        ensureCurrent(task);
+        if (result.unauthorized) {
+            authenticated = false;
+            stopped = true;
+            app.hidden = true;
             window.location.replace("/");
-            throw new Error("Сессия завершена.");
+            throw requestError("SESSION_REQUIRED", "Сессия завершена.");
         }
-        if (!response.ok || payload.success === false) {
-            throw new Error(payload && payload.error && payload.error.message ? payload.error.message : "Не удалось получить данные.");
-        }
-        return payload.success === true ? payload.data : payload;
+        return result.data;
     }
 
     function renderUnavailable(prefix, message) {
@@ -98,6 +131,8 @@
         var severity;
         if (!data) {
             renderUnavailable("home-xray", "Модуль Xray не вернул состояние.");
+            setText("home-xray-version", null);
+            setText("home-xray-config", null);
             return;
         }
         severity = severityOf(data);
@@ -114,6 +149,8 @@
         if (!data) {
             renderUnavailable("home-servers", "Сводка серверов недоступна.");
             setText("home-server-name", "Сводка серверов недоступна.");
+            setText("home-servers-total", null);
+            setText("home-server-quality", null);
             return;
         }
         active = data.activeServer;
@@ -132,6 +169,8 @@
         var severity, updateStatus, updateTime, warning;
         if (!data) {
             renderUnavailable("home-subscriptions", "Сводка подписок недоступна.");
+            setText("home-subscriptions-enabled", null);
+            setText("home-subscriptions-servers", null);
             return;
         }
         severity = severityOf(data);
@@ -269,6 +308,8 @@
         var severity, name;
         if (!data) {
             renderUnavailable("home-keenetic", "Состояние управляемого прокси-интерфейса недоступно.");
+            setText("home-keenetic-link", null);
+            setText("home-keenetic-state", null);
             return;
         }
         severity = severityOf(data);
@@ -292,6 +333,8 @@
         if (!data) {
             setStatus("home-broray-status", "Недоступно", "error");
             setText("home-broray-main", "Сведения BROray недоступны.");
+            setText("home-broray-version", null);
+            setText("home-broray-update", null);
             return;
         }
 
@@ -384,27 +427,159 @@
         setText("home-updated-at", formatDate(data.updatedAt));
     }
 
-    async function loadSummary(showToast) {
-        var data = await request("/api/home/summary.cgi");
-        render(data);
-        if (showToast && window.BROrayUI) window.BROrayUI.toast("Состояние обновлено.", "success");
+    function clearRefreshTimer() {
+        if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+        refreshTimer = null;
     }
-
-    async function initialize() {
-        try {
-            var session = await request("/api/session.cgi");
-            setText("current-user", session.user || "admin");
+    function setRefreshBusy(busy) {
+        if (!refreshButton) return;
+        refreshButton.disabled = busy || stopped;
+        refreshButton.setAttribute("aria-busy", busy ? "true" : "false");
+        refreshButton.setAttribute("aria-label", busy ? "Обновление сводки" : "Обновить сводку");
+        refreshButton.classList.toggle("is-loading", busy);
+    }
+    function interruptRequest(code) {
+        var task = activeRequest;
+        if (!task || task.cancelled) return;
+        task.cancelled = true;
+        task.reject(requestError(code, code === "REQUEST_TIMEOUT"
+            ? "Роутер не ответил вовремя." : "Запрос отменён."));
+        task.controller.abort();
+    }
+    function scheduleRefresh(delay) {
+        clearRefreshTimer();
+        if (stopped || suspended || document.hidden) return;
+        refreshTimer = window.setTimeout(function () {
+            refreshTimer = null;
+            refresh(false);
+        }, delay);
+    }
+    function validateSummary(data) {
+        var modules = ["xray", "servers", "subscriptions", "dns", "routes", "keenetic", "broray"];
+        if (!data || typeof data !== "object" || Array.isArray(data) ||
+            !data.health || typeof data.health !== "object" || Array.isArray(data.health) ||
+            !modules.every(function (name) {
+                return Object.prototype.hasOwnProperty.call(data, name) &&
+                    (data[name] === null || (typeof data[name] === "object" && !Array.isArray(data[name])));
+            })) throw new Error("Сервер вернул неполную сводку.");
+    }
+    function showRefreshFailure(error) {
+        if (lastReceivedAt === null) {
+            render({health: {severity: "unknown"}, errors: [], updatedAt: null});
+        }
+        var badge = byId("home-health");
+        badge.textContent = lastReceivedAt === null ? "Сводка недоступна" : "Данные не обновлены";
+        badge.className = "status-badge status-warning";
+        if (refreshFeedback) {
+            refreshFeedback.textContent = "Не удалось обновить сводку. " + error.message +
+                (lastReceivedAt === null ? " " : " Показаны последние полученные данные от " + formatDate(lastReceivedAt) + ". ") +
+                "Нажмите «Обновить» или дождитесь повторной попытки.";
+            refreshFeedback.hidden = false;
+        }
+    }
+    async function refresh(showToast) {
+        if (stopped || suspended || document.hidden) return;
+        if (activeRequest) {
+            // A return to the page must follow an aborted request, never run in parallel.
+            if (activeRequest.cancelled) refreshPending = true;
+            return;
+        }
+        clearRefreshTimer();
+        if (typeof window.AbortController !== "function") {
             loader.hidden = true;
             app.hidden = false;
-            await loadSummary(false);
-        } catch (error) {
-            if (error.message !== "Сессия завершена.") {
+            showRefreshFailure(new Error("Для обновления сводки требуется современный браузер."));
+            return;
+        }
+        var task = {controller: new window.AbortController(), cancelled: false};
+        task.interrupted = new Promise(function (resolve, reject) { task.reject = reject; });
+        activeRequest = task;
+        refreshPending = false;
+        setRefreshBusy(true);
+        var deadline = window.setTimeout(function () {
+            if (activeRequest === task) interruptRequest("REQUEST_TIMEOUT");
+        }, REQUEST_TIMEOUT_MS);
+        var failed = false;
+        try {
+            if (!authenticated) {
+                var session = await request("/api/session.cgi", task);
+                if (!session || session.authenticated !== true || typeof session.user !== "string" || !session.user) {
+                    throw new Error("Не удалось подтвердить пользователя.");
+                }
+                setText("current-user", session.user);
+                authenticated = true;
                 loader.hidden = true;
                 app.hidden = false;
-                byId("home-warning").textContent = error.message;
-                byId("home-warning").hidden = false;
             }
+            var data = await request("/api/home/summary.cgi", task);
+            validateSummary(data);
+            render(data);
+            lastReceivedAt = new Date().toISOString();
+            if (refreshFeedback) refreshFeedback.hidden = true;
+            // updatedAt is the assembled summary time, not proof that every module is fresh.
+            if (byId("home-updated-at")) byId("home-updated-at").title =
+                "Время формирования сводки. Актуальность каждого модуля указана в его состоянии.";
+            retryDelay = REFRESH_INTERVAL_MS;
+            if (showToast && window.BROrayUI) window.BROrayUI.toast("Сводка обновлена.", "success");
+        } catch (error) {
+            if (error.code !== "INTERRUPTED" && error.code !== "SESSION_REQUIRED" && !stopped) {
+                failed = true;
+                loader.hidden = true;
+                app.hidden = false;
+                showRefreshFailure(error);
+            }
+        } finally {
+            window.clearTimeout(deadline);
+            if (activeRequest === task) activeRequest = null;
+            setRefreshBusy(false);
+            var delay = refreshPending ? 0 : retryDelay;
+            refreshPending = false;
+            if (failed) retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+            scheduleRefresh(delay);
         }
+    }
+    function resumeRefresh() {
+        if (!stopped && !suspended && !document.hidden) refresh(false);
+    }
+    function initialize() {
+        var warning = byId("home-warning");
+        refreshFeedback = document.createElement("div");
+        refreshFeedback.id = "home-refresh-feedback";
+        refreshFeedback.className = "home-warning";
+        refreshFeedback.setAttribute("role", "status");
+        refreshFeedback.hidden = true;
+        if (warning && warning.parentNode) warning.parentNode.insertBefore(refreshFeedback, warning);
+        if (refreshButton) {
+            refreshButton.hidden = false;
+            refreshButton.removeAttribute("aria-hidden");
+            refreshButton.removeAttribute("tabindex");
+            refreshButton.addEventListener("click", function () { refresh(true); });
+        }
+        document.addEventListener("visibilitychange", function () {
+            if (document.hidden) {
+                clearRefreshTimer();
+                interruptRequest("INTERRUPTED");
+            } else resumeRefresh();
+        });
+        window.addEventListener("pagehide", function () {
+            suspended = true;
+            clearRefreshTimer();
+            interruptRequest("INTERRUPTED");
+        });
+        window.addEventListener("pageshow", function (event) {
+            if (!event.persisted) return;
+            suspended = false;
+            authenticated = false;
+            resumeRefresh();
+        });
+        window.addEventListener("online", resumeRefresh);
+        var logout = byId("logout-button");
+        if (logout) logout.addEventListener("click", function () {
+            stopped = true;
+            clearRefreshTimer();
+            interruptRequest("INTERRUPTED");
+        }, true);
+        refresh(false);
     }
 
     initialize();
