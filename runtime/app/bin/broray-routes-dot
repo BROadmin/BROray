@@ -7,11 +7,43 @@ LIB="${BRORAY_DOT_LIB:-$ROOT/lib/routes-dot.sh}"
   exit 1
 }
 . "$LIB"
+# CGI holds the same fence until its child finishes. Standalone destructive
+# calls acquire it themselves; no request can bypass serialization.
+broray_dot_cli_locked()
+{
+    local action parent recorded scope recorded_action result
+    action="$1"
+    shift
+    . "$ROOT/lib/routes-api-operation.sh" || return 1
+    parent="$(awk 'NR==1 {line=$0;sub(/^.*\) /,"",line);split(line,f," ");print f[2]}' "/proc/$$/stat")" || return 1
+    if [ -n "${BRORAY_DOT_PARENT_LOCK_PID:-}" ]; then
+        [ "$BRORAY_DOT_PARENT_LOCK_PID" = "$parent" ] || return 1
+        recorded="$(cat "$BRORAY_ROUTES_API_LOCK/pid" 2>/dev/null)" || return 1
+        scope="$(cat "$BRORAY_ROUTES_API_LOCK/scope" 2>/dev/null)" || return 1
+        recorded_action="$(cat "$BRORAY_ROUTES_API_LOCK/action" 2>/dev/null)" || return 1
+        [ "$recorded" = "$parent" ] && [ "$scope" = routes ] &&
+            [ "$recorded_action" = "dot:$action" ] || return 1
+    else
+        result=0
+        broray_routes_api_lock_acquire "dot:$action" dns-over-tls || result=$?
+        [ "$result" -eq 0 ] || {
+            broray_dot_error ROUTES_OPERATION_BUSY "Другая конфликтующая операция уже выполняется."
+            return 1
+        }
+        trap 'broray_routes_api_lock_release' EXIT
+        trap 'exit 129' HUP
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+    fi
+    "$@"
+}
+
 case "${1:-}" in
   status) broray_dot_status ;;
   status-cached) broray_dot_status_cached ;;
   test) [ -n "${2:-}" ] || broray_dot_error REQUEST_INVALID "Не указан файл запроса."; broray_dot_test "$2" ;;
   apply) [ -n "${2:-}" ] || broray_dot_error REQUEST_INVALID "Не указан файл запроса."; broray_dot_apply "$2" ;;
-  delete) broray_dot_delete ;;
-  *) echo 'Использование: broray-routes-dot {status|status-cached|test REQUEST.json|apply REQUEST.json|delete}' >&2; exit 2 ;;
+  delete-preview) broray_dot_cli_locked delete-preview broray_dot_delete_preview ;;
+  delete) [ -n "${2:-}" ] || { broray_dot_error REQUEST_INVALID "Не указан файл подтверждения удаления."; exit 1; }; broray_dot_cli_locked delete broray_dot_delete "$2" ;;
+  *) echo 'Использование: broray-routes-dot {status|status-cached|test REQUEST.json|apply REQUEST.json|delete-preview|delete REQUEST.json}' >&2; exit 2 ;;
 esac

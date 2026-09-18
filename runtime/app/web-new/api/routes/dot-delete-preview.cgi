@@ -5,8 +5,5 @@ BRORAY_ROOT="${BRORAY_ROOT:-/opt/broray}"
 broray_dot_api_install_traps
 broray_api_require_method POST
 broray_api_require_session
-request="$BRORAY_ROOT/tmp/dot-delete-request-api.$$.json"
-BRORAY_DOT_API_REQUEST_FILE="$request"
-broray_dot_api_read_body "$request"
-broray_dot_api_lock delete
-broray_dot_api_run delete "$request"
+broray_dot_api_lock delete-preview
+broray_dot_api_run delete-preview

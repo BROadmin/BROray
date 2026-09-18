@@ -10,6 +10,8 @@ PATH="${BRORAY_UPDATER_PATH:-/opt/bin:/opt/sbin:/opt/usr/bin:/opt/usr/sbin:/bin:
 LC_ALL=C
 export PATH LC_ALL
 
+UPDATER_LAUNCH_SHA256="$(sha256sum "$0" 2>/dev/null || true)"
+UPDATER_LAUNCH_SHA256="${UPDATER_LAUNCH_SHA256%% *}"
 UPDATER_VERSION=5
 UPDATER_ENGINE="broray-updater/$UPDATER_VERSION"
 LIFECYCLE_CONTRACT="compact-app-rename/1"
@@ -2405,6 +2407,39 @@ request_conflict_terminal()
     operation_cleanup_terminal
 }
 
+# The authenticated target slot must agree with the persistent platform BEFORE
+# route capture/service stop. Startup identity prevents accepting an older
+# already-loaded daemon merely because its pathname was replaced on disk.
+updater_platform_before_routes()
+{
+    local platform slot manifest relative expected actual launch_expected destination
+    slot="$1"
+    platform="$slot/app/share/updater-platform"
+    manifest="$platform/SHA256SUMS"
+    [ -f "$manifest" ] && [ ! -L "$manifest" ] || return 1
+    [ "$(wc -l <"$manifest" | tr -d ' ')" = 7 ] || return 1
+    launch_expected=''
+    for relative in opt/bin/broray-updaterctl opt/etc/init.d/S22broray-updater \
+      opt/libexec/broray-updater/broray-compat.sh \
+      opt/libexec/broray-updater/broray-migrate-legacy.sh \
+      opt/libexec/broray-updater/broray-updater.sh \
+      opt/libexec/broray-updater/minisign opt/libexec/broray-updater/xray-wrapper
+    do
+        [ "$(awk -v path="$relative" '$2==path {n++} END {print n+0}' "$manifest")" = 1 ] || return 1
+        expected="$(awk -v path="$relative" '$2==path {print $1}' "$manifest")" || return 1
+        valid_sha256 "$expected" || return 1
+        [ -f "$platform/$relative" ] && [ ! -L "$platform/$relative" ] || return 1
+        actual="$(sha256sum "$platform/$relative")" || return 1
+        [ "${actual%% *}" = "$expected" ] || return 1
+        destination="$(root_path "/$relative")"
+        [ -f "$destination" ] && [ ! -L "$destination" ] && [ -x "$destination" ] || return 1
+        actual="$(sha256sum "$destination")" || return 1
+        [ "${actual%% *}" = "$expected" ] || return 1
+        [ "$relative" != opt/libexec/broray-updater/broray-updater.sh ] || launch_expected="$expected"
+    done
+    valid_sha256 "$UPDATER_LAUNCH_SHA256" && [ "$UPDATER_LAUNCH_SHA256" = "$launch_expected" ]
+}
+
 request_process()
 {
     local request_file operation_id operation target_json bundle_url bundle_sha bundle_size
@@ -2572,6 +2607,12 @@ request_process()
         request_conflict_terminal "$operation" pre-switch || true
         return 1
     fi
+
+    updater_platform_before_routes "$slot_root" || {
+        status_write "$operation" error platform 100 'Постоянный updater не совпадает с целевой платформой. Требуется проверенный bootstrap до обновления; маршруты и активный slot не изменялись.' PERSISTENT_UPDATER_PREREQUISITE false false || true
+        operation_cleanup_terminal
+        return 1
+    }
 
     routes_capture || {
         status_write "$operation" error routes 100 'Не удалось зафиксировать установленные маршруты; переключение не выполнялось.' ROUTE_CAPTURE_FAILED false false || true

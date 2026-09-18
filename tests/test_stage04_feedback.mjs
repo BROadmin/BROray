@@ -44,7 +44,7 @@ if(!repro){
   ['global denied',s=>s.deleteEligible=false],['mutation denied',s=>s.mutationAvailable=false],['read unavailable',s=>s.runningConfigAvailable=false],['ambiguous observation',s=>s.actual.determinate=false],
   ['duplicate endpoint',s=>s.actual.dot.push({...s.actual.dot[0]})],['SNI mismatch',s=>s.actual.dot[0].sni='wrong.test'],['extra SPKI',s=>s.actual.dot[0].spki='pin'],['unknown token',s=>s.actual.dot[0].unknownTokenCount=1],['invalid record',s=>s.actual.dot[0].valid=false],['entry denied',s=>s.actual.dot[0].deleteEligible=false],['catalog id absent',s=>s.servers.shift()],['missing saved IDs',s=>delete s.selectedIds],['all selected missing',s=>s.actual.dot=s.actual.dot.slice(2)]
  ])test('deletion fail-closed: '+name,()=>assert.equal(stateCheck(change).deleteAvailable(),false));
- test('one missing selected record is skipped as backend does',()=>{const p=stateCheck(s=>s.actual.dot.shift()).deletionPreview();assert.equal(p.entries.length,1);});
+ test('partial selected set cannot be confirmed by backend or UI',()=>{const q=stateCheck(s=>s.actual.dot.shift());assert.equal(q.deletionPreview(),null);assert.equal(q.deleteAvailable(),false);});
  test('implicit effective port uses 853',()=>assert.equal(stateCheck(s=>{delete s.actual.dot[0].port;s.actual.dot[0].effectivePort=853;}).deleteAvailable(),true));
  const feedback=fs.readFileSync(path.join(root,'runtime/app/web-new/assets/js/action-feedback.js'),'utf8');const ctx={window:{},document:{},JSON};vm.createContext(ctx);vm.runInContext(feedback,ctx);const describe=ctx.window.BROrayActionFeedback.describe;
  test('no DOM access or requests just loading feedback helper',()=>assert.ok(ctx.window.BROrayActionFeedback));

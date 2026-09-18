@@ -16,7 +16,7 @@ class Handoff(unittest.TestCase):
         self.identities.write_text(json.dumps({'900001':parent or self.owner,'900002':worker or self.worker}))
     def begin(self,mode='protected',action='xray:update'):
         self.launch=uuid.uuid4().hex
-        self.a=self.call('begin','routes',action,'xray','USER','900001',mode,self.launch)
+        self.a=self.call('begin','system',action,'xray','USER','900001',mode,self.launch)
         self.id=self.a['operationId'];self.old=self.a['token']
         self.call('ack',self.id,self.old,'900001')
         return self.a
@@ -84,6 +84,14 @@ class Handoff(unittest.TestCase):
     def test_original_launch_retry_cannot_reacquire_transferred_authority(self):
         self.begin();self.transfer()
         self.assertEqual(self.call('begin','routes','xray:update','xray','USER','900001','protected',self.launch,expected=2)['errorCode'],'OWNER_CHANGED')
+
+    def test_route_scope_still_refuses_cooperative_cancellation(self):
+        # Real Xray handoff uses system scope. A route-scoped operation remains
+        # protected even when a legacy producer requests cooperative mode.
+        a=self.call('begin','routes','xray:update','xray','USER','900001','cooperative',uuid.uuid4().hex)
+        self.call('ack',a['operationId'],a['token'],'900001')
+        self.assertEqual(self.call('cancel',a['operationId'],expected=2)['errorCode'],'CANCEL_NOT_SUPPORTED')
+        self.assertEqual(json.loads(self.opfile(a,'state.json').read_text())['cancelability'],'protected')
 
 if __name__=='__main__':
     result=unittest.TextTestRunner(verbosity=2,failfast=True).run(unittest.defaultTestLoader.loadTestsFromTestCase(Handoff))

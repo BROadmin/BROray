@@ -155,7 +155,7 @@
             var matches = actual.filter(function (entry) {
                 return entry.address === server.address && effectivePort(entry) === effectivePort(server);
             });
-            if (!matches.length) continue;
+            if (!matches.length) return null;
             var entry = matches[0];
             if (matches.length !== 1 || entry.deleteEligible !== true || entry.valid !== true ||
                 Number(entry.unknownTokenCount || 0) !== 0 || !sameEntry(entry, server) ||
@@ -459,9 +459,10 @@
         if (message) setText("dns-operation-message", message);
         render();
     }
-    function runAction(action, payload) {
+    function runAction(action, payload, propagateError) {
         var endpoint = action === "test" ? "dot-test.cgi" : action === "apply" ? "dot-apply.cgi" : "dot-delete.cgi";
         var title = action === "test" ? "Проверка TLS/SNI" : action === "apply" ? "Установка в Keenetic" : "Удаление выбранных записей";
+        var failure = null;
         if (window.BROrayActionFeedback) window.BROrayActionFeedback.clear("dns-feedback");
         setBusy(true, title, "Подождите. После завершения состояние обновится автоматически.");
         return request("/api/routes/" + endpoint, {
@@ -481,9 +482,14 @@
                 initializeSelection(data);
             }
             if (action === "delete") window.BROrayUI.toast("Точные выбранные DNS-over-TLS записи удалены. Остальные DoT/DoH сохранены.", "success");
-        }).catch(handleError).then(function () {
+        }).catch(function (error) {
+            failure = error;
+            if (!propagateError) handleError(error);
+        }).then(function () {
             busy = false;
             return loadStatus(true, false).catch(function () { render(); });
+        }).then(function () {
+            if (failure && propagateError) throw failure;
         });
     }
     function confirmAction(options) {
@@ -534,6 +540,13 @@
             });
         });
     }
+    function readDeletePreview() {
+        return request("/api/routes/dot-delete-preview.cgi", {
+            method:"POST",
+            credentials:"same-origin",
+            headers:{"Accept":"application/json"}
+        });
+    }
     function onDelete() {
         if (busy || !deleteAvailable()) return;
         var preview;
@@ -542,29 +555,38 @@
         stopBackgroundRefresh();
         setBusy(true, "Проверка перед удалением", "Получение списка записей из роутера…");
         return readDeleteStatus().then(function () {
-            preview = deletionPreview();
-            if (!preview) throw new Error("Выбор или настройки изменились. Обновите состояние и проверьте выбранные серверы.");
+            if (!deletionPreview()) throw new Error("Выбор или настройки изменились. Обновите состояние и проверьте выбранные серверы.");
+            return readDeletePreview();
+        }).then(function (serverPreview) {
+            preview = serverPreview;
+            if (!preview || preview.schemaVersion !== 1 || !Array.isArray(preview.serverIds) ||
+                !Array.isArray(preview.entries) || !preview.entries.length ||
+                typeof preview.expectedFingerprint !== "string" || preview.expectedFingerprint.length !== 64) {
+                throw new Error("BROray не смог сформировать безопасное подтверждение удаления.");
+            }
             return confirmAction({
                 eyebrow:"Опасное действие",
                 title:"Удалить выбранные DoT-записи?",
                 message:"Будут удалены следующие записи из роутера:\n" + preview.entries.map(function (entry) {
-                    return entry.address + ":" + entry.port + " · TLS-домен: " + entry.sni;
+                    return entry.address + ":" + entry.effectivePort + " · TLS-домен: " + entry.sni;
                 }).join("\n") + "\n\nЗаписи удаляются независимо от того, кто их добавил. Не выбранные DoT и все DoH-записи сохраняются. Эти DNS-серверы перестанут использоваться роутером. Если других рабочих DNS-серверов нет, доступ по именам сайтов может пропасть.",
                 confirmText:"Удалить перечисленные записи", cancelText:"Отмена", variant:"danger", icon:"delete"
             });
         }).then(function (confirmed) {
             if (!confirmed) return null;
-            return readDeleteStatus().then(function () {
-                var current = deletionPreview();
-                if (!current || current.signature !== preview.signature) throw new Error("Список записей изменился после подтверждения. Удаление не отправлено. Проверьте новый список.");
-                sent = true;
-                return runAction("delete", null);
-            });
+            sent = true;
+            return runAction("delete", {
+                schemaVersion:1,
+                serverIds:preview.serverIds.slice(),
+                expectedFingerprint:preview.expectedFingerprint
+            }, true);
         }).catch(function (error) {
             if (error && (error.status === 401 || error.code === "AUTH_REQUIRED" || error.code === "SESSION_REQUIRED")) { handleError(error); return; }
             if (window.BROrayActionFeedback) window.BROrayActionFeedback.show("dns-feedback", {
                 title:"Удаление не выполнено",
-                message:sent ? "Результат удаления не подтверждён. Обновите состояние." : "Запрос на удаление не отправлен.",
+                message:error && error.code === "DOT_DELETE_CONFIRMATION_STALE" ?
+                    "Настройки DNS-over-TLS изменились после подтверждения. Ничего не удалено." :
+                    (sent ? "Результат удаления не подтверждён. Обновите состояние." : "Запрос на удаление не отправлен."),
                 next:"Обновите состояние и повторно откройте подтверждение удаления.",
                 details:error && error.message || "Причина не получена."
             });

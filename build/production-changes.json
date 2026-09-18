@@ -73,6 +73,10 @@
     "app/lib/package-transaction.sh",
     "app/lib/parser-shadowsocks.sh",
     "app/web-new/api/routes/dot-common.sh",
+    "app/web-new/api/routes/dot-delete.cgi",
+    "app/web-new/api/routes/dot-delete-preview.cgi",
+    "app/bin/broray-routes-dot",
+    "app/lib/routes-dot.sh",
     "app/web-new/assets/js/common.js",
     "app/web-new/assets/js/home.js",
     "app/web-new/assets/js/routes-custom-page.js",
@@ -80,6 +84,7 @@
     "app/web-new/routes-custom.html",
     "app/web-new/routes-import.html",
     "app/web-new/subscriptions.html",
-    "init/S25broray-web"
+    "init/S25broray-web",
+    "app/lib/universal-platform-handoff.sh"
   ]
 }

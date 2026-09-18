@@ -165,6 +165,7 @@
   "app/web-new/api/routes/dot-apply.cgi": 493,
   "app/web-new/api/routes/dot-common.sh": 493,
   "app/web-new/api/routes/dot-delete.cgi": 493,
+  "app/web-new/api/routes/dot-delete-preview.cgi": 493,
   "app/web-new/api/routes/dot-status.cgi": 493,
   "app/web-new/api/routes/dot-test.cgi": 493,
   "app/web-new/api/routes/download.cgi": 493,

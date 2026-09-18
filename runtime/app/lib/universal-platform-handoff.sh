@@ -28,7 +28,9 @@ root_path()
 }
 
 APP_ROOT="${BRORAY_HANDOFF_APP_ROOT:-$(root_path /opt/broray)}"
-STATE_ROOT="${BRORAY_HANDOFF_STATE_ROOT:-$(root_path /opt/var/lib/broray-platform-handoff)}"
+HANDOFF_NAMESPACE=broray-platform-handoff
+[ "${1:-}" != preflight ] || HANDOFF_NAMESPACE=broray-updater-preflight
+STATE_ROOT="${BRORAY_HANDOFF_STATE_ROOT:-$(root_path "/opt/var/lib/$HANDOFF_NAMESPACE")}"
 UPDATER_STATE_ROOT="${BRORAY_HANDOFF_UPDATER_STATE_ROOT:-$(root_path /opt/var/lib/broray-updater)}"
 OPERATION_ROOT="${BRORAY_HANDOFF_OPERATION_ROOT:-$(root_path /opt/var/lib/broray/operations)}"
 OPERATION_POINTER="${BRORAY_HANDOFF_OPERATION_POINTER:-$(root_path /opt/var/lib/broray/last-operation)}"
@@ -195,6 +197,10 @@ payload_valid()
     do
         regular_file "$PAYLOAD_ROOT/$relative" || return 1
         platform_executable "$PAYLOAD_ROOT/$relative" || return 1
+    done
+    # Every allowed target must be authenticated exactly once.
+    for relative in $PLATFORM_TARGET_FILES; do
+        [ "$(awk -v path="$relative" '$2==path {n++} END {print n+0}' "$PAYLOAD_ROOT/SHA256SUMS")" = 1 ] || return 1
     done
     (cd "$PAYLOAD_ROOT" && sha256sum -c SHA256SUMS >/dev/null 2>&1) || return 1
     [ "$($ASH "$PAYLOAD_ROOT/opt/libexec/broray-updater/broray-updater.sh" version 2>/dev/null)" = 'broray-updater/5' ] || return 1
@@ -765,6 +771,160 @@ schedule()
     worker_start
 }
 
+# Authenticated installer entry: called BEFORE an update/reinstall is queued.
+# No application, Xray, route, OPKG, or user configuration is changed here.
+preflight_stop_daemon()
+{
+    local pf_pid pf_start pf_ticks pf_cmd pf_count
+    if [ "$TEST_MODE" = 1 ] && [ -n "${BRORAY_HANDOFF_PREFLIGHT_STOP_HOOK:-}" ]; then
+        "$BRORAY_HANDOFF_PREFLIGHT_STOP_HOOK"
+        return $?
+    fi
+    if [ ! -e "$UPDATER_STATE_ROOT/daemon.pid" ]; then
+        [ ! -e "$UPDATER_STATE_ROOT/daemon.lock" ] && [ ! -L "$UPDATER_STATE_ROOT/daemon.pid" ]
+        return $?
+    fi
+    regular_file "$UPDATER_STATE_ROOT/daemon.pid" || return 1
+    pf_pid="$(cat "$UPDATER_STATE_ROOT/daemon.pid")" || return 1
+    case "$pf_pid" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    pf_start="$(process_starttime "$pf_pid")" || return 1
+    [ -n "$pf_start" ] || return 1
+    pf_cmd="$(tr '\000' '\n' <"$(root_path /proc)/$pf_pid/cmdline")" || return 1
+    printf '%s\n' "$pf_cmd" | awk -v script="$UPDATER" '
+      {arg[NR]=$0} END {exit !((NR==3 || NR==2) && arg[NR]=="daemon" && arg[NR-1]==script)}
+    ' || return 1
+    process_matches "$pf_pid" "$pf_start" || return 1
+    kill -TERM "$pf_pid" || return 1
+    pf_count=0
+    while process_matches "$pf_pid" "$pf_start" && [ "$pf_count" -lt 10 ]; do
+        sleep 1
+        pf_count=$((pf_count + 1))
+    done
+    ! process_matches "$pf_pid" "$pf_start"
+}
+
+preflight_paths_safe()
+{
+    local pf_relative pf_parent pf_stop
+    pf_stop="$(root_path /opt)"
+    safe_directory "$pf_stop" || return 1
+    for pf_relative in $PLATFORM_TARGET_FILES; do
+        pf_parent="$(root_path "/$pf_relative")"
+        pf_parent="${pf_parent%/*}"
+        while [ "$pf_parent" != "$pf_stop" ]; do
+            [ ! -L "$pf_parent" ] || return 1
+            if [ -e "$pf_parent" ]; then safe_directory "$pf_parent" || return 1; fi
+            [ "$pf_parent" != / ] && [ -n "$pf_parent" ] || return 1
+            pf_parent="${pf_parent%/*}"
+        done
+    done
+}
+
+preflight()
+{
+    local pf_expected pf_lock_library pf_previous_running pf_rc pf_entry pf_phase
+    pf_expected="${1:-}"
+    valid_sha256 "$pf_expected" &&
+        [ "$(payload_manifest_sha)" = "$pf_expected" ] && payload_valid || return 1
+    for pf_entry in $PLATFORM_TARGET_FILES; do
+        [ -x "$PAYLOAD_ROOT/$pf_entry" ] || return 1
+    done
+    preflight_paths_safe || return 1
+    pf_lock_library="${BRORAY_HANDOFF_PREFLIGHT_LOCK_LIBRARY:-${0%/*}/routes-api-operation.sh}"
+    regular_file "$pf_lock_library" || return 1
+    BRORAY_ROOT="$APP_ROOT"
+    BRORAY_ROUTES_API_LOCK="$(root_path /opt/var/lock/broray/global-operation.lock)"
+    BRORAY_UPDATER_REQUEST_LOCK="$UPDATER_STATE_ROOT/request.lock"
+    BRORAY_UPDATER_OPERATION_POINTER="$OPERATION_POINTER"
+    BRORAY_UPDATER_OPERATION_ROOT="$OPERATION_ROOT"
+    BRORAY_LEGACY_GLOBAL_LOCK="$(root_path /opt/var/lock/broray-updater.lock)"
+    . "$pf_lock_library" || return 1
+    broray_routes_api_lock_acquire system:platform-preflight updater-platform || return 1
+    trap 'preflight_exit $?' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    for pf_entry in "$UPDATER_STATE_ROOT/queue"/*.json; do
+        [ ! -e "$pf_entry" ] && [ ! -L "$pf_entry" ] || return 1
+    done
+    ensure_state_root || return 1
+    PREFLIGHT_STOPPED=false
+    PREFLIGHT_COMMITTED=false
+    pf_previous_running=false
+    pf_phase="$(cat "$PHASE_FILE" 2>/dev/null || true)"
+    case "$pf_phase" in
+      preparing|installing|restarting)
+        regular_file "$DAEMON_STATE_FILE" || return 1
+        pf_previous_running="$(cat "$DAEMON_STATE_FILE")" || return 1
+        case "$pf_previous_running" in true|false) ;; *) return 1 ;; esac
+        ;;
+      *)
+        init_call status >/dev/null 2>&1 && pf_previous_running=true
+        [ ! -L "$DAEMON_STATE_FILE" ] || return 1
+        printf '%s\n' "$pf_previous_running" >"$DAEMON_STATE_FILE" && sync || return 1
+        ;;
+    esac
+    PREFLIGHT_OLD_RUNNING="$pf_previous_running"
+    preflight_stop_daemon || {
+        status_write error false PREFLIGHT_OWNER_UNCONFIRMED 'Не подтверждена безопасная остановка updater; файлы не изменялись.' false false '' '' || true
+        return 1
+    }
+    PREFLIGHT_STOPPED=true
+    if [ -e "$BACKUP_ROOT" ] || [ -L "$BACKUP_ROOT" ]; then
+        pf_phase="$(cat "$PHASE_FILE" 2>/dev/null)" || return 1
+        case "$pf_phase" in
+          preparing) ;; # No target copy is permitted in this durable phase.
+          installing|restarting|rolled-back) backup_valid && platform_restore || return 1 ;;
+          complete) platform_current || return 1 ;;
+          *) return 1 ;;
+        esac
+        rm -rf "$BACKUP_ROOT" || return 1
+        phase_write rolled-back || return 1
+    fi
+    phase_write preparing && backup_prepare && backup_valid || return 1
+    phase_write installing && sync || return 1
+    platform_install || return 1
+    phase_write restarting || return 1
+    init_call start >/dev/null 2>&1 && daemon_ready && platform_current || return 1
+    # Success is recorded only after re-reading exact installed bytes.
+    phase_write complete && sync || return 1
+    PREFLIGHT_COMMITTED=true
+    status_write success false PREFLIGHT_PLATFORM_READY 'Постоянный updater проверен и запущен до постановки обновления в очередь.' true false '' '' || return 1
+    rm -rf "$BACKUP_ROOT" || return 1
+    return 0
+}
+
+preflight_exit()
+{
+    local pf_exit_rc pf_rollback_ok pf_exit_phase
+    pf_exit_rc="$1"
+    if [ "${PREFLIGHT_STOPPED:-false}" = true ] && [ "${PREFLIGHT_COMMITTED:-false}" != true ]; then
+        pf_rollback_ok=true
+        preflight_stop_daemon || pf_rollback_ok=false
+        pf_exit_phase="$(cat "$PHASE_FILE" 2>/dev/null || true)"
+        case "$pf_exit_phase" in
+          installing|restarting)
+            [ "$pf_rollback_ok" = true ] && backup_valid && platform_restore || pf_rollback_ok=false
+            ;;
+          preparing) ;;
+          *) [ ! -e "$BACKUP_ROOT" ] || pf_rollback_ok=false ;;
+        esac
+        if [ "$pf_rollback_ok" = true ] && [ "${PREFLIGHT_OLD_RUNNING:-false}" = true ]; then
+            init_call start >/dev/null 2>&1 && daemon_ready || pf_rollback_ok=false
+        fi
+        if [ "$pf_rollback_ok" = true ]; then
+            phase_write rolled-back || true
+            status_write error false PREFLIGHT_ROLLED_BACK 'Подготовка updater не завершена; прежняя платформа восстановлена, маршруты не изменялись.' true true '' '' || true
+            rm -rf "$BACKUP_ROOT" || true
+        else
+            phase_write rollback-failed || true
+            status_write error false PREFLIGHT_ROLLBACK_FAILED 'Подготовка updater остановлена. Восстановление платформы не подтверждено; запуск обновления запрещён.' true false '' '' || true
+        fi
+    fi
+    broray_routes_api_lock_release >/dev/null 2>&1 || true
+    return "$pf_exit_rc"
+}
+
 status_json()
 {
     if platform_current; then
@@ -790,12 +950,13 @@ status_json()
 }
 
 case "${1:-}" in
+    preflight) preflight "${2:-}" ;;
     schedule) schedule ;;
     finalize) finalize ;;
     status) status_json ;;
     verify) payload_valid && platform_current ;;
     *)
-        printf '%s\n' 'Использование: universal-platform-handoff.sh {schedule|finalize|status|verify}' >&2
+        printf '%s\n' 'Использование: universal-platform-handoff.sh {preflight SHA256|schedule|finalize|status|verify}' >&2
         exit 2
         ;;
 esac

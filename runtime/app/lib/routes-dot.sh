@@ -1763,16 +1763,158 @@ broray_dot_apply()
     broray_dot_status
 }
 
-broray_dot_delete()
+broray_dot_delete_fingerprint()
+{
+    local canonical digest
+    canonical="$1"
+    jq -e '
+      .schemaVersion==1 and (.serverIds|type)=="array" and
+      (.serverIds|length)>0 and (.serverIds|length)<=8 and
+      .serverIds==(.serverIds|sort|unique) and
+      (.entries|type)=="array" and (.entries|map(.id))==.serverIds and
+      all(.entries[]; (.id|type)=="string" and (.address|type)=="string" and
+        (.address|length)>0 and (.effectivePort|type)=="number" and
+        .effectivePort==853 and (.sni|type)=="string" and (.sni|length)>0 and
+        (.spki|type)=="string" and (.interface|type)=="string" and
+        (.domain|type)=="string")
+    ' "$canonical" >/dev/null 2>&1 || return 1
+    digest="$(sha256sum "$canonical" 2>/dev/null)" || return 1
+    digest="${digest%% *}"
+    case "$digest" in ''|*[!0-9a-f]*) return 1 ;; esac
+    [ "${#digest}" -eq 64 ] || return 1
+    printf '%s\n' "$digest"
+}
+
+broray_dot_delete_preview()
 {
     broray_dot_transaction_require_clear || return 1
     broray_dot_require_write_protocol || return 1
+    broray_dot_ensure_files || return 1
+    preview_status="$BRORAY_ROOT/tmp/dot-delete-preview-status.$$.json"
+    preview_canonical="$BRORAY_ROOT/tmp/dot-delete-preview-canonical.$$.json"
+    broray_dot_status >"$preview_status" || {
+      rm -f "$preview_status" "$preview_canonical"
+      return 1
+    }
+    if ! jq -e '.deleteEligible==true and (.selectedIds|type)=="array" and (.selectedIds|length)>0' "$preview_status" >/dev/null 2>&1; then
+      preview_reason="$(jq -r '.deleteBlockedReason // "delete-not-eligible"' "$preview_status" 2>/dev/null)"
+      rm -f "$preview_status" "$preview_canonical"
+      broray_dot_error DOT_DELETE_AUTHORITY_REFUSED "Удаление недоступно: текущий набор DoT нельзя однозначно подтвердить." "$preview_reason"
+      return 1
+    fi
+    jq -cS '
+      (.selectedIds|sort) as $ids |
+      {
+        schemaVersion:1,
+        serverIds:$ids,
+        entries:([
+          $ids[] as $id |
+          ([.actual.dot[]? |
+            select(.deleteEligible==true and (.catalogMatchIds|index($id))!=null)]) as $matches |
+          select(($matches|length)==1) | $matches[0] as $live |
+          select($live != null) |
+          {
+            id:$id,
+            address:$live.address,
+            effectivePort:$live.effectivePort,
+            sni:$live.sni,
+            spki:($live.spki//""),
+            interface:($live.interface//$live.on//""),
+            domain:($live.domain//"")
+          }
+        ] | sort_by(.id))
+      }
+    ' "$preview_status" >"$preview_canonical" || {
+      rm -f "$preview_status" "$preview_canonical"
+      return 1
+    }
+    [ "$(jq '.entries|length' "$preview_canonical")" -gt 0 ] || {
+      rm -f "$preview_status" "$preview_canonical"
+      broray_dot_error DOT_DELETE_AUTHORITY_REFUSED "Удаление недоступно: подтверждённые записи не найдены."
+      return 1
+    }
+    preview_fingerprint="$(broray_dot_delete_fingerprint "$preview_canonical")" || {
+      rm -f "$preview_status" "$preview_canonical"
+      broray_dot_error DEPENDENCY_MISSING "Не удалось вычислить контрольную сумму подтверждения удаления."
+      return 1
+    }
+    case "$preview_fingerprint" in
+      ''|*[!0-9a-f]*) rm -f "$preview_status" "$preview_canonical"; return 1 ;;
+    esac
+    [ "${#preview_fingerprint}" -eq 64 ] || {
+      rm -f "$preview_status" "$preview_canonical"
+      return 1
+    }
+    jq -n --slurpfile confirmation "$preview_canonical" --arg fingerprint "$preview_fingerprint" '
+      {
+        schemaVersion:1,
+        expectedFingerprint:$fingerprint,
+        serverIds:$confirmation[0].serverIds,
+        entries:$confirmation[0].entries
+      }
+    '
+    preview_rc=$?
+    rm -f "$preview_status" "$preview_canonical"
+    return "$preview_rc"
+}
+
+broray_dot_delete()
+{
+    delete_input="${1:-}"
+    broray_dot_transaction_require_clear || return 1
+    broray_dot_require_write_protocol || return 1
+    # Delete never creates or migrates persistent state. Preview handles setup.
+    [ -f "$BRORAY_DOT_CONFIG" ] && [ ! -L "$BRORAY_DOT_CONFIG" ] &&
+    [ -f "$BRORAY_DOT_STATE" ] && [ ! -L "$BRORAY_DOT_STATE" ] &&
+    jq -e '.schemaVersion==3' "$BRORAY_DOT_CONFIG" >/dev/null 2>&1 &&
+    jq -e '.schemaVersion==1' "$BRORAY_DOT_STATE" >/dev/null 2>&1 || {
+      broray_dot_error DOT_DELETE_CONFIRMATION_STALE "Состояние DNS-over-TLS изменилось. Обновите список и подтвердите удаление повторно."
+      return 1
+    }
     broray_dot_ensure_files || return 1
     delete_request="$BRORAY_ROOT/tmp/dot-delete-request.$$.json"
     delete_selected_file="$BRORAY_ROOT/tmp/dot-delete-selected.$$.json"
     delete_current="$BRORAY_ROOT/tmp/dot-delete-current.$$.json"
     delete_plan="$BRORAY_ROOT/tmp/dot-delete-plan.$$.json"
-    jq '{serverIds:(.requestedIds//.selectedIds//[])}' "$BRORAY_DOT_CONFIG" >"$delete_request" || return 1
+    delete_canonical="$BRORAY_ROOT/tmp/dot-delete-canonical.$$.json"
+    [ -f "$delete_input" ] && [ -r "$delete_input" ] && [ ! -L "$delete_input" ] || {
+      broray_dot_error REQUEST_INVALID "Подтверждение удаления DNS-over-TLS отсутствует."
+      return 1
+    }
+    cp "$delete_input" "$delete_request" || return 1
+    jq -e -s 'length==1 and (.[0] | type=="object" and .schemaVersion==1 and (.expectedFingerprint|type)=="string")' "$delete_request" >/dev/null 2>&1 || {
+      rm -f "$delete_request"
+      broray_dot_error REQUEST_INVALID "Подтверждение удаления имеет неподдерживаемый формат."
+      return 1
+    }
+    broray_dot_validate_request "$delete_request" || {
+      rm -f "$delete_request"
+      return 1
+    }
+    delete_expected_fingerprint="$(jq -er '.expectedFingerprint | select(type=="string")' "$delete_request" 2>/dev/null)" || {
+      rm -f "$delete_request"
+      broray_dot_error REQUEST_INVALID "Запрос удаления не содержит контрольную сумму подтверждённого набора."
+      return 1
+    }
+    case "$delete_expected_fingerprint" in
+      ''|*[!0-9a-f]*)
+        rm -f "$delete_request"
+        broray_dot_error REQUEST_INVALID "Контрольная сумма подтверждения удаления некорректна."
+        return 1
+        ;;
+    esac
+    [ "${#delete_expected_fingerprint}" -eq 64 ] || {
+      rm -f "$delete_request"
+      broray_dot_error REQUEST_INVALID "Контрольная сумма подтверждения удаления некорректна."
+      return 1
+    }
+    if ! jq -e --slurpfile request "$delete_request" '
+      ((.requestedIds//.selectedIds//[])|sort)==($request[0].serverIds|sort)
+    ' "$BRORAY_DOT_CONFIG" >/dev/null 2>&1; then
+      rm -f "$delete_request"
+      broray_dot_error DOT_DELETE_CONFIRMATION_STALE "Выбранный набор DNS-over-TLS изменился после подтверждения. Обновите список и подтвердите удаление повторно."
+      return 1
+    fi
     broray_dot_entries_for_request "$delete_request" "$delete_selected_file" || {
       rm -f "$delete_request" "$delete_selected_file"
       return 1
@@ -1808,6 +1950,48 @@ broray_dot_delete()
       rm -f "$delete_request" "$delete_selected_file" "$delete_current" "$delete_plan"
       return 1
     }
+    jq -cS -n --slurpfile request "$delete_request" --slurpfile selected "$delete_selected_file" --slurpfile current "$delete_current" '
+      def same_semantic($wanted;$live):
+        $wanted.address==$live.address and $wanted.effectivePort==$live.effectivePort and
+        $wanted.sni==$live.sni and ($wanted.spki//"")==($live.spki//"") and
+        ($wanted.interface//$wanted.on//"")==($live.interface//$live.on//"") and
+        ($wanted.domain//"")==($live.domain//"");
+      ($request[0].serverIds|sort) as $ids |
+      {
+        schemaVersion:1,
+        serverIds:$ids,
+        entries:([
+          $ids[] as $id |
+          ($selected[0][] | select(.id==$id)) as $wanted |
+          ([$current[0].dot[]? |
+            select(.valid and .unknownTokenCount==0 and same_semantic($wanted;.))] | .[0]) as $live |
+          select($live != null) |
+          {
+            id:$id,
+            address:$live.address,
+            effectivePort:$live.effectivePort,
+            sni:$live.sni,
+            spki:($live.spki//""),
+            interface:($live.interface//$live.on//""),
+            domain:($live.domain//"")
+          }
+        ] | sort_by(.id))
+      }
+    ' >"$delete_canonical" || {
+      rm -f "$delete_request" "$delete_selected_file" "$delete_current" "$delete_plan" "$delete_canonical"
+      return 1
+    }
+    delete_actual_fingerprint="$(broray_dot_delete_fingerprint "$delete_canonical")" || {
+      rm -f "$delete_request" "$delete_selected_file" "$delete_current" "$delete_plan" "$delete_canonical"
+      broray_dot_error DOT_DELETE_CONFIRMATION_STALE "Подтверждённый набор DNS-over-TLS больше не совпадает с текущим. Ничего не удалено."
+      return 1
+    }
+    if [ "$delete_actual_fingerprint" != "$delete_expected_fingerprint" ]; then
+      rm -f "$delete_request" "$delete_selected_file" "$delete_current" "$delete_plan" "$delete_canonical"
+      broray_dot_error DOT_DELETE_CONFIRMATION_STALE "Список DNS-over-TLS изменился после подтверждения. Ничего не удалено; обновите список и подтвердите операцию повторно."
+      return 1
+    fi
+    rm -f "$delete_canonical"
     if ! jq -e '.determinate and .runtimeReconciled' "$delete_current" >/dev/null 2>&1 ||
        [ "$(jq '.conflictIds|length' "$delete_plan")" -ne 0 ]; then
       delete_details="$(jq -c '.conflictIds' "$delete_plan")"
