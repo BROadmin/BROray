@@ -55,14 +55,54 @@
 <li>Дождитесь проверки конфигурации, запуска и соединения; затем проверьте итоговый статус.</li>
 </ol>
 <p><strong>Xray 26.2.6 заблокирован:</strong> на тестовом ARM64-роутере с текущим VLESS/XHTTP/REALITY-профилем не прошёл внешний HTTPS. Успешный <code>run -test</code> не доказывает работоспособность трафика. Версии 26.3.27, 26.6.27, 26.7.11, 26.7.28, 26.9.8 и 26.9.9 прошли ограниченный тест этого профиля; это не обещание совместимости со всеми серверами и транспортами. Непроверенный архив не становится проверенным из-за совпадения номера версии.</p>
-<h2 id="guide-10">10. Удаление</h2>
-<ol>
+<section id="guide-10"><h2>10. Удаление BROray-Light</h2>
+<h3>Только снять пакет</h3>
+<ol class="steps">
 <li>Сохраните данные и переключите устройства в Keenetic на другой рабочий путь доступа, если они зависят от Light.</li>
 <li>Подключитесь к Entware shell от root.</li>
 <li>Выполните <code>opkg remove broray-light</code> и прочитайте результат.</li>
-<li>Проверьте, что сервисы остановлены. Не удаляйте полный BROray или сторонние интерфейсы.</li>
+<li>Проверьте, что службы остановлены.</li>
 </ol>
-<p>Снятие пакета не следует считать гарантированным стиранием всех сохранённых данных. Не применяйте <code>rm -rf /opt/broray-light</code> для «исправления» установки: восстановление требует проверки владения и точного состава оставшегося состояния.</p>
+<p><strong>Это не полное удаление.</strong> Пакетный <code>postrm</code> намеренно не удаляет Keenetic-интерфейс, KeenDNS-публикацию, пользовательские настройки, серверы, подписки и Xray без отдельного доказательства владения.</p>
+
+<h3 id="light-terminal-full-remove">Полное ручное удаление через терминал</h3>
+<p>Пока файлы Light ещё установлены, сначала безопасно удалите два объекта Keenetic по их ownership receipts. Только после этого снимайте пакет и удаляйте оставшиеся product-owned данные.</p>
+<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать полное удаление BROray-Light">Копировать</button><pre><code class="language-sh">(
+set -eu
+
+# 1. Удалить публикацию WebUI brolight из KeenDNS.
+/opt/bin/broray-light-web-publishctl delete
+
+# 2. Удалить только подтверждённый owned ProxyN BROray-Light.
+/opt/bin/ash /opt/broray-light/lib/interface.sh delete
+
+# 3. Снять пакет — prerm остановит Light, updater и Xray.
+opkg remove broray-light
+
+# 4. Не продолжать, если пакет всё ещё зарегистрирован.
+if opkg list-installed 2>/dev/null | grep -q '^broray-light '; then
+    echo 'ERROR: broray-light всё ещё зарегистрирован в OPKG' >&2
+    exit 1
+fi
+
+# 5. Теперь удалить только оставшиеся долговременные данные Light.
+rm -rf /opt/broray-light        /opt/var/lib/broray-light        /opt/var/lib/broray-light-updater
+
+echo 'BROray-Light полностью удалён.'
+)</code></pre></div>
+<div class="note warning"><span class="note-title">Перед полным удалением</span>Каталоги <code>/opt/broray-light/config</code>, <code>servers</code>, <code>subscriptions</code> и <code>runtime/xray</code> будут удалены. Если они нужны — сохраните их заранее. Общие пакеты Entware (<code>lighttpd</code>, <code>curl</code>, <code>jq</code> и другие зависимости) этот блок не удаляет.</div>
+
+<h3 id="light-keenetic-after-remove">После удаления обязательно проверьте Keenetic</h3>
+<ol class="steps">
+<li>В панели Keenetic проверьте список прокси-подключений. Управляемый интерфейс, который BROray-Light показывал на Главной, должен отсутствовать.</li>
+<li>Откройте <strong>Доменное имя / KeenDNS</strong> и список опубликованных веб-приложений. Адрес вида <code>https://brolight.ВАШ-ДОМЕН-KEENDNS/</code> должен исчезнуть.</li>
+<li>Если остался объект, удаляйте только тот ProxyN или WebUI-адрес, который точно принадлежал BROray-Light. Сторонние интерфейсы и публикации не трогайте.</li>
+</ol>
+<p>Если Light уже частично удалён и ownership-aware команда публикации больше недоступна, оставшийся HTTP Proxy с точным именем <code>brolight</code> можно удалить из Entware shell:</p>
+<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать удаление адреса BROray-Light из Keenetic">Копировать</button><pre><code class="language-sh">ndmc -c 'no ip http proxy brolight'
+ndmc -c 'system configuration save'</code></pre></div>
+<p class="muted">Если после частичного удаления остался ProxyN, удалите его через панель Keenetic только после точной идентификации имени и принадлежности. Не выполняйте <code>no interface Proxy0</code> наугад.</p>
+</section>
 </main></div>
 <footer class="site-footer"><div class="footer-inner">
 <span>BROvibe Docs · BROray-Light · Обслуживание</span>
