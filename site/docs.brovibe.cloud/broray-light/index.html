@@ -1,276 +1,52 @@
 <!doctype html>
 <html lang="ru">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>BROray-Light 2.0.0 — пошаговая инструкция и история версий</title>
-    <meta name="description" content="BROray-Light: установка Entware и SSH, VLESS, подписки, Xray, безопасное обновление и история версий.">
-    <link rel="canonical" href="https://docs.brovibe.cloud/broray-light/">
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-    <link rel="shortcut icon" href="/favicon.ico">
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-    <link rel="manifest" href="/site-manifest.json">
-    <meta name="theme-color" content="#081016">
-    <link rel="stylesheet" href="/styles.css?v=20260920-bro-green-r1">
-<style>
-.light-code-block { overflow: hidden; margin: 18px 0; border: 1px solid var(--line); border-radius: 14px; background: #080c0d; }
-.light-code-block > .copy { float: none; display: block; position: relative; min-height: 44px; margin: 12px 12px 0 auto; }
-.light-code-block > pre { margin: 0; border: 0; border-radius: 0; }
-</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BROray-Light 2.0.0 — документация</title>
+<meta name="description" content="Пользовательская документация BROray-Light 2.0.0: установка, три страницы WebUI, VLESS, обслуживание, решение проблем и история версий.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray-light/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
 <header class="site-header">
-    <div class="header-inner">
-        <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
-        <nav class="nav" aria-label="Основная навигация">
-            <a href="/">Главная</a>
-            <a href="/broray/">BROray</a>
-            <a href="/broray-light/" aria-current="page">BROray-Light</a>
-            <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
-        </nav>
-    </div>
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/">BROray</a>
+      <a href="/broray-light/" aria-current="page">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
 </header>
-
-<div class="layout">
-<aside class="sidebar" aria-label="Разделы страницы">
-    <p class="sidebar-title">Документация BROray-Light</p>
-    <a href="#guide-1">Начало работы</a>
-    <a href="#guide-4">Установка</a>
-    <a href="#guide-5">Руководство WebUI</a>
-    <a href="#guide-6">Основные сценарии</a>
-    <a href="#guide-8">Обслуживание</a>
-    <a href="#guide-9">Решение проблем</a>
-    <a href="#guide-10">Удаление</a>
-    <a href="#guide-12">История версий</a>
-    <a href="#guide-1">Справочник</a>
-    <a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a>
-</aside>
-
-<main class="content" id="content"><section class="release-banner"><div><p class="eyebrow">Стабильный релиз</p><h1>BROray-Light 2.0.0</h1><p class="lead">Только VLESS. Три страницы WebUI. Безопасное управление Xray.</p></div><div class="release-state">Проверено перед выпуском</div></section>
-
-<section id="docs-overview" class="docs-overview" aria-labelledby="docs-overview-title">
-    <div class="docs-overview-head">
-        <div>
-            <p class="eyebrow">Выберите задачу</p>
-            <h2 id="docs-overview-title">BROray-Light по шагам</h2>
-            <p>Лёгкая редакция остаётся VLESS-only. Выберите нужное действие, а подробные проверенные инструкции и история релизов находятся ниже.</p>
-        </div>
-        <a class="primary-action" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe →</a>
-    </div>
-    <div class="docs-grid">
-        <a class="docs-card" href="#guide-1"><span class="docs-card-kicker">01 · Старт</span><strong>Начало работы</strong><p>Совместимость, Entware и подключение к терминалу.</p></a>
-        <a class="docs-card" href="#guide-4"><span class="docs-card-kicker">02 · Установка</span><strong>Чистая установка</strong><p>Проверяемый установщик, SHA-256 и контроль результата.</p></a>
-        <a class="docs-card" href="#guide-5"><span class="docs-card-kicker">03 · WebUI</span><strong>Руководство</strong><p>Вход, три страницы интерфейса и безопасная работа с Light.</p></a>
-        <a class="docs-card" href="#guide-6"><span class="docs-card-kicker">04 · Сценарии</span><strong>Подписки и серверы</strong><p>Добавление VLESS, активация подключения и резервное переключение.</p></a>
-        <a class="docs-card" href="#guide-8"><span class="docs-card-kicker">05 · Обслуживание</span><strong>Обновление и Xray</strong><p>Обновление Light, выбор версии Xray, резервная копия и удаление.</p></a>
-        <a class="docs-card" href="#guide-9"><span class="docs-card-kicker">06 · Поддержка</span><strong>Решение проблем</strong><p>Диагностика, сохранность данных и безопасное обращение в поддержку.</p></a>
-        <a class="docs-card" href="#guide-12"><span class="docs-card-kicker">07 · Релизы</span><strong>История версий</strong><p>2.0.0, предыдущие выпуски и невыпущенные инженерные работы.</p></a>
-    </div>
-</section>
-
-<blockquote>
-<p><a href="https://github.com/BROadmin/BROray-Light/releases/tag/v2.0.0">Релиз 2.0.0</a> · 11 сентября 2026 г. · aarch64-3.10.</p>
-</blockquote>
-<p>Это инструкция для пользователей, которые раньше не работали с Entware и SSH. BROray-Light — отдельный VLESS-клиент для Keenetic, а не упрощённый режим установленного полного BROray.</p>
-<h2 id="guide-1">1. Проверьте совместимость</h2>
-<p>Нужны Keenetic с Entware <strong>aarch64-3.10</strong>, накопитель, подключённый как <code>/opt</code>, доступ root к Entware shell, корректное время, DNS и HTTPS. Пакета для MIPS, ARM32 или x86 в этом выпуске нет. Не устанавливайте пакет другой архитектуры.</p>
-<p>Постоянный объём — примерно <strong>35 МиБ вместе с Xray</strong>. В сборке 2.0.0 собственный app-slot Light содержит 146 файлов, 858363 байт (около 0,82 МиБ); отдельно находятся обновитель, настройки и Xray 26.9.9 размером 35061884 байта (около 33,44 МиБ). Объём пользовательского каталога зависит от числа серверов и подписок; фактический расход файловой системы может отличаться.</p>
-<p>Рекомендуемый запас перед установкой — около <strong>80 МиБ свободно на <code>/opt</code></strong>, чтобы оставалось место для последующей атомарной замены Xray. Это не постоянный размер Light. Для установки и операций Xray нужен свободный RAM-backed <code>/tmp</code>; ориентир — не менее 64 МиБ, запас 128 МиБ предпочтителен при параллельной работе приложений. Обновление конкретного ядра может потребовать больше: не обходите отказ проверки места.</p>
-<p>Загрузки, распаковка, сессии, журналы, PID, блокировки и промежуточные результаты Light 2.0.0 размещаются в защищённых каталогах <code>/tmp</code>. Настройки, серверы, подписки, установленное ядро, слоты приложения и квитанции владения сохраняются на <code>/opt</code>. Проверенный соседний файл Xray на <code>/opt</code> нужен для атомарного переключения и отката, а не для хранения скачанного архива.</p>
-<p><strong>Полный BROray и BROray-Light не должны одновременно владеть интерфейсом, WebUI или runtime.</strong> При конфликте установка прекращается. Не удаляйте чужие файлы вручную и не обходите проверку: сохраните данные и штатно удалите ненужный продукт.</p>
-<h2 id="guide-2">2. Установите Entware, если его ещё нет</h2>
-<ol>
-<li>Откройте веб-интерфейс Keenetic по LAN-адресу своего роутера, обычно <code>http://192.168.1.1/</code>.</li>
-<li>Проверьте раздел приложений: если OPKG/Entware уже работает и выбран накопитель, переустанавливать Entware не нужно.</li>
-<li>Если Entware отсутствует, сохраните нужные файлы с выделенного накопителя. <strong>Форматирование удаляет его содержимое.</strong></li>
-<li>Подготовьте накопитель и компоненты «Поддержка открытых пакетов»/OPKG согласно инструкции для своей модели и версии KeeneticOS. Названия пунктов могут различаться.</li>
-<li>Установите именно Entware <code>aarch64-3.10</code> по <a href="https://forum.keenetic.ru/topic/4299-entware/">инструкции Keenetic Community</a>.</li>
-<li>Дождитесь завершения установки и убедитесь, что OPKG работает, а <code>/opt</code> доступен на запись.</li>
-</ol>
-<p>Не переносите команды форматирования с другой модели и не выполняйте установку Light в командной строке KeeneticOS.</p>
-<h2 id="guide-3">3. Подключитесь к терминалу Entware</h2>
-<p>Используйте <a href="https://termius.com/">Termius</a>, <a href="https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html">PuTTY</a> или встроенный SSH-клиент.</p>
-<p>В Termius создайте <strong>New Host</strong>, в PuTTY заполните <strong>Host Name</strong>. Укажите LAN-IP роутера, SSH-порт <strong>Entware</strong>, пользователя <code>root</code> и свой пароль Entware. Сверьте ключ сервера при первом подключении. Пароль WebUI Keenetic и пароль root Entware могут различаться.</p>
-<p>Во встроенном терминале:</p>
-<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">ssh root@192.168.1.1
-</code></pre></div>
-<p>Для другого SSH-порта: <code>ssh -p НОМЕР_ПОРТА root@IP_РОУТЕРА</code>. Если приглашение выглядит как <code>(config)&gt;</code>, это KeeneticOS CLI, а не Entware. Откройте правильный SSH-порт. При вводе пароля символы могут не отображаться — это нормально.</p>
-<p>Проверьте окружение:</p>
-<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">opkg --version
-opkg print-architecture
-ls -ld /opt
-df -h /opt /tmp
-test -x /opt/bin/ash &amp;&amp; echo &quot;Entware shell: OK&quot;
-</code></pre></div>
-<p>Архитектура должна включать <code>aarch64-3.10</code>. При ошибке остановитесь и устраните её до следующего шага.</p>
-<h2 id="guide-4">4. Чистая установка 2.0.0</h2>
-<p>Этот путь — <strong>только для отсутствующей установки Light</strong>. Если Light уже установлен, используйте раздел 8.</p>
-<p>Скопируйте весь блок в Entware shell от root. Он устанавливает зависимости, скачивает точный установщик в оперативную память и проверяет его SHA-256 до запуска:</p>
-<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">(
-set -eu
-PATH=/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin
-export PATH
-[ &quot;$(id -u)&quot; = 0 ]
-[ -d /tmp ] &amp;&amp; [ ! -L /tmp ]
-awk &#39;$2==&quot;/tmp&quot; &amp;&amp; ($3==&quot;tmpfs&quot; || $3==&quot;ramfs&quot;) {ok=1} END {exit !ok}&#39; /proc/mounts
-umask 077
-D=&quot;$(mktemp -d /tmp/broray-light-guide.XXXXXX)&quot;
-trap &#39;rm -f &quot;$D/install.sh&quot;; rmdir &quot;$D/opkg&quot; 2&gt;/dev/null || :; rmdir &quot;$D&quot; 2&gt;/dev/null || :&#39; EXIT
-mkdir &quot;$D/opkg&quot;
-TMPDIR=&quot;$D/opkg&quot; opkg --tmp-dir &quot;$D/opkg&quot; update
-TMPDIR=&quot;$D/opkg&quot; opkg --tmp-dir &quot;$D/opkg&quot; install ca-bundle ca-certificates curl coreutils-stat
-curl -q --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --tlsv1.2 \
-  --connect-timeout 15 --max-time 600 -fsSL \
-  -H &#39;Cache-Control: no-cache, no-store&#39; -H &#39;Accept-Encoding: identity&#39; \
-  &#39;https://github.com/BROadmin/BROray-Light/releases/download/v2.0.0/broray-light-install-2.0.0.sh&#39; \
-  -o &quot;$D/install.sh&quot;
-[ &quot;$(sha256sum &quot;$D/install.sh&quot; | awk &#39;NR==1{print $1}&#39;)&quot; = \
-  &#39;d7d1a709621f3154c0f5b5892a98bddd3f3f782b57d01eb15025e739abcd44f2&#39; ]
-/opt/bin/ash &quot;$D/install.sh&quot;
-)
-</code></pre></div>
-<p>Не используйте <code>curl -k</code>, <code>opkg --force-reinstall</code> или ручную распаковку вместо отказавшего установщика. Не запускайте тот же блок бесконечно при ошибке: сохраните сообщение, выясните причину и только затем повторите установку. Если аварийное завершение OPKG оставило файлы, удаляйте только каталог <code>/tmp/broray-light-guide.XXXXXX</code>, созданный этой попыткой, после проверки его точного имени и содержимого; не очищайте весь <code>/tmp</code>.</p>
-<p>Проверка результата:</p>
-<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">/opt/etc/init.d/S23broray-light-updater status &amp;&amp; echo &quot;Updater: OK&quot;
-/opt/etc/init.d/S24broray-light status &amp;&amp; echo &quot;BROray-Light: OK&quot;
-/opt/broray-light/runtime/xray version
-/opt/bin/broray-light-web-publishctl status
-</code></pre></div>
-<p>При чистой установке используется Xray <strong>26.9.9</strong>. Это предварительный выпуск самого Xray, отдельно проверенный в рамках Light; слово Stable относится к релизу приложения, а не меняет статус upstream-ядра. Пока сервер не выбран, Xray может быть остановлен — добавьте и активируйте рабочий VLESS-сервер.</p>
-<h2 id="guide-5">5. Откройте WebUI и войдите</h2>
-<p>Локально: <code>http://LAN-IP-РОУТЕРА:8080/</code>.</p>
-<p>При настроенном KeenDNS: <code>https://brolight.ВАШ-ДОМЕН-KEENDNS/</code>. Например, для <code>myrouter.keenetic.link</code> адрес будет <code>https://brolight.myrouter.keenetic.link/</code>. Порт <code>8080</code> в этом HTTPS-адресе не добавляется. Внешний доступ зависит от настроек KeenDNS и подтверждённого владения публикацией.</p>
-<p>Введите <strong>логин и пароль пользователя Keenetic</strong>, не пароль root Entware. Пароль проверяется KeeneticOS и не сохраняется Light. Не открывайте порт 8080 напрямую в интернет, не отключайте авторизацию и защиту сессии.</p>
-<h2 id="guide-6">6. Добавьте подписку или сервер</h2>
-<h3>Подписка</h3>
-<ol>
-<li>Откройте <strong>Подписки</strong>.</li>
-<li>В поле <strong>Название</strong> введите, например, <code>Основная</code>.</li>
-<li>Вставьте HTTPS-ссылку провайдера в поле <strong>Ссылка подписки</strong>.</li>
-<li>Нажмите <strong>Добавить подписку</strong> и дождитесь результата.</li>
-<li>Откройте <strong>Серверы</strong>: импортируются только VLESS-записи.</li>
-</ol>
-<p>Ссылка подписки — секрет: не отправляйте её в Issues и скриншотах. Она не отображается в списке. Название подписки задаётся отдельно от имён серверов.</p>
-<p>Кнопка <strong>Обновить</strong> синхронизирует подписку сейчас. Для расписания включите <strong>Включить автообновление</strong>, задайте интервал от 5 до 10080 минут и нажмите <strong>Сохранить автообновление</strong>. Проверьте время следующего обновления. Автообновление подписок не является плановым измерением качества серверов.</p>
-<p><strong>Удалить</strong> запрашивает подтверждение и удаляет подписку вместе с относящимися к ней незащищёнными записями. Если подписка содержит активный сервер, сначала активируйте узел вне неё. Отказ защиты не следует обходить ручным удалением файлов.</p>
-<h3>Одна VLESS-ссылка</h3>
-<ol>
-<li>Откройте <strong>Серверы</strong>.</li>
-<li>Вставьте полную ссылку <code>vless://…</code> в поле добавления.</li>
-<li>Нажмите <strong>Добавить сервер</strong>.</li>
-</ol>
-<p>Название берётся из подписи ссылки после <code>#</code>. Одинаковые нормализованные параметры VLESS не должны создавать отдельные серверы при пересечении подписок и ручного импорта.</p>
-<h2 id="guide-7">7. Активируйте соединение и настройте резерв</h2>
-<ol>
-<li>Нажмите <strong>Проверить</strong> у нужного сервера. Дождитесь результата: успешная проверка одного узла не означает работоспособность всех узлов подписки.</li>
-<li>Нажмите <strong>Активировать</strong> у рабочего сервера.</li>
-<li>Откройте <strong>Главную</strong> и нажмите <strong>Обновить статус</strong>.</li>
-<li>Убедитесь, что указано имя сервера, Xray запущен, соединение работает, а карточка Keenetic показывает интерфейс и состояние <strong>Активен</strong>.</li>
-<li>Если требуется настройка, используйте <strong>Настроить</strong> или <strong>Исправить</strong>. На исправном управляемом интерфейсе эти действия недоступны намеренно.</li>
-<li>При необходимости выберите этот интерфейс в политике доступа Keenetic для нужных устройств. Light не устанавливает наборы Routes; правила распределения устройств остаются настройками Keenetic.</li>
-</ol>
-<p>Для резервного переключения на странице <strong>Серверы</strong> задайте порядок стрелками <strong>↑/↓</strong>, исключите ненужные узлы флажком <strong>Не использовать в автопереключении</strong>, настройте порог ошибок и паузу, включите автопереключение и нажмите <strong>Сохранить настройки</strong>. Изменение порядка без сохранения ещё не меняет конфигурацию.</p>
-<p><strong>Выключено</strong> означает отсутствие автоматических проверок. <strong>Ожидание первой проверки</strong> означает, что настройки уже сохранены, но цикл ещё не завершался. <strong>Нет доступной замены</strong> означает, что после порога ошибок не найден рабочий резерв. Это не рейтинг: Light использует заданный порядок, без истории качества.</p>
-<p>Активный сервер защищён от удаления. Чтобы удалить его, сначала выберите другой рабочий сервер. В диалоге удаления можно отменить действие без изменений.</p>
-<h2 id="guide-8">8. Обновление Light и выбор Xray</h2>
-<h3>BROray-Light</h3>
-<ol>
-<li>Создайте резервную копию важных данных (раздел 9).</li>
-<li>Откройте <strong>Главная → BROray-Light → Проверить обновление</strong>.</li>
-<li>Если доступен новый подписанный Stable, нажмите <strong>Обновить</strong> и дождитесь завершения.</li>
-<li>Повторно откройте страницу и проверьте версию, сервер, Xray и интерфейс.</li>
-</ol>
-<p>Переход с проверенного <code>1.0.0-r1</code> сохраняет пользовательское состояние и установленный Xray. Равная версия — успешная операция без переустановки приложения; downgrade запрещён. При ошибке проверки здоровья обновитель возвращает предыдущий рабочий слот. <code>2.0.0-r1</code> в техническом индексе — внутренний идентификатор релиза <strong>2.0.0</strong>, а не другая пользовательская версия.</p>
-<p>Если WebUI недоступен, после резервного копирования можно запустить тот же подписанный обновитель из Entware shell:</p>
-<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">/opt/libexec/broray-light-updater/broray-light-updater.sh check
-/opt/libexec/broray-light-updater/broray-light-updater.sh update
-/opt/libexec/broray-light-updater/broray-light-updater.sh status
-</code></pre></div>
-<p>Не запускайте чистый IPK поверх имеющегося Light. Исторический <code>1.0.0-r2</code> опубликован, но не является текущей рекомендованной базой: проверенный переход этого выпуска начинается с r1. Для иной или вручную изменённой установки сначала запросите диагностику.</p>
-<h3>Xray</h3>
-<ol>
-<li>В карточке <strong>Xray</strong> нажмите <strong>Проверить обновление</strong>.</li>
-<li>Выберите официальную версию в списке. При необходимости включите <strong>Показывать предварительные версии</strong>.</li>
-<li>Прочитайте статус совместимости именно с этой сборкой Light. Результат полного BROray автоматически не считается проверкой Light.</li>
-<li>Нажмите <strong>Установить</strong> либо <strong>Переустановить</strong> для текущей версии.</li>
-<li>Подтвердите непроверенную/предварительную версию или понижение отдельно, если эти предупреждения показаны.</li>
-<li>Дождитесь проверки конфигурации, запуска и соединения; затем проверьте итоговый статус.</li>
-</ol>
-<p><strong>Xray 26.2.6 заблокирован:</strong> на тестовом ARM64-роутере с текущим VLESS/XHTTP/REALITY-профилем не прошёл внешний HTTPS. Успешный <code>run -test</code> не доказывает работоспособность трафика. Версии 26.3.27, 26.6.27, 26.7.11, 26.7.28, 26.9.8 и 26.9.9 прошли ограниченный тест этого профиля; это не обещание совместимости со всеми серверами и транспортами. Непроверенный архив не становится проверенным из-за совпадения номера версии.</p>
-<h2 id="guide-9">9. Резервная копия, диагностика и сохранность</h2>
-<p>Пользовательские данные находятся в <code>/opt/broray-light/config</code>, <code>/opt/broray-light/servers</code>, <code>/opt/broray-light/subscriptions</code>; Xray — в <code>/opt/broray-light/runtime/xray</code>. Сохраняйте их на компьютер перед удалением или восстановлением. Копия может содержать секреты и не должна попадать в открытый репозиторий. Журналы и сессии в <code>/tmp</code> исчезают после перезагрузки — это ожидаемо; серверы и подписки исчезать не должны.</p>
-<p>Для обращения в поддержку достаточно версии Light/Xray, модели и KeeneticOS, действия, точного текста ошибки, времени и обезличенного скриншота. Не прикладывайте весь <code>/opt</code>, running-config, URL подписки, UUID, приватные ключи, пароли или cookies.</p>
-<p>При недоступном WebUI:</p>
-<ol>
-<li>Проверьте LAN-адрес и порт, затем отдельно KeenDNS.</li>
-<li>Проверьте два сервиса командами из раздела 4.</li>
-<li>Проверьте свободное место, время и доступность GitHub по HTTPS.</li>
-<li>При сообщении о чужом владении остановитесь: не удаляйте квитанции, блокировки или интерфейсы наугад.</li>
-<li>При ошибке обновления сохраните её текст и состояние обновителя, не выполняйте скрытые повторные установки.</li>
-</ol>
-<h2 id="guide-10">10. Удаление</h2>
-<ol>
-<li>Сохраните данные и переключите устройства в Keenetic на другой рабочий путь доступа, если они зависят от Light.</li>
-<li>Подключитесь к Entware shell от root.</li>
-<li>Выполните <code>opkg remove broray-light</code> и прочитайте результат.</li>
-<li>Проверьте, что сервисы остановлены. Не удаляйте полный BROray или сторонние интерфейсы.</li>
-</ol>
-<p>Снятие пакета не следует считать гарантированным стиранием всех сохранённых данных. Не применяйте <code>rm -rf /opt/broray-light</code> для «исправления» установки: восстановление требует проверки владения и точного состава оставшегося состояния.</p>
-<h2 id="guide-11">История версий и поддержка</h2>
-<ul>
-<li><a href="https://github.com/BROadmin/BROray-Light/blob/main/CHANGELOG.md">История версий</a>.</li>
-<li><a href="https://github.com/BROadmin/BROray-Light/blob/main/docs/RELEASE-2.0.0.md">Состав и границы проверки 2.0.0</a>.</li>
-<li><a href="https://docs.brovibe.cloud/broray-light/">Отдельный раздел сайта</a>.</li>
-<li><a href="https://t.me/myBROvibe">Обсуждение</a>, <a href="https://github.com/BROadmin/BROray-Light/issues">Issues</a>, <a href="https://pay.cloudtips.ru/p/09b23d0a">поддержать проект</a>.</li>
-</ul>
-<p>Light не содержит Routes, управления DNS-over-TLS, рейтингов, истории качества и поддержки протоколов кроме VLESS. Лицензия приложения — GPL-3.0; Xray-core распространяется отдельно под MPL-2.0, остальные компоненты сохраняют собственные лицензии.</p>
-<h2 id="guide-12">История версий BROray-Light</h2>
-<h2 id="guide-13">2.0.0 — 11 сентября 2026 г.</h2>
-<p>Публичная версия и версия пакета — <code>2.0.0</code>, технический releaseId — <code>2.0.0-r1</code>. <a href="https://github.com/BROadmin/BROray-Light/releases/tag/v2.0.0">Релиз v2.0.0</a>.</p>
-<ul>
-<li>Выбор конкретной официальной версии Xray на Главной; переустановка текущего ядра и отдельное подтверждение предварительной версии, downgrade и непроверенного архива.</li>
-<li>Совместимость привязана к сборке Light, архитектуре, тегу и SHA-256 архива. Точная 26.2.6 запрещена по собственному отрицательному тесту Light.</li>
-<li>Xray 26.9.9 при чистой установке; обычное обновление приложения сохраняет установленное ядро.</li>
-<li>Сохранение идентификаторов одинаковых серверов при добавлении пересекающейся подписки: новая подписка не перехватывает существующие записи и не сбрасывает их порядок и исключения автопереключения.</li>
-<li>Избирательно перенесены применимые изменения проверенного BROray 3.1.0-r09c02: идентификация процесса, безопасные операции Xray, синхронизация подписок и имени интерфейса, согласованная навигация и управление подписками.</li>
-<li>Операционные временные файлы, загрузки и bootstrap перенесены в защищённые RAM-каталоги; долговременные данные и проверенные транзакционные слоты остаются на <code>/opt</code>.</li>
-<li>Фоновый сервис больше не наследует удаляемый временный каталог установщика: собственный <code>TMPDIR</code> в RAM предотвращает ложную ошибку состояния интерфейса после установки.</li>
-<li>Сохранены три страницы, VLESS-only, native-аутентификация, fail-closed владение, подпись обновлений и откат. Полная инструкция находится на GitHub и сайте, не внутри приложения.</li>
-</ul>
-<h2 id="guide-14">1.0.0-r2 — 2 сентября 2026</h2>
-<p>Исторический опубликованный документационный выпуск с инструкцией внутри WebUI. Такое размещение было отклонено владельцем проекта; рекомендованным Stable снова выбран проверенный <code>1.0.0-r1</code>. Предыдущие артефакты не переписываются. <a href="https://github.com/BROadmin/BROray-Light/releases/tag/v1.0.0-r2">Архив релиза</a>.</p>
-<h2 id="guide-15">1.0.0-r1 — 2 сентября 2026</h2>
-<p>Первый проверенный публичный Light: три страницы WebUI, VLESS-серверы и подписки, имена подписок, автообновление, дедупликация, защита активного сервера, детерминированное автопереключение, интерфейс Keenetic, Xray 26.7.28 и подписанный обновитель 5-light1 с откатом. <a href="https://github.com/BROadmin/BROray-Light/releases/tag/v1.0.0-r1">Релиз</a>.</p>
-<h2 id="guide-16">Невыпущенные работы</h2>
-<p>Тег <code>v1.0.0-r3</code> относится к отклонённой подготовке и не является публичным Stable-релизом. Незавершённые работы над <code>1.0.0-r4</code> сохранены как инженерная история и не используются автоматически в 2.0.0.</p>
-
-</main>
-</div>
-
-<footer class="site-footer">
-    <div class="footer-inner">
-        <span>BROvibe Docs · BROray-Light 2.0.0</span>
-        <div class="link-list footer-links">
-            <a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a>
-            <a href="#content">Наверх ↑</a>
-        </div>
-    </div>
-</footer>
-
-<script>
-document.querySelectorAll('button.copy').forEach(function (button) {
-    button.addEventListener('click', function () {
-        var code = button.closest('.light-code-block').querySelector('code');
-        if (!code) return;
-        navigator.clipboard.writeText(code.textContent).then(function () {
-            var old = button.textContent;
-            button.textContent = 'Скопировано';
-            setTimeout(function () { button.textContent = old; }, 1200);
-        });
-    });
-});
-</script>
-</body>
-</html>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray-light/" aria-current="page">Обзор</a><a href="/broray-light/start/">Установка</a><a href="/broray-light/webui/">WebUI</a><a href="/broray-light/scenarios/">Сценарии</a><a href="/broray-light/maintenance/">Обслуживание</a><a href="/broray-light/troubleshooting/">Решение проблем</a><a href="/broray-light/releases/">История версий</a><a href="/broray-light/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero"><div><p class="eyebrow">BROray-Light · Keenetic · VLESS</p><h1>BROray-Light 2.0.0</h1><p class="lead">Минимальная VLESS-only редакция: три страницы WebUI, подписки, резервные серверы и управление Xray.</p></div><div class="release-state"><span class="status-dot" aria-hidden="true"></span>Stable · 11 сентября 2026</div></section>
+<section class="task-entry"><h2>Что вы хотите сделать?</h2><div class="task-grid">
+<a class="task-card task-card-primary" href="/broray-light/start/"><span>01</span><strong>Установить впервые</strong><p>Совместимость, Entware, терминал и чистая установка.</p></a>
+<a class="task-card" href="/broray-light/scenarios/"><span>02</span><strong>Настроить VLESS</strong><p>Подписка или сервер, активация и резервное переключение.</p></a>
+<a class="task-card" href="/broray-light/maintenance/"><span>03</span><strong>Обновить Light или Xray</strong><p>Штатное обновление и безопасное обслуживание.</p></a>
+<a class="task-card task-card-problem" href="/broray-light/troubleshooting/"><span>!</span><strong>Что-то не работает</strong><p>Выберите симптом и начните с безопасной проверки.</p></a>
+</div></section>
+<section><h2>Что отличает Light</h2><div class="feature-grid">
+<article class="feature"><h3>Только VLESS</h3><p>Другие протоколы не импортируются и не поддерживаются этой редакцией.</p></article>
+<article class="feature"><h3>Три страницы</h3><p>Главная, Серверы и Подписки — без отдельных Routes и DNS-over-TLS.</p></article>
+<article class="feature"><h3>Резервные серверы</h3><p>Детерминированное переключение по заданному порядку без рейтингов и истории качества.</p></article>
+<article class="feature"><h3>Управление Xray</h3><p>Выбор официальной версии, совместимость, переустановка и отдельные предупреждения.</p></article>
+</div></section>
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray-Light 2.0.0</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>
