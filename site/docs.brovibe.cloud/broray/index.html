@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="manifest" href="/site-manifest.json">
     <meta name="theme-color" content="#081016">
-    <link rel="stylesheet" href="/styles.css?v=20260903-light-r1">
+    <link rel="stylesheet" href="/styles.css?v=20260920-bro-green-r1">
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
@@ -23,30 +23,22 @@
             <a href="/">Главная</a>
             <a href="/broray/" aria-current="page">BROray</a>
             <a href="/broray-light/">BROray-Light</a>
+            <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
         </nav>
     </div>
 </header>
 
 <div class="layout">
 <aside class="sidebar" aria-label="Разделы страницы">
-    <p class="sidebar-title">На этой странице</p>
-    <a href="/broray/beginner-installation/">Пошаговая установка</a>
-    <a href="#status">Статус релиза</a>
-    <a href="#about">О BROray</a>
-    <a href="#requirements">Требования</a>
-    <a href="#install">Установка</a>
-    <a href="#keenetic-bootstrap">Bootstrap Keenetic</a>
-    <a href="#webui">Вход в WebUI</a>
-    <a href="#first-steps">Начало работы</a>
-    <a href="#pages">Страницы WebUI</a>
-    <a href="#update">Обновление</a>
-    <a href="#new">Что нового</a>
+    <p class="sidebar-title">Документация BROray</p>
+    <a href="/broray/beginner-installation/">Начало работы</a>
+    <a href="#pages">Руководство WebUI</a>
+    <a href="#first-steps">Основные сценарии</a>
+    <a href="#update">Обслуживание</a>
+    <a href="#diagnostics">Решение проблем</a>
     <a href="#history">История версий</a>
-    <a href="#safety">Безопасность</a>
-    <a href="#diagnostics">Диагностика</a>
-    <a href="#uninstall">Удаление</a>
-    <a href="#support">Поддержка</a>
-    <a href="#license">Лицензия</a>
+    <a href="#about">Справочник</a>
+    <a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a>
 </aside>
 
 <main class="content" id="content">
@@ -59,6 +51,26 @@
     <div class="release-state">
         <span class="status-dot" aria-hidden="true"></span>
         Stable · опубликован 16 сентября 2026
+    </div>
+</section>
+
+<section id="docs-overview" class="docs-overview" aria-labelledby="docs-overview-title">
+    <div class="docs-overview-head">
+        <div>
+            <p class="eyebrow">Выберите задачу</p>
+            <h2 id="docs-overview-title">Документация по действиям</h2>
+            <p>Начните с нужного сценария. Технические сведения, команды, проверки и история релизов сохранены ниже на этой странице.</p>
+        </div>
+        <a class="primary-action" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe →</a>
+    </div>
+    <div class="docs-grid">
+        <a class="docs-card" href="/broray/beginner-installation/"><span class="docs-card-kicker">01 · Старт</span><strong>Начало работы</strong><p>Entware, терминал, чистая установка и первая проверка — пошагово.</p></a>
+        <a class="docs-card" href="#pages"><span class="docs-card-kicker">02 · Интерфейс</span><strong>Руководство WebUI</strong><p>Что делают Главная, Серверы, Подписки, Маршруты, Keenetic, Xray и BROray.</p></a>
+        <a class="docs-card" href="#first-steps"><span class="docs-card-kicker">03 · Сценарии</span><strong>Основные действия</strong><p>Добавить подключение, активировать сервер, настроить DNS и маршруты.</p></a>
+        <a class="docs-card" href="#update"><span class="docs-card-kicker">04 · Жизненный цикл</span><strong>Обслуживание</strong><p>Обновление, переустановка, восстановление и безопасное удаление.</p></a>
+        <a class="docs-card" href="#diagnostics"><span class="docs-card-kicker">05 · Поддержка</span><strong>Решение проблем</strong><p>Диагностика, фоновые операции, блокировки и данные для обращения в поддержку.</p></a>
+        <a class="docs-card" href="#history"><span class="docs-card-kicker">06 · Релизы</span><strong>История версий</strong><p>Что менялось от версии к версии и ссылка на технический CHANGELOG.</p></a>
+        <a class="docs-card" href="#about"><span class="docs-card-kicker">07 · Справочник</span><strong>Совместимость и устройство</strong><p>Версии компонентов, требования, безопасность и границы поддерживаемого окружения.</p></a>
     </div>
 </section>
 
@@ -496,7 +508,7 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 <section id="support">
     <h2>Поддержка</h2>
     <div class="link-list">
-        <a href="https://t.me/BROvibe_vpn" target="_blank" rel="noopener noreferrer">Telegram BROvibe</a>
+        <a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram BROvibe</a>
         <a href="https://github.com/BROadmin/BROray" target="_blank" rel="noopener noreferrer">Исходный код на GitHub</a>
         <a href="https://github.com/BROadmin/BROray/issues" target="_blank" rel="noopener noreferrer">Сообщить об ошибке</a>
         <a href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Поддержать проект</a>
@@ -519,7 +531,10 @@ SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a
 <footer class="site-footer">
     <div class="footer-inner">
         <span>BROvibe Docs · BROray 3.1.1</span>
-        <a href="#content">Наверх ↑</a>
+        <div class="link-list footer-links">
+            <a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a>
+            <a href="#content">Наверх ↑</a>
+        </div>
     </div>
 </footer>
 

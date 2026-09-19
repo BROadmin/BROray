@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="manifest" href="/site-manifest.json">
     <meta name="theme-color" content="#081016">
-    <link rel="stylesheet" href="/styles.css?v=20260903-light-r1">
+    <link rel="stylesheet" href="/styles.css?v=20260920-bro-green-r1">
 <style>
 .light-code-block { overflow: hidden; margin: 18px 0; border: 1px solid var(--line); border-radius: 14px; background: #080c0d; }
 .light-code-block > .copy { float: none; display: block; position: relative; min-height: 44px; margin: 12px 12px 0 auto; }
@@ -28,29 +28,48 @@
             <a href="/">Главная</a>
             <a href="/broray/">BROray</a>
             <a href="/broray-light/" aria-current="page">BROray-Light</a>
+            <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
         </nav>
     </div>
 </header>
 
 <div class="layout">
-<aside class="sidebar" aria-label="Разделы страницы"><p class="sidebar-title">Пошаговая инструкция</p><a href="#guide-1">1. Проверьте совместимость</a>
-<a href="#guide-2">2. Установите Entware, если его ещё нет</a>
-<a href="#guide-3">3. Подключитесь к терминалу Entware</a>
-<a href="#guide-4">4. Чистая установка 2.0.0</a>
-<a href="#guide-5">5. Откройте WebUI и войдите</a>
-<a href="#guide-6">6. Добавьте подписку или сервер</a>
-<a href="#guide-7">7. Активируйте соединение и настройте резерв</a>
-<a href="#guide-8">8. Обновление Light и выбор Xray</a>
-<a href="#guide-9">9. Резервная копия, диагностика и сохранность</a>
-<a href="#guide-10">10. Удаление</a>
-<a href="#guide-11">История версий и поддержка</a>
-<a href="#guide-12">История версий BROray-Light</a>
-<a href="#guide-13">2.0.0 — 11 сентября 2026 г.</a>
-<a href="#guide-14">1.0.0-r2 — 2 сентября 2026</a>
-<a href="#guide-15">1.0.0-r1 — 2 сентября 2026</a>
-<a href="#guide-16">Невыпущенные работы</a></aside>
+<aside class="sidebar" aria-label="Разделы страницы">
+    <p class="sidebar-title">Документация BROray-Light</p>
+    <a href="#guide-1">Начало работы</a>
+    <a href="#guide-4">Установка</a>
+    <a href="#guide-5">Руководство WebUI</a>
+    <a href="#guide-6">Основные сценарии</a>
+    <a href="#guide-8">Обслуживание</a>
+    <a href="#guide-9">Решение проблем</a>
+    <a href="#guide-10">Удаление</a>
+    <a href="#guide-12">История версий</a>
+    <a href="#guide-1">Справочник</a>
+    <a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a>
+</aside>
 
 <main class="content" id="content"><section class="release-banner"><div><p class="eyebrow">Стабильный релиз</p><h1>BROray-Light 2.0.0</h1><p class="lead">Только VLESS. Три страницы WebUI. Безопасное управление Xray.</p></div><div class="release-state">Проверено перед выпуском</div></section>
+
+<section id="docs-overview" class="docs-overview" aria-labelledby="docs-overview-title">
+    <div class="docs-overview-head">
+        <div>
+            <p class="eyebrow">Выберите задачу</p>
+            <h2 id="docs-overview-title">BROray-Light по шагам</h2>
+            <p>Лёгкая редакция остаётся VLESS-only. Выберите нужное действие, а подробные проверенные инструкции и история релизов находятся ниже.</p>
+        </div>
+        <a class="primary-action" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe →</a>
+    </div>
+    <div class="docs-grid">
+        <a class="docs-card" href="#guide-1"><span class="docs-card-kicker">01 · Старт</span><strong>Начало работы</strong><p>Совместимость, Entware и подключение к терминалу.</p></a>
+        <a class="docs-card" href="#guide-4"><span class="docs-card-kicker">02 · Установка</span><strong>Чистая установка</strong><p>Проверяемый установщик, SHA-256 и контроль результата.</p></a>
+        <a class="docs-card" href="#guide-5"><span class="docs-card-kicker">03 · WebUI</span><strong>Руководство</strong><p>Вход, три страницы интерфейса и безопасная работа с Light.</p></a>
+        <a class="docs-card" href="#guide-6"><span class="docs-card-kicker">04 · Сценарии</span><strong>Подписки и серверы</strong><p>Добавление VLESS, активация подключения и резервное переключение.</p></a>
+        <a class="docs-card" href="#guide-8"><span class="docs-card-kicker">05 · Обслуживание</span><strong>Обновление и Xray</strong><p>Обновление Light, выбор версии Xray, резервная копия и удаление.</p></a>
+        <a class="docs-card" href="#guide-9"><span class="docs-card-kicker">06 · Поддержка</span><strong>Решение проблем</strong><p>Диагностика, сохранность данных и безопасное обращение в поддержку.</p></a>
+        <a class="docs-card" href="#guide-12"><span class="docs-card-kicker">07 · Релизы</span><strong>История версий</strong><p>2.0.0, предыдущие выпуски и невыпущенные инженерные работы.</p></a>
+    </div>
+</section>
+
 <blockquote>
 <p><a href="https://github.com/BROadmin/BROray-Light/releases/tag/v2.0.0">Релиз 2.0.0</a> · 11 сентября 2026 г. · aarch64-3.10.</p>
 </blockquote>
@@ -204,7 +223,7 @@ curl -q --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --tlsv1.2 \
 <li><a href="https://github.com/BROadmin/BROray-Light/blob/main/CHANGELOG.md">История версий</a>.</li>
 <li><a href="https://github.com/BROadmin/BROray-Light/blob/main/docs/RELEASE-2.0.0.md">Состав и границы проверки 2.0.0</a>.</li>
 <li><a href="https://docs.brovibe.cloud/broray-light/">Отдельный раздел сайта</a>.</li>
-<li><a href="https://t.me/BROvibe_vpn">Обсуждение</a>, <a href="https://github.com/BROadmin/BROray-Light/issues">Issues</a>, <a href="https://pay.cloudtips.ru/p/09b23d0a">поддержать проект</a>.</li>
+<li><a href="https://t.me/myBROvibe">Обсуждение</a>, <a href="https://github.com/BROadmin/BROray-Light/issues">Issues</a>, <a href="https://pay.cloudtips.ru/p/09b23d0a">поддержать проект</a>.</li>
 </ul>
 <p>Light не содержит Routes, управления DNS-over-TLS, рейтингов, истории качества и поддержки протоколов кроме VLESS. Лицензия приложения — GPL-3.0; Xray-core распространяется отдельно под MPL-2.0, остальные компоненты сохраняют собственные лицензии.</p>
 <h2 id="guide-12">История версий BROray-Light</h2>
@@ -233,7 +252,10 @@ curl -q --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --tlsv1.2 \
 <footer class="site-footer">
     <div class="footer-inner">
         <span>BROvibe Docs · BROray-Light 2.0.0</span>
-        <a href="#content">Наверх ↑</a>
+        <div class="link-list footer-links">
+            <a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a>
+            <a href="#content">Наверх ↑</a>
+        </div>
     </div>
 </footer>
 
