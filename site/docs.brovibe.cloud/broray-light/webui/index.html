@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebUI BROray-Light — руководство</title>
+<meta name="description" content="Руководство по трём страницам BROray-Light: Главная, Серверы и Подписки.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray-light/webui/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/">BROray</a>
+      <a href="/broray-light/" aria-current="page">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray-light/">Обзор</a><a href="/broray-light/start/">Установка</a><a href="/broray-light/webui/" aria-current="page">WebUI</a><a href="/broray-light/scenarios/">Сценарии</a><a href="/broray-light/maintenance/">Обслуживание</a><a href="/broray-light/troubleshooting/">Решение проблем</a><a href="/broray-light/releases/">История версий</a><a href="/broray-light/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero"><div><p class="eyebrow">Руководство пользователя</p><h1>Три страницы WebUI</h1><p class="lead">Light специально ограничен тремя основными страницами. Все повседневные действия находятся в них.</p></div></section>
+<section><div class="feature-grid">
+<article class="feature"><h3>Главная</h3><p>Активный сервер, состояние Xray, версия BROray-Light и управление интерфейсом Keenetic.</p></article>
+<article class="feature"><h3>Серверы</h3><p>VLESS-серверы, проверка, активация, порядок резервов и автопереключение.</p></article>
+<article class="feature"><h3>Подписки</h3><p>Добавление и синхронизация подписок, автообновление и безопасное удаление.</p></article>
+</div></section>
+<h2 id="guide-5">5. Откройте WebUI и войдите</h2>
+<p>Локально: <code>http://LAN-IP-РОУТЕРА:8080/</code>.</p>
+<p>При настроенном KeenDNS: <code>https://brolight.ВАШ-ДОМЕН-KEENDNS/</code>. Например, для <code>myrouter.keenetic.link</code> адрес будет <code>https://brolight.myrouter.keenetic.link/</code>. Порт <code>8080</code> в этом HTTPS-адресе не добавляется. Внешний доступ зависит от настроек KeenDNS и подтверждённого владения публикацией.</p>
+<p>Введите <strong>логин и пароль пользователя Keenetic</strong>, не пароль root Entware. Пароль проверяется KeeneticOS и не сохраняется Light. Не открывайте порт 8080 напрямую в интернет, не отключайте авторизацию и защиту сессии.</p>
+
+<section class="what-next"><div><p class="eyebrow">Нужно выполнить действие?</p><h2>Откройте сценарии</h2><p>Там собраны пошаговые действия с подпиской, сервером и резервом.</p></div><a class="primary-action" href="/broray-light/scenarios/">Открыть сценарии →</a></section>
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray-Light · WebUI</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>

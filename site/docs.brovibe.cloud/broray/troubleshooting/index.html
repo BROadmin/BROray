@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Решение проблем BROray</title>
+<meta name="description" content="Диагностика BROray по симптомам: WebUI, вход, серверы, подписки, маршруты, DNS-over-TLS, Xray и обновление.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray/troubleshooting/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/" aria-current="page">BROray</a>
+      <a href="/broray-light/">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/troubleshooting/" aria-current="page">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero"><div><p class="eyebrow">Помощь</p><h1>Решение проблем</h1><p class="lead">Выберите то, что вы видите. Сначала выполняются безопасные проверки через WebUI; команды находятся ниже как расширенная диагностика.</p></div></section>
+<section><h2>Выберите симптом</h2><div class="symptom-grid">
+<a href="#webui-down" class="symptom-card"><strong>WebUI не открывается</strong><span>Страница не загружается по LAN или KeenDNS.</span></a>
+<a href="#login" class="symptom-card"><strong>Не удаётся войти</strong><span>Ошибка авторизации или сессии.</span></a>
+<a href="#server-fail" class="symptom-card"><strong>Сервер не проходит проверку</strong><span>Подключение не активируется.</span></a>
+<a href="#internet-fail" class="symptom-card"><strong>Сервер активен, но трафика нет</strong><span>Проверьте Xray и ProxyN.</span></a>
+<a href="#subscription-fail" class="symptom-card"><strong>Подписка не обновляется</strong><span>Ошибка при синхронизации источника.</span></a>
+<a href="#route-fail" class="symptom-card"><strong>Маршрут не работает</strong><span>Набор установлен, но результат не ожидаемый.</span></a>
+<a href="#dot-fail" class="symptom-card"><strong>Проблема с DNS-over-TLS</strong><span>Проверка или применение записи не проходит.</span></a>
+<a href="#update-fail" class="symptom-card"><strong>Ошибка обновления</strong><span>Операция зависла, завершилась ошибкой или требует восстановления.</span></a>
+</div></section>
+<section id="webui-down"><h2>WebUI не открывается</h2><ol class="steps"><li>Проверьте локальный адрес BROray и попробуйте LAN-доступ до проверки KeenDNS.</li><li>Если WebUI всё ещё недоступен, переходите к расширенной проверке служб ниже.</li><li>Не переустанавливайте BROray многократно до выяснения причины.</li></ol></section>
+<section id="login"><h2>Не удаётся войти</h2><p>Для WebUI используется учётная запись Keenetic. Не публикуйте пароль или данные сессии в обращении поддержки.</p></section>
+<section id="server-fail"><h2>Сервер не проходит проверку</h2><p>Откройте «Серверы», повторно проверьте конфигурацию и сохраните точный текст результата. Не меняйте Xray или Keenetic вручную до определения причины.</p></section>
+<section id="internet-fail"><h2>Сервер активен, но трафика нет</h2><ol class="steps"><li>На Главной проверьте активный сервер и состояние Xray.</li><li>На странице Keenetic проверьте, что управляемый ProxyN подключён и соответствует активному серверу.</li><li>Если состояние неоднозначно, скачайте диагностический отчёт.</li></ol></section>
+<section id="subscription-fail"><h2>Подписка не обновляется</h2><p>Запустите обновление на странице «Подписки» и сохраните точный текст ошибки. Ссылка подписки является секретом: не публикуйте её в Issues, Telegram или скриншотах.</p></section>
+<section id="route-fail"><h2>Маршрут не работает</h2><ol class="steps"><li>Откройте нужный набор и выполните проверку локального состояния и фактического Keenetic.</li><li>Если интерфейс предлагает восстановление или продолжение операции, используйте штатное действие.</li><li>Не удаляйте чужие или общие маршруты вручную.</li></ol></section>
+<section id="dot-fail"><h2>Проблема с DNS-over-TLS</h2><p>Сначала выполните свежую TLS/SNI-проверку выбранных серверов, затем повторите применение. BROray удаляет только подтверждённые управляемые записи и сохраняет внешние DoT/DoH.</p></section>
+<section id="update-fail"><h2>Ошибка обновления</h2><ol class="steps"><li>Откройте страницу BROray и журнал текущей операции.</li><li>Не удаляйте lock-файлы вручную и не запускайте новую конфликтующую операцию.</li><li>При необходимости используйте штатное восстановление блокировки только после проверки владельца и процессов.</li></ol></section>
+<details class="advanced" open><summary>Расширенная диагностика и данные для поддержки</summary>
+<section id="diagnostics">
+    <h2>Проверка и диагностика</h2>
+    <p>На странице BROray доступны фоновые операции, журнал и скачивание диагностического отчёта. Можно остановить отменяемые задачи и поставить автоматические запуски на паузу. Защищённые этапы маршрутов не прерываются.</p>
+    <p>Восстановление освобождает блокировку только после проверки владельца и дочерних процессов. Если операция активна или её состояние неоднозначно, блокировка сохраняется. Восстановление самих маршрутов выполняется на страницах маршрутов.</p>
+    <pre><button class="copy" type="button" aria-label="Копировать команды диагностики">Копировать</button><code>/opt/broray/bin/broray-system info
+/opt/bin/broray-updaterctl version
+/opt/bin/broray-updaterctl check
+/opt/bin/broray-updaterctl status
+/opt/etc/init.d/S22broray-updater status
+/opt/etc/init.d/S23broray-monitor status
+/opt/etc/init.d/S24broray status
+/opt/etc/init.d/S25broray-web status</code></pre>
+    <p>
+        Для текущего Stable ожидаются release <code>3.1.1-r12</code>, кандидат
+        <code>3.1.1-r12c01</code>, WebUI <code>WebUI-3.1.1-r12c01</code>, пакет
+        <code>3.0.0-r14</code>, <code>broray-updater/5</code>, канал Stable и
+        отсутствие доступного обновления.
+    </p>
+</section><section id="help">
+    <h2>7. Если что-то не получилось</h2>
+    <h3>WebUI не открывается</h3>
+    <ul>
+        <li>проверьте адрес <code>http://192.168.1.1:8080/</code>;</li>
+        <li>убедитесь, что устройство подключено к домашнему Keenetic;</li>
+        <li>временно отключите мобильный интернет на телефоне;</li>
+        <li>очистите кэш сайта или откройте страницу в другом браузере.</li>
+    </ul>
+
+    <h3>Проверьте службы</h3>
+    <pre><button class="copy" type="button" aria-label="Копировать команды диагностики">Копировать</button><code>/opt/etc/init.d/S24broray status
+/opt/etc/init.d/S25broray-web status
+/opt/broray/bin/broray-system info</code></pre>
+
+    <h3>Что отправить в поддержку</h3>
+    <p>Можно отправить модель Keenetic, версию KeeneticOS, версию BROray, текст ошибки и результат проверки служб.</p>
+    <div class="note warning">
+        <span class="note-title">Не публикуйте секреты</span>
+        Не отправляйте пароль роутера, ссылку подписки, UUID сервера, приватный ключ, токен или полный файл конфигурации Xray.
+    </div>
+    <div class="link-list">
+        <a href="/broray/">Полное руководство BROray</a>
+        <a href="https://github.com/BROadmin/BROray/blob/main/docs/beginner-installation.md" target="_blank" rel="noopener noreferrer">Инструкция на GitHub</a>
+        <a href="https://github.com/BROadmin/BROray/issues" target="_blank" rel="noopener noreferrer">Сообщить об ошибке</a>
+    </div>
+</section></details>
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray · Решение проблем</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>

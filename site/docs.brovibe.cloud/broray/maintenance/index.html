@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Обновление и обслуживание BROray</title>
+<meta name="description" content="Обслуживание BROray: обновление через WebUI, переустановка, восстановление, удаление и аварийный административный путь.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray/maintenance/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/" aria-current="page">BROray</a>
+      <a href="/broray-light/">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/" aria-current="page">Обслуживание</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero"><div><p class="eyebrow">Жизненный цикл</p><h1>Обслуживание BROray</h1><p class="lead">Обновление, переустановка, восстановление и удаление. Сначала — штатные действия WebUI; shell оставлен как аварийный путь.</p></div></section><section id="update">
+    <h2>4. Обновление BROray</h2>
+    <p><strong>Обновление BROray не заменяет установленный Xray.</strong> Для отдельного перехода на 26.9.9 откройте <strong>Xray → Проверить версии</strong>, выберите <strong>26.9.9</strong>, нажмите <strong>Установить</strong> и дождитесь результата. Если эта версия уже установлена, ничего делать не нужно.</p>
+    <p>Статус рядом с версией показывает совместимость с текущей сборкой BROray, без привязки к модели роутера. Непроверенная или предварительная версия требует подтверждения; понижение подтверждается отдельно. <strong>26.2.6 несовместима — установить её нельзя.</strong></p>
+    <p>Обновление поддерживается с любой исправной версии BROray, начиная с <code>3.0.0-r1</code>. Серверы, подписки, маршруты, DNS-over-TLS, управляемый интерфейс и установленный Xray сохраняются.</p>
+
+    <h3>Рекомендуемый способ через WebUI</h3>
+    <ol class="steps">
+        <li>Откройте WebUI и страницу <strong>BROray</strong>.</li>
+        <li>Нажмите <strong>Проверить обновление</strong>.</li>
+        <li>Если доступна новая версия, нажмите <strong>Установить обновление</strong>.</li>
+        <li>Подтвердите операцию, не нажимайте кнопку повторно и дождитесь успешного завершения.</li>
+        <li>На компьютере нажмите <code>Ctrl+R</code>; на телефоне очистите кэш сайта и заново откройте страницу.</li>
+        <li>Проверьте страницы <strong>Главная</strong>, <strong>Серверы</strong>, <strong>Keenetic</strong>, <strong>Xray</strong> и <strong>BROray</strong>.</li>
+    </ol>
+    <p>Старая версия обновляется, актуальная завершается без изменения файлов, более новая автоматически не понижается.</p>
+
+    <h3>Обновление через терминал</h3>
+    <p>Если WebUI недоступен, используйте проверяемый установочный блок из раздела 3. При обычном обновлении уже установленного BROray повторно выполнять <code>opkg update</code> не нужно.</p>
+    <p>Для уже актуального Stable нормальный результат выглядит так:</p>
+    <pre><code>UPDATE_DECISION=already-current
+INSTALLED_RELEASE=3.1.1-r12
+CURRENT_RELEASE=3.1.1-r12
+RELEASE_MUTATION=NONE
+ENVIRONMENT_RECONCILED=YES</code></pre>
+</section><section id="reinstall">
+    <h2>5. Переустановка текущей версии</h2>
+    <ol class="steps">
+        <li>Откройте страницу <strong>BROray</strong> и найдите раздел переустановки.</li>
+        <li>Нажмите <strong>Переустановить текущую версию</strong>.</li>
+        <li>Прочитайте план операции, подтвердите её и дождитесь успешного завершения.</li>
+        <li>Очистите кэш браузера и снова откройте WebUI.</li>
+    </ol>
+    <div class="note warning">
+        <span class="note-title">Не заменяйте штатную переустановку</span>
+        Не используйте <code>opkg upgrade broray</code>, <code>opkg --force-reinstall broray</code> или ручную замену файлов.
+    </div>
+</section><section id="uninstall">
+    <h2>6. Удаление BROray</h2>
+    <ol class="steps">
+        <li>Откройте страницу <strong>BROray</strong> и перейдите к разделу удаления.</li>
+        <li>Выберите нужный вариант удаления.</li>
+        <li>Прочитайте точный список данных, которые будут удалены или сохранены.</li>
+        <li>Если какие-либо данные нужны, отмените операцию и сначала сохраните их.</li>
+        <li>Подтвердите удаление и дождитесь успешного завершения.</li>
+    </ol>
+    <p>После полного удаления WebUI на порту <code>8080</code> перестанет открываться — это нормально. Удаление BROray и удаление Entware являются разными операциями. Не удаляйте каталоги <code>/opt/broray</code> и отдельные файлы вручную.</p>
+    <p>Для повторной установки выполните раздел 3 заново.</p>
+</section>
+<details class="advanced"><summary>Расширенная административная информация</summary>
+<p>Этот блок нужен, если WebUI недоступен или требуется точная техническая диагностика операции.</p>
+<section id="advanced-update">
+    <h2>Расширенное обновление и переустановка</h2>
+    <h3>Обычное обновление</h3>
+    <p>В WebUI откройте:</p>
+    <pre><code>BROray → Проверить обновление → Установить обновление</code></pre>
+    <p>
+        Updater-v5 проверяет Stable index и SHA-256, создаёт резервную копию,
+        готовит новый app-slot и переключает его только после предварительной
+        проверки. Ошибка после переключения запускает откат.
+    </p>
+    <div class="note warning">
+        <span class="note-title">Обязательно после обновления</span>
+        Очистите кэш браузера и заново откройте WebUI. На компьютере используйте
+        <code>Ctrl+R</code>; на мобильном устройстве очистите кэш сайта в настройках
+        браузера и перезагрузите страницу.
+    </div>
+
+    <h3>Переустановка текущей версии</h3>
+    <p>
+        На странице <strong>BROray</strong> выберите переустановку. Серверы,
+        подписки, пользовательские маршруты, DNS-настройки и общий Xray runtime
+        находятся вне сменяемого app-slot и сохраняются.
+    </p>
+
+    <h3>Аварийное административное обновление</h3>
+    <p>
+        Если WebUI не открывается, но Entware shell доступен, повторите
+        проверяемый Stable-блок из раздела обновления. Он обновляет более старый
+        release, ничего не меняет при равном и отказывается понижать более новый.
+    </p>
+    <p>Если updater-v5 исправен, можно отправить административный запрос:</p>
+    <pre><button class="copy" type="button" aria-label="Копировать команды обновителя">Копировать</button><code>/opt/bin/broray-updaterctl check &amp;&amp;
+/opt/bin/broray-updaterctl request update
+/opt/bin/broray-updaterctl status</code></pre>
+    <p>Для переустановки текущего кандидата:</p>
+    <pre><button class="copy" type="button" aria-label="Копировать команду переустановки">Копировать</button><code>/opt/bin/broray-updaterctl request reinstall</code></pre>
+    <p class="muted">Не удаляйте lock-файлы вручную и не запускайте новую операцию, пока предыдущая имеет состояние <code>running</code> или <code>recovery-required</code>.</p>
+</section><section id="legacy-uninstall">
+    <h2>Техническая граница удаления</h2>
+    <p>
+        Используйте раздел удаления на странице <strong>BROray</strong>.
+        Обычное удаление и полное удаление показывают точный план и требуют
+        авторизованного подтверждения. Ручное удаление файлов не заменяет
+        штатную операцию и может оставить объекты Keenetic без receipt.
+    </p>
+</section></details>
+<section class="what-next"><div><p class="eyebrow">Перед опасной операцией</p><h2>Сначала проверьте, что именно сохранится</h2><p>Штатная переустановка сохраняет пользовательские серверы, подписки, маршруты, DNS-настройки и общий Xray runtime. Ручная замена файлов не эквивалентна штатной операции.</p></div><a class="primary-action" href="/broray/reference/#safety">Модель безопасности →</a></section>
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray · Обслуживание</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>

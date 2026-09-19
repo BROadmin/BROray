@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Справочник BROray</title>
+<meta name="description" content="Технический справочник BROray: компоненты, требования, совместимость, безопасность, поддержка и лицензии.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray/reference/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/" aria-current="page">BROray</a>
+      <a href="/broray-light/">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/" aria-current="page">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero"><div><p class="eyebrow">Справочник</p><h1>Техническая информация BROray</h1><p class="lead">Точные требования, версии компонентов, совместимость, безопасность и ссылки для поддержки.</p></div></section><section id="about">
+    <h2>Статус и состав релиза</h2>
+    <div class="meta" aria-label="Версии компонентов">
+        <span class="badge accent">BROray 3.1.1-r12</span>
+        <span class="badge">OPKG 3.0.0-r14</span>
+        <span class="badge">WebUI-3.1.1-r12c01</span>
+        <span class="badge">Updater v5</span>
+        <span class="badge">aarch64-3.10</span>
+        <span class="badge">Xray 26.9.9</span>
+    </div>
+
+    <p>
+        Технический кандидат текущего Stable — <code>3.1.1-r12c01</code>, release —
+        <code>3.1.1-r12</code>. Пакет OPKG остаётся <code>3.0.0-r14</code> и не
+        участвует в выборе обновления. Stable опубликован из физически проверенных
+        application и updater-platform байтов без их пересборки.
+    </p>
+
+    <div class="note">
+        <span class="note-title">Новый выпуск проверен</span>
+        Пройдены обновление, откат, удаление, чистая установка и перезагрузка с сохранением пользовательских данных.
+        Проверены семь версий Xray: шесть совместимы с испытанным профилем, 26.2.6 не передаёт трафик.
+        При чистой установке Xray <strong>26.9.9 устанавливается автоматически</strong>.
+        <strong>Обычное обновление BROray сохраняет установленную версию Xray.</strong>
+        Подробности и границы испытаний приведены в
+        <a href="https://github.com/BROadmin/BROray/blob/main/docs/RELEASE-3.1.1.md">описании релиза</a>.
+    </div>
+
+    <div class="fact-grid">
+        <div class="fact"><strong>7 версий</strong><span>физическая проверка Xray</span></div>
+        <div class="fact"><strong>6 совместимы</strong><span>VLESS/XHTTP/REALITY на ARM64</span></div>
+        <div class="fact"><strong>Восстановление</strong><span>проверка владельцев блокировок</span></div>
+        <div class="fact"><strong>PASS</strong><span>установка, откат и перезагрузка</span></div>
+    </div>
+
+    <div class="note">
+        <span class="note-title">Что делает BROray</span>
+        BROray устанавливает и обслуживает Xray на роутере, принимает отдельные
+        подключения и подписки, создаёт штатный прокси-интерфейс Keenetic,
+        управляет маршрутами и DNS-over-TLS через авторизованный WebUI.
+    </div>
+</section><section id="requirements">
+    <h2>Требования к роутеру</h2>
+    <div class="table-wrap" tabindex="0" aria-label="Требования к ресурсам">
+    <table>
+        <thead>
+            <tr><th>Компонент</th><th>Обязательное условие</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Архитектура</td><td><code>aarch64</code> и Entware <code>aarch64-3.10</code></td></tr>
+            <tr><td>Open Package</td><td>Один записываемый накопитель, подключённый как <code>/opt</code></td></tr>
+            <tr><td>Компоненты Keenetic</td><td><code>proxy</code>, <code>opkg</code> и <code>ndns</code></td></tr>
+            <tr><td>Entware shell</td><td>Доступ <code>root</code>, <code>/opt/bin/ash</code>, BusyBox, <code>curl</code>, <code>jq</code> и <code>ndmc</code></td></tr>
+            <tr><td>Место на <code>/opt</code></td><td>Не менее 64 МиБ; рекомендуется от 100 МиБ</td></tr>
+            <tr><td>Место в <code>/tmp</code></td><td>Не менее 75 МиБ; рекомендуется от 128 МиБ</td></tr>
+            <tr><td>Временные файлы</td><td>Возможность создать 4096 файлов в <code>/tmp</code></td></tr>
+            <tr><td>Сеть</td><td>Рабочие DNS, HTTPS и правильное системное время</td></tr>
+        </tbody>
+    </table>
+    </div>
+    <p class="muted">
+        Совместимость определяется фактическими возможностями устройства во время
+        предварительной проверки. Приёмка 3.1.1 выполнена на Keenetic Peak KN-2710,
+        KeeneticOS 5.01.C.4.0-1, ARM64.
+        Релиз не привязан к конкретному роутеру, серийному номеру или SSH-ключу.
+    </p>
+</section><section id="safety">
+    <h2>Безопасность операций</h2>
+    <ul>
+        <li>релизные файлы проверяются по SHA-256;</li>
+        <li>конфигурация Xray тестируется до перезапуска;</li>
+        <li>обновление BROray использует резервную копию и postcheck;</li>
+        <li>ProxyN, маршруты, DoT и KeenDNS HTTP Proxy изменяются только при подтверждённом владении;</li>
+        <li>внешние объекты Keenetic и пользовательские файлы не удаляются;</li>
+        <li>BAT-файлы разбираются как данные и не исполняются;</li>
+        <li>конфликтующие операции сериализуются общим контролем.</li>
+    </ul>
+</section><section id="support">
+    <h2>Поддержка</h2>
+    <div class="link-list">
+        <a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram BROvibe</a>
+        <a href="https://github.com/BROadmin/BROray" target="_blank" rel="noopener noreferrer">Исходный код на GitHub</a>
+        <a href="https://github.com/BROadmin/BROray/issues" target="_blank" rel="noopener noreferrer">Сообщить об ошибке</a>
+        <a href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Поддержать проект</a>
+    </div>
+    <p class="muted">В обращении укажите модель, версию KeeneticOS, версию BROray и текст ошибки. Удалите пароли, токены подписок, UUID серверов, приватные ключи и данные сессии.</p>
+</section><section id="license">
+    <h2>Лицензия</h2>
+    <p>
+        Исходный код BROray распространяется по лицензии
+        <a href="https://github.com/BROadmin/BROray/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GNU General Public License v3.0</a>.
+        Xray-core является отдельным сторонним компонентом и распространяется
+        по <a href="https://github.com/XTLS/Xray-core/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Mozilla Public License 2.0</a>.
+    </p>
+</section></main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray · Справочник</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>

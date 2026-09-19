@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сценарии BROray-Light</title>
+<meta name="description" content="Основные сценарии BROray-Light: VLESS-подписка, отдельный сервер, активация и резервное переключение.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray-light/scenarios/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/">BROray</a>
+      <a href="/broray-light/" aria-current="page">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray-light/">Обзор</a><a href="/broray-light/start/">Установка</a><a href="/broray-light/webui/">WebUI</a><a href="/broray-light/scenarios/" aria-current="page">Сценарии</a><a href="/broray-light/maintenance/">Обслуживание</a><a href="/broray-light/troubleshooting/">Решение проблем</a><a href="/broray-light/releases/">История версий</a><a href="/broray-light/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero"><div><p class="eyebrow">Обычные действия</p><h1>Основные сценарии</h1><p class="lead">Добавьте VLESS, активируйте подключение и настройте резервный порядок.</p></div></section><h2 id="guide-6">6. Добавьте подписку или сервер</h2>
+<h3>Подписка</h3>
+<ol>
+<li>Откройте <strong>Подписки</strong>.</li>
+<li>В поле <strong>Название</strong> введите, например, <code>Основная</code>.</li>
+<li>Вставьте HTTPS-ссылку провайдера в поле <strong>Ссылка подписки</strong>.</li>
+<li>Нажмите <strong>Добавить подписку</strong> и дождитесь результата.</li>
+<li>Откройте <strong>Серверы</strong>: импортируются только VLESS-записи.</li>
+</ol>
+<p>Ссылка подписки — секрет: не отправляйте её в Issues и скриншотах. Она не отображается в списке. Название подписки задаётся отдельно от имён серверов.</p>
+<p>Кнопка <strong>Обновить</strong> синхронизирует подписку сейчас. Для расписания включите <strong>Включить автообновление</strong>, задайте интервал от 5 до 10080 минут и нажмите <strong>Сохранить автообновление</strong>. Проверьте время следующего обновления. Автообновление подписок не является плановым измерением качества серверов.</p>
+<p><strong>Удалить</strong> запрашивает подтверждение и удаляет подписку вместе с относящимися к ней незащищёнными записями. Если подписка содержит активный сервер, сначала активируйте узел вне неё. Отказ защиты не следует обходить ручным удалением файлов.</p>
+<h3>Одна VLESS-ссылка</h3>
+<ol>
+<li>Откройте <strong>Серверы</strong>.</li>
+<li>Вставьте полную ссылку <code>vless://…</code> в поле добавления.</li>
+<li>Нажмите <strong>Добавить сервер</strong>.</li>
+</ol>
+<p>Название берётся из подписи ссылки после <code>#</code>. Одинаковые нормализованные параметры VLESS не должны создавать отдельные серверы при пересечении подписок и ручного импорта.</p>
+<h2 id="guide-7">7. Активируйте соединение и настройте резерв</h2>
+<ol>
+<li>Нажмите <strong>Проверить</strong> у нужного сервера. Дождитесь результата: успешная проверка одного узла не означает работоспособность всех узлов подписки.</li>
+<li>Нажмите <strong>Активировать</strong> у рабочего сервера.</li>
+<li>Откройте <strong>Главную</strong> и нажмите <strong>Обновить статус</strong>.</li>
+<li>Убедитесь, что указано имя сервера, Xray запущен, соединение работает, а карточка Keenetic показывает интерфейс и состояние <strong>Активен</strong>.</li>
+<li>Если требуется настройка, используйте <strong>Настроить</strong> или <strong>Исправить</strong>. На исправном управляемом интерфейсе эти действия недоступны намеренно.</li>
+<li>При необходимости выберите этот интерфейс в политике доступа Keenetic для нужных устройств. Light не устанавливает наборы Routes; правила распределения устройств остаются настройками Keenetic.</li>
+</ol>
+<p>Для резервного переключения на странице <strong>Серверы</strong> задайте порядок стрелками <strong>↑/↓</strong>, исключите ненужные узлы флажком <strong>Не использовать в автопереключении</strong>, настройте порог ошибок и паузу, включите автопереключение и нажмите <strong>Сохранить настройки</strong>. Изменение порядка без сохранения ещё не меняет конфигурацию.</p>
+<p><strong>Выключено</strong> означает отсутствие автоматических проверок. <strong>Ожидание первой проверки</strong> означает, что настройки уже сохранены, но цикл ещё не завершался. <strong>Нет доступной замены</strong> означает, что после порога ошибок не найден рабочий резерв. Это не рейтинг: Light использует заданный порядок, без истории качества.</p>
+<p>Активный сервер защищён от удаления. Чтобы удалить его, сначала выберите другой рабочий сервер. В диалоге удаления можно отменить действие без изменений.</p>
+
+<section class="what-next"><div><p class="eyebrow">Обновление и Xray</p><h2>Обслуживание вынесено отдельно</h2><p>Так настройки подключения не смешиваются с обновлением приложения.</p></div><a class="primary-action" href="/broray-light/maintenance/">Открыть обслуживание →</a></section>
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray-Light · Сценарии</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>

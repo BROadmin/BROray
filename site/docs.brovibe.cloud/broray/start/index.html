@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Установка BROray 3.1.1 — пошагово</title>
+<meta name="description" content="Пошаговая первая установка BROray 3.1.1 на совместимый Keenetic: требования, Entware, терминал, установка и проверка результата.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray/start/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/" aria-current="page">BROray</a>
+      <a href="/broray-light/">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/" aria-current="page">Установка</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero"><div><p class="eyebrow">Начало работы</p><h1>Установка BROray</h1><p class="lead">Рекомендуемый путь для первой установки. Делайте шаги по порядку и переходите дальше только после успешной проверки.</p></div><div class="release-state"><span class="status-dot" aria-hidden="true"></span>Для Stable 3.1.1</div></section>
+<section class="journey"><h2>Короткий путь</h2><ol class="journey-steps">
+<li><strong>Проверьте совместимость</strong><span>Keenetic aarch64, Entware aarch64-3.10, рабочий /opt и интернет.</span></li>
+<li><strong>Подготовьте Entware и терминал</strong><span>Если они уже работают — этот этап пропускается.</span></li>
+<li><strong>Запустите проверяемую установку</strong><span>Используйте только опубликованный Stable-установщик и его SHA-256.</span></li>
+<li><strong>Откройте WebUI</strong><span>После установки перейдите к первичной настройке.</span></li>
+</ol></section>
+<div class="result-box"><strong>Что должно получиться</strong><p>WebUI BROray открывается, вход выполняется учётной записью Keenetic, после чего можно добавить сервер или подписку и активировать рабочее подключение.</p></div>
+<section id="requirements">
+    <h2>Что потребуется</h2>
+    <ul class="check-list">
+        <li>совместимый роутер Keenetic с архитектурой <code>aarch64</code>;</li>
+        <li>Entware <code>aarch64-3.10</code> на накопителе, подключённом как <code>/opt</code>;</li>
+        <li>доступ к настройкам роутера;</li>
+        <li>компьютер, смартфон или планшет в домашней сети Keenetic;</li>
+        <li>работающий интернет и правильное время на роутере.</li>
+    </ul>
+</section><section id="entware">
+    <h2>1. Установка Entware — при необходимости</h2>
+    <div class="facultative">
+        <span class="facultative-title">Факультативный раздел</span>
+        Пропустите его, если OPKG/Entware уже работает и накопитель подключён как <code>/opt</code>.
+    </div>
+
+    <h3>Как проверить</h3>
+    <p>Откройте <code>http://192.168.1.1/</code> и перейдите в раздел <strong>Приложения</strong>. Если OPKG/Entware запущен и выбран накопитель, повторная установка не требуется.</p>
+    <p>В терминале Entware можно дополнительно выполнить:</p>
+    <pre><button class="copy" type="button" aria-label="Копировать команды проверки Entware">Копировать</button><code>opkg --version
+ls -ld /opt</code></pre>
+
+    <h3>Если Entware не установлен</h3>
+    <ol class="steps">
+        <li>Подготовьте отдельный USB-накопитель. Лучше использовать надёжный SSD или HDD.</li>
+        <li><strong>Сохраните нужные файлы:</strong> форматирование удалит данные с выбранного накопителя.</li>
+        <li>Отформатируйте накопитель в <code>EXT4</code> и подключите его к Keenetic.</li>
+        <li>Откройте <strong>Управление → Параметры системы → Изменить набор компонентов</strong>.</li>
+        <li>Установите <strong>Поддержку открытых пакетов</strong> или <strong>Пакеты OPKG</strong>, поддержку EXT и предложенные модули файловых систем.</li>
+        <li>Дождитесь установки компонентов и перезагрузки роутера.</li>
+        <li>Установите Entware <code>aarch64-3.10</code> по инструкции для своей модели. Не используйте установщик другой архитектуры.</li>
+        <li>Убедитесь, что накопитель подключён как <code>/opt</code>, а OPKG имеет состояние <strong>Работает</strong>.</li>
+    </ol>
+    <div class="link-list">
+        <a href="https://forum.keenetic.ru/topic/4299-entware/" target="_blank" rel="noopener noreferrer">Entware на Keenetic Community</a>
+        <a href="/broray/#requirements">Требования BROray</a>
+    </div>
+    <div class="note warning">
+        <span class="note-title">Не продолжайте при ошибке</span>
+        Если OPKG не запущен или каталог <code>/opt</code> отсутствует, сначала завершите настройку Entware.
+    </div>
+</section><section id="terminal">
+    <h2>2. Подключение к терминалу — при необходимости</h2>
+    <div class="facultative">
+        <span class="facultative-title">Факультативный раздел</span>
+        Если вы уже умеете входить в Entware shell как <code>root</code>, переходите к установке.
+    </div>
+
+    <h3>Termius</h3>
+    <ol class="steps">
+        <li>Скачайте Termius с <a href="https://termius.com/" target="_blank" rel="noopener noreferrer">официального сайта</a> и откройте приложение.</li>
+        <li>Создайте подключение <strong>New Host</strong>.</li>
+        <li>Укажите LAN-адрес роутера, обычно <code>192.168.1.1</code>, и SSH-порт Entware.</li>
+        <li>Имя пользователя — <code>root</code>; пароль — пароль root, заданный при установке Entware.</li>
+        <li>Откройте подключение. При первом входе убедитесь, что это ваш домашний роутер, и подтвердите его SSH-ключ.</li>
+    </ol>
+
+    <h3>PuTTY для Windows</h3>
+    <ol class="steps">
+        <li>Скачайте PuTTY с <a href="https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html" target="_blank" rel="noopener noreferrer">официального сайта проекта</a>.</li>
+        <li>В поле <strong>Host Name</strong> укажите LAN-адрес роутера, обычно <code>192.168.1.1</code>.</li>
+        <li>В поле <strong>Port</strong> укажите SSH-порт Entware, выберите <strong>SSH</strong> и нажмите <strong>Open</strong>.</li>
+        <li>Введите пользователя <code>root</code> и пароль Entware. Пароль при вводе не отображается — это нормально.</li>
+    </ol>
+
+    <h3>Встроенный SSH-клиент</h3>
+    <pre><button class="copy" type="button" aria-label="Копировать команду SSH">Копировать</button><code>ssh root@192.168.1.1</code></pre>
+    <p>Если Entware использует другой порт:</p>
+    <pre><code>ssh -p НОМЕР_ПОРТА root@192.168.1.1</code></pre>
+
+    <div class="note">
+        <span class="note-title">Как выглядит правильный терминал</span>
+        Entware shell обычно показывает <code>~ #</code> или <code>root@router:~#</code>.
+        Если вы видите <code>(config)&gt;</code>, это командная строка KeeneticOS. Команды установки BROray в ней выполнять нельзя.
+    </div>
+</section><section id="install">
+    <h2>3. Чистая установка BROray</h2>
+    <p>Используйте этот раздел, если BROray ещё не установлен.</p>
+
+    <h3>Шаг 1. Установите необходимые инструменты</h3>
+    <pre><button class="copy" type="button" aria-label="Копировать установку инструментов">Копировать</button><code>opkg update &amp;&amp;
+opkg install ca-bundle ca-certificates curl jq</code></pre>
+    <p>Дождитесь окончания. Если команда завершилась ошибкой, не переходите к следующему шагу.</p>
+
+    <h3>Шаг 2. Запустите установку</h3>
+    <p>Скопируйте весь блок целиком, вставьте в терминал и нажмите Enter:</p>
+    <pre><button class="copy" type="button" aria-label="Копировать установку BROray">Копировать</button><code>(
+set -eu
+PATH=/opt/broray/bin:/opt/sbin:/opt/bin:/opt/usr/bin:/opt/usr/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+for cmd in curl jq mktemp sha256sum awk sh rm; do
+    command -v "$cmd" &gt;/dev/null
+done
+
+T="$(mktemp /tmp/broray-clean-current.XXXXXX)"
+trap 'rm -f "$T"' EXIT
+
+curl -q \
+  --proto '=https' \
+  --proto-redir '=https' \
+  --tlsv1.2 \
+  --connect-timeout 15 \
+  --max-time 600 \
+  --retry 3 \
+  -fsSL \
+  -H 'Cache-Control: no-cache, no-store' \
+  -H 'Accept-Encoding: identity' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.1.1-r12/INSTALL-ON-ROUTER.sh' \
+  -o "$T"
+
+[ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
+  'ac334c4f3ce16e9119dcc3b84e21bd076ba5fce5252cf0f6aef2df5510edba1a' ]
+
+sh "$T"
+)</code></pre>
+    <p>Не закрывайте терминал и не перезагружайте роутер. Установка может временно останавливать и запускать Xray и интерфейс BROray.</p>
+
+    <h3>Шаг 3. Проверьте результат</h3>
+    <pre><code>BRORAY_INSTALL=PASS
+CANDIDATE=3.1.1-r12c01
+STABLE=YES</code></pre>
+    <p>Если появилась строка <code>FAIL</code>, сохраните текст ошибки, но удалите из него пароли, ссылки подписок, UUID и приватные ключи.</p>
+
+    <h3>Шаг 4. Откройте WebUI</h3>
+    <p>При установке с нуля автоматически устанавливается <strong>Xray 26.9.9</strong>. До добавления и активации сервера VPN ещё не настроен — это следующий шаг.</p>
+    <pre><code>http://192.168.1.1:8080/</code></pre>
+    <p>Если LAN-адрес роутера другой, подставьте его. При настроенном KeenDNS также может работать <code>https://broray.&lt;KeenDNS-домен-роутера&gt;/</code> без порта <code>8080</code>.</p>
+
+    <h3>Шаг 5. Первоначальная настройка</h3>
+    <ol class="steps">
+        <li>Войдите с учётной записью администратора Keenetic.</li>
+        <li>На странице <strong>Подписки</strong> или <strong>Серверы</strong> добавьте подключение.</li>
+        <li>Проверьте и подключите выбранный сервер.</li>
+        <li>На странице <strong>Keenetic</strong> убедитесь, что ProxyN соответствует активному серверу.</li>
+        <li>При необходимости настройте DNS-over-TLS и готовые маршруты.</li>
+    </ol>
+</section>
+<details class="advanced"><summary>Расширенные способы установки</summary><p>Обычному пользователю этот раздел не нужен. Здесь сохранены альтернативный Stable-путь и подписанный bootstrap через штатный механизм Keenetic.</p><section id="advanced-install">
+    <h2>Расширенная установка и обновление Stable</h2>
+    <p>
+        Рекомендуемый путь: <strong>BROray → Проверить обновление → Установить обновление</strong>.
+        Поддерживается любая исправная версия от <code>3.0.0-r1</code>. Более старый
+        release обновляется, равный завершается без изменений, более новый не понижается.
+        Если BROray ещё не установлен, этот же установщик выполняет чистую установку 3.1.1.
+    </p>
+    <p>
+        Для обычного обновления не запускайте <code>opkg update</code>: установленный
+        BROray уже содержит необходимые зависимости. Для административного запуска
+        достаточно проверить <code>curl</code>, <code>jq</code>, <code>mktemp</code>,
+        <code>sha256sum</code>, <code>awk</code> и <code>sh</code>.
+    </p>
+    <pre><button class="copy" type="button" aria-label="Копировать проверку инструментов">Копировать</button><code>command -v curl
+command -v jq
+command -v mktemp
+command -v sha256sum
+command -v awk
+command -v sh</code></pre>
+
+    <div class="note">
+        <span class="note-title">BROray ещё не установлен?</span>
+        <p>Только перед первой установкой:</p>
+        <ol>
+            <li>Откройте терминал Entware на роутере.</li>
+            <li>Войдите как <code>root</code>.</li>
+            <li>Один раз выполните команду ниже.</li>
+        </ol>
+        <p><strong>Если BROray уже установлен и вы его обновляете, пропустите этот шаг.</strong></p>
+    </div>
+    <pre><button class="copy" type="button" aria-label="Копировать команду подготовки">Копировать</button><code>opkg update &amp;&amp;
+opkg install ca-bundle ca-certificates curl jq</code></pre>
+
+    <p>Для чистой установки или терминального обновления выполните один и тот же проверяемый блок целиком:</p>
+    <pre><button class="copy" type="button" aria-label="Копировать команду установки">Копировать</button><code>(
+set -eu
+PATH=/opt/broray/bin:/opt/sbin:/opt/bin:/opt/usr/bin:/opt/usr/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+for cmd in curl jq mktemp sha256sum awk sh rm; do command -v "$cmd" &gt;/dev/null; done
+
+T="$(mktemp /tmp/broray-stable-update.XXXXXX)"
+trap 'rm -f "$T"' EXIT
+
+curl -q \
+  --proto '=https' \
+  --proto-redir '=https' \
+  --tlsv1.2 \
+  --connect-timeout 15 \
+  --max-time 600 \
+  --retry 3 \
+  -fsSL \
+  -H 'Cache-Control: no-cache, no-store' \
+  -H 'Accept-Encoding: identity' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.1.1-r12/INSTALL-ON-ROUTER.sh' \
+  -o "$T"
+
+[ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
+  'ac334c4f3ce16e9119dcc3b84e21bd076ba5fce5252cf0f6aef2df5510edba1a' ]
+
+sh "$T"
+)</code></pre>
+
+    <p>Если текущий Stable уже установлен, завершение содержит:</p>
+    <pre><code>UPDATE_DECISION=already-current
+INSTALLED_RELEASE=3.1.1-r12
+CURRENT_RELEASE=3.1.1-r12
+RELEASE_MUTATION=NONE
+ENVIRONMENT_RECONCILED=YES</code></pre>
+
+    <div class="note">
+        <span class="note-title">Чистая установка</span>
+        Stable-установщик сам проверяет чистое состояние и сразу разворачивает
+        <code>3.1.1-r12c01</code>. OPKG <code>3.0.0-r14</code> используется только
+        как регистрационный якорь; промежуточное приложение <code>r14c68</code>
+        не устанавливается и не запускается.
+        Полный проверяемый блок приведён в
+        <a href="https://github.com/BROadmin/BROray/blob/main/docs/installation.md">инструкции по установке</a>.
+    </div>
+
+    <div class="note warning">
+        <span class="note-title">Переход с BROray 2.x</span>
+        Прямое обновление с 2.x не поддерживается. Сохраните нужные данные,
+        завершите штатное удаление старой ветки и запустите чистую установку текущей
+        3.1.1 универсальным Stable-установщиком.
+        Не используйте <code>opkg upgrade</code>, <code>opkg --force-reinstall</code>
+        или ручную замену файлов приложения.
+    </div>
+</section><section id="keenetic-bootstrap">
+    <h2>Подписанная установка через штатный механизм Keenetic</h2>
+    <p>
+        Для каталога <code>/opt/install/*.tgz</code> опубликован отдельный альтернативный bootstrap
+        <code>broray-webcli-bootstrap-3.0.0-r14c68-b1</code>. После проверки подписи
+        он устанавливает точную базовую версию <code>3.0.0-r14c68</code>. Затем
+        только для этого варианта выполните обычное обновление через WebUI до текущего Stable
+        <code>3.1.1-r12</code>. Физическая проверка базового пути на Keenetic aarch64 —
+        <strong>PASS</strong>.
+    </p>
+
+    <div class="note warning">
+        <span class="note-title">Что умеет Web CLI</span>
+        Web CLI принимает команды KeeneticOS, но не является Linux shell и не
+        загружает файлы. Архив сначала копируется в <code>/opt/install/</code>
+        через SFTP или USB, после чего выполняется штатная перезагрузка роутера.
+    </div>
+
+    <h3>1. Скачайте и проверьте</h3>
+    <ul>
+        <li><a href="https://api.brovibe.cloud/releases/bootstrap/broray/3.0.0-r14c68-b1/broray-webcli-bootstrap-3.0.0-r14c68-b1.tgz">архив bootstrap</a>;</li>
+        <li><a href="https://api.brovibe.cloud/releases/bootstrap/broray/3.0.0-r14c68-b1/broray-webcli-bootstrap-3.0.0-r14c68-b1.tgz.sig">внешняя подпись</a>;</li>
+        <li><a href="https://api.brovibe.cloud/releases/bootstrap/broray/3.0.0-r14c68-b1/broray-bootstrap-rsa3072-v1-public.pem">публичный ключ</a>;</li>
+        <li><a href="https://api.brovibe.cloud/releases/bootstrap/broray/3.0.0-r14c68-b1/VERIFY-WINDOWS.ps1">проверка Windows</a> или <a href="https://api.brovibe.cloud/releases/bootstrap/broray/3.0.0-r14c68-b1/VERIFY-LINUX.sh">проверка Linux</a>.</li>
+    </ul>
+    <pre><code>Архив SHA-256: 50904456e998dc501ee534efca5eccc47b997f9986bf5aef3f959d468ad66dd7
+Key ID:         aaac0ea3b4a6334c
+SPKI SHA-256:   aaac0ea3b4a6334c8be5626aba4a1a10078526c731ce5392fb41ddb66f033b4a</code></pre>
+    <p>Проверка должна завершиться строкой <code>SIGNED_BOOTSTRAP=ACCEPTED</code>.</p>
+
+    <h3>2. Скопируйте и перезагрузите</h3>
+    <ol class="steps">
+        <li>Скопируйте только принятый <code>.tgz</code> в <code>/opt/install/</code>.</li>
+        <li>Выполните штатную перезагрузку через WebUI Keenetic или командой KeeneticOS на вкладке <strong>Parse</strong>.</li>
+        <li>После загрузки откройте BROray и проверьте Stable-канал, Xray и Keenetic.</li>
+    </ol>
+    <p>
+        Bootstrap повторно проверяет встроенную подпись до сети, затем точные SHA-256
+        Stable-объектов. Успешная повторная загрузка идемпотентна. При отказе ручной
+        повтор разрешён только из Entware shell после устранения причины.
+    </p>
+    <p><a class="button" href="https://github.com/BROadmin/BROray/blob/main/docs/keenetic-web-cli-install.md">Полная инструкция на GitHub</a></p>
+</section></details>
+<section class="what-next"><div><p class="eyebrow">Следующий шаг</p><h2>Добавьте подключение</h2><p>После установки не нужно продолжать работу в терминале. Перейдите к обычным сценариям WebUI.</p></div><a class="primary-action" href="/broray/scenarios/">Настроить BROray →</a></section>
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray · Установка</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>
