@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -78,7 +79,7 @@ static int register_supervisor(const char *ash,const char *control){
         close(output[0]);dup2(output[1],STDOUT_FILENO);close(output[1]);
         int null=open("/dev/null",O_RDONLY);if(null>=0){dup2(null,STDIN_FILENO);close(null);}
         char pid[24];snprintf(pid,sizeof pid,"%d",getppid());
-        execl(ash,ash,control,protected_route==2?"register-interface":protected_route?"register-route":"register",pid,nonce,(char *)0);_exit(74);
+        execl(ash,ash,control,protected_route==4?"register-service-stop":protected_route==3?"register-platform":protected_route==2?"register-interface":protected_route?"register-route":"register",pid,nonce,(char *)0);_exit(74);
     }
     close(output[1]);char buffer[PATH_MAX+512];size_t length=0;
     for(;;){ssize_t n=read(output[0],buffer+length,sizeof buffer-length-1);if(n<0&&errno==EINTR)continue;if(n<=0)break;length+=(size_t)n;if(length==sizeof buffer-1)break;}
@@ -107,10 +108,16 @@ static int end_supervisor(int result,const char *state,int killing){
        sessions and threads. The coordinator still verifies their disappearance. */
     return result;
 }
+#include "broray-bound-updater-stop.h"
+
 int main(int argc,char **argv){
+    if(argc==2&&!strcmp(argv[1],"--service-stop-capability")){puts("bound-updater-stop/3");return 0;}
+    if(argc>1&&!strcmp(argv[1],"--stop-updater"))return bound_updater_stop_main(argc,argv);
     if(argc==2&&!strcmp(argv[1],"--version")){puts("broray-ops-supervisor/2 ptrace-exitkill cooperative-helper protected-route");return 0;}
+    if(argc==2&&!strcmp(argv[1],"--platform-capability")){puts("protected-platform-stop/1");return 0;}
     if(argc>1&&!strcmp(argv[1],"--protected-route")){protected_route=1;argc--;argv++;}
     else if(argc>1&&!strcmp(argv[1],"--protected-interface")){protected_route=2;argc--;argv++;}
+    else if(argc>1&&!strcmp(argv[1],"--protected-platform")){protected_route=3;argc--;argv++;}
     /* ash, control script, cancel-file, timeout seconds, cooperative grace,
        TERM grace, --, absolute command, command arguments */
     if(argc<9||strcmp(argv[7],"--")||argv[1][0]!='/'||argv[2][0]!='/'||argv[3][0]!='/'||argv[8][0]!='/')return 64;
@@ -129,6 +136,8 @@ int main(int argc,char **argv){
         setenv("BRORAY_OPS_SUPERVISED","ptrace/1",1);
         if(protected_route==1)setenv("BRORAY_OPS_ROUTE_SUPERVISED","ptrace/1",1);
         else unsetenv("BRORAY_OPS_ROUTE_SUPERVISED");
+        if(protected_route==3)setenv("BRORAY_OPS_PLATFORM_SUPERVISED","ptrace/1",1);
+        else unsetenv("BRORAY_OPS_PLATFORM_SUPERVISED");
         execv(argv[8],argv+8);_exit(127);
     }
     close(gate[0]);

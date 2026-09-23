@@ -42,6 +42,60 @@ broray_url_decode() {
     printf '%b' "$decoded_value"
 }
 
+broray_uri_component_decode() {
+    local rest pair prefix
+    [ "$#" = 1 ] || return 1
+    # Validate the whole component before emitting any decoded bytes.
+    rest="$1"
+    while :; do
+        case "$rest" in
+            *%*) rest="${rest#*%}" ;;
+            *) break ;;
+        esac
+        case "$rest" in
+            [0-9a-fA-F][0-9a-fA-F]*) rest="${rest#??}" ;;
+            *) echo 'Ошибка: некорректное percent-кодирование URI' >&2; return 1 ;;
+        esac
+    done
+    rest="$1"
+    while :; do
+        case "$rest" in
+            *%*)
+                prefix="${rest%%\%*}"
+                printf '%s' "$prefix"
+                rest="${rest#*%}"
+                pair="${rest%"${rest#??}"}"
+                printf '%b' "\\x$pair"
+                rest="${rest#??}"
+                ;;
+            *) printf '%s' "$rest"; return 0 ;;
+        esac
+    done
+}
+
+broray_uri_query_value() {
+    local wanted rest item key value found result alias
+    wanted="$1"; rest="$2"; shift 2
+    found=0; result=""
+    while [ -n "$rest" ]; do
+        item="${rest%%&*}"
+        case "$rest" in *'&'*) rest="${rest#*&}" ;; *) rest="" ;; esac
+        key="$(broray_uri_component_decode "${item%%=*}")" || return 1
+        for alias in "$wanted" "$@"; do
+            [ "$key" = "$alias" ] || continue
+            [ "$found" = 0 ] || {
+                echo "Ошибка: повторяющийся параметр URI: $wanted" >&2
+                return 1
+            }
+            found=1
+            case "$item" in *=*) value="${item#*=}" ;; *) value="" ;; esac
+            result="$(broray_uri_component_decode "$value")" || return 1
+            break
+        done
+    done
+    printf '%s' "$result"
+}
+
 broray_query_value() {
     query_key="$1"
     query_string="$2"

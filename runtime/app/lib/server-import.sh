@@ -78,10 +78,11 @@ broray_server_save_parsed() {
     case "$BRORAY_SECURITY" in none|tls|reality) ;; *) broray_die "неподдерживаемая защита VLESS: $BRORAY_SECURITY" ;; esac
     case "${BRORAY_FLOW:-}" in ''|xtls-rprx-vision) ;; *) broray_die "неподдерживаемый режим VLESS flow: $BRORAY_FLOW" ;; esac
     if [ -n "${BRORAY_FLOW:-}" ] &&
-       { [ "$BRORAY_NETWORK" != raw ] || [ "$BRORAY_SECURITY" != reality ]; }; then
-        broray_die "VLESS flow поддерживается только для TCP/RAW + REALITY"
+       { [ "$BRORAY_NETWORK" != raw ] || { [ "$BRORAY_SECURITY" != reality ] && [ "$BRORAY_SECURITY" != tls ]; }; }; then
+        broray_die "VLESS flow поддерживается только для TCP/RAW + TLS/REALITY"
     fi
     if [ "$BRORAY_SECURITY" = reality ]; then
+        case "$BRORAY_NETWORK" in raw|grpc|xhttp) ;; *) broray_die "VLESS REALITY не поддерживает этот транспорт" ;; esac
         [ -n "$BRORAY_SNI" ] || broray_die "для VLESS REALITY не указан SNI"
         [ -n "$BRORAY_PBK" ] || broray_die "для VLESS REALITY не указан public key"
     fi
@@ -548,6 +549,7 @@ broray_server_save_trojan()
         --arg path "$BRORAY_PATH" \
         --arg serviceName "$BRORAY_SERVICE_NAME" \
         --arg mode "$BRORAY_MODE" \
+        --argjson extra "$BRORAY_EXTRA" \
         '{
             schemaVersion: 2,
             id: $id,
@@ -581,7 +583,8 @@ broray_server_save_trojan()
                 host: $host,
                 path: $path,
                 serviceName: $serviceName,
-                mode: $mode
+                mode: $mode,
+                extra: $extra
             }
         }' > "$temporary_file" ||
         broray_die \
@@ -710,6 +713,7 @@ broray_server_save_hysteria2()
         --arg fingerprint "$BRORAY_FP" \
         --argjson alpn "$BRORAY_ALPN" \
         --argjson allowInsecure "$BRORAY_ALLOW_INSECURE" \
+        --arg pinnedPeerCertSha256 "$BRORAY_PIN_SHA256" \
         --arg obfs "$BRORAY_OBFS" \
         --arg obfsPassword "$BRORAY_OBFS_PASSWORD" \
         --arg upMbps "$BRORAY_UP_MBPS" \
@@ -738,12 +742,12 @@ broray_server_save_hysteria2()
             auth: $auth,
             network: "hysteria",
             security: $security,
-            tls: {
+            tls: ({
                 serverName: $sni,
                 fingerprint: $fingerprint,
                 alpn: $alpn,
                 allowInsecure: $allowInsecure
-            },
+            } + (if $pinnedPeerCertSha256 != "" then {pinnedPeerCertSha256:$pinnedPeerCertSha256} else {} end)),
             hysteria: {
                 version: 2,
                 obfs: $obfs,

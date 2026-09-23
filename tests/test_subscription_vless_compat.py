@@ -49,6 +49,61 @@ def user(p):
 def changed(p, fn): fn(p); return p
 
 
+class UriComponents(unittest.TestCase):
+    def test_changed_shell_files_syntax(self):
+        for name in ['util.sh','parser-vless.sh','parser-trojan.sh','parser-hysteria2.sh','server-import.sh',
+                     'server.sh','server-config-generator.sh','subscription-service.sh','server-subscription-service.sh']:
+            with self.subTest(file=name):
+                r=subprocess.run(['/bin/ash','-n',str(ROOT/'runtime/app/lib'/name)],capture_output=True,timeout=5)
+                self.assertEqual(r.returncode,0,r.stderr)
+    def decode(self, value):
+        return subprocess.run(['/bin/ash', '-c', '. "$1"; broray_uri_component_decode "$2"',
+                               'decode', str(ROOT / 'runtime/app/lib/util.sh'), value],
+                              capture_output=True, timeout=5)
+
+    def test_percent_decoder_exact_once(self):
+        for encoded, expected in [('a+b','a+b'),('%2B','+'),('%20',' '),
+                                  ('%40%3A%2F%3F%23','@:/?#'),('%252B','%2B'),
+                                  (r'a\n%5Cn',r'a\n\n'),('',''),('%E2%82%AC','€')]:
+            with self.subTest(encoded=encoded):
+                r=self.decode(encoded)
+                self.assertEqual(r.returncode,0,r.stderr)
+                self.assertEqual(r.stdout,expected.encode())
+
+    def test_percent_decoder_rejects_malformed_without_output(self):
+        for encoded in ['%', '%2', '%GG', 'prefix%2X', '%41%broken']:
+            with self.subTest(encoded=encoded):
+                r=self.decode(encoded)
+                self.assertNotEqual(r.returncode,0)
+                self.assertEqual(r.stdout,b'')
+
+    def test_unique_query(self):
+        for query, expected, ok in [('other=x','',True),('path=a+b%2Bc','a+b+c',True),
+                                    ('path','',True),('path=a&path=b','',False),
+                                    ('path=a&%70ath=b','',False),('path=%Q0','',False)]:
+            with self.subTest(query=query):
+                r=subprocess.run(['/bin/ash','-c','. "$1"; broray_uri_query_value path "$2"',
+                                  'query',str(ROOT/'runtime/app/lib/util.sh'),query],capture_output=True,timeout=5)
+                self.assertEqual(r.returncode==0,ok,r.stderr)
+                self.assertEqual(r.stdout,expected.encode())
+
+    def parse_vless(self, query):
+        return subprocess.run(['/bin/ash','-c','. "$BRORAY_BASE/lib/parser-vless.sh"; broray_parse_vless "$1"',
+                               'parse',f'vless://{UUID}@vpn.example.invalid:443?{query}'],
+                              env={**os.environ,'BRORAY_BASE':str(ROOT/'runtime/app')},capture_output=True,timeout=5)
+
+    def test_vless_critical_duplicates(self):
+        for key in ['type','security','encryption','flow','sni','fp','pbk','sid','spx','host',
+                    'authority','path','serviceName','service_name','mode','headerType','extra','alpn','allowInsecure']:
+            with self.subTest(key=key):
+                r=self.parse_vless(f'{key}=&{key}=')
+                self.assertNotEqual(r.returncode,0)
+                self.assertIn('повтор',r.stderr.decode())
+        r=self.parse_vless('serviceName=a&service_name=a')
+        self.assertNotEqual(r.returncode,0)
+        self.assertIn('повтор',r.stderr.decode())
+
+
 class Adapter(unittest.TestCase):
     def run_adapter(self, data, limit=500, raw=False):
         self.assertTrue(JQ, 'jq is required; missing dependency is not a pass')
@@ -214,7 +269,7 @@ if __name__=='__main__':
     loader=unittest.TestLoader()
     if os.environ.get('STAGE05_REPRO')=='1':
         suite=unittest.TestSuite(Adapter(n) for n in loader.getTestCaseNames(Adapter) if 'regression_' in n)
-    else: suite=loader.loadTestsFromTestCase(Adapter)
+    else: suite=unittest.TestSuite([loader.loadTestsFromTestCase(UriComponents),loader.loadTestsFromTestCase(Adapter)])
     result=unittest.TextTestRunner(verbosity=2).run(suite)
     print(json.dumps({'testsRun':result.testsRun,'failures':len(result.failures),'errors':len(result.errors),'skipped':len(result.skipped),'routerAccessed':False}))
     raise SystemExit(0 if result.wasSuccessful() else 1)

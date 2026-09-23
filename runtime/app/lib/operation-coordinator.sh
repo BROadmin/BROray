@@ -4,6 +4,9 @@
 set -u
 umask 077
 OPS_APP="${BRORAY_ROOT:-/opt/broray}"
+OPS_CODE="${BRORAY_OPS_CODE_ROOT:-$OPS_APP}"
+OPS_PREFLIGHT_EXPECTED_SHA=''
+OPS_PREFLIGHT_SERVICE_STOP=null
 OPS_STATE="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}"
 OPS_ROOT="$OPS_STATE/operations"
 OPS_GLOBAL="${BRORAY_ROUTES_API_LOCK:-${BRORAY_GLOBAL_LOCK:-/opt/var/lock/broray/global-operation.lock}}"
@@ -11,14 +14,18 @@ OPS_PROC="${BRORAY_OPS_PROC_ROOT:-/proc}"
 OPS_UPDATER="${BRORAY_OPS_UPDATER_ROOT:-/opt/var/lib/broray-updater}"
 OPS_LEGACY="${BRORAY_LEGACY_GLOBAL_LOCK:-/tmp/broray-global-operation.lock}"
 OPS_AUTOMATION="$OPS_STATE/background-automation.json"
-OPS_GUARD="${BRORAY_OPS_GUARD:-$OPS_APP/bin/broray-ops-guard}"
+OPS_GUARD="${BRORAY_OPS_GUARD:-$OPS_CODE/bin/broray-ops-guard}"
 OPS_RAM="${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}"
 [ "${BRORAY_OPS_GUARD_HELD:-0}" = 1 ] || exit 73
-. "$OPS_APP/lib/operation-owner.sh"
-. "$OPS_APP/lib/operation-journal.sh"
-. "$OPS_APP/lib/operation-report.sh"
-. "$OPS_APP/lib/operation-publication.sh"
-. "$OPS_APP/lib/operation-route-recovery.sh"
+. "${OPS_CODE:-$OPS_APP}/lib/operation-owner.sh"
+. "${OPS_CODE:-$OPS_APP}/lib/operation-journal.sh"
+. "${OPS_CODE:-$OPS_APP}/lib/operation-report.sh"
+. "${OPS_CODE:-$OPS_APP}/lib/operation-publication.sh"
+. "${OPS_CODE:-$OPS_APP}/lib/operation-route-recovery.sh"
+. "$OPS_CODE/lib/operation-platform-recovery.sh"
+. "$OPS_CODE/lib/operation-platform-service.sh"
+. "$OPS_CODE/lib/operation-platform-generation.sh"
+. "$OPS_CODE/lib/operation-platform-bootguard.sh"
 
 ops_error()
 {
@@ -387,23 +394,37 @@ ops_supervisor_register()
     local owner records record dir directory context file nonce route_mode expected_exe
     ops_authorize "$1" "$2"
     route_mode="${5:-false}"
-    if [ "$route_mode" = interface ]; then
+    if [ "$route_mode" = platform ] || [ "$route_mode" = service ]; then
+        ops_platform_stop_valid || ops_error PLATFORM_PHASE_INVALID
+        [ "$route_mode" != service ] || ops_platform_service_register_prepare
+        ops_nonce_valid "${BRORAY_PREFLIGHT_STOP_NONCE:-}" || ops_error INVALID_REQUEST 1
+        jq -e --arg nonce "$BRORAY_PREFLIGHT_STOP_NONCE" '.platformPreflight.stopNonce==$nonce' \
+          "$OPS_CURRENT/state.json" >/dev/null || ops_error OWNER_CHANGED
+        [ ! -e "$OPS_CURRENT/platform-stop-supervision.json" ] && \
+          [ ! -L "$OPS_CURRENT/platform-stop-supervision.json" ] || ops_error OPERATION_EXISTS
+        ops_pending_domain && ops_error DOMAIN_OPERATION_BUSY
+        ops_platform_queue_clear || ops_error DOMAIN_OPERATION_BUSY
+    elif [ "$route_mode" = interface ]; then
         jq -e '.scope=="system" and .operation=="keenetic:reconcile" and .source=="SYSTEM_RECOVERY" and .acknowledged==true and .cancelability=="protected"' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCEL_NOT_SUPPORTED
     elif [ "$route_mode" = true ]; then
         jq -e '.scope=="routes" and .acknowledged==true and .cancelability=="protected" and .initialCancelability=="protected"' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCEL_NOT_SUPPORTED
         [ ! -e "$OPS_CURRENT/route-supervision.json" ] && [ ! -L "$OPS_CURRENT/route-supervision.json" ] || ops_error OPERATION_EXISTS
     else
-        jq -e -L "$OPS_APP/lib" 'include "operation-public"; (route_protected|not) and .acknowledged==true and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCEL_NOT_SUPPORTED
+        jq -e -L "${OPS_CODE:-$OPS_APP}/lib" 'include "operation-public"; (route_protected|not) and .acknowledged==true and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null || ops_error CANCEL_NOT_SUPPORTED
         [ ! -e "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ] || ops_error CANCELLED
     fi
     nonce="$4"; ops_nonce_valid "$nonce" || ops_error INVALID_REQUEST 1
     owner="$(broray_ops_capture_owner "$3")" || ops_error OWNER_UNCONFIRMED 1
-    if [ "$route_mode" = interface ]; then
-        expected_exe="$(readlink -f "${BRORAY_OPS_SUPERVISOR:-$OPS_APP/bin/broray-ops-supervisor}")" || ops_error OWNER_UNCONFIRMED 1
+    if [ "$route_mode" = platform ] || [ "$route_mode" = service ]; then
+        expected_exe="$(readlink -f "${BRORAY_OPS_SUPERVISOR:-$OPS_CODE/bin/broray-ops-supervisor}")" || ops_error OWNER_UNCONFIRMED 1
+        [ "$(printf '%s\n' "$owner" | jq -r .executable)" = "$expected_exe" ] &&
+          [ "$(tr '\000' '\n' <"$OPS_PROC/$3/cmdline" | sed -n '2p')" = "$(if [ "$route_mode" = service ]; then printf %s --stop-updater; else printf %s --protected-platform; fi)" ] || ops_error OWNER_UNCONFIRMED
+    elif [ "$route_mode" = interface ]; then
+        expected_exe="$(readlink -f "${BRORAY_OPS_SUPERVISOR:-$OPS_CODE/bin/broray-ops-supervisor}")" || ops_error OWNER_UNCONFIRMED 1
         [ "$(printf '%s\n' "$owner" | jq -r .executable)" = "$expected_exe" ] &&
           [ "$(tr '\000' '\n' <"$OPS_PROC/$3/cmdline" | sed -n '2p')" = --protected-interface ] || ops_error OWNER_UNCONFIRMED
     elif [ "$route_mode" = true ]; then
-        expected_exe="$(readlink -f "${BRORAY_OPS_SUPERVISOR:-$OPS_APP/bin/broray-ops-supervisor}")" || ops_error OWNER_UNCONFIRMED 1
+        expected_exe="$(readlink -f "${BRORAY_OPS_SUPERVISOR:-$OPS_CODE/bin/broray-ops-supervisor}")" || ops_error OWNER_UNCONFIRMED 1
         [ "$(printf '%s\n' "$owner" | jq -r .executable)" = "$expected_exe" ] &&
           [ "$(tr '\000' '\n' <"$OPS_PROC/$3/cmdline" | sed -n '2p')" = --protected-route ] || ops_error OWNER_UNCONFIRMED
     fi
@@ -427,7 +448,13 @@ ops_supervisor_register()
     ops_write "$dir/children.json" "$record" || ops_error STATE_UNAVAILABLE 1
     records="$(printf '%s\n' "$records" | jq -c --arg sid "$nonce" --argjson owner "$owner" '.supervisors += [{supervisorId:$sid,owner:$owner}]')" || ops_error STATE_UNAVAILABLE 1
     ops_write "$file" "$records" || ops_error STATE_UNAVAILABLE 1
-    if [ "$route_mode" = true ]; then
+    if [ "$route_mode" = platform ] || [ "$route_mode" = service ]; then
+        context="$(jq -nc --arg id "$OPS_ID" --arg sid "$nonce" --argjson owner "$owner" \
+          --arg stopNonce "$BRORAY_PREFLIGHT_STOP_NONCE" \
+          --arg mode "$route_mode" \
+          '{schemaVersion:1,kind:"protected-platform-stop-supervision",operationId:$id,supervisorId:$sid,stopNonce:$stopNonce,owner:$owner} + (if $mode=="service" then {mode:"bound-service"} else {} end)')" || ops_error STATE_UNAVAILABLE 1
+        ops_write "$OPS_CURRENT/platform-stop-supervision.json" "$context" || ops_error STATE_UNAVAILABLE 1
+    elif [ "$route_mode" = true ]; then
         context="$(jq -nc --arg id "$OPS_ID" --arg sid "$nonce" --argjson owner "$owner" \
           '{schemaVersion:1,kind:"protected-route-supervision",operationId:$id,supervisorId:$sid,owner:$owner}')" || ops_error STATE_UNAVAILABLE 1
         ops_write "$OPS_CURRENT/route-supervision.json" "$context" || ops_error STATE_UNAVAILABLE 1
@@ -471,6 +498,9 @@ ops_pending_domain()
 {
     local file pointer id resume_bundle resource
     resume_bundle=''
+    if [ "${1:-}" = system:platform-preflight ]; then
+        ops_platform_queue_clear || return 0
+    fi
     # Only the existing continuation and its confirmation may pass a paused
     # record for the same bundle. This does not waive global/process ownership
     # or permit an old route resource generation to be removed.
@@ -541,7 +571,7 @@ ops_interface_recover()
     for file in "$OPS_APP/config/interface.json.operation" "$OPS_APP/config/interface.json.quarantine" "$OPS_APP/config/interface.json.create-reservation"; do
         [ ! -e "$file" ] && [ ! -L "$file" ] || return 1
     done
-    script="$OPS_APP/lib/interface.sh"
+    script="${OPS_CODE:-$OPS_APP}/lib/interface.sh"
     # Test substitution is restricted to a private application root.
     if [ "$OPS_APP" != /opt/broray ]; then script="${BRORAY_RECONCILE_INTERFACE:-$script}"; fi
     ops_file_safe "$script" 65536 || return 1
@@ -571,6 +601,7 @@ ops_recover_global()
     if jq -e '.running==false' "$OPS_CURRENT/state.json" >/dev/null 2>&1; then
         ops_publication_ready || { OPS_RECOVERY_RESULT=publication_unconfirmed; return 2; }
         ops_children_absent || { OPS_RECOVERY_RESULT=children_unconfirmed; return 2; }
+        ops_platform_finish_ready || { OPS_RECOVERY_RESULT=platform_domain_pending; return 2; }
         ops_route_finish_ready || { OPS_RECOVERY_RESULT=domain_pending; return 2; }
         ops_retire_global || return 1
         OPS_RECOVERY_RESULT=terminal_lock_retired
@@ -584,10 +615,12 @@ ops_recover_global()
     ops_publication_recover || { OPS_RECOVERY_RESULT=publication_unconfirmed; return 2; }
     # Absence of an executor is not proof that a protected domain commit can
     # be discarded. Route/updater/Xray state stays under its original owner.
-    cancelability="$(jq -r -L "$OPS_APP/lib" 'include "operation-public"; if route_protected then "protected" else .cancelability end' "$OPS_CURRENT/state.json")"
-    if ! ops_executor_pending && ! jq -e '.state=="starting" and .acknowledged==false' "$OPS_CURRENT/state.json" >/dev/null; then
+    cancelability="$(jq -r -L "${OPS_CODE:-$OPS_APP}/lib" 'include "operation-public"; if route_protected then "protected" else .cancelability end' "$OPS_CURRENT/state.json")"
+    if ops_platform_is_preflight; then
+        ops_platform_recover_prepared || { OPS_RECOVERY_RESULT=protected_recovery; return 2; }
+    elif ! ops_executor_pending && ! jq -e '.state=="starting" and .acknowledged==false' "$OPS_CURRENT/state.json" >/dev/null; then
         if [ "$cancelability" != cooperative ]; then
-            ops_route_recover || ops_interface_recover || { OPS_RECOVERY_RESULT=protected_recovery; return 2; }
+            ops_route_recover || ops_interface_recover || ops_platform_recover_prepared || { OPS_RECOVERY_RESULT=protected_recovery; return 2; }
         else
             ops_pending_domain && { OPS_RECOVERY_RESULT=domain_pending; return 2; }
         fi
@@ -604,15 +637,21 @@ ops_begin()
     local scope action bundle source pid cancelability owner nonce id dir final_dir record state rc fence launch file count
     scope="$1"; action="$2"; bundle="$3"; source="$4"; pid="$5"; cancelability="$6"
     launch="$7"; ops_nonce_valid "$launch" || ops_error INVALID_LAUNCH_NONCE 1
+    if [ "$action" = system:platform-preflight ]; then
+        [ "$verb" = platform-preflight-begin ] &&
+        [ "$scope:$bundle:$source" = system:updater-platform:UPDATER ] &&
+        ops_platform_sha_valid "$OPS_PREFLIGHT_EXPECTED_SHA" || ops_error INVALID_PLATFORM_CONTEXT 1
+        cancelability=protected
+    fi
     case "$scope" in routes|system) ;; *) ops_error INVALID_SCOPE 1 ;; esac
-    case "$action" in auto-switch|subscriptions:*|servers:*|xray:*|keenetic:*|dot:*|custom:*|preflight:*|check|download|build-export|verify|plan|export|delete|resume) ;; *) ops_error INVALID_ACTION 1 ;; esac
+    case "$action" in system:platform-preflight|auto-switch|subscriptions:*|servers:*|xray:*|keenetic:*|dot:*|custom:*|preflight:*|check|download|build-export|verify|plan|export|delete|resume) ;; *) ops_error INVALID_ACTION 1 ;; esac
     case "$action:$bundle" in *[!A-Za-z0-9._:-]*) ops_error INVALID_ACTION 1 ;; esac
     [ "${#action}" -le 64 ] && [ "${#bundle}" -le 64 ] || ops_error INVALID_ACTION 1
     case "$source" in USER|SCHEDULER|SUBSCRIPTION_AUTO|SERVER_CHECK_AUTO|AUTO_SWITCH|UPDATER|SYSTEM_RECOVERY) ;; *) ops_error INVALID_SOURCE 1 ;; esac
     case "$cancelability" in cooperative|protected) ;; *) ops_error INVALID_CANCEL_MODE 1 ;; esac
     # Route work is protected for its entire lifetime, including preparation.
     # Enforce centrally even when an older caller asks for cooperative mode.
-    cancelability="$(jq -nr -L "$OPS_APP/lib" --arg scope "$scope" --arg action "$action" --arg mode "$cancelability" \
+    cancelability="$(jq -nr -L "${OPS_CODE:-$OPS_APP}/lib" --arg scope "$scope" --arg action "$action" --arg mode "$cancelability" \
       'include "operation-public"; {scope:$scope,operation:$action} | if route_protected then "protected" else $mode end')" || ops_error STATE_UNAVAILABLE 1
     ops_prune || ops_error STATE_UNAVAILABLE 1
     ops_prune_launch_stages
@@ -629,6 +668,10 @@ ops_begin()
         jq -e --arg scope "$scope" --arg action "$action" --arg bundle "$bundle" --arg source "$source" --arg mode "$cancelability" \
           '.scope==$scope and .operation==$action and .bundleId==$bundle and .source==$source and .initialCancelability==$mode' "$OPS_CURRENT/state.json" >/dev/null || ops_error LAUNCH_MISMATCH
         jq -e '.running==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error OPERATION_FINISHED
+        if [ "$action" = system:platform-preflight ]; then
+            ops_platform_prepared_valid && jq -e --arg sha "$OPS_PREFLIGHT_EXPECTED_SHA" \
+              '.platformPreflight.expectedPlatformManifestSha256==$sha' "$OPS_CURRENT/state.json" >/dev/null || ops_error LAUNCH_MISMATCH
+        fi
         # A launch interrupted before publication has never been admitted.
         if ! ops_global_matches; then
             [ ! -e "$OPS_GLOBAL" ] && [ ! -L "$OPS_GLOBAL" ] || ops_error OPERATION_BUSY
@@ -639,7 +682,7 @@ ops_begin()
         jq -c '{ok:true,operationId,token}' "$OPS_CURRENT/owner.json"
         return 0
     done
-    if [ "$source" != USER ] && [ -e "$OPS_AUTOMATION" ]; then
+    if [ "$source" != USER ] && [ "$action" != system:platform-preflight ] && [ -e "$OPS_AUTOMATION" ]; then
         ops_file_safe "$OPS_AUTOMATION" 4096 || ops_error AUTOMATION_STATE_INVALID
         jq -e '.paused==false' "$OPS_AUTOMATION" >/dev/null 2>&1 || ops_error AUTOMATION_PAUSED
     fi
@@ -658,10 +701,13 @@ ops_begin()
     mkdir "$dir" || ops_error STATE_UNAVAILABLE 1
     ops_launch_test_point directory
     record="$(jq -nc --arg id "$id" --arg token "$nonce" --arg launch "$launch" --argjson owner "$owner" '{schemaVersion:2,operationId:$id,token:$token,launchNonce:$launch,owner:$owner}')" || ops_error STATE_UNAVAILABLE 1
-    state="$(jq -nc --arg id "$id" --arg action "$action" --arg source "$source" --arg scope "$scope" --arg bundle "$bundle" --arg now "$(ops_now)" --arg mono "$(ops_monotonic)" --arg mode "$cancelability" \
+    state="$(jq -nc --arg id "$id" --arg action "$action" --arg source "$source" --arg scope "$scope" --arg bundle "$bundle" --arg now "$(ops_now)" --arg mono "$(ops_monotonic)" --arg mode "$cancelability" --arg platformSha "$OPS_PREFLIGHT_EXPECTED_SHA" --argjson serviceStop "$OPS_PREFLIGHT_SERVICE_STOP" \
       '{schemaVersion:2,kind:"background",operationId:$id,operation:$action,type:$action,source:$source,scope:$scope,bundleId:$bundle,
         state:"starting",phase:"starting",running:true,revision:1,resourceLocks:["global"],cancelRequested:false,cancelability:$mode,initialCancelability:$mode,acknowledged:false,
-        startedAt:$now,updatedAt:$now,startedMonotonic:$mono,finishedAt:null,errorCode:null}')" || ops_error STATE_UNAVAILABLE 1
+        startedAt:$now,updatedAt:$now,startedMonotonic:$mono,finishedAt:null,errorCode:null} +
+       (if $platformSha=="" then {} else {platformPreflight:{schemaVersion:1,contract:"broray-platform-preflight/1",
+         expectedPlatformManifestSha256:$platformSha,phase:"PREPARED",mutationStarted:false}} end) +
+       (if $serviceStop==null then {} else {serviceStop:$serviceStop} end)' )" || ops_error STATE_UNAVAILABLE 1
     ops_write "$dir/owner.json" "$record" || ops_error STATE_UNAVAILABLE 1
     ops_launch_test_point owner
     ops_write "$dir/state.json" "$state" || ops_error STATE_UNAVAILABLE 1
@@ -692,7 +738,7 @@ ops_begin()
 
 ops_prune()
 {
-    local file dir id count owner
+    local file dir id count owner evidence
     count=0
     # Keep the latest twenty terminal records. Never remove a live/ambiguous
     # owner, a fence, an unreadable state or a child whose absence is unproven.
@@ -700,6 +746,13 @@ ops_prune()
         [ -e "$file" ] || continue
         ops_file_safe "$file" || continue
         jq -e '.kind=="background" and .running==false and (.state=="completed" or .state=="failed" or .state=="aborted" or .state=="recovered")' "$file" >/dev/null 2>&1 || continue
+        # Platform history retains authenticated code and generation bindings.
+        # A terminal operation owner does not prove that these can be deleted.
+        jq -e 'has("platformPreflight") or .operation=="system:platform-preflight"' "$file" >/dev/null 2>&1 && continue
+        dir="${file%/state.json}"
+        for evidence in "$dir"/platform-*; do
+            [ ! -e "$evidence" ] && [ ! -L "$evidence" ] || continue 2
+        done
         count=$((count+1)); [ "$count" -gt 20 ] || continue
         dir="${file%/state.json}"; id="${dir##*/}"
         ops_load "$id" || continue
@@ -716,6 +769,7 @@ ops_prune()
 ops_ack()
 {
     ops_authorize "$1" "$2"; ops_owner_authorize "$3"
+    ops_platform_finish_ready || ops_error DOMAIN_OPERATION_BUSY
     ops_global_matches || ops_error OWNER_CHANGED
     if jq -e '.acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null; then
         printf '%s\n' '{"ok":true,"acknowledged":true}'; return 0
@@ -774,7 +828,7 @@ ops_initialize_previous_boot()
     [ "$OPS_OWNER_STATUS:$OPS_OWNER_REASON" = STALE:previous_boot ] || return 0
     # Protected domain commits still require their explicit consistency path.
     # This is the same safe cooperative recovery used by the next begin call.
-    jq -e -L "$OPS_APP/lib" 'include "operation-public";
+    jq -e -L "${OPS_CODE:-$OPS_APP}/lib" 'include "operation-public";
       (route_protected|not) and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null || return 0
     ops_recover_global || return 0
 }
@@ -783,7 +837,7 @@ ops_cancel()
 {
     ops_load "$1" || ops_error STATE_UNAVAILABLE 1
     jq -e '.running==true' "$OPS_CURRENT/state.json" >/dev/null 2>&1 || { printf '%s\n' '{"ok":true,"alreadyFinished":true}'; return 0; }
-    jq -e -L "$OPS_APP/lib" 'include "operation-public"; (route_protected|not) and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null 2>&1 || ops_error CANCEL_NOT_SUPPORTED
+    jq -e -L "${OPS_CODE:-$OPS_APP}/lib" 'include "operation-public"; (route_protected|not) and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null 2>&1 || ops_error CANCEL_NOT_SUPPORTED
     if ops_file_safe "$OPS_CURRENT/cancel.json" 4096 && jq -e '.cancelRequested==true' "$OPS_CURRENT/cancel.json" >/dev/null; then
         printf '%s\n' '{"ok":true,"cancelRequested":true}'; return 0
     fi
@@ -805,7 +859,7 @@ ops_stop_background()
         dir="${file%/state.json}"; id="${dir##*/}"
         rc=0; result="$(ops_cancel "$id")" || rc=$?
         # The same projection as status prevents untrusted identifiers escaping.
-        results="$(jq -nc -L "$OPS_APP/lib" --argjson rows "$results" --arg id "$id" --argjson result "$result" --argjson rc "$rc" \
+        results="$(jq -nc -L "${OPS_CODE:-$OPS_APP}/lib" --argjson rows "$results" --arg id "$id" --argjson result "$result" --argjson rc "$rc" \
           'include "operation-public"; $rows+[{operationId:($id|operation_id),cancelRequested:($result.cancelRequested==true),protected:($result.errorCode=="CANCEL_NOT_SUPPORTED"),ok:($rc==0)}]')" || ops_error STATE_UNAVAILABLE 1
     done
     jq -nc --argjson results "$results" '{ok:true,automationPaused:true,operations:$results}'
@@ -847,7 +901,7 @@ ops_emergency_recover()
     case "$OPS_RECOVERY_RESULT" in ACTIVE|children_unconfirmed)
         # A bounded UI recheck is useful only for a cancellable operation.
         if [ -n "${OPS_CURRENT:-}" ] && ops_file_safe "$OPS_CURRENT/state.json" &&
-           jq -e -L "$OPS_APP/lib" 'include "operation-public"; (route_protected|not) and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null 2>&1; then
+           jq -e -L "${OPS_CODE:-$OPS_APP}/lib" 'include "operation-public"; (route_protected|not) and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null 2>&1; then
             retryable=true
         fi ;;
     esac
@@ -872,7 +926,7 @@ ops_status()
         cancelled=false
         [ ! -f "$dir/cancel.json" ] || [ -L "$dir/cancel.json" ] || cancelled=true
         if ops_id_valid "$id" && ops_dir_safe "$dir" && ops_file_safe "$file" &&
-          item="$(jq -ec -L "$OPS_APP/lib" --arg id "$id" --argjson cancelled "$cancelled" '
+          item="$(jq -ec -L "${OPS_CODE:-$OPS_APP}/lib" --arg id "$id" --argjson cancelled "$cancelled" '
             include "operation-public";
             select(type=="object" and .schemaVersion==2 and .kind=="background" and .operationId==$id and
               .running==false and .phase=="finished" and (.resourceLocks|type)=="array" and
@@ -886,7 +940,7 @@ ops_status()
         if ! ops_load "$id"; then errors='["STATE_UNAVAILABLE"]'; continue; fi
         owner="$(jq -c '.owner' "$OPS_EXECUTOR")"
         broray_ops_classify_owner "$owner"; status="$OPS_OWNER_STATUS"
-        item="$(jq -c -L "$OPS_APP/lib" --arg owner "$status" --arg reason "$OPS_OWNER_REASON" \
+        item="$(jq -c -L "${OPS_CODE:-$OPS_APP}/lib" --arg owner "$status" --arg reason "$OPS_OWNER_REASON" \
           'include "operation-public"; .ownerStatus=$owner | .ownerReason=$reason | operation_public' "$file")" || return 1
         if ops_executor_pending; then item="$(printf '%s\n' "$item" | jq -c '.phase="waiting"')" || return 1; fi
         if [ -f "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ]; then
@@ -916,7 +970,7 @@ ops_status()
 
 for directory in "$OPS_STATE" "$OPS_ROOT"; do
     [ ! -L "$directory" ] || ops_error UNSAFE_STATE 1
-    case "${1:-}" in status|events|report|classify) ;; *) mkdir -p "$directory" || ops_error STATE_UNAVAILABLE 1 ;; esac
+    case "${1:-}" in status|events|report|classify|platform-preflight-boot-context|platform-preflight-install-context) ;; *) mkdir -p "$directory" || ops_error STATE_UNAVAILABLE 1 ;; esac
     ops_dir_safe "$directory" || ops_error UNSAFE_STATE 1
 done
 verb="${1:-}"; [ "$#" -gt 0 ] && shift
@@ -927,6 +981,8 @@ case "$verb" in
         [ "$#" = 0 ] || ops_error INVALID_REQUEST 1
         ops_initialize_previous_boot
         printf '%s\n' '{"ok":true}' ;;
+    platform-preflight-begin) ops_platform_admission_request "$@" ;;
+    platform-service-stop) ops_platform_service_stop "$@" ;;
     begin) [ "$#" = 7 ] || ops_error INVALID_REQUEST 1; ops_begin "$@" ;;
     ack) [ "$#" = 3 ] || ops_error INVALID_REQUEST 1; ops_ack "$@" ;;
     owner-check)
@@ -935,7 +991,27 @@ case "$verb" in
         ops_global_matches || ops_error OWNER_CHANGED
         jq -e '.acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error NOT_ACKNOWLEDGED
         printf '%s\n' '{"ok":true}' ;;
-    publish-json) [ "$#" = 8 ] || ops_error INVALID_REQUEST 1; ops_publish_json "$@" ;;
+    publish-json)
+        [ "$#" = 8 ] || ops_error INVALID_REQUEST 1
+        ops_load "$1" || ops_error STATE_UNAVAILABLE 1
+        ops_platform_is_preflight && ops_error PLATFORM_MUTATION_NOT_IMPLEMENTED
+        ops_publish_json "$@" ;;
+    updater-stop-supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" service ;;
+    platform-preflight-stop-target) ops_platform_service_stop_target "$@" ;;
+    platform-preflight-stop-authorize) ops_platform_service_authorize_stop "$@" ;;
+    platform-preflight-service-stopped) ops_platform_service_stopped "$@" ;;
+    platform-preflight-service-bind) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_platform_service_bind "$@" ;;
+    platform-preflight-migration-stage) ops_platform_migration_stage "$@" ;;
+    platform-preflight-bootguard-stage) ops_platform_bootguard_stage "$@" ;;
+    platform-preflight-boot-context) ops_platform_boot_context "$@" ;;
+    platform-preflight-install-context) ops_platform_install_context "$@" ;;
+    platform-preflight-complete-context) ops_platform_context complete "$@" ;;
+    platform-preflight-complete) ops_platform_complete "$@" ;;
+    platform-preflight-stop-generation) ops_platform_generation_stop "$@" ;;
+    platform-preflight-stop-complete) ops_platform_generation_stop_complete guard "$@" ;;
+    platform-preflight-stop-settle) ops_platform_generation_stop_complete settle "$@" ;;
+    platform-preflight-stop-intent) ops_platform_stop_intent "$@" ;;
+    platform-supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" platform ;;
     supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" ;;
     route-supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" true ;;
     interface-supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" interface ;;
@@ -956,6 +1032,7 @@ case "$verb" in
         case "$3" in completed|failed|aborted) ;; *) ops_error INVALID_STATE 1 ;; esac
         case "$4" in ''|CANCELLED|OPERATION_FAILED) ;; *) ops_error INVALID_ERROR_CODE 1 ;; esac
         ops_children_absent || ops_error CHILDREN_UNCONFIRMED
+        ops_platform_finish_ready || ops_error DOMAIN_OPERATION_BUSY
         ops_route_finish_ready || ops_error DOMAIN_OPERATION_BUSY
         if jq -e '.running==false' "$OPS_CURRENT/state.json" >/dev/null; then
             if ops_global_matches; then ops_retire_global || ops_error STATE_UNAVAILABLE 1; fi
@@ -969,6 +1046,7 @@ case "$verb" in
         [ "$#" = 3 ] || ops_error INVALID_REQUEST 1
         ops_authorize "$1" "$2"
         ops_publication_ready || ops_error PUBLICATION_UNCONFIRMED 75
+        ops_platform_is_preflight && ops_error PLATFORM_MUTATION_NOT_IMPLEMENTED
         case "$3" in working|checking|fetching|parsing|committing|switching|waiting) ;; *) ops_error INVALID_PHASE 1 ;; esac
         ops_global_matches || ops_error OWNER_CHANGED
         jq -e '.acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error NOT_ACKNOWLEDGED
@@ -978,7 +1056,7 @@ case "$verb" in
         esac
         case "$3" in committing|switching) ops_children_absent || ops_error CHILDREN_UNCONFIRMED ;; esac
         if [ "$(jq -r '.phase' "$OPS_CURRENT/state.json")" != "$3" ]; then
-            mode="$(jq -r -L "$OPS_APP/lib" 'include "operation-public"; if route_protected then "protected" else .initialCancelability end' "$OPS_CURRENT/state.json")"
+            mode="$(jq -r -L "${OPS_CODE:-$OPS_APP}/lib" 'include "operation-public"; if route_protected then "protected" else .initialCancelability end' "$OPS_CURRENT/state.json")"
             case "$3" in committing|switching) mode=protected ;; esac
             ops_state_transition running "$3" '' "$mode" || ops_error STATE_UNAVAILABLE 1
             ops_event phase_changed >/dev/null 2>&1 || true

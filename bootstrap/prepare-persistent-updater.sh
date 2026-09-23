@@ -3,7 +3,12 @@
 # release metadata, not from recomputing hashes of an untrusted download.
 # Run after archive authentication/safe extraction, before request update/reinstall.
 set -u
-[ "$#" -eq 3 ] || { echo 'usage: prepare-persistent-updater.sh SLOT RUNTIME_MANIFEST_SHA256 PLATFORM_MANIFEST_SHA256' >&2; exit 2; }
+[ "$#" -eq 3 ] || [ "$#" -eq 4 ] || { echo 'usage: prepare-persistent-updater.sh SLOT RUNTIME_MANIFEST_SHA256 PLATFORM_MANIFEST_SHA256' >&2; exit 2; }
+mode=preflight
+if [ "$#" = 4 ]; then
+    [ "$4" = --admission-only ] || exit 2
+    mode=preflight-admission
+fi
 slot="$1"
 expected_runtime="$2"
 expected_platform="$3"
@@ -25,7 +30,23 @@ for relative in app/lib/universal-platform-handoff.sh app/lib/routes-api-operati
     [ "$(awk -v path="$relative" '$2==path {n++} END {print n+0}' "$slot/SHA256SUMS")" = 1 ] || exit 1
 done
 [ -x "$handoff" ] && [ -f "$lock_library" ] || exit 1
+# Both entries execute the canonical coordinator closure. Correct bytes that
+# are absent from the authenticated manifest are still untrusted input.
+for name in operation-client.sh operation-coordinator.sh operation-owner.sh operation-journal.sh \
+  operation-report.sh operation-report-facts.sh operation-publication.sh operation-route-recovery.sh \
+  operation-platform-recovery.sh operation-platform-service.sh operation-platform-generation.sh \
+  operation-platform-bootguard.sh operation-public.jq operation-report-public.jq; do
+    [ "$(awk -v path="app/lib/$name" '$2==path {n++} END {print n+0}' "$slot/SHA256SUMS")" = 1 ] || exit 1
+done
+[ "$(awk '$2=="app/bin/broray-ops-guard" {n++} END {print n+0}' "$slot/SHA256SUMS")" = 1 ] || exit 1
+[ -x "$slot/app/bin/broray-ops-guard" ] || exit 1
+if [ "$mode" = preflight ]; then
+    [ "$(awk '$2=="app/bin/broray-updater-generation" {n++} END {print n+0}' "$slot/SHA256SUMS")" = 1 ] || exit 1
+    [ -x "$slot/app/bin/broray-updater-generation" ] || exit 1
+fi
+
+BRORAY_OPS_CODE_ROOT="$slot/app" \
 BRORAY_HANDOFF_SELF="$handoff" \
 BRORAY_HANDOFF_PREFLIGHT_LOCK_LIBRARY="$lock_library" \
 BRORAY_HANDOFF_PAYLOAD_ROOT="$slot/app/share/updater-platform" \
-    "${BRORAY_HANDOFF_ASH:-/opt/bin/ash}" "$handoff" preflight "$expected_platform"
+    "${BRORAY_HANDOFF_ASH:-/opt/bin/ash}" "$handoff" "$mode" "$expected_platform"

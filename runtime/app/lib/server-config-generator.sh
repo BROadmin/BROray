@@ -56,7 +56,9 @@ broray_generate_server_config()
                         "chrome"
                     ),
                 alpn:
-                    ($s.tls.alpn // [])
+                    ($s.tls.alpn // []),
+                pinnedPeerCertSha256:
+                    ($s.tls.pinnedPeerCertSha256 // "")
             }
             | compact_object;
 

@@ -49,8 +49,8 @@ broray_parse_trojan()
         broray_die "Trojan не содержит пароль"
 
     BRORAY_PASSWORD="$(
-        broray_url_decode "$BRORAY_PASSWORD"
-    )"
+        broray_uri_component_decode "$BRORAY_PASSWORD"
+    )" || broray_die "неправильное кодирование URI Trojan"
 
     BRORAY_ADDRESS="${hostport%:*}"
     BRORAY_PORT="${hostport##*:}"
@@ -64,63 +64,63 @@ broray_parse_trojan()
     BRORAY_PROTOCOL="trojan"
 
     BRORAY_NETWORK="$(
-        broray_url_decode \
+        broray_uri_component_decode \
             "$(broray_query_value type "$query")"
-    )"
+    )" || broray_die "неправильное кодирование URI Trojan"
 
     BRORAY_SECURITY="$(
-        broray_url_decode \
+        broray_uri_component_decode \
             "$(broray_query_value security "$query")"
-    )"
+    )" || broray_die "неправильное кодирование URI Trojan"
 
     BRORAY_SNI="$(
-        broray_url_decode \
+        broray_uri_component_decode \
             "$(broray_query_value sni "$query")"
-    )"
+    )" || broray_die "неправильное кодирование URI Trojan"
 
     BRORAY_FP="$(
-        broray_url_decode \
+        broray_uri_component_decode \
             "$(broray_query_value fp "$query")"
-    )"
+    )" || broray_die "неправильное кодирование URI Trojan"
 
     BRORAY_HOST="$(
-        broray_url_decode \
+        broray_uri_component_decode \
             "$(broray_query_value authority "$query")"
-    )"
+    )" || broray_die "неправильное кодирование URI Trojan"
 
     [ -n "$BRORAY_HOST" ] || {
         BRORAY_HOST="$(
-            broray_url_decode \
+            broray_uri_component_decode \
                 "$(broray_query_value host "$query")"
-        )"
+        )" || broray_die "неправильное кодирование URI Trojan"
     }
 
     BRORAY_SERVICE_NAME="$(
-        broray_url_decode \
+        broray_uri_component_decode \
             "$(broray_query_value serviceName "$query")"
-    )"
+    )" || broray_die "неправильное кодирование URI Trojan"
 
     [ -n "$BRORAY_SERVICE_NAME" ] || {
         BRORAY_SERVICE_NAME="$(
-            broray_url_decode \
+            broray_uri_component_decode \
                 "$(broray_query_value service_name "$query")"
-        )"
+        )" || broray_die "неправильное кодирование URI Trojan"
     }
 
     BRORAY_MODE="$(
-        broray_url_decode \
+        broray_uri_component_decode \
             "$(broray_query_value mode "$query")"
-    )"
+    )" || broray_die "неправильное кодирование URI Trojan"
 
     BRORAY_PATH="$(
-        broray_url_decode \
+        broray_uri_component_decode \
             "$(broray_query_value path "$query")"
-    )"
+    )" || broray_die "неправильное кодирование URI Trojan"
 
     alpn_text="$(
-        broray_url_decode \
+        broray_uri_component_decode \
             "$(broray_query_value alpn "$query")"
-    )"
+    )" || broray_die "неправильное кодирование URI Trojan"
 
     if [ -n "$alpn_text" ]; then
         BRORAY_ALPN="$(
@@ -140,13 +140,13 @@ broray_parse_trojan()
     fi
 
     allow_insecure="$(
-        broray_url_decode \
+        broray_uri_component_decode \
             "$(broray_query_value allowInsecure "$query")"
-    )"
+    )" || broray_die "неправильное кодирование URI Trojan"
 
     case "$allow_insecure" in
         1|true|TRUE|yes|YES)
-            BRORAY_ALLOW_INSECURE="true"
+            broray_die "неподдерживаемая настройка TLS allowInsecure"
             ;;
         *)
             BRORAY_ALLOW_INSECURE="false"
@@ -154,8 +154,8 @@ broray_parse_trojan()
     esac
 
     BRORAY_NAME="$(
-        broray_url_decode "$fragment"
-    )"
+        broray_uri_component_decode "$fragment"
+    )" || broray_die "неправильное кодирование URI Trojan"
 
     [ -n "$BRORAY_NETWORK" ] ||
         BRORAY_NETWORK="raw"
@@ -200,8 +200,30 @@ broray_parse_trojan()
     [ -n "$BRORAY_FP" ] ||
         BRORAY_FP="chrome"
 
-    [ -n "$BRORAY_MODE" ] ||
-        BRORAY_MODE="gun"
+    case "$BRORAY_NETWORK" in
+        grpc)
+            [ -n "$BRORAY_MODE" ] || BRORAY_MODE=gun
+            case "$BRORAY_MODE" in gun|multi) ;; *) broray_die "неподдерживаемый режим Trojan gRPC" ;; esac
+            ;;
+        xhttp)
+            [ -n "$BRORAY_MODE" ] || BRORAY_MODE=auto
+            case "$BRORAY_MODE" in auto|packet-up|stream-up|stream-one) ;; *) broray_die "неподдерживаемый режим Trojan XHTTP" ;; esac
+            ;;
+    esac
+
+    BRORAY_EXTRA="$(broray_uri_query_value extra "$query")" || broray_die "неправильный параметр Trojan extra"
+    local extra_query extra_item extra_key
+    extra_query="$query"
+    while [ -n "$extra_query" ]; do
+        extra_item="${extra_query%%&*}"
+        case "$extra_query" in *'&'*) extra_query="${extra_query#*&}" ;; *) extra_query="" ;; esac
+        extra_key="$(broray_uri_component_decode "${extra_item%%=*}")" || broray_die "неправильный параметр Trojan extra"
+        [ "$extra_key" != extra ] || [ "$BRORAY_NETWORK" = xhttp ] ||
+            broray_die "Trojan extra поддерживается только для XHTTP"
+    done
+    [ -n "$BRORAY_EXTRA" ] || BRORAY_EXTRA='{}'
+    printf '%s' "$BRORAY_EXTRA" | jq -e 'type == "object"' >/dev/null 2>&1 ||
+        broray_die "Trojan extra должен быть JSON object"
 
     [ -n "$BRORAY_PATH" ] ||
         BRORAY_PATH="/"

@@ -176,7 +176,7 @@ def outbound_uris($profile;$index;$multiple):
   require(keys_only(["id","encryption","flow"])) | require(.id|unreserved) |
   string_field(.;"encryption";"none") as $encryption | require($encryption=="none") |
   string_field(.;"flow";"") as $flow |
-  require($flow=="" or ($flow=="xtls-rprx-vision" and ($stream|network)=="tcp" and $stream.security=="reality")) |
+  require($flow=="" or ($flow=="xtls-rprx-vision" and ($stream|network)=="tcp" and ($stream.security=="reality" or $stream.security=="tls"))) |
   "vless://"+.id+"@"+$address+":"+($endpoint.port|tostring)+"?"+
     (($transport+$protection+[pair("encryption";$encryption),pair("flow";$flow)])|join("&"))+"#"+($name|@uri);
 

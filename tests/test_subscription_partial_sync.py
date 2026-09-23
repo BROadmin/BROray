@@ -2,6 +2,7 @@
 import hashlib,json,os,shutil,subprocess,tempfile,unittest
 from pathlib import Path
 ROOT=Path(os.environ.get('BRORAY_TEST_ROOT',Path(__file__).resolve().parents[1]))
+CORE_RESULTS=[]
 def node(key, *, id=None, sub='test', password='uuid-old'):
  return {'schemaVersion':2,'id':id or 'subscription-'+sub+'-'+key,'name':'QA '+key,'uri':'vless://synthetic-'+key,'source':{'type':'subscription','subscriptionId':sub,'importKey':hashlib.sha256(key.encode()).hexdigest(),'nodeIndex':1,'updatedAt':'old'},'protocol':'vless','address':key+'.example.invalid','port':443,'uuid':password,'flow':None,'network':'raw','security':'tls'}
 class Sync(unittest.TestCase):
@@ -22,6 +23,15 @@ broray_job_checkpoint() { return 0; }
 broray_xray_test_file() { printf test >> "$BRORAY_ROOT/unexpected-live-hook"; return 1; }
 broray_xray_apply_server() { printf apply >> "$BRORAY_ROOT/unexpected-live-hook"; return 1; }
 broray_interface_sync_description() { printf interface >> "$BRORAY_ROOT/unexpected-live-hook"; return 1; }
+if [ "${QA_ACTIVE_ROTATION:-0}" = 1 ]; then
+ broray_xray_test_file() {
+  "$BRORAY_TEST_XRAY" run -test -config "$1" > "$BRORAY_ROOT/xray-config-test.log" 2>&1
+  rc=$?
+  jq -nc --argjson returncode "$rc" --arg configurationSha256 "$(sha256sum "$1" | awk '{print $1}')" '{returncode:$returncode,configurationSha256:$configurationSha256}' >> "$BRORAY_ROOT/xray-config-tests.jsonl"
+  return "$rc"
+ }
+ broray_xray_apply_server() { printf '%s' "$1" > "$BRORAY_ROOT/applied-id"; return 0; }
+fi
 if [ "${QA_FAIL_COMMIT:-0}" = 1 ]; then
  cp() { case "$2" in "$BRORAY_ROOT/servers/".*.new.*)
    if [ "${QA_FAIL_SECOND:-0}" = 1 ] && [ ! -f "$BRORAY_ROOT/fault-first-written" ]; then
@@ -33,7 +43,10 @@ BRORAY_ACTIVE_SERVER_FILE="$BRORAY_ROOT/active"
 broray_server_subscription_sync test "$BRORAY_ROOT/stage" "$1" qa-update "$2"
 '''
   p=subprocess.run(['/bin/ash','-c',script,'qa',str(enabled).lower(),policy],env=self.env,capture_output=True,timeout=30)
-  if ok:self.assertEqual(p.returncode,0,p.stderr.decode(errors='replace'));return json.loads(p.stdout)
+  core=self.app/'xray-config-tests.jsonl'
+  if core.exists():
+   CORE_RESULTS.extend(dict(json.loads(line),case=self.id(),output=(self.app/'xray-config-test.log').read_text()) for line in core.read_text().splitlines());core.unlink()
+  if ok:self.assertEqual(p.returncode,0,p.stderr.decode(errors='replace')+((self.app/'xray-config-test.log').read_text() if (self.app/'xray-config-test.log').exists() else ''));return json.loads(p.stdout)
   self.assertNotEqual(p.returncode,0,p.stdout);self.assertEqual(p.stdout,b'');return p.stderr.decode(errors='replace')
  def test_regression_preserve_missing_in_partial(self):
   old=self.store(node('old'));before=old.read_bytes();self.store(node('new'),'stage');r=self.sync();self.assertTrue(old.exists());self.assertEqual(old.read_bytes(),before);self.assertEqual(r['retained'],1);self.assertEqual(r['removed'],0)
@@ -94,6 +107,34 @@ broray_server_subscription_sync test "$BRORAY_ROOT/stage" "$1" qa-update "$2"
   self.store(node('old'));self.store(node('new'),'stage');self.sync();self.assertFalse(list((self.app/'tmp').glob('server-subscription-sync.*')))
  def test_second_commit_failure_restores_already_changed_node(self):
   n=node('a');self.store(n);self.store(node('b'));before=self.catalog();n['uuid']='uuid-new';self.store(n,'stage');self.store(node('z'),'stage');self.env.update(QA_FAIL_COMMIT='1',QA_FAIL_SECOND='1');self.sync(ok=False);self.assertTrue((self.app/'fault-first-written').exists());self.assertEqual(before,self.catalog());self.assertFalse(list((self.app/'tmp').glob('server-subscription-sync.*')))
+ def test_credential_rotation_preserves_id(self):
+  old=node('same',id='stable-old',password='credential-A');self.store(old)
+  new=node('same',id='provisional-new',password='credential-B');self.store(new,'stage')
+  r=self.sync('replace');rows=[json.loads(p.read_bytes()) for p in (self.app/'servers').glob('*.json')]
+  self.assertEqual(len(rows),1);self.assertEqual(rows[0]['id'],'stable-old');self.assertEqual(rows[0]['uuid'],'credential-B');self.assertEqual(r['updated'],1)
+ def test_exact_old_plus_credential_variant(self):
+  self.store(node('same',id='stable-old',password='credential-A'))
+  self.store(node('same',id='provisional-exact',password='credential-A'),'stage')
+  self.store(node('same',id='provisional-new',password='credential-B'),'stage')
+  r=self.sync('replace');rows={json.loads(p.read_bytes())['uuid']:json.loads(p.read_bytes())['id'] for p in (self.app/'servers').glob('*.json')}
+  self.assertEqual(rows,{'credential-A':'stable-old','credential-B':'provisional-new'})
+  self.assertEqual((r['added'],r['removed']),(1,0))
+ def test_ambiguous_rotation_preserves_catalog_and_active(self):
+  self.store(node('same',id='stable-old',password='credential-A'));(self.app/'active').write_bytes(b'stable-old\n')
+  self.store(node('same',id='candidate-b',password='credential-B'),'stage');self.store(node('same',id='candidate-c',password='credential-C'),'stage')
+  before=self.catalog();error=self.sync('replace',ok=False)
+  self.assertIn('SERVER_SYNC_AMBIGUOUS_IDENTITY',error);self.assertEqual(self.catalog(),before)
+  self.assertEqual((self.app/'active').read_bytes(),b'stable-old\n');self.assertFalse((self.app/'unexpected-live-hook').exists())
+ def test_active_rotation_uses_remapped_file(self):
+  old=node('same',id='stable-active',password='credential-A');self.store(old);(self.app/'active').write_bytes(b'stable-active\n')
+  self.store(node('same',id='provisional-new',password='credential-B'),'stage')
+  (self.app/'config/system/settings.json').write_text(json.dumps({'listenAddress':'127.0.0.1','socksPort':2080,'logLevel':'warning'}))
+  (self.app/'logs').mkdir()
+  self.env['QA_ACTIVE_ROTATION']='1'
+  r=self.sync('replace')
+  self.assertEqual((self.app/'applied-id').read_text(),'stable-active');self.assertEqual((self.app/'active').read_bytes(),b'stable-active\n')
+  self.assertEqual(json.loads((self.app/'servers/stable-active.json').read_bytes())['uuid'],'credential-B')
+  self.assertEqual(r['activeServerImpact'],'configuration-changed');self.assertIn('Configuration OK',(self.app/'xray-config-test.log').read_text())
 if __name__=='__main__':
  assert os.name!='nt', 'Use disposable Linux guest'
  suite=unittest.defaultTestLoader.loadTestsFromTestCase(Sync)

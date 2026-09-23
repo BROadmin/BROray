@@ -1,89 +1,96 @@
 #!/opt/bin/ash
+set -u
 
-ENABLED=yes
-DAEMON=/opt/libexec/broray-updater/broray-updater.sh
-PIDFILE=/opt/var/lib/broray-updater/daemon.pid
-LOGFILE=/opt/var/lib/broray-updater/updater.log
-
-pid_valid()
+# Installed entry uses retained authenticated code; neither PID nor init
+# status may stand in for an exact live generation. No legacy launch fallback.
+fail()
 {
-    pid="$(sed -n '1p' "$PIDFILE" 2>/dev/null || true)"
-    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-    kill -0 "$pid" 2>/dev/null || return 1
-    [ -r "/proc/$pid/cmdline" ] || return 0
-    command_line="$(tr '\000' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
-    case "$command_line" in *broray-updater*daemon*) return 0 ;; esac
-    return 1
+    printf '{"ok":false,"errorCode":"%s","platformReady":false}\n' "$1"
+    exit 75
 }
-
-start()
-{
-    [ "$ENABLED" = yes ] || return 0
-    pid_valid && {
-        printf 'BROray updater уже запущен, PID %s\n' "$(sed -n '1p' "$PIDFILE")"
-        return 0
-    }
-
-    [ -x "$DAEMON" ] || {
-        printf 'Не найден updater: %s\n' "$DAEMON" >&2
-        return 1
-    }
-
-    mkdir -p "${PIDFILE%/*}" || return 1
-    /opt/bin/ash "$DAEMON" daemon >>"$LOGFILE" 2>&1 </dev/null &
-    launched=$!
-
-    wait_round=0
-    while [ "$wait_round" -lt 10 ]
-    do
-        wait_round=$((wait_round + 1))
-        pid_valid && {
-            printf 'BROray updater запущен, PID %s\n' "$(sed -n '1p' "$PIDFILE")"
-            return 0
-        }
-        kill -0 "$launched" 2>/dev/null || break
-        sleep 1
-    done
-
-    printf '%s\n' 'Ошибка запуска BROray updater' >&2
-    return 1
-}
-
-stop()
-{
-    if ! pid_valid; then
-        printf '%s\n' 'BROray updater не запущен'
-        return 0
-    fi
-
-    pid="$(sed -n '1p' "$PIDFILE")"
-    kill "$pid" 2>/dev/null || true
-
-    wait_round=0
-    while kill -0 "$pid" 2>/dev/null && [ "$wait_round" -lt 10 ]
-    do
-        wait_round=$((wait_round + 1))
-        sleep 1
-    done
-
-    kill -0 "$pid" 2>/dev/null && return 1
-    printf '%s\n' 'BROray updater остановлен'
-}
-
-status()
-{
-    if pid_valid; then
-        printf 'BROray updater работает, PID %s\n' "$(sed -n '1p' "$PIDFILE")"
-        return 0
-    fi
-    printf '%s\n' 'BROray updater не запущен'
-    return 1
-}
-
 case "${1:-}" in
-    start) start ;;
-    stop) stop ;;
-    restart) stop && start ;;
-    status) status ;;
+    start) step=recovery-resume ;;
+    status) step=recovery-status ;;
+    stop) step=service-cycle-stop ;;
+    restart) step=service-cycle-restart ;;
     *) printf '%s\n' 'Использование: S22broray-updater {start|stop|restart|status}' >&2; exit 2 ;;
 esac
+
+prefix="${BRORAY_UPDATER_ROOT_PREFIX:-}"
+[ "$prefix" != / ] || prefix=''
+case "$prefix" in ''|/*) ;; *) fail UPDATER_SERVICE_ROOT_INVALID ;; esac
+PATH="$prefix/opt/bin:$prefix/opt/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
+LC_ALL=C
+export PATH LC_ALL
+state="$prefix/opt/var/lib/broray"
+lock="$prefix/opt/var/lock/broray/global-operation.lock"
+operation=''
+if [ -L "$lock" ]; then
+    target="$(readlink "$lock")" || fail UPDATER_SERVICE_FENCE_UNCONFIRMED
+    case "$target" in
+        "$state/operations/"op-*/fence) operation="${target%/fence}"; operation="${operation##*/}" ;;
+        *) fail UPDATER_SERVICE_FENCE_UNCONFIRMED ;;
+    esac
+elif [ -e "$lock" ]; then
+    fail UPDATER_SERVICE_FENCE_UNCONFIRMED
+else
+    for file in "$state/operations"/op-*/state.json; do
+        [ -e "$file" ] || [ -L "$file" ] || continue
+        [ -f "$file" ] && [ ! -L "$file" ] || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+        jq -e . "$file" >/dev/null 2>&1 || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+        jq -e '.operation=="system:platform-preflight" and .state=="completed" and .running==false' "$file" >/dev/null || continue
+        # A completed service stop refers to its retained launch origin; it
+        # is not another installed runtime. The guarded entry verifies its
+        # full binding and terminal proof before returning a repeated reply.
+        if jq -e 'has("serviceStop")' "$file" >/dev/null; then
+            jq -e '.serviceStop.schemaVersion==1 and .serviceStop.contract=="broray-service-stop/1" and
+              (.serviceStop.originOperationId|type=="string" and test("^op-[A-Za-z0-9_-]+$"))' "$file" >/dev/null || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+            continue
+        fi
+        [ -z "$operation" ] || fail UPDATER_SERVICE_IDENTITY_AMBIGUOUS
+        operation="${file%/state.json}"; operation="${operation##*/}"
+    done
+fi
+case "$operation" in op-*) ;; *) fail UPDATER_SERVICE_IDENTITY_UNCONFIRMED ;; esac
+case "$operation" in *[!A-Za-z0-9_-]*) fail UPDATER_SERVICE_IDENTITY_UNCONFIRMED ;; esac
+[ "${#operation}" -le 96 ] || fail UPDATER_SERVICE_IDENTITY_UNCONFIRMED
+if [ "$step" = service-cycle-stop ] || [ "$step" = service-cycle-restart ]; then
+    owner_state="$state/operations/$operation/state.json"
+    [ -f "$owner_state" ] && [ ! -L "$owner_state" ] || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+    if jq -e 'has("serviceStop")' "$owner_state" >/dev/null; then
+        origin="$(jq -er '.serviceStop|select(.schemaVersion==1 and .contract=="broray-service-stop/1")|
+          .originOperationId|select(type=="string" and test("^op-[A-Za-z0-9_-]+$") and length<=96)' "$owner_state")" || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+        [ "$origin" != "$operation" ] || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+        operation="$origin"
+    fi
+fi
+binding="$state/operations/$operation/platform-bootguard.json"
+[ -f "$binding" ] && [ ! -L "$binding" ] || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+jq -e --arg id "$operation" '
+  .schemaVersion==1 and .contract=="broray-platform-bootguard/1" and .operationId==$id and
+  (.nativeSha256|type=="string" and test("^[0-9a-f]{64}$")) and
+  (.migrationIntentSha256|type=="string" and test("^[0-9a-f]{64}$")) and
+  (.stopNonce|type=="string" and test("^[0-9a-f]{32}$"))' "$binding" >/dev/null || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+native_sha="$(jq -er .nativeSha256 "$binding")" || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+migration="$(jq -er .migrationIntentSha256 "$binding")" || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+nonce="$(jq -er .stopNonce "$binding")" || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+# Discovery fields do not choose executable code. Cross-check their exact
+# binding against the independently retained closure before opening runtime.
+recovery_binding="$state/operations/$operation/platform-recovery-code.json"
+[ -f "$recovery_binding" ] && [ ! -L "$recovery_binding" ] || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+guard_sha="$(sha256sum "$binding")" || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+guard_sha="${guard_sha%% *}"
+jq -e --arg id "$operation" --arg native "$native_sha" --arg migration "$migration" \
+  --arg nonce "$nonce" --arg guard "$guard_sha" '
+  .schemaVersion==1 and .contract=="broray-recovery-code/1" and .operationId==$id and
+  .nativeSha256==$native and .migrationIntentSha256==$migration and .stopNonce==$nonce and
+  .bootGuardBindingSha256==$guard' "$recovery_binding" >/dev/null || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+native="$state/operations/$operation/platform-bootguard/runtime"
+[ -f "$native" ] && [ ! -L "$native" ] && [ -x "$native" ] || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
+exec 8<"$native" || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
+identity="$(stat -L -c '%u:%a:%h' /proc/self/fd/8)" || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
+[ "$identity" = "$(id -u):700:1" ] || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
+actual="$(sha256sum <&8)" || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
+[ "${actual%% *}" = "$native_sha" ] || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
+# Execute the same opened native inode that was hashed, not a fresh path lookup.
+exec /proc/self/fd/8 "$step" "${prefix:-/}" "$operation" "$migration" "$nonce"

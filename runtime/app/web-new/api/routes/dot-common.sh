@@ -8,7 +8,6 @@ BRORAY_ROOT="${BRORAY_ROOT:-/opt/broray}"
 BRORAY_DOT_CLI="${BRORAY_DOT_CLI:-$BRORAY_ROOT/bin/broray-routes-dot}"
 BRORAY_DOT_API_LOCK_LIBRARY="${BRORAY_DOT_API_LOCK_LIBRARY:-$BRORAY_ROOT/lib/routes-api-operation.sh}"
 BRORAY_DOT_BODY_LIMIT=65536
-BRORAY_DOT_API_CHILD_PID=''
 BRORAY_DOT_API_REQUEST_FILE=''
 BRORAY_DOT_API_OUTPUT_FILE=''
 BRORAY_DOT_API_ERROR_FILE=''
@@ -26,17 +25,6 @@ broray_dot_api_release()
 
 broray_dot_api_cleanup()
 {
-    cleanup_pid="$BRORAY_DOT_API_CHILD_PID"
-    BRORAY_DOT_API_CHILD_PID=''
-    case "$cleanup_pid" in
-        ''|*[!0-9]*) ;;
-        *)
-            if kill -0 "$cleanup_pid" 2>/dev/null; then
-                kill -TERM "$cleanup_pid" 2>/dev/null || true
-            fi
-            wait "$cleanup_pid" 2>/dev/null || true
-            ;;
-    esac
     [ -z "$BRORAY_DOT_API_REQUEST_FILE" ] || rm -f "$BRORAY_DOT_API_REQUEST_FILE"
     [ -z "$BRORAY_DOT_API_OUTPUT_FILE" ] || rm -f "$BRORAY_DOT_API_OUTPUT_FILE"
     [ -z "$BRORAY_DOT_API_ERROR_FILE" ] || rm -f "$BRORAY_DOT_API_ERROR_FILE"
@@ -99,11 +87,11 @@ broray_dot_api_run()
     BRORAY_DOT_API_OUTPUT_FILE="$output"
     BRORAY_DOT_API_ERROR_FILE="$error"
     mkdir -p "$BRORAY_ROOT/tmp"
-    BRORAY_DOT_PARENT_LOCK_PID="$$" "$BRORAY_DOT_CLI" "$action" "$@" >"$output" 2>"$error" &
-    BRORAY_DOT_API_CHILD_PID=$!
+    # The protected native job owns the whole command tree. Foreground wait
+    # keeps CGI cleanup from releasing state ahead of a still-running child;
+    # cancellation/signals never select a target from an outer PID variable.
     child_rc=0
-    wait "$BRORAY_DOT_API_CHILD_PID" || child_rc=$?
-    BRORAY_DOT_API_CHILD_PID=''
+    "$BRORAY_DOT_CLI" "$action" "$@" >"$output" 2>"$error" || child_rc=$?
     if [ "$child_rc" -eq 0 ]; then
         jq -e 'type=="object"' "$output" >/dev/null 2>&1 || {
             details="$(tail -n 30 "$output" 2>/dev/null)"

@@ -842,6 +842,18 @@ broray_subscription_decode_base64()
     return 1
 }
 
+broray_subscription_strip_bom()
+{
+    local input output prefix
+    input="$1"; output="$2"
+    prefix="$(head -c 3 "$input" | od -An -tx1 | tr -d ' \n')"
+    if [ "$prefix" = efbbbf ]; then
+        tail -c +4 "$input" > "$output"
+    else
+        cat "$input" > "$output"
+    fi
+}
+
 broray_subscription_extract_nodes()
 {
     extract_input="$1"
@@ -850,8 +862,9 @@ broray_subscription_extract_nodes()
     extract_decoded="$BRORAY_SUB_TMP/subscription-decoded.$$.txt"
     BRORAY_SUB_JSON_IMPORT=false
 
-    tr -d '\r' < "$extract_input" > "$extract_normalized"
-    sed -i '1s/^\xef\xbb\xbf//' "$extract_normalized" 2>/dev/null || true
+    broray_subscription_strip_bom "$extract_input" "$extract_normalized.clean" || return 1
+    tr -d '\r' < "$extract_normalized.clean" > "$extract_normalized" || return 1
+    rm -f "$extract_normalized.clean"
     broray_subscription_metadata_collect body "$extract_normalized" || return 1
     broray_subscription_strip_metadata "$extract_normalized" "$extract_normalized.clean" && mv "$extract_normalized.clean" "$extract_normalized" || return 1
 
@@ -864,23 +877,24 @@ broray_subscription_extract_nodes()
         return 1
     fi
 
-    if grep -Eq '^(vless|vmess|trojan|ss|hysteria2|hy2|tuic|socks|socks5|http|https)://' \
+    if grep -Eq '^[[:space:]]*(vless|vmess|trojan|ss|hysteria2|hy2|tuic|socks|socks5|http|https)://' \
         "$extract_normalized"; then
-        cp "$extract_normalized" "$extract_output"
+        sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$extract_normalized" > "$extract_output" || return 1
     else
         extract_json_input="$extract_normalized"
         # BusyBox base64 may ignore JSON punctuation and accept some plain
         # documents as garbage bytes. Recognize JSON before trying Base64.
         if ! grep -Eq '^[[:space:]]*(\{|\[)' "$extract_normalized" &&
             broray_subscription_decode_base64 "$extract_normalized" "$extract_decoded"; then
-            tr -d '\r' < "$extract_decoded" > "$extract_decoded.clean" && mv "$extract_decoded.clean" "$extract_decoded" || return 1
-            sed -i '1s/^\xef\xbb\xbf//' "$extract_decoded" 2>/dev/null || true
+            broray_subscription_strip_bom "$extract_decoded" "$extract_decoded.clean" || return 1
+            tr -d '\r' < "$extract_decoded.clean" > "$extract_decoded" || return 1
+            rm -f "$extract_decoded.clean"
             broray_subscription_metadata_collect body "$extract_decoded" || return 1
             broray_subscription_strip_metadata "$extract_decoded" "$extract_decoded.clean" && mv "$extract_decoded.clean" "$extract_decoded" || return 1
             extract_json_input="$extract_decoded"
         fi
-        if grep -Eq '^(vless|vmess|trojan|ss|hysteria2|hy2|tuic|socks|socks5|http|https)://' "$extract_json_input"; then
-            tr -d '\r' < "$extract_json_input" > "$extract_output"
+        if grep -Eq '^[[:space:]]*(vless|vmess|trojan|ss|hysteria2|hy2|tuic|socks|socks5|http|https)://' "$extract_json_input"; then
+            sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$extract_json_input" > "$extract_output" || return 1
         elif jq -rs --argjson max_nodes "$BRORAY_SUB_MAX_NODES" \
             -f "$BRORAY_SUB_BASE/lib/subscription-xray-json.jq" "$extract_json_input" > "$extract_output" 2>/dev/null; then
             BRORAY_SUB_JSON_IMPORT=true

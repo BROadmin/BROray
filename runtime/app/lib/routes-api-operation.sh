@@ -144,7 +144,7 @@ broray_routes_api_lock_acquire()
     bundle="${2:-}"
 
     case "$action" in
-        check|download|verify|plan|export|delete|resume|preflight:*|custom:*)
+        check|download|verify|plan|export|delete|resume|preflight:*|custom:*|dot:*)
             if [ -z "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] &&
                { [ -e "$BRORAY_ROUTES_API_LOCK" ] || [ -L "$BRORAY_ROUTES_API_LOCK" ]; }; then
                 return 2

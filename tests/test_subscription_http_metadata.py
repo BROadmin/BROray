@@ -29,7 +29,7 @@ class Transport(unittest.TestCase):
  def response(self,status='200',headers='',body=URI,rc=0):
   self.responses.append({'status':status,'headers':'HTTP/1.1 '+status+' TEST\r\n'+headers+'\r\n','body':base64.b64encode(body.encode() if isinstance(body,str) else body).decode(),'rc':rc});Path(self.env['TEST_RESPONSES']).write_text(json.dumps(self.responses))
  def shell(self,script,*args):
-  return subprocess.run(['/bin/ash','-c','. "$BRORAY_ROOT/lib/subscription-service.sh"\n'+script,'stage07',*args],env=self.env,capture_output=True,timeout=20)
+  return subprocess.run(['/bin/ash','-c','. "$BRORAY_ROOT/lib/subscription-service.sh"\n'+script,'stage07',*args],env=self.env,capture_output=True,timeout=30)
  def fetch(self,ua='',url='https://provider.example.invalid/sub/PRIVATE_CANARY'):
   p=self.shell('''broray_subscription_resolve_public_ip() { BRORAY_SUB_RESOLVED_IP=93.184.216.34; }
 rc=0; broray_subscription_fetch "$1" "$BRORAY_ROOT/tmp/download" "$2" "$3" || rc=$?

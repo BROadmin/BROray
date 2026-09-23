@@ -6,48 +6,12 @@ BRORAY_BASE="${BRORAY_BASE:-${BRORAY_ROOT:-/opt/broray}}"
 
 broray_hy2_urldecode()
 {
-    encoded_value="$1"
-
-    escaped_value="$(
-        printf '%s' "$encoded_value" |
-            sed \
-                -e 's/+/ /g' \
-                -e 's/%/\\x/g'
-    )"
-
-    printf '%b' "$escaped_value"
+    broray_uri_component_decode "$1"
 }
 
 broray_hy2_query_value()
 {
-    query_string="$1"
-    requested_key="$2"
-
-    old_ifs="$IFS"
-    IFS='&'
-
-    for query_item in $query_string; do
-        query_key="${query_item%%=*}"
-
-        if [ "$query_item" = "$query_key" ]; then
-            query_value=""
-        else
-            query_value="${query_item#*=}"
-        fi
-
-        decoded_key="$(
-            broray_hy2_urldecode "$query_key"
-        )"
-
-        if [ "$decoded_key" = "$requested_key" ]; then
-            broray_hy2_urldecode "$query_value"
-            IFS="$old_ifs"
-            return 0
-        fi
-    done
-
-    IFS="$old_ifs"
-    return 1
+    broray_uri_query_value "$2" "$1"
 }
 
 broray_parse_hysteria2()
@@ -111,8 +75,8 @@ broray_parse_hysteria2()
     esac
 
     BRORAY_AUTH="$(
-        broray_hy2_urldecode "$encoded_auth"
-    )"
+        broray_uri_component_decode "$encoded_auth"
+    )" || broray_die "неправильное кодирование URI Hysteria2"
 
     [ -n "$BRORAY_AUTH" ] ||
         broray_die \
@@ -124,13 +88,18 @@ broray_parse_hysteria2()
             BRORAY_ADDRESS="${BRORAY_ADDRESS#\[}"
             BRORAY_PORT="${host_port##*\]:}"
             ;;
+        \[*\])
+            BRORAY_ADDRESS="${host_port#\[}"
+            BRORAY_ADDRESS="${BRORAY_ADDRESS%\]}"
+            BRORAY_PORT=443
+            ;;
         *:*)
             BRORAY_ADDRESS="${host_port%:*}"
             BRORAY_PORT="${host_port##*:}"
             ;;
         *)
-            broray_die \
-                "в ссылке Hysteria2 отсутствует порт"
+            BRORAY_ADDRESS="$host_port"
+            BRORAY_PORT=443
             ;;
     esac
 
@@ -152,56 +121,31 @@ broray_parse_hysteria2()
 
     if [ -n "$encoded_name" ]; then
         BRORAY_NAME="$(
-            broray_hy2_urldecode "$encoded_name"
-        )"
+            broray_uri_component_decode "$encoded_name"
+        )" || broray_die "неправильное кодирование URI Hysteria2"
     else
         BRORAY_NAME="$BRORAY_ADDRESS"
     fi
 
-    BRORAY_SECURITY="$(
-        broray_hy2_query_value \
-            "$query_string" \
-            "security" 2>/dev/null ||
-            printf '%s' "tls"
-    )"
+    BRORAY_SECURITY="$(broray_hy2_query_value "$query_string" "security")" || broray_die "неправильный параметр URI Hysteria2"
 
     [ -n "$BRORAY_SECURITY" ] ||
         BRORAY_SECURITY="tls"
 
-    BRORAY_SNI="$(
-        broray_hy2_query_value \
-            "$query_string" \
-            "sni" 2>/dev/null ||
-            true
-    )"
+    BRORAY_SNI="$(broray_hy2_query_value "$query_string" "sni")" || broray_die "неправильный параметр URI Hysteria2"
 
     [ -n "$BRORAY_SNI" ] ||
-        BRORAY_SNI="$(
-            broray_hy2_query_value \
-                "$query_string" \
-                "peer" 2>/dev/null ||
-                true
-        )"
+        BRORAY_SNI="$(broray_hy2_query_value "$query_string" "peer")" || broray_die "неправильный параметр URI Hysteria2"
 
     [ -n "$BRORAY_SNI" ] ||
         BRORAY_SNI="$BRORAY_ADDRESS"
 
-    BRORAY_FP="$(
-        broray_hy2_query_value \
-            "$query_string" \
-            "fp" 2>/dev/null ||
-            printf '%s' "chrome"
-    )"
+    BRORAY_FP="$(broray_hy2_query_value "$query_string" "fp")" || broray_die "неправильный параметр URI Hysteria2"
 
     [ -n "$BRORAY_FP" ] ||
         BRORAY_FP="chrome"
 
-    alpn_value="$(
-        broray_hy2_query_value \
-            "$query_string" \
-            "alpn" 2>/dev/null ||
-            true
-    )"
+    alpn_value="$(broray_hy2_query_value "$query_string" "alpn")" || broray_die "неправильный параметр URI Hysteria2"
 
     if [ -n "$alpn_value" ]; then
         BRORAY_ALPN="$(
@@ -215,61 +159,46 @@ broray_parse_hysteria2()
         BRORAY_ALPN='["h3"]'
     fi
 
-    BRORAY_OBFS="$(
-        broray_hy2_query_value \
-            "$query_string" \
-            "obfs" 2>/dev/null ||
-            true
-    )"
+    BRORAY_OBFS="$(broray_hy2_query_value "$query_string" "obfs")" || broray_die "неправильный параметр URI Hysteria2"
 
-    BRORAY_OBFS_PASSWORD="$(
-        broray_hy2_query_value \
-            "$query_string" \
-            "obfs-password" 2>/dev/null ||
-            true
-    )"
+    BRORAY_OBFS_PASSWORD="$(broray_hy2_query_value "$query_string" "obfs-password")" || broray_die "неправильный параметр URI Hysteria2"
 
-    BRORAY_UP_MBPS="$(
-        broray_hy2_query_value \
-            "$query_string" \
-            "upmbps" 2>/dev/null ||
-            true
-    )"
+    BRORAY_UP_MBPS="$(broray_hy2_query_value "$query_string" "upmbps")" || broray_die "неправильный параметр URI Hysteria2"
 
-    BRORAY_DOWN_MBPS="$(
-        broray_hy2_query_value \
-            "$query_string" \
-            "downmbps" 2>/dev/null ||
-            true
-    )"
+    BRORAY_DOWN_MBPS="$(broray_hy2_query_value "$query_string" "downmbps")" || broray_die "неправильный параметр URI Hysteria2"
 
-    insecure_value="$(
-        broray_hy2_query_value \
-            "$query_string" \
-            "insecure" 2>/dev/null ||
-            true
-    )"
+    case "$BRORAY_OBFS" in
+        '') [ -z "$BRORAY_OBFS_PASSWORD" ] || broray_die "Hysteria2 obfs-password требует obfs=salamander" ;;
+        salamander) [ -n "$BRORAY_OBFS_PASSWORD" ] || broray_die "Hysteria2 salamander требует obfs-password" ;;
+        *) broray_die "неподдерживаемый Hysteria2 obfs: $BRORAY_OBFS" ;;
+    esac
+    [ -z "$BRORAY_UP_MBPS" ] && [ -z "$BRORAY_DOWN_MBPS" ] ||
+        broray_die "Hysteria2 upmbps/downmbps не поддерживаются"
+
+    BRORAY_PIN_SHA256="$(broray_hy2_query_value "$query_string" pinSHA256)" || broray_die "неправильный pinSHA256"
+    if [ -n "$BRORAY_PIN_SHA256" ]; then
+        BRORAY_PIN_SHA256="$(printf '%s' "$BRORAY_PIN_SHA256" | tr -d ':' | tr 'A-F' 'a-f')"
+        [ "${#BRORAY_PIN_SHA256}" = 64 ] || broray_die "pinSHA256 должен содержать 64 hex-символа"
+        case "$BRORAY_PIN_SHA256" in *[!0-9a-f]*) broray_die "неправильный pinSHA256" ;; esac
+    fi
+
+    insecure_value="$(broray_hy2_query_value "$query_string" "insecure")" || broray_die "неправильный параметр URI Hysteria2"
 
     case "$insecure_value" in
         1|true|TRUE|yes|YES)
-            BRORAY_ALLOW_INSECURE="true"
+            [ -n "$BRORAY_PIN_SHA256" ] || broray_die "Hysteria2 insecure требует pinSHA256"
+            BRORAY_ALLOW_INSECURE="false"
             ;;
         *)
             BRORAY_ALLOW_INSECURE="false"
             ;;
     esac
 
-    BRORAY_FINAL_MASK_RAW="$(
-        broray_hy2_query_value \
-            "$query_string" \
-            "fm" 2>/dev/null ||
-            true
-    )"
+    BRORAY_FINAL_MASK_RAW="$(broray_hy2_query_value "$query_string" "fm")" || broray_die "неправильный параметр URI Hysteria2"
 
-    if [ -n "$BRORAY_FINAL_MASK_RAW" ] &&
-       printf '%s' "$BRORAY_FINAL_MASK_RAW" |
-            jq -e 'type == "object"' >/dev/null 2>&1
-    then
+    if [ -n "$BRORAY_FINAL_MASK_RAW" ]; then
+        printf '%s' "$BRORAY_FINAL_MASK_RAW" | jq -e 'type == "object"' >/dev/null 2>&1 ||
+            broray_die "Hysteria2 fm должен быть JSON object"
         BRORAY_FINAL_MASK="$BRORAY_FINAL_MASK_RAW"
     else
         BRORAY_FINAL_MASK='{}'

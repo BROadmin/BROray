@@ -8,9 +8,13 @@ broray_xray_tag_valid() {
 }
 
 broray_xray_github_get() {
+    local version
+    version="$(jq -er '.version | select(type=="string" and length>0 and length<=64)' \
+        "$BRORAY_BASE/share/release/manifest.json" 2>/dev/null)" || version=unknown
+    case "$version" in ''|*[!a-zA-Z0-9.+_-]*) version=unknown ;; esac
     curl -q -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
         --connect-timeout 8 --max-time 20 --max-filesize 8388608 \
-        -H 'Accept: application/vnd.github+json' -H 'User-Agent: BROray-Xray/3.1.0' \
+        -H 'Accept: application/vnd.github+json' -H "User-Agent: BROray-Xray/$version" \
         "$BRORAY_XRAY_GITHUB/$1" -o "$2"
 }
 

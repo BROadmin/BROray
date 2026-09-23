@@ -62,7 +62,7 @@ ops_report_service()
     # Service setup selects actual /proc and unsets test identities. These
     # globals must never change the containing coordinator's owner context.
     BRORAY_ROOT="$OPS_APP"; BRORAY_STATE_ROOT="$OPS_STATE"
-    . "$OPS_APP/lib/service-lifecycle.sh" || exit 1
+    . "${OPS_CODE:-$OPS_APP}/lib/service-lifecycle.sh" || exit 1
     broray_service_setup "$1" || exit 1
     broray_service_status_json | jq -ce --arg service "$1" '
       select(.service==$service and (.complete|type)=="boolean") |
@@ -97,7 +97,7 @@ ops_report_home()
     file="$OPS_APP/run/home-snapshots/$module.json"
     ops_report_file_safe "$file" 131072 || return 1
     now="$(date '+%s')"
-    jq -ces -L "$OPS_APP/lib" --arg module "$module" --argjson now "$now" '
+    jq -ces -L "${OPS_CODE:-$OPS_APP}/lib" --arg module "$module" --argjson now "$now" '
       include "operation-public"; include "operation-report-public";
       select(length==1) | .[0] |
       select(.schemaVersion==1 and .module==$module and (.data|type)=="object" and
@@ -123,7 +123,7 @@ ops_report_xray()
     unset BRORAY_OPS_TEST_IDENTITIES
     BRORAY_XRAY_BINARY="$OPS_APP/runtime/xray"
     BRORAY_XRAY_CONFIG="$OPS_APP/config/config.json"
-    . "$OPS_APP/lib/xray-process.sh" || exit 1
+    . "${OPS_CODE:-$OPS_APP}/lib/xray-process.sh" || exit 1
     if [ -n "$pid" ]; then
         owner="$(broray_ops_capture_owner "$pid")" || owner=''
         started="$(broray_xray_runtime_identity "$pid")" || started=''

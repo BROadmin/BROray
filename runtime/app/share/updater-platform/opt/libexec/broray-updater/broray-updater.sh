@@ -10,8 +10,21 @@ PATH="${BRORAY_UPDATER_PATH:-/opt/bin:/opt/sbin:/opt/usr/bin:/opt/usr/sbin:/bin:
 LC_ALL=C
 export PATH LC_ALL
 
-UPDATER_LAUNCH_SHA256="$(sha256sum "$0" 2>/dev/null || true)"
-UPDATER_LAUNCH_SHA256="${UPDATER_LAUNCH_SHA256%% *}"
+if [ -n "${BRORAY_UPDATER_GENERATION:-}" ]; then
+    # The canonical launcher executes verified bytes through a pipe. Reading
+    # $0 here would consume the shell's remaining program. Authenticate the
+    # current generation before accepting its already verified source digest.
+    [ "${1:-}" = daemon ] &&
+        "${BRORAY_UPDATER_GENERATION_NATIVE:?}" control \
+        "${BRORAY_UPDATER_GENERATION_ROOT:?}" AUTH \
+        "$BRORAY_UPDATER_GENERATION" "${BRORAY_UPDATER_MANIFEST_SHA256:?}" \
+        "${BRORAY_UPDATER_OPERATION_ID:?}" "${BRORAY_UPDATER_STOP_NONCE:?}" \
+        >/dev/null || exit 75
+    UPDATER_LAUNCH_SHA256="${BRORAY_UPDATER_DAEMON_SHA256:?}"
+else
+    UPDATER_LAUNCH_SHA256="$(sha256sum "$0" 2>/dev/null || true)"
+    UPDATER_LAUNCH_SHA256="${UPDATER_LAUNCH_SHA256%% *}"
+fi
 UPDATER_VERSION=5
 UPDATER_ENGINE="broray-updater/$UPDATER_VERSION"
 LIFECYCLE_CONTRACT="compact-app-rename/1"
@@ -197,7 +210,7 @@ process_start_ticks()
 
 ensure_layout()
 {
-    local command_name
+    local command_name directory layout_modes expected_owner mode
     for command_name in awk chmod cmp cp curl date df find gzip jq kill ln mkdir mv readlink rm sed sha256sum sleep sort sync tail tar tr wc
     do
         command -v "$command_name" >/dev/null 2>&1 || return 1
@@ -211,12 +224,28 @@ ensure_layout()
         "$OPERATION_ROOT" \
         "$RELEASES_ROOT" || return 1
 
-    chmod 700 \
-        "$STATE_ROOT" \
-        "$QUEUE_ROOT" \
-        "$WORK_ROOT" \
-        "$SLOT_META_ROOT" \
-        "$OPERATION_ROOT" 2>/dev/null || true
+    if [ -n "${BRORAY_UPDATER_GENERATION:-}" ]; then
+        # These paths were created with the generation's private umask. Do not
+        # chmod existing state: even an unchanged chmod emits an integrity
+        # event on the supervised launch ancestors. Unknown modes fail closed.
+        for directory in "$STATE_ROOT" "$QUEUE_ROOT" "$WORK_ROOT" "$SLOT_META_ROOT" "$OPERATION_ROOT"
+        do
+            [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
+        done
+        expected_owner="$(id -u)" || return 1
+        layout_modes="$(stat -c '%a:%u' "$STATE_ROOT" "$QUEUE_ROOT" "$WORK_ROOT" "$SLOT_META_ROOT" "$OPERATION_ROOT")" || return 1
+        for mode in $layout_modes
+        do
+            [ "$mode" = "700:$expected_owner" ] || return 1
+        done
+    else
+        chmod 700 \
+            "$STATE_ROOT" \
+            "$QUEUE_ROOT" \
+            "$WORK_ROOT" \
+            "$SLOT_META_ROOT" \
+            "$OPERATION_ROOT" 2>/dev/null || true
+    fi
 }
 
 atomic_json_file()
@@ -922,7 +951,20 @@ admission_hook_call()
 request_enqueue()
 {
     local operation target_json target_rc operation_id request_temporary pinned_check
-    local queue_temporary
+    local queue_temporary prepared_candidate prepared_archive
+    prepared_candidate=''; prepared_archive=''
+    case "$#" in
+        1) ;;
+        4)
+            if [ "$2" != --prepared-target ] || ! valid_id "$3" ||
+               [ "${#3}" -gt 96 ] || ! valid_sha256 "$4"; then
+                json_error INVALID_REQUEST 'Некорректная привязка подготовленного кандидата.'
+                return 1
+            fi
+            prepared_candidate="$3"; prepared_archive="$4"
+            ;;
+        *) json_error INVALID_REQUEST 'Некорректные параметры запроса обновления.'; return 1 ;;
+    esac
     operation="$1"
     operation_id="$operation-$(date -u '+%Y%m%d%H%M%S')-$$"
     valid_id "$operation_id" || return 1
@@ -1025,6 +1067,15 @@ request_enqueue()
             return 1
             ;;
     esac
+
+    # Compare after authenticated selection/refresh and before operation or
+    # queue publication. Same ID with different archive bytes also refuses.
+    if [ -n "$prepared_candidate" ] && ! printf '%s\n' "$target_json" |
+        jq -e --arg id "$prepared_candidate" --arg sha "$prepared_archive" \
+            '.candidateId==$id and .bundle.sha256==$sha' >/dev/null 2>&1; then
+        json_error PREPARED_TARGET_CHANGED 'Кандидат обновления изменился после подготовки; запрос не принят.'
+        return 1
+    fi
 
     operation_select "$operation_id" || return 1
 
@@ -1583,9 +1634,58 @@ state_seed_abort_before_switch()
 
 service_call()
 {
-    local action service script
+    local action service script state_file state_sha script_sha slot request_id service_root
     action="$1"
     service="$2"
+
+    # Native authenticates the independent host and this exact generation
+    # child. App init must never execute inside the updater writer tree.
+    if [ -n "${BRORAY_UPDATER_GENERATION:-}" ]; then
+        [ -n "${BRORAY_UPDATER_SERVICE_HOST:-}" ] &&
+            [ -n "${BRORAY_UPDATER_GENERATION_NATIVE:-}" ] &&
+            [ -n "${BRORAY_UPDATER_GENERATION_ROOT:-}" ] &&
+            [ -n "${BRORAY_UPDATER_MANIFEST_SHA256:-}" ] &&
+            [ -n "${BRORAY_UPDATER_SERVICE_INTERPRETER:-}" ] &&
+            [ -n "${BRORAY_UPDATER_SERVICE_INTERPRETER_SHA256:-}" ] &&
+            [ -n "${CURRENT_OPERATION_ID:-}" ] &&
+            [ -n "${CURRENT_OPERATION_DIR:-}" ] &&
+            [ -n "${CURRENT_PATH:-}" ] || {
+                printf '%s\n' 'UPDATER_SERVICE_LAUNCH_BOUNDARY_REQUIRED' >&2
+                return 75
+            }
+        case "$action" in start|stop|status) ;; *) return 75 ;; esac
+        case "$service" in
+            S23broray-monitor|S24broray|S25broray-web|S27broray-auto-switch|S28broray-subscriptions) ;;
+            *) return 75 ;;
+        esac
+        state_file="$CURRENT_OPERATION_DIR/state.json"
+        script="$CURRENT_PATH/init/$service"
+        [ -f "$state_file" ] && [ ! -L "$state_file" ] &&
+            [ -f "$script" ] && [ ! -L "$script" ] || return 75
+        jq -e --arg id "$CURRENT_OPERATION_ID" '
+            .operationId == $id and (.stage | type == "string" and length > 0)
+        ' "$state_file" >/dev/null 2>&1 || return 75
+        state_sha="$(sha256sum "$state_file")" || return 75
+        state_sha="${state_sha%% *}"
+        script_sha="$(sha256sum "$script")" || return 75
+        script_sha="${script_sha%% *}"
+        slot="$(current_slot)" || return 75
+        # Exact replay identity includes the caller's durable operation stage.
+        # A lost reply cannot silently execute the same request twice; a new
+        # stage/action/slot is a distinct request. Host persists intent first.
+        request_id="$(printf '%s\n' 'BROray-service-request/1' \
+            "$BRORAY_UPDATER_GENERATION" "$CURRENT_OPERATION_ID" "$state_sha" \
+            "$action" "$service" "$slot" "$script_sha" | sha256sum)" || return 75
+        request_id="${request_id%% *}"
+        service_root="${ROOT_PREFIX:-/}"
+        "$BRORAY_UPDATER_GENERATION_NATIVE" service \
+            "$BRORAY_UPDATER_SERVICE_HOST" "$BRORAY_UPDATER_GENERATION_ROOT" \
+            "$BRORAY_UPDATER_GENERATION" "$BRORAY_UPDATER_MANIFEST_SHA256" \
+            "$service_root" "$BRORAY_UPDATER_SERVICE_INTERPRETER" \
+            "$BRORAY_UPDATER_SERVICE_INTERPRETER_SHA256" \
+            "$action" "$service" "$request_id" "$script_sha" "$slot"
+        return $?
+    fi
 
     if [ -n "$SERVICE_HOOK" ]; then
         "$SERVICE_HOOK" "$action" "$service"
@@ -1599,7 +1699,7 @@ service_call()
 
 services_capture()
 {
-    local output service
+    local output service service_rc
     output="$CURRENT_OPERATION_DIR/services.tsv"
     : >"$output"
 
@@ -1608,6 +1708,13 @@ services_capture()
         if service_call status "$service" >>"$CURRENT_OPERATION_LOG" 2>&1; then
             printf '%s\trunning\n' "$service" >>"$output" || return 1
         else
+            service_rc=$?
+            # Status 1 is the init contract's stopped result. A transport,
+            # authorization or execution error is unknown, never stopped.
+            [ "$service_rc" = 1 ] || {
+                printf 'SERVICE_STATUS_UNCONFIRMED service=%s rc=%s\n' "$service" "$service_rc" >&2
+                return "$service_rc"
+            }
             printf '%s\tstopped\n' "$service" >>"$output" || return 1
         fi
     done
@@ -2750,14 +2857,24 @@ recover_incomplete()
     request_file="$CURRENT_OPERATION_DIR/request.json"
     [ -s "$state_file" ] || return 0
 
-    running="$(jq -r '.running // false' "$state_file" 2>/dev/null || true)"
+    # One snapshot and one traced jq process for the startup recovery decision.
+    # Preserve the historical raw-text comparisons, including trailing LF,
+    # but never treat unreadable/ambiguous JSON as a completed operation.
+    running="$(jq -sr '
+      def field_text($value):
+        $value | tostring |
+        if contains("\u0000") then error("invalid recovery field")
+        else sub("\n+$"; "") end;
+      if length != 1 or (.[0] | type) != "object"
+      then error("ambiguous recovery state") else .[0] end |
+      if field_text(.running // false) == "true" then "true"
+      elif field_text(.stage // "") == "rollback-failed" or
+           field_text(.stage // "") == "recovery-ambiguous" or
+           field_text(.state // "") == "recovery-required"
+      then "recovery-required" else "false" end
+    ' "$state_file" 2>/dev/null)" || return 1
     if [ "$running" != true ]; then
-        stage="$(jq -r '.stage // ""' "$state_file" 2>/dev/null || true)"
-        state="$(jq -r '.state // ""' "$state_file" 2>/dev/null || true)"
-        if [ "$stage" = rollback-failed ] ||
-           [ "$stage" = recovery-ambiguous ] ||
-           [ "$state" = recovery-required ]
-        then
+        if [ "$running" = recovery-required ]; then
             operation_log 'RECOVERY_REQUIRED fence retained'
             return 1
         fi
@@ -2885,61 +3002,17 @@ recover_incomplete()
     return 0
 }
 
-# A CGI can be killed in the tiny interval after the atomic mkdir of the
-# request fence and before its owner tuple is durable.  The daemon is the only
-# process allowed to retire that bounded residue.  Two reads separated by one
-# second distinguish a live publisher from an abandoned directory.
+# Legacy publisher metadata is observation evidence, not retirement authority.
+# An empty directory can belong to a live publisher before its first write.
+# Preserve all ambiguous residue for protected publication/boot recovery.
 request_lock_recover_abandoned()
 {
-    local owner_before owner_after start_before start_after live_start operation_before operation_after entry pointer pointer_state
-
+    local owner start operation live_start entry
     if [ -e "$REQUEST_LOCK" ] || [ -L "$REQUEST_LOCK" ]; then
         [ -d "$REQUEST_LOCK" ] && [ ! -L "$REQUEST_LOCK" ] || return 1
     else
         return 0
     fi
-    owner_before="$(sed -n '1p' "$REQUEST_LOCK/pid" 2>/dev/null || true)"
-    start_before="$(sed -n '1p' "$REQUEST_LOCK/owner-start" 2>/dev/null || true)"
-    operation_before="$(sed -n '1p' "$REQUEST_LOCK/operation-id" 2>/dev/null || true)"
-    case "$owner_before" in
-        '' ) ;;
-        *[!0-9]*) return 1 ;;
-        *)
-            if kill -0 "$owner_before" 2>/dev/null; then
-                live_start="$(process_start_ticks "$owner_before" 2>/dev/null || true)"
-                [ -n "$start_before" ] && [ "$live_start" = "$start_before" ] && return 0
-            fi
-            ;;
-    esac
-
-    sleep 1
-    if [ -e "$REQUEST_LOCK" ] || [ -L "$REQUEST_LOCK" ]; then
-        [ -d "$REQUEST_LOCK" ] && [ ! -L "$REQUEST_LOCK" ] || return 1
-    else
-        return 0
-    fi
-    owner_after="$(sed -n '1p' "$REQUEST_LOCK/pid" 2>/dev/null || true)"
-    start_after="$(sed -n '1p' "$REQUEST_LOCK/owner-start" 2>/dev/null || true)"
-    operation_after="$(sed -n '1p' "$REQUEST_LOCK/operation-id" 2>/dev/null || true)"
-    [ "$owner_before" = "$owner_after" ] || return 0
-    [ "$start_before" = "$start_after" ] || return 0
-    [ "$operation_before" = "$operation_after" ] || return 0
-    case "$owner_after" in
-        '' ) [ -z "$start_after" ] || return 1 ;;
-        *[!0-9]*) return 1 ;;
-        *)
-            case "$start_after" in *[!0-9]*) return 1 ;; esac
-            if kill -0 "$owner_after" 2>/dev/null; then
-                live_start="$(process_start_ticks "$owner_after" 2>/dev/null || true)"
-                # A publisher that is still between the pid and owner-start
-                # renames is live but not yet fully identifiable.  Never
-                # retire its fence; a stale PID reuse remains fail-closed.
-                [ -n "$start_after" ] || return 1
-                [ -n "$start_after" ] && [ "$live_start" = "$start_after" ] && return 0
-            fi
-            ;;
-    esac
-
     for entry in "$REQUEST_LOCK"/* "$REQUEST_LOCK"/.[!.]* "$REQUEST_LOCK"/..?*
     do
         [ -e "$entry" ] || [ -L "$entry" ] || continue
@@ -2950,36 +3023,25 @@ request_lock_recover_abandoned()
         esac
         [ "$(wc -c <"$entry" 2>/dev/null | tr -d ' ')" -le 128 ] || return 1
     done
-
-    if [ -n "$operation_after" ]; then
-        valid_id "$operation_after" || return 1
-        if [ -e "$QUEUE_ROOT/$operation_after.json" ] || [ -L "$QUEUE_ROOT/$operation_after.json" ]; then
-            [ -f "$QUEUE_ROOT/$operation_after.json" ] &&
-            [ ! -L "$QUEUE_ROOT/$operation_after.json" ] || return 1
+    owner="$(sed -n '1p' "$REQUEST_LOCK/pid" 2>/dev/null || true)"
+    start="$(sed -n '1p' "$REQUEST_LOCK/owner-start" 2>/dev/null || true)"
+    operation="$(sed -n '1p' "$REQUEST_LOCK/operation-id" 2>/dev/null || true)"
+    # A live matching publisher may continue writing its metadata. This branch
+    # performs no cleanup and grants no signal/STOPPED authority.
+    case "$owner:$start" in
+        *[!0-9:]*|:*|*:) ;;
+        *) live_start="$(process_start_ticks "$owner" 2>/dev/null || true)"
+           [ -n "$live_start" ] && [ "$live_start" = "$start" ] && return 0 ;;
+    esac
+    # A complete durable queue entry is interpreted by the existing request
+    # validation/recovery path. The legacy fence is never retired here.
+    if [ -n "$operation" ] && valid_id "$operation"; then
+        if [ -e "$QUEUE_ROOT/$operation.json" ] || [ -L "$QUEUE_ROOT/$operation.json" ]; then
+            [ -f "$QUEUE_ROOT/$operation.json" ] && [ ! -L "$QUEUE_ROOT/$operation.json" ] || return 1
             return 0
         fi
-        pointer="$(sed -n '1p' "$OPERATION_POINTER" 2>/dev/null || true)"
-        if [ "$pointer" = "$operation_after" ]; then
-            rm -f "$OPERATION_POINTER" || return 1
-        elif [ -n "$pointer" ]; then
-            valid_id "$pointer" || return 1
-            pointer_state="$OPERATION_ROOT/$pointer/state.json"
-            [ -f "$pointer_state" ] && [ ! -L "$pointer_state" ] || return 1
-            jq -e --arg operationId "$pointer" '
-              .operationId == $operationId and .running == false and
-              (.state == "success" or .state == "error") and
-              (.stage != "rollback-failed") and
-              (.stage != "recovery-ambiguous") and
-              (.state != "recovery-required")
-            ' "$pointer_state" >/dev/null 2>&1 || return 1
-        fi
-        if [ -d "$OPERATION_ROOT/$operation_after" ] &&
-           [ ! -L "$OPERATION_ROOT/$operation_after" ]
-        then
-            rm -rf "$OPERATION_ROOT/$operation_after" || return 1
-        fi
     fi
-    rm -rf "$REQUEST_LOCK"
+    return 1
 }
 
 daemon_lock_release()
@@ -2990,25 +3052,63 @@ daemon_lock_release()
 
 daemon_lock_claim()
 {
-    rm -f "$DAEMON_READY"
-    if mkdir "$DAEMON_LOCK" 2>/dev/null; then
-        printf '%s\n' "$$" >"$DAEMON_PID" || return 1
-        return 0
-    fi
-
-    if daemon_identity_valid; then
-        return 1
-    fi
-
-    rm -f "$DAEMON_PID"
-    rm -rf "$DAEMON_LOCK"
+    # A new daemon has no authority over an existing daemon's evidence.
+    # This includes the publication window before its pid file appears and
+    # incomplete legacy state. Only protected lifecycle recovery may retire it.
+    [ ! -e "$DAEMON_READY" ] && [ ! -L "$DAEMON_READY" ] || return 1
+    [ ! -e "$DAEMON_PID" ] && [ ! -L "$DAEMON_PID" ] || return 1
     mkdir "$DAEMON_LOCK" || return 1
-    printf '%s\n' "$$" >"$DAEMON_PID"
+    (set -C; printf '%s\n' "$$" >"$DAEMON_PID") || return 1
+}
+
+updater_idle_wait()
+{
+    # Pacing only: neither this timeout nor these descriptors prove ownership,
+    # readiness or STOPPED. The native generation provides a fresh empty pipe.
+    # Keeping its write end open prevents EOF from turning the loop into a spin.
+    if [ -z "${BRORAY_UPDATER_GENERATION:-}" ]; then
+        sleep 2
+        return $?
+    fi
+    local read_fd write_fd fd key value rest flags mode expected result idle_input
+    read_fd="${BRORAY_UPDATER_IDLE_READ_FD:-}"
+    write_fd="${BRORAY_UPDATER_IDLE_WRITE_FD:-}"
+    case "$read_fd:$write_fd" in *[!0-9:]*|:*|*:) return 75 ;; esac
+    [ "$read_fd" -ge 3 ] && [ "$write_fd" -ge 3 ] &&
+        [ "$read_fd" -lt 1048576 ] && [ "$write_fd" -lt 1048576 ] &&
+        [ "$read_fd" -ne "$write_fd" ] || return 75
+    [ -p "/proc/self/fd/$read_fd" ] && [ -p "/proc/self/fd/$write_fd" ] &&
+        [ "/proc/self/fd/$read_fd" -ef "/proc/self/fd/$write_fd" ] || return 75
+    expected=0
+    for fd in "$read_fd" "$write_fd"
+    do
+        flags=""
+        while read -r key value rest
+        do
+            [ "$key" = flags: ] && flags="$value"
+        done <"/proc/self/fdinfo/$fd"
+        case "$flags" in ''|*[!0-7]*) return 75 ;; esac
+        mode=$((flags & 3))
+        [ "$mode" -eq "$expected" ] || return 75
+        expected=1
+    done
+    result=0
+    IFS= read -r -t 2 idle_input <&"$read_fd" || result=$?
+    # Data or a descriptor error is unexpected; only the bounded empty read
+    # may finish an idle cycle. Both validated pipe ends remain open above.
+    [ "$result" -eq 1 ] || return 75
 }
 
 daemon_run()
 {
     local request candidate request_result request_operation
+    # A persistent writer may only enter through the authenticated native
+    # launch above. Refuse legacy/direct entry before ensure_layout changes
+    # any directory metadata belonging to an already live generation.
+    [ -n "${BRORAY_UPDATER_GENERATION:-}" ] || {
+        printf '%s\n' 'UPDATER_SUPERVISED_LAUNCH_REQUIRED' >&2
+        return 75
+    }
     ensure_layout || return 1
     daemon_lock_claim || return 1
     trap daemon_lock_release EXIT
@@ -3031,6 +3131,14 @@ daemon_run()
     }
 
     printf '%s\n' "$$" | atomic_text_file "$DAEMON_READY" || return 1
+
+    if [ -n "${BRORAY_UPDATER_GENERATION:-}" ]; then
+        "$BRORAY_UPDATER_GENERATION_NATIVE" control \
+            "$BRORAY_UPDATER_GENERATION_ROOT" READY \
+            "$BRORAY_UPDATER_GENERATION" "$BRORAY_UPDATER_MANIFEST_SHA256" \
+            "$BRORAY_UPDATER_OPERATION_ID" "$BRORAY_UPDATER_STOP_NONCE" \
+            >/dev/null || return 75
+    fi
 
     while :
     do
@@ -3072,7 +3180,10 @@ daemon_run()
 
         [ "$RUN_ONCE" = 1 ] && break
         if [ "$NO_SLEEP" != 1 ]; then
-            sleep 2
+            updater_idle_wait || {
+                printf '%s\n' 'UPDATER_IDLE_CHANNEL_UNCONFIRMED' >&2
+                return 75
+            }
         fi
     done
 }
@@ -3091,7 +3202,7 @@ main()
     case "$command_name" in
         daemon) daemon_run ;;
         check) release_check ;;
-        request) request_enqueue "${1:-}" ;;
+        request) request_enqueue "$@" ;;
         status) ensure_layout && status_output ;;
         version) printf '%s\n' "$UPDATER_ENGINE" ;;
         *) usage; return 2 ;;

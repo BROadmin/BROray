@@ -56,7 +56,7 @@ ops_event_append()
     fi
     ops_journal_safe && ops_journal_head_read || return 1
     sequence="$(printf '%s\n' "$OPS_JOURNAL_HEAD" | jq -er '.allocatedSequence+1 | select(.<=9007199254740991)')" || return 1
-    record="$(jq -nc -L "$OPS_APP/lib" --argjson sequence "$sequence" --argjson state "$state" --argjson owner "$owner" --arg key "$key" \
+    record="$(jq -nc -L "${OPS_CODE:-$OPS_APP}/lib" --argjson sequence "$sequence" --argjson state "$state" --argjson owner "$owner" --arg key "$key" \
       --arg now "$(ops_now)" --arg event "$event" --arg code "${2:-}" \
       'include "operation-public"; {sequence:$sequence,eventId:$key,timestamp:$now,operationId:$state.operationId,operationType:$state.type,
        source:($state.source // "SYSTEM_RECOVERY"),event:$event,pid:$owner.owner.pid,
@@ -145,7 +145,7 @@ ops_journal_snapshot()
     )"
     for file in "$OPS_JOURNAL/events.2.jsonl" "$OPS_JOURNAL/events.1.jsonl" "$OPS_JOURNAL/events.jsonl"; do
         [ ! -f "$file" ] || cat "$file"
-    done | jq -Rsc -L "$OPS_APP/lib" --argjson gap "$gap" --argjson head "$OPS_JOURNAL_HEAD" --arg lastHash "$last_hash" '
+    done | jq -Rsc -L "${OPS_CODE:-$OPS_APP}/lib" --argjson gap "$gap" --argjson head "$OPS_JOURNAL_HEAD" --arg lastHash "$last_hash" '
       include "operation-public";
       split("\n") | map(select(length>0)) as $lines |
       ($lines | map(try fromjson catch null)) as $rows |

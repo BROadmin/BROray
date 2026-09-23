@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from test_subscription_jobs import ROOT, SubscriptionJobs
+from test_subscription_vless_pipeline import Pipeline, CORE_RESULTS
 
 
 def profile(address='vpn.example.invalid', network='grpc', security='reality', name='Fixture #1'):
@@ -32,11 +33,15 @@ def profile(address='vpn.example.invalid', network='grpc', security='reality', n
 
 
 class SubscriptionXrayJson(unittest.TestCase):
+    shell=Pipeline.shell
+    generate=Pipeline.generate
     def setUp(self):
         self.temp = Path(tempfile.mkdtemp(prefix='subscription-json-'))
         self.app = self.temp/'app'
         shutil.copytree(ROOT/'implementation/runtime/app/lib', self.app/'lib')
         (self.app/'tmp').mkdir()
+        for name in ['servers','logs','config/system']:(self.app/name).mkdir(parents=True,exist_ok=True)
+        (self.app/'config/system/settings.json').write_text(json.dumps({'listenAddress':'127.0.0.1','socksPort':2080,'logLevel':'warning'}))
         self.env = os.environ | {'BRORAY_ROOT': str(self.app), 'BRORAY_BASE': str(self.app),
             'PATH': '/usr/bin:/bin:/usr/sbin:/sbin'}
 
@@ -63,6 +68,7 @@ jq -nc --argjson rc "$rc" --arg code "${BRORAY_SUB_ERROR_CODE:-}" \
         self.assertEqual(p.returncode, 0, p.stderr)
         result = json.loads(p.stdout)
         servers = [json.loads(f.read_bytes()) for f in sorted((self.app/'stage').glob('*.json'))]
+        for server in servers:self.generate(server)
         warnings = ''.join(f.read_text() for f in (self.app/'tmp').glob('subscription-warnings.*.txt'))
         return result, servers, warnings
 
@@ -144,7 +150,9 @@ class SubscriptionXrayJsonUpdate(unittest.TestCase):
 
     def update(self, data, expected=0):
         self.payload.write_text(json.dumps(data))
-        return self.shell(self.job_script('broray_subscription_update test manual'), expected=expected, timeout=120)
+        result=self.shell(self.job_script('broray_subscription_update test manual'), expected=expected, timeout=120)
+        if expected==0:SubscriptionJobs.assert_generated_configs(self)
+        return result
 
     def test_repeated_update_keeps_ids_and_other_sources(self):
         path = self.record()

@@ -247,6 +247,12 @@ broray_server_validate()
                 (.security == "tls") and
                 ((.hysteria | type) == "object") and
                 (.hysteria.version == 2) and
+                (.tls.allowInsecure != true) and
+                (
+                    (.tls | has("pinnedPeerCertSha256") | not) or
+                    (.tls.pinnedPeerCertSha256 | type == "string" and length == 64 and
+                        (explode | all(.[]; (. >= 48 and . <= 57) or (. >= 97 and . <= 102))))
+                ) and
                 ((.tls | type) == "object") and
                 (
                     ((.tls.serverName | type) == "string") and ((.tls.serverName | length) > 0)
@@ -257,13 +263,14 @@ broray_server_validate()
                 (.network == "raw") and
                 (.security == "none")
             elif .protocol == "vless" then
+                (.security != "reality" or .network == "raw" or .network == "grpc" or .network == "xhttp") and
                 (((.uuid | type) == "string") and ((.uuid | length) > 0)) and
                 (
                     (.flow == null) or
                     (
                         .flow == "xtls-rprx-vision" and
                         .network == "raw" and
-                        .security == "reality"
+                        (.security == "reality" or .security == "tls")
                     )
                 )
             else

@@ -58,37 +58,112 @@ broray_server_subscription_release_lock()
 
 broray_server_subscription_import_key()
 {
+    local import_file connection
     import_file="$1"
-    jq -cS '
+    connection="$(jq -cS '
         {
             protocol: (.protocol // ""),
             address: ((.address // "") | ascii_downcase),
             port: (.port // 0),
             network: (.network // .transport.type // ""),
             security: (.security // "none"),
-            serverName: (
-                .reality.serverName //
-                .tls.serverName //
-                .sni //
-                ""
-            ),
-            path: (
-                .xhttp.path //
-                .ws.path //
-                .httpupgrade.path //
-                .transport.path //
-                ""
-            ),
-            mode: (.xhttp.mode // ""),
-            serviceName: (
-                .grpc.serviceName //
-                .transport.serviceName //
-                ""
-            )
+            uuid: (.uuid // ""), encryption: (.encryption // ""),
+            flow: (.flow // ""), alterId: (.alterId // 0),
+            password: (.password // ""), method: (.method // ""), auth: (.auth // ""),
+            serverName: (if .security == "reality" then .reality.serverName // "" else .tls.serverName // .reality.serverName // .sni // "" end),
+            fingerprint: (if .security == "reality" then .reality.fingerprint // "chrome" else .tls.fingerprint // .reality.fingerprint // "chrome" end),
+            alpn: (.tls.alpn // []), allowInsecure: (.tls.allowInsecure // false),
+            publicKey: (.reality.publicKey // ""), shortId: (.reality.shortId // ""),
+            spiderX: (.reality.spiderX // ""), pinnedPeerCertSha256: (.tls.pinnedPeerCertSha256 // ""),
+            host: (.transport.host // .grpc.authority // .ws.host // .httpupgrade.host // ""),
+            path: (.xhttp.path // .ws.path // .httpupgrade.path // .transport.path // ""),
+            serviceName: (.grpc.serviceName // .transport.serviceName // ""),
+            mode: (.xhttp.mode // .transport.mode // ""),
+            headerType: (.transport.headerType // "none"),
+            extra: (.xhttp.extra // .transport.extra // {}),
+            obfs: (.hysteria.obfs // ""), obfsPassword: (.hysteria.obfsPassword // ""),
+            finalMask: (.hysteria.finalMask // {})
         }
-    ' "$import_file" 2>/dev/null |
-        sha256sum |
-        awk '{print $1}'
+    ' "$import_file" 2>/dev/null)" || return 1
+    printf '%s\n' "$connection" | sha256sum | awk '{print $1}'
+}
+
+broray_server_subscription_continuity_key()
+{
+    local connection
+    connection="$(jq -cS '
+        {
+            protocol:(.protocol // ""), address:((.address // "") | ascii_downcase),
+            port:(.port // 0), network:(.network // .transport.type // ""), security:(.security // "none"),
+            serverName:(if .security == "reality" then .reality.serverName // "" else .tls.serverName // .reality.serverName // .sni // "" end),
+            host:(.transport.host // .grpc.authority // .ws.host // .httpupgrade.host // ""),
+            path:(.xhttp.path // .ws.path // .httpupgrade.path // .transport.path // ""),
+            serviceName:(.grpc.serviceName // .transport.serviceName // ""),
+            mode:(.xhttp.mode // .transport.mode // "")
+        }
+    ' "$1" 2>/dev/null)" || return 1
+    printf '%s\n' "$connection" | sha256sum | awk '{print $1}'
+}
+
+# Match in private work only. The original stage and live catalog stay immutable
+# until the complete one-to-one mapping and existing sync checks have succeeded.
+broray_server_subscription_remap()
+{
+    local file key continuity id old_hash target match_key
+    BRORAY_SYNC_MAP_ERROR=SERVER_SYNC_CONFLICT
+    : > "$sync_maps/old.jsonl"
+    : > "$sync_maps/new.jsonl"
+    while IFS="$(printf '\t')" read -r key file old_hash; do
+        [ -n "$key" ] || continue
+        [ -f "$file" ] && [ ! -L "$file" ] || return 1
+        (broray_server_validate "$file" >/dev/null 2>&1) || return 1
+        id="$(jq -er '.id' "$file")" || return 1
+        case "$id" in ''|.|..|*[!A-Za-z0-9._-]*) return 1 ;; esac
+        [ "${file##*/}" = "$id.json" ] || return 1
+        continuity="$(broray_server_subscription_continuity_key "$file")" || return 1
+        jq -nc --arg key "$key" --arg continuity "$continuity" --arg id "$id" --arg file "$file" \
+            '{key:$key,continuity:$continuity,id:$id,file:$file}' >> "$sync_maps/old.jsonl" || return 1
+    done < "$sync_maps/old.tsv"
+    for file in "$sync_stage_dir"/*.json; do
+        [ -f "$file" ] && [ ! -L "$file" ] || return 1
+        id="$(jq -er '.id' "$file")" || return 1
+        case "$id" in ''|.|..|*[!A-Za-z0-9._-]*) return 1 ;; esac
+        [ "${file##*/}" = "$id.json" ] || return 1
+        jq -e '.source.importKey | type == "string" and length > 0' "$file" >/dev/null || return 1
+        key="$(broray_server_subscription_import_key "$file")" || return 1
+        continuity="$(broray_server_subscription_continuity_key "$file")" || return 1
+        jq -nc --arg key "$key" --arg continuity "$continuity" --arg id "$id" --arg file "$file" \
+            '{key:$key,continuity:$continuity,id:$id,file:$file}' >> "$sync_maps/new.jsonl" || return 1
+    done
+    if ! jq -n --slurpfile old "$sync_maps/old.jsonl" --slurpfile new "$sync_maps/new.jsonl" '
+        if ($old | group_by(.key) | any(length > 1)) or
+           ($new | group_by(.key) | any(length > 1)) then error("ambiguous exact identity") else . end |
+        [$new[] as $n | $n + {old:([$old[] | select(.key == $n.key)][0])}] as $exact |
+        [$old[] as $o | select(any($exact[]; .old.id == $o.id) | not) | $o] as $remainingOld |
+        [$exact[] | select(.old == null)] as $remainingNew |
+        (($remainingOld + $remainingNew) | map(.continuity) | unique) as $keys |
+        if any($keys[]; . as $key |
+            ([$remainingOld[] | select(.continuity == $key)] | length) > 1 or
+            ([$remainingNew[] | select(.continuity == $key)] | length) > 1)
+        then error("ambiguous continuity identity") else . end |
+        [$exact[] as $n |
+            ($n.old // ([$remainingOld[] | select(.continuity == $n.continuity)][0])) as $o |
+            {key:$n.key,matchKey:($o.key // $n.key),id:($o.id // $n.id),file:$n.file}]
+    ' > "$sync_maps/plan.json"; then
+        BRORAY_SYNC_MAP_ERROR=SERVER_SYNC_AMBIGUOUS_IDENTITY
+        return 1
+    fi
+    jq -r '.[] | [.key,.matchKey,.id,.file] | @tsv' "$sync_maps/plan.json" > "$sync_maps/plan.tsv" || return 1
+    mkdir "$sync_work/remapped" || return 1
+    : > "$sync_maps/remap.tsv"
+    while IFS="$(printf '\t')" read -r key match_key id file; do
+        target="$sync_work/remapped/$id.json"
+        [ ! -e "$target" ] && [ ! -L "$target" ] || return 1
+        jq --arg id "$id" --arg key "$key" '.id=$id | .source.importKey=$key' "$file" > "$target" || return 1
+        chmod 600 "$target" || return 1
+        printf '%s\t%s\n' "$match_key" "$target" >> "$sync_maps/remap.tsv" || return 1
+    done < "$sync_maps/plan.tsv"
+    sync_stage_dir="$sync_work/remapped"
 }
 
 broray_server_subscription_config_hash()
@@ -489,7 +564,7 @@ broray_server_subscription_merge_partial()
 
 broray_server_subscription_sync()
 {
-    local sync_policy sync_retained sync_catalog_total BRORAY_SYNC_RETAIN_ERROR
+    local sync_policy sync_retained sync_catalog_total BRORAY_SYNC_RETAIN_ERROR BRORAY_SYNC_MAP_ERROR
     sync_subscription_id="$1"
     sync_stage_dir="$2"
     sync_enabled="$3"
@@ -577,9 +652,7 @@ broray_server_subscription_sync()
                 "Не удалось создать резервную копию серверов."
             return 1
         }
-        sync_old_key="$(jq -r '.source.importKey // empty' "$sync_old_file")"
-        [ -n "$sync_old_key" ] || \
-            sync_old_key="$(broray_server_subscription_import_key "$sync_old_file")"
+        sync_old_key="$(broray_server_subscription_import_key "$sync_old_file")"
         sync_old_hash="$(jq -cS 'del(.source.nodeIndex,.source.updatedAt)' "$sync_old_file" | sha256sum | awk '{print $1}')"
         printf '%s\t%s\t%s\n' \
             "$sync_old_key" "$sync_old_file" "$sync_old_hash" \
@@ -604,14 +677,19 @@ broray_server_subscription_sync()
                 "Не удалось создать резервную копию выключенных серверов."
             return 1
         }
-        sync_old_key="$(jq -r '.source.importKey // empty' "$sync_old_file")"
-        [ -n "$sync_old_key" ] || \
-            sync_old_key="$(broray_server_subscription_import_key "$sync_old_file")"
+        sync_old_key="$(broray_server_subscription_import_key "$sync_old_file")"
         sync_old_hash="$(jq -cS 'del(.source.nodeIndex,.source.updatedAt)' "$sync_old_file" | sha256sum | awk '{print $1}')"
         printf '%s\t%s\t%s\n' \
             "$sync_old_key" "$sync_old_file" "$sync_old_hash" \
             >> "$sync_maps/old.tsv"
     done
+
+    if ! broray_server_subscription_remap; then
+        rm -rf "$sync_work"
+        broray_server_subscription_release_lock
+        broray_server_subscription_error "$BRORAY_SYNC_MAP_ERROR" "Не удалось однозначно сопоставить серверы подписки. Прежний каталог сохранён."
+        return 1
+    fi
 
     : > "$sync_maps/new.tsv"
     sync_added=0
@@ -619,7 +697,7 @@ broray_server_subscription_sync()
     sync_unchanged=0
     for sync_new_file in "$sync_stage_dir"/*.json; do
         [ -f "$sync_new_file" ] || continue
-        sync_new_key="$(jq -r '.source.importKey // empty' "$sync_new_file")"
+        sync_new_key="$(awk -F '\t' -v file="$sync_new_file" '$2 == file {print $1; exit}' "$sync_maps/remap.tsv")"
         [ -n "$sync_new_key" ] || {
             rm -rf "$sync_work"
             broray_server_subscription_release_lock
@@ -663,9 +741,7 @@ broray_server_subscription_sync()
     done < "$sync_maps/old.tsv"
 
     if [ -n "$sync_active_old_file" ]; then
-        sync_active_key="$(jq -r '.source.importKey // empty' "$sync_active_old_file")"
-        [ -n "$sync_active_key" ] || \
-            sync_active_key="$(broray_server_subscription_import_key "$sync_active_old_file")"
+        sync_active_key="$(broray_server_subscription_import_key "$sync_active_old_file")"
         sync_active_row="$(awk -F '\t' -v key="$sync_active_key" '$1 == key {print; exit}' "$sync_maps/new.tsv")"
         if [ -z "$sync_active_row" ]; then
             rm -rf "$sync_work"

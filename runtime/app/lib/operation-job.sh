@@ -1,6 +1,6 @@
 #!/opt/bin/ash
 # Lifecycle for an actual foreground job, never the scheduling daemon.
-. "${BRORAY_ROOT:-/opt/broray}/lib/operation-client.sh"
+. "${BRORAY_OPS_CODE_ROOT:-${BRORAY_ROOT:-/opt/broray}}/lib/operation-client.sh"
 
 broray_job_require_owner()
 {

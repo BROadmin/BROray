@@ -46,11 +46,15 @@ const out=path.resolve(__dirname,'../../docs/evidence',name);fs.mkdirSync(out,{r
     while(!release)await new Promise(resolve=>setTimeout(resolve,10));release();
    }
    const toast=page.locator('#toast-root .toast').last();await toast.waitFor();
-   const text=await toast.textContent();assert(text.length>0);assert.equal(posts,1);
+   const message=toast.locator('.toast-message');assert(await message.isVisible());
+   const text=await message.textContent();assert(text.length>0);assert.equal(posts,1);
    if(['success','pending'].includes(scenario)){
+    assert.equal(await toast.locator('.toast-kind').textContent(),'Успех: ');
+    assert(await toast.locator('.toast-note').isHidden());
     assert.equal(text,'Подписка добавлена.');await page.locator('.subscription-card').waitFor();
     assert(!(await page.locator('#subscription-form-panel').isVisible()));
    }else{
+    assert.equal(await toast.locator('.toast-kind').textContent(),'Ошибка: ');
     assert((await toast.getAttribute('class')).includes('toast-error'));
     assert(await page.locator('#subscription-form-panel').isVisible());
     assert.equal(await page.locator('#subscription-url').inputValue(),'https://example.invalid/sub/test');

@@ -1,8 +1,25 @@
 """Production subscription code with actual Linux owners and isolated files."""
-import ctypes,json,os,shutil,subprocess,tempfile,time,unittest
+import ctypes,hashlib,json,os,shutil,subprocess,tempfile,time,unittest
 from pathlib import Path
+from test_subscription_vless_pipeline import CORE_RESULTS
 ROOT=Path(__file__).resolve().parents[2]
 class SubscriptionJobs(unittest.TestCase):
+    def assert_generated_configs(self):
+        xray=os.environ.get('BRORAY_TEST_XRAY')
+        if not xray:return
+        for name in ['logs','config/system']:(self.app/name).mkdir(parents=True,exist_ok=True)
+        settings=self.app/'config/system/settings.json'
+        if not settings.exists():settings.write_text(json.dumps({'listenAddress':'127.0.0.1','socksPort':2080,'logLevel':'warning'}))
+        for node in (self.app/'servers').glob('*.json'):
+            data=json.loads(node.read_bytes())
+            if data.get('source',{}).get('subscriptionId')!='test':continue
+            p=subprocess.run(['/bin/ash','-c','. "$BRORAY_ROOT/lib/server-config-generator.sh"; broray_generate_server_config "$1"','config',data['id']],env=self.env,capture_output=True,timeout=20)
+            self.assertEqual(p.returncode,0,p.stderr)
+            config=Path(p.stdout.decode().strip());self.assertTrue(config.is_relative_to(self.app))
+            core=subprocess.run([xray,'run','-test','-config',str(config)],env=self.env,capture_output=True,timeout=20)
+            output=(core.stdout+core.stderr).decode(errors='replace')
+            CORE_RESULTS.append({'case':self.id(),'returncode':core.returncode,'configurationSha256':hashlib.sha256(config.read_bytes()).hexdigest()})
+            self.assertEqual(core.returncode,0,output);self.assertIn('Configuration OK',output)
     def setUp(self):
         self.temp=Path(tempfile.mkdtemp(prefix='subscription-jobs-'))
         self.addCleanup(SubscriptionJobs.clean_fixture,self)
@@ -90,6 +107,7 @@ printf 200
         path=self.record()
         self.assertFalse((self.app/'run/subscriptions').exists())
         self.shell(self.job_script('broray_subscription_update test manual'),timeout=90)
+        self.assert_generated_configs()
         data=json.loads(path.read_text());self.assertEqual(data['lastUpdateStatus'],'success')
         self.assertEqual(data['lastUpdateResult']['accepted'],1)
         self.assertEqual(len(list((self.app/'servers').glob('*.json'))),1)

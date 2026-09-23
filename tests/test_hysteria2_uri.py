@@ -2,6 +2,79 @@
 import base64,ctypes,json,os,subprocess,unittest
 from test_subscription_xray_json import SubscriptionXrayJson
 from test_subscription_jobs import ROOT,SubscriptionJobs
+from test_subscription_vless_pipeline import Pipeline, CORE_RESULTS
+from urllib.parse import quote, unquote
+
+class Hysteria2Pipeline(unittest.TestCase):
+    setUp=Pipeline.setUp
+    tearDown=Pipeline.tearDown
+    shell=Pipeline.shell
+    extract=Pipeline.extract
+    generate=Pipeline.generate
+    one=Pipeline.one
+    reject_uri=Pipeline.reject_uri
+    def uri(self,query='',auth='password',host='vpn.example.invalid:443'):
+        return f'hysteria2://{auth}@{host}/?{query}'.encode()
+    def test_auth_components(self):
+        for value in ['a+b','a%2Bb','a%20b','a%40b','a%3Ab','a%2Fb','a%3Fb','a%23b','a%252Bb']:
+            with self.subTest(value=value):
+                n,c=self.one(self.uri(auth=value))
+                self.assertEqual(n['auth'],unquote(value))
+                self.assertEqual(c['streamSettings']['hysteriaSettings']['auth'],unquote(value))
+        self.reject_uri(self.uri(auth='a%GG'))
+    def test_default_and_explicit_ports(self):
+        for host in ['vpn.example.invalid:443','vpn.example.invalid','[2001:db8::5]:443','[2001:db8::5]']:
+            for scheme in ['hysteria2','hy2']:
+                with self.subTest(host=host,scheme=scheme):
+                    n,c=self.one(self.uri(host=host).replace(b'hysteria2:',scheme.encode()+b':'))
+                    self.assertEqual(n['port'],443)
+                    self.assertEqual(c['settings']['port'],443)
+        for port in ['0','65536','abc','443x']:
+            self.reject_uri(self.uri(host='vpn.example.invalid:'+port))
+    def test_pin_and_insecure_contract(self):
+        pin='ab'*32
+        for insecure in ['', '&insecure=1','&insecure=true']:
+            n,c=self.one(self.uri('pinSHA256='+':'.join(['AB']*32)+insecure))
+            self.assertEqual(n['tls']['pinnedPeerCertSha256'],pin)
+            self.assertFalse(n['tls']['allowInsecure'])
+            self.assertEqual(c['streamSettings']['tlsSettings']['pinnedPeerCertSha256'],pin)
+            self.assertNotIn('allowInsecure',c['streamSettings']['tlsSettings'])
+        for query in ['insecure=1','insecure=true','pinSHA256=abc','pinSHA256='+'g'*64]:
+            self.reject_uri(self.uri(query))
+        for value in ['', '0','false']:
+            n,c=self.one(self.uri('insecure='+value))
+            self.assertFalse(n['tls']['allowInsecure'])
+            self.assertNotIn('pinnedPeerCertSha256',c['streamSettings']['tlsSettings'])
+    def test_hysteria_model_rejects_unsafe_tls(self):
+        n,c=self.one(self.uri())
+        for field,value in [('allowInsecure',True),('pinnedPeerCertSha256',''),('pinnedPeerCertSha256','bad'),('pinnedPeerCertSha256',42),('pinnedPeerCertSha256',None)]:
+            with self.subTest(field=field,value=value):
+                modified=json.loads(json.dumps(n));modified['tls'][field]=value
+                (self.app/'model.json').write_text(json.dumps(modified))
+                r=self.shell('. "$BRORAY_ROOT/lib/server.sh"; broray_server_validate "$BRORAY_ROOT/model.json"')
+                self.assertNotEqual(r.returncode,0)
+    def test_obfs_contract(self):
+        n,c=self.one(self.uri('obfs=salamander&obfs-password=mask%2Bpassword'))
+        self.assertEqual(n['hysteria']['obfsPassword'],'mask+password')
+        self.assertEqual(c['streamSettings']['finalmask']['udp'][0]['settings']['password'],'mask+password')
+        for query in ['obfs=salamander','obfs-password=password','obfs=other','obfs=gecko&obfs-password=password']:
+            self.reject_uri(self.uri(query))
+    def test_finalmask_contract(self):
+        fm={'udp':[{'type':'salamander','settings':{'password':'mask'}}]}
+        n,c=self.one(self.uri('fm='+quote(json.dumps(fm))))
+        self.assertEqual(n['hysteria']['finalMask'],fm)
+        self.assertEqual(c['streamSettings']['finalmask'],fm)
+        for value in ['', '{}']:
+            n,c=self.one(self.uri('fm='+quote(value)))
+            self.assertEqual(n['hysteria']['finalMask'],{})
+        for value in ['{broken','[]','42','null','"text"']:
+            self.reject_uri(self.uri('fm='+quote(value)))
+    def test_unsupported_bandwidth_rejected(self):
+        for query in ['upmbps=100','downmbps=100','upmbps=abc','downmbps=0']:
+            self.reject_uri(self.uri(query))
+        n,c=self.one(self.uri('upmbps=&downmbps='))
+        self.assertEqual(n['hysteria']['upMbps'],'')
+        self.assertEqual(n['hysteria']['downMbps'],'')
 
 class Hysteria2Uri(SubscriptionXrayJson):
     def parse(self,uri):
@@ -29,7 +102,7 @@ class Hysteria2Uri(SubscriptionXrayJson):
         self.assertEqual(d['auth'],'user:pass/word@host?#')
         self.assertEqual(d['name'],'Name/?#');self.assertEqual(d['sni'],'tls.example.invalid')
     def test_invalid_ports_and_nonroot_paths_are_rejected(self):
-        for suffix in [':0/',':65536/',':abc/',':443x/',':/', '/',':443/path',':443//']:
+        for suffix in [':0/',':65536/',':abc/',':443x/',':/',':443/path',':443//']:
             with self.subTest(suffix=suffix):
                 p=self.parse('hysteria2://fixture@vpn.example.invalid'+suffix+'?sni=tls.example.invalid')
                 self.assertNotEqual(p.returncode,0)
@@ -65,6 +138,7 @@ class Hysteria2SubscriptionUpdate(unittest.TestCase):
         ids=None
         for _ in range(2):
             self.shell(self.job_script('broray_subscription_update test manual'),timeout=180)
+            SubscriptionJobs.assert_generated_configs(self)
             data=json.loads(record.read_text());result=data['lastUpdateResult']
             self.assertEqual(data['url'],before['url']);self.assertTrue(data['autoUpdateEnabled'])
             self.assertEqual(data['updateIntervalMinutes'],360)
@@ -79,6 +153,7 @@ class Hysteria2SubscriptionUpdate(unittest.TestCase):
 if __name__=='__main__':
     assert ctypes.CDLL(None).prctl(36,1,0,0,0)==0
     suite=unittest.TestSuite(Hysteria2Uri(n) for n in sorted(Hysteria2Uri.__dict__) if n.startswith('test_'))
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(Hysteria2Pipeline))
     if os.environ.get('HY2_BASELINE')!='1':suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(Hysteria2SubscriptionUpdate))
     result=unittest.TextTestRunner(verbosity=2).run(suite)
     (ROOT/'docs/evidence/hysteria2-uri-tests.json').write_text(json.dumps(dict(status='PASS' if result.wasSuccessful() else 'FAIL',testsRun=result.testsRun,

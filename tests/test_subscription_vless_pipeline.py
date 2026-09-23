@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 import unittest
 from test_subscription_vless_compat import profile, stream, outbound, user
+from urllib.parse import quote, urlencode
 
 ROOT=Path(os.environ.get('BRORAY_TEST_ROOT',Path(__file__).resolve().parents[1]))
 XRAY=os.environ.get('BRORAY_TEST_XRAY','')
@@ -68,10 +69,10 @@ jq -nc --argjson rc "$rc" --arg code "${BRORAY_SUB_ERROR_CODE:-}" \
         if XRAY:
             core=subprocess.run([XRAY,'run','-test','-config',str(file)],capture_output=True,timeout=20,env=self.env)
             text=(core.stdout+core.stderr).decode(errors='replace')
+            CORE_RESULTS.append({'case':self.id(),'network':node['network'],'security':node['security'],
+                'configurationSha256':hashlib.sha256(file.read_bytes()).hexdigest(),'returncode':core.returncode})
             self.assertEqual(core.returncode,0,text)
             self.assertIn('Configuration OK',text)
-            CORE_RESULTS.append({'case':self.id(),'network':node['network'],'security':node['security'],
-                'configurationSha256':hashlib.sha256(file.read_bytes()).hexdigest(),'returncode':0})
         return config['outbounds'][0]
     def one(self,payload):
         result,nodes=self.extract(payload)
@@ -82,6 +83,166 @@ jq -nc --argjson rc "$rc" --arg code "${BRORAY_SUB_ERROR_CODE:-}" \
     def test_tcp_tls(self):
         n,c=self.one(profile());self.assertEqual(c['streamSettings']['network'],'raw')
         self.assertEqual(c['streamSettings']['tlsSettings']['serverName'],'sni.example.invalid')
+    def test_duplicate_uri_parameters_never_saved(self):
+        for key in ['type','security','flow','fp','allowInsecure','serviceName']:
+            with self.subTest(key=key):
+                result,nodes=self.extract(('vless://11111111-2222-4333-8444-555555555555@vpn.example.invalid:443?'+key+'=&'+key+'=').encode())
+                self.assertEqual(nodes,[],result)
+                self.assertEqual(result['accepted'],0,result)
+    def test_duplicate_after_previous_parse_cannot_reuse_values(self):
+        valid=self.vless_uri().decode()
+        invalid=self.vless_uri('security=tls&allowInsecure=&allowInsecure=').decode()
+        r=self.shell('. "$BRORAY_ROOT/lib/server-import.sh"; broray_server_import_dispatch "$1" subscription fixture 1; broray_server_import_dispatch "$2" subscription fixture 2',valid,invalid)
+        self.assertNotEqual(r.returncode,0)
+        rows=list((self.app/'servers').glob('*.json'))
+        self.assertEqual(len(rows),1)
+        self.generate(json.loads(rows[0].read_bytes()))
+    def test_trojan_encoded_extra_key_rejects_wrong_transport(self):
+        for value in ['', '%7B%7D']:
+            self.reject_uri(self.trojan_uri('type=raw&%65xtra='+value))
+        n,c=self.one(self.trojan_uri('type=xhttp&%65xtra='+quote('{"noSSEHeader":true}')))
+        self.assertEqual(c['streamSettings']['xhttpSettings']['extra'],{'noSSEHeader':True})
+    def test_tls_connection_key_matches_generated_settings(self):
+        n,c=self.one(profile())
+        for field,value in [('serverName','changed.invalid'),('fingerprint','chrome')]:
+            other=copy.deepcopy(n);other['tls'][field]=value
+            c2=self.generate(other)
+            self.assertNotEqual(c['streamSettings']['tlsSettings'][field],c2['streamSettings']['tlsSettings'][field])
+            (self.app/'key-a.json').write_text(json.dumps(n));(self.app/'key-b.json').write_text(json.dumps(other))
+            r=self.shell('. "$BRORAY_ROOT/lib/server-subscription-service.sh"; broray_server_subscription_import_key "$BRORAY_ROOT/key-a.json"; broray_server_subscription_import_key "$BRORAY_ROOT/key-b.json"')
+            self.assertEqual(r.returncode,0,r.stderr)
+            keys=r.stdout.splitlines();self.assertEqual(len(keys),2);self.assertNotEqual(keys[0],keys[1])
+            r=self.shell('. "$BRORAY_ROOT/lib/server-subscription-service.sh"; broray_server_subscription_continuity_key "$BRORAY_ROOT/key-a.json"; broray_server_subscription_continuity_key "$BRORAY_ROOT/key-b.json"')
+            self.assertEqual(r.returncode,0,r.stderr);keys=r.stdout.splitlines();self.assertEqual(len(keys),2)
+            self.assertEqual(keys[0]==keys[1],field=='fingerprint')
+    def vless_uri(self, query='security=tls', identity='11111111-2222-4333-8444-555555555555', suffix=''):
+        return f'vless://{identity}@vpn.example.invalid:443{suffix}?{query}'.encode()
+    def reject_uri(self, uri):
+        result,nodes=self.extract(uri)
+        self.assertEqual(result['accepted'],0,result)
+        self.assertEqual(nodes,[],result)
+    def test_vless_encoded_id(self):
+        n,c=self.one(self.vless_uri(identity='%31'+'11111111-2222-4333-8444-555555555555'[1:]))
+        self.assertEqual(n['uuid'],'11111111-2222-4333-8444-555555555555')
+        self.assertEqual(c['settings']['vnext'][0]['users'][0]['id'],n['uuid'])
+        self.reject_uri(self.vless_uri(identity='%GG'))
+    def test_vless_root_slash(self):
+        n,c=self.one(self.vless_uri(suffix='/'))
+        self.assertEqual(n['port'],443)
+        n,c=self.one(b'vless://11111111-2222-4333-8444-555555555555@vpn.example.invalid:443/')
+        self.assertEqual(n['port'],443)
+        self.reject_uri(self.vless_uri(suffix='/unexpected'))
+    def test_vless_grpc_authority(self):
+        for extra in ['authority=front.invalid','host=front.invalid','authority=front.invalid&host=front.invalid']:
+            with self.subTest(extra=extra):
+                n,c=self.one(self.vless_uri('security=tls&type=grpc&serviceName=api&'+extra))
+                self.assertEqual(n['transport']['host'],'front.invalid')
+                self.assertEqual(c['streamSettings']['grpcSettings']['authority'],'front.invalid')
+        self.reject_uri(self.vless_uri('security=tls&type=grpc&host=a.invalid&authority=b.invalid'))
+    def test_vless_security_matrix(self):
+        for network,security,flow in [('raw','tls',''),('raw','reality',''),
+              ('raw','tls','xtls-rprx-vision'),('raw','reality','xtls-rprx-vision'),
+              ('grpc','tls',''),('grpc','reality',''),('xhttp','tls',''),('xhttp','reality',''),
+              ('ws','tls',''),('httpupgrade','tls','')]:
+            with self.subTest(network=network,security=security,flow=flow):
+                query={'type':network,'security':security,'flow':flow,'sni':'front.invalid'}
+                if security=='reality':query['pbk']='A'*43
+                if network=='grpc':query['authority']='front.invalid'
+                n,c=self.one(self.vless_uri(urlencode(query)))
+                self.assertEqual(n['flow'],flow or None)
+                self.assertEqual(c['streamSettings']['security'],security)
+                self.assertNotIn('allowInsecure',c['streamSettings'].get('tlsSettings',{}))
+        for network in ['ws','httpupgrade']:
+            self.reject_uri(self.vless_uri(f'type={network}&security=reality&sni=front.invalid&pbk='+('A'*43)))
+        for network in ['grpc','ws','httpupgrade','xhttp']:
+            self.reject_uri(self.vless_uri(f'type={network}&security=tls&flow=xtls-rprx-vision'))
+    def test_vless_tls_vision_json(self):
+        p=profile('raw','tls');user(p)['flow']='xtls-rprx-vision'
+        n,c=self.one(p)
+        self.assertEqual(c['settings']['vnext'][0]['users'][0]['flow'],'xtls-rprx-vision')
+    def test_vless_allow_insecure_explicit(self):
+        for value in ['true','1','yes']:
+            self.reject_uri(self.vless_uri('security=tls&allowInsecure='+value))
+        for value in ['false','0','']:
+            n,c=self.one(self.vless_uri('security=tls&allowInsecure='+value))
+            self.assertFalse(n['tls']['allowInsecure'])
+            self.assertNotIn('allowInsecure',c['streamSettings']['tlsSettings'])
+    def trojan_uri(self,query='',password='password'):
+        return f'trojan://{password}@vpn.example.invalid:443?{query}'.encode()
+    def test_trojan_password_components(self):
+        for password,expected in [('a+b','a+b'),('a%2Bb','a+b'),('a%252Bb','a%2Bb')]:
+            n,c=self.one(self.trojan_uri(password=password))
+            self.assertEqual(n['password'],expected)
+            self.assertEqual(c['settings']['servers'][0]['password'],expected)
+    def test_trojan_transport_modes(self):
+        for network,mode in [('raw',''),('grpc','gun'),('xhttp','auto'),('xhttp','packet-up'),
+                             ('xhttp','stream-up'),('xhttp','stream-one'),('grpc','multi')]:
+            query='type='+network
+            if mode not in ['','gun','auto']:query+='&mode='+mode
+            n,c=self.one(self.trojan_uri(query))
+            self.assertEqual(n['transport']['mode'],mode)
+            if network=='xhttp':self.assertEqual(c['streamSettings']['xhttpSettings']['mode'],mode)
+        for query in ['type=xhttp&mode=gun','type=grpc&mode=auto']:
+            self.reject_uri(self.trojan_uri(query))
+    def test_trojan_extra_preserved(self):
+        extra={'noSSEHeader':True,'headers':{'X-Test':'a+b%20'},'xmux':{'maxConnections':2}}
+        n,c=self.one(self.trojan_uri('type=xhttp&extra='+quote(json.dumps(extra))))
+        self.assertEqual(n['transport']['extra'],extra)
+        self.assertEqual(c['streamSettings']['xhttpSettings']['extra'],extra)
+        n,c=self.one(self.trojan_uri('type=xhttp&extra='))
+        self.assertEqual(n['transport']['extra'],{})
+        for query in ['type=xhttp&extra=%7Bbroken','type=xhttp&extra=%5B%5D','type=grpc&extra=%7B%7D','type=raw&extra=']:
+            self.reject_uri(self.trojan_uri(query))
+    def test_trojan_insecure_explicit(self):
+        self.reject_uri(self.trojan_uri('allowInsecure=true'))
+        for value in ['false','']:
+            n,c=self.one(self.trojan_uri('allowInsecure='+value))
+            self.assertFalse(n['tls']['allowInsecure'])
+            self.assertNotIn('allowInsecure',c['streamSettings']['tlsSettings'])
+    def test_subscription_bom_four_inputs(self):
+        for raw in [self.vless_uri(),json.dumps(profile()).encode()]:
+            for encoded in [False,True]:
+                with self.subTest(json=raw.startswith(b'{'),base64=encoded):
+                    reference=base64.b64encode(raw) if encoded else raw
+                    n,c=self.one(reference)
+                    with_bom=b'\xef\xbb\xbf'+raw
+                    n2,c2=self.one(base64.b64encode(with_bom) if encoded else with_bom)
+                    self.assertEqual(c2,c)
+                    self.assertEqual(n2['uuid'],n['uuid'])
+                    self.assertEqual(n2['source']['importKey'],n['source']['importKey'])
+    def test_bom_removed_only_at_start(self):
+        for raw,expected in [(b'\xef\xbb\xbfabc',b'abc'),(b'abc\xef\xbb\xbf',b'abc\xef\xbb\xbf'),
+                             (b' \xef\xbb\xbfabc',b' \xef\xbb\xbfabc'),(b'\xef\xbb',b'\xef\xbb')]:
+            (self.app/'bom-in').write_bytes(raw)
+            p=self.shell('. "$BRORAY_ROOT/lib/subscription-service.sh"; broray_subscription_strip_bom "$BRORAY_ROOT/bom-in" "$BRORAY_ROOT/bom-out"')
+            self.assertEqual(p.returncode,0,p.stderr)
+            self.assertEqual((self.app/'bom-out').read_bytes(),expected)
+    def test_uri_list_outer_whitespace_only(self):
+        uri=self.vless_uri('security=tls&type=ws&path=%2Fa%20b%2B%2520')
+        n,c=self.one(uri)
+        for raw in [b'  \t'+uri+b' \t\n',base64.b64encode(b'  '+uri+b'  \n')]:
+            n2,c2=self.one(raw)
+            self.assertEqual(n2['uri'],n['uri'])
+            self.assertEqual(c2,c)
+            self.assertEqual(n2['transport']['path'],'/a b+%20')
+    def test_exact_subscription_duplicate(self):
+        uri=self.vless_uri()
+        r,nodes=self.extract(uri+b'\n'+uri)
+        self.assertEqual((r['accepted'],r['rejected']),(1,1),r)
+        self.generate(nodes[0])
+    def test_distinct_connection_parameters_not_deduplicated(self):
+        base='type=ws&security=tls&host=a.invalid&path=%2Fa'
+        variants=[(self.vless_uri(base),self.vless_uri(base.replace('host=a.invalid','host=b.invalid'))),
+                  (self.vless_uri(),self.vless_uri(identity='22222222-2222-4333-8444-555555555555')),
+                  (self.vless_uri(base),self.vless_uri(base.replace('path=%2Fa','path=%2Fb'))),
+                  (self.vless_uri('security=reality&sni=a.invalid&pbk='+'A'*43),
+                   self.vless_uri('security=reality&sni=a.invalid&pbk='+'B'*42+'A'))]
+        for first,second in variants:
+            with self.subTest(first=first,second=second):
+                r,nodes=self.extract(first+b'\n'+second)
+                self.assertEqual((r['accepted'],r['rejected']),(2,0),r)
+                self.assertEqual(len({n['source']['importKey'] for n in nodes}),2)
+                for n in nodes:self.generate(n)
     def test_grpc_tls(self):
         n,c=self.one(profile('grpc'));g=c['streamSettings']['grpcSettings']
         self.assertEqual(g,{'serviceName':'api/a+b%20?c&d','authority':'front.example.invalid','multiMode':True})

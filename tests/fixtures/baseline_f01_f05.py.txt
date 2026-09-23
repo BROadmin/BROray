@@ -1,0 +1,149 @@
+"""Adversarial lifecycle probes. Exact candidate code, isolated fixture FS only."""
+import os, sys, json, time, signal, subprocess, hashlib
+from pathlib import Path
+sys.path.insert(0, '/work/implementation/tests')
+from test_updater_preflight import UpdaterPreflight, HANDOFF, PLATFORM, UPDATER, ROOT
+OUT=[]
+
+def waitfile(p,proc=None,seconds=12):
+    end=time.monotonic()+seconds
+    while time.monotonic()<end:
+        if p.exists(): return
+        if proc is not None and proc.poll() is not None: raise RuntimeError('process exited early')
+        time.sleep(.05)
+    raise RuntimeError('fixture stage timeout: '+str(p))
+
+def kill_owned(p):
+    if p.poll() is None:
+        os.killpg(p.pid,signal.SIGKILL)
+    p.wait(timeout=5)
+
+def fixture():
+    t=UpdaterPreflight('runTest');t.setUp();return t
+
+def case(name,fn):
+    t=fixture()
+    try:
+        r=fn(t);r={'id':name,**r}
+    except Exception as e:
+        r={'id':name,'probeStatus':'HARNESS_ERROR','error':repr(e)}
+    finally: t.doCleanups()
+    OUT.append(r);print('PROBE '+json.dumps(r,sort_keys=True),flush=True)
+
+def legacy(t):
+    live=subprocess.Popen(['/bin/sleep','60'],start_new_session=True)
+    try:
+        lock=t.root/'tmp/broray-global-operation.lock';lock.mkdir(parents=True)
+        (lock/'pid').write_text(str(live.pid)+'\n');(lock/'scope').write_text('system\n')
+        p=t.call()
+        wrong=t.root/'opt/var/lock/broray-updater.lock'
+        return {'probeStatus':'EXECUTED','expected':'refuse delivery while actual legacy fence exists',
+                'returncode':p.returncode,'legacyOwnerAlive':live.poll() is None,'actualLegacyLockExists':lock.is_dir(),
+                'checkedWrongPathExists':wrong.exists(),'platformChanged':t.snapshot()!=t.expected_old,
+                'bugReproduced':p.returncode==0 and t.snapshot()!=t.expected_old and live.poll() is None}
+    finally:kill_owned(live)
+
+def crash(t):
+    hook=t.home/'stop-blocked';hook.write_text('#!/bin/ash\ntouch "$TEST_ROOT/inside-stop"\nwhile :; do sleep 1; done\n');hook.chmod(0o755)
+    env={**t.env,'BRORAY_HANDOFF_PREFLIGHT_STOP_HOOK':str(hook)}
+    p=subprocess.Popen(['/bin/ash',str(HANDOFF),'preflight',t.sha],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+    try:waitfile(t.home/'inside-stop',p)
+    finally:kill_owned(p)
+    lock=t.root/'opt/var/lock/broray/global-operation.lock'
+    before=t.snapshot();retry=t.call()
+    return {'probeStatus':'EXECUTED','expected':'recover own interrupted preflight with proved ownership, permit retry',
+            'killedPid':p.pid,'lockFiles':sorted(x.name for x in lock.iterdir()),'recordedPid':(lock/'pid').read_text().strip(),
+            'strongOwnerMetadataPresent':(lock/'owner.json').exists(),'retryReturncode':retry.returncode,
+            'platformUnchanged':before==t.expected_old and t.snapshot()==before,'lockStillExists':lock.exists(),
+            'bugReproduced':retry.returncode!=0 and lock.exists() and not (lock/'owner.json').exists()}
+
+def library(t):
+    source=t.home/'updater-library.sh';text=(PLATFORM/UPDATER).read_text();assert text.endswith('main "$@"\n');source.write_text(text[:-len('main "$@"\n')])
+    shim=t.home/'bin';shim.mkdir();curl=shim/'curl';curl.write_text('#!/bin/ash\necho UNEXPECTED_CURL >&2\nexit 98\n');curl.chmod(0o755)
+    env={**os.environ,'BRORAY_UPDATER_ROOT_PREFIX':str(t.root),'BRORAY_UPDATER_TEST_MODE':'1','BRORAY_UPDATER_ASSUME_DAEMON':'0',
+         'BRORAY_UPDATER_PATH':str(shim)+':/usr/bin:/bin:/usr/sbin:/sbin','UPLIB':str(source),'TEST_ROOT':str(t.home)}
+    return source,env
+
+def call_lib(env,body,timeout=15):
+    return subprocess.run(['/bin/ash','-c','. "$UPLIB"; '+body],env=env,capture_output=True,text=True,timeout=timeout)
+
+def live_daemon(t,env):
+    script=t.home/'broray-updater-live-fixture.sh'
+    script.write_text('#!/bin/ash\n. "$UPLIB"\nensure_layout || exit 2\ndaemon_lock_claim || exit 3\ntrap daemon_lock_release EXIT\ntrap "exit 143" TERM\nprintf "%s\\n" "$$" | atomic_text_file "$DAEMON_READY" || exit 4\ntouch "$TEST_ROOT/live-ready"\nwhile :; do sleep 1; done\n');script.chmod(0o755)
+    p=subprocess.Popen(['/bin/ash',str(script),'daemon'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+    try:waitfile(t.home/'live-ready',p)
+    except Exception:kill_owned(p);raise
+    return p
+
+def duplicate(t):
+    source,env=library(t);live=live_daemon(t,env)
+    try:
+        ready=t.root/'opt/var/lib/broray-updater/daemon.ready';old=ready.read_text()
+        identity=call_lib(env,'daemon_identity_valid').returncode
+        other=call_lib(env,'daemon_lock_claim');request=call_lib(env,'request_enqueue update')
+        return {'probeStatus':'EXECUTED','expected':'second daemon refuses without invalidating live daemon readiness',
+                'originalIdentityReturncode':identity,'secondClaimReturncode':other.returncode,'wasReadyForPid':old.strip(),
+                'ownerAlive':live.poll() is None,'readyExistsAfterSecondClaim':ready.exists(),'requestReturncode':request.returncode,
+                'requestOutput':request.stdout.strip(),'bugReproduced':identity==0 and other.returncode!=0 and not ready.exists() and 'UPDATER_NOT_RUNNING' in request.stdout and live.poll() is None}
+    finally:kill_owned(live)
+
+def publisher(t):
+    source,env=library(t);live=live_daemon(t,env)
+    paused=None
+    try:
+        request_lock=t.root/'opt/var/lib/broray-updater/request.lock'
+        mkdir=t.home/'bin/mkdir'
+        mkdir.write_text('''#!/bin/ash
+if [ "${DELAY_REQUEST_MKDIR:-0}" = 1 ] && [ "$#" = 1 ] && [ "$1" = "$TEST_REQUEST_LOCK" ]; then
+ /bin/mkdir "$@" || exit $?
+ touch "$TEST_ROOT/mkdir-paused"
+ while [ ! -e "$TEST_ROOT/allow-publish" ]; do sleep .1; done
+ exit 0
+fi
+exec /bin/mkdir "$@"
+''');mkdir.chmod(0o755)
+        pubenv={**env,'DELAY_REQUEST_MKDIR':'1','TEST_REQUEST_LOCK':str(request_lock)}
+        paused=subprocess.Popen(['/bin/ash','-c','. "$UPLIB"; request_enqueue update'],env=pubenv,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
+        waitfile(t.home/'mkdir-paused',paused)
+        was_empty=list(request_lock.iterdir())==[]
+        cleanup=call_lib(env,'request_lock_recover_abandoned')
+        deleted=not request_lock.exists();still_alive=paused.poll() is None
+        (t.home/'allow-publish').touch();out,err=paused.communicate(timeout=15)
+        return {'probeStatus':'EXECUTED','expected':'do not retire fence of a live publisher paused before metadata publication',
+                'emptyFenceBeforeCleanup':was_empty,'cleanupReturncode':cleanup.returncode,'fenceDeleted':deleted,
+                'publisherAliveWhenFenceDeleted':still_alive,'publisherReturncode':paused.returncode,'publisherStderr':err[-1000:],
+                'bugReproduced':cleanup.returncode==0 and deleted and still_alive and paused.returncode!=0}
+    finally:
+        if paused is not None:kill_owned(paused)
+        kill_owned(live)
+
+def false_ready(t):
+    # Model the documented init contract: start/status report a live process,
+    # while the updater-specific readiness marker is still absent.
+    env=dict(t.env);env.pop('BRORAY_HANDOFF_DAEMON_READY_HOOK')
+    ready=t.root/'opt/var/lib/broray-updater/daemon.ready'
+    assert not ready.exists()
+    p=t.call(env=env);report=json.loads((t.root/'opt/var/lib/broray-updater-preflight/status.json').read_text())
+    return {'probeStatus':'EXECUTED','expected':'preflight must not claim ready solely from init status',
+            'initContract':'live, not yet ready (service fixture)', 'returncode':p.returncode,'statusCode':report['code'],
+            'daemonReadyExists':ready.exists(),'bugReproduced':p.returncode==0 and report['code']=='PREFLIGHT_PLATFORM_READY' and not ready.exists(),
+            'evidenceClass':'isolated init-contract test; not physical delayed-boot test'}
+
+def version_and_syntax():
+    root=ROOT/'runtime';failed=[];checked=0
+    for p in root.rglob('*'):
+        if not p.is_file():continue
+        b=p.read_bytes()
+        if b.startswith(b'#!') and (b'ash' in b.splitlines()[0] or b'/sh' in b.splitlines()[0]):
+            r=subprocess.run(['/bin/ash','-n',str(p)],capture_output=True,text=True,timeout=10);checked+=1
+            if r.returncode:failed.append([str(p),r.stderr])
+    print('SHELL_SYNTAX '+json.dumps({'checked':checked,'failures':failed}),flush=True)
+
+version_and_syntax()
+case('F01_LEGACY_LOCK_PATH',legacy)
+case('F02_PREFLIGHT_CRASH_FENCE',crash)
+case('F03_DUPLICATE_DAEMON',duplicate)
+case('F04_LIVE_PUBLISHER_CLEANUP',publisher)
+case('F05_PREFLIGHT_READINESS',false_ready)
+print('AUDIT_PROBES_BEGIN\n'+json.dumps(OUT,indent=2)+'\nAUDIT_PROBES_END',flush=True)
+sys.exit(1 if any(x.get('probeStatus')=='HARNESS_ERROR' for x in OUT) else 0)

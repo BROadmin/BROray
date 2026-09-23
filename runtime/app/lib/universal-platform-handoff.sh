@@ -773,36 +773,6 @@ schedule()
 
 # Authenticated installer entry: called BEFORE an update/reinstall is queued.
 # No application, Xray, route, OPKG, or user configuration is changed here.
-preflight_stop_daemon()
-{
-    local pf_pid pf_start pf_ticks pf_cmd pf_count
-    if [ "$TEST_MODE" = 1 ] && [ -n "${BRORAY_HANDOFF_PREFLIGHT_STOP_HOOK:-}" ]; then
-        "$BRORAY_HANDOFF_PREFLIGHT_STOP_HOOK"
-        return $?
-    fi
-    if [ ! -e "$UPDATER_STATE_ROOT/daemon.pid" ]; then
-        [ ! -e "$UPDATER_STATE_ROOT/daemon.lock" ] && [ ! -L "$UPDATER_STATE_ROOT/daemon.pid" ]
-        return $?
-    fi
-    regular_file "$UPDATER_STATE_ROOT/daemon.pid" || return 1
-    pf_pid="$(cat "$UPDATER_STATE_ROOT/daemon.pid")" || return 1
-    case "$pf_pid" in ''|*[!0-9]*|0|1) return 1 ;; esac
-    pf_start="$(process_starttime "$pf_pid")" || return 1
-    [ -n "$pf_start" ] || return 1
-    pf_cmd="$(tr '\000' '\n' <"$(root_path /proc)/$pf_pid/cmdline")" || return 1
-    printf '%s\n' "$pf_cmd" | awk -v script="$UPDATER" '
-      {arg[NR]=$0} END {exit !((NR==3 || NR==2) && arg[NR]=="daemon" && arg[NR-1]==script)}
-    ' || return 1
-    process_matches "$pf_pid" "$pf_start" || return 1
-    kill -TERM "$pf_pid" || return 1
-    pf_count=0
-    while process_matches "$pf_pid" "$pf_start" && [ "$pf_count" -lt 10 ]; do
-        sleep 1
-        pf_count=$((pf_count + 1))
-    done
-    ! process_matches "$pf_pid" "$pf_start"
-}
-
 preflight_paths_safe()
 {
     local pf_relative pf_parent pf_stop
@@ -820,109 +790,160 @@ preflight_paths_safe()
     done
 }
 
+# Return 3 only when no protected generation/transaction exists. Directory and
+# JSON reads below locate evidence; only the authenticated native entry grants
+# mutation or readiness. Never choose a transaction by PID, age or mtime.
+preflight_recovery_error()
+{
+    jq -nc --arg code "$1" '{ok:false,errorCode:$code,platformReady:false,activationAllowed:false}'
+    return 75
+}
+
+preflight_native_phase()
+{
+    local step expected output rc
+    step="$1"; expected="$2"; rc=0
+    output="$("$pf_native" "$step" "$pf_live" "$pf_id" "$pf_migration" "$pf_nonce")" || rc=$?
+    if [ "$rc" != 0 ]; then
+        [ -z "$output" ] || printf '%s\n' "$output"
+        [ -n "$output" ] || preflight_recovery_error PREFLIGHT_RECOVERY_UNCONFIRMED
+        return "$rc"
+    fi
+    printf '%s\n' "$output" | jq -es --arg phase "$expected" \
+      'length==1 and .[0].ok==true and .[0].phase==$phase and .[0].activationAllowed==false' >/dev/null || {
+        preflight_recovery_error PREFLIGHT_RECOVERY_RESPONSE_INVALID
+        return 75
+    }
+    pf_reply="$output"
+}
+
+preflight_resume()
+{
+    local expected code pf_id pf_op pf_state pf_binding pf_native pf_live pf_migration pf_nonce pf_reply
+    local target file selected actual running
+    expected="$1"; code="$2"; pf_id=''
+    if [ -L "$BRORAY_ROUTES_API_LOCK" ]; then
+        target="$(readlink "$BRORAY_ROUTES_API_LOCK")" || return 75
+        case "$target" in
+          "$BRORAY_STATE_ROOT/operations/"op-*/fence)
+            pf_id="${target%/fence}"; pf_id="${pf_id##*/}" ;;
+          *) preflight_recovery_error PREFLIGHT_RECOVERY_FENCE_UNCONFIRMED; return 75 ;;
+        esac
+    elif [ -e "$BRORAY_ROUTES_API_LOCK" ]; then
+        return 3 # Existing admission classifies/preserves legacy or foreign locks.
+    else
+        # Lost completion replies have no global fence. Discover one matching
+        # completed operation, then re-prove its live generation below. A bare
+        # terminal flag is never readiness; multiple matches are ambiguous.
+        selected=''
+        for file in "$BRORAY_STATE_ROOT/operations"/op-*/state.json; do
+            regular_file "$file" || continue
+            jq -e --arg sha "$expected" '.operation=="system:platform-preflight" and
+              .state=="completed" and .running==false and
+              .platformPreflight.expectedPlatformManifestSha256==$sha' "$file" >/dev/null 2>&1 || continue
+            [ -z "$selected" ] || { preflight_recovery_error PREFLIGHT_RECOVERY_AMBIGUOUS; return 75; }
+            selected="${file%/state.json}"; selected="${selected##*/}"
+        done
+        pf_id="$selected"
+    fi
+    if [ -z "$pf_id" ]; then
+        if [ -e "$UPDATER_STATE_ROOT/generations" ] || [ -L "$UPDATER_STATE_ROOT/generations" ]; then
+            preflight_recovery_error PREFLIGHT_GENERATION_UNCONFIRMED
+            return 75
+        fi
+        return 3
+    fi
+    valid_id "$pf_id" || return 75
+    pf_op="$BRORAY_STATE_ROOT/operations/$pf_id"; pf_state="$pf_op/state.json"
+    regular_file "$pf_state" || return 75
+    jq -e '.operation=="system:platform-preflight"' "$pf_state" >/dev/null 2>&1 || return 3
+    jq -e --arg sha "$expected" '.platformPreflight.expectedPlatformManifestSha256==$sha' "$pf_state" >/dev/null || {
+        preflight_recovery_error PREFLIGHT_TARGET_CHANGED; return 75
+    }
+    pf_binding="$pf_op/platform-bootguard.json"
+    regular_file "$pf_binding" || { preflight_recovery_error PREFLIGHT_RECOVERY_EVIDENCE_INCOMPLETE; return 75; }
+    pf_migration="$(jq -er .migrationIntentSha256 "$pf_binding")" || return 75
+    pf_nonce="$(jq -er .stopNonce "$pf_binding")" || return 75
+    valid_sha256 "$pf_migration" || return 75
+    [ "${#pf_nonce}" = 32 ] || return 75
+    case "$pf_nonce" in *[!0-9a-f]*) return 75 ;; esac
+    # Execute the authenticated slot's binary, never a path supplied by state.
+    pf_native="$code/bin/broray-updater-generation"
+    regular_file "$pf_native" && [ -x "$pf_native" ] || return 75
+    actual="$(sha256sum "$pf_native")" || return 75; actual="${actual%% *}"
+    jq -e --arg sha "$actual" --arg id "$pf_id" --arg expected "$expected" \
+      '.nativeSha256==$sha and .operationId==$id and .expectedPlatformManifestSha256==$expected' "$pf_binding" >/dev/null || {
+        preflight_recovery_error PREFLIGHT_NATIVE_GENERATION_MISMATCH; return 75
+    }
+    pf_live="$(root_path /)"; pf_live="${pf_live%/}"; [ -n "$pf_live" ] || pf_live=/
+    running="$(jq -er '.running|tostring' "$pf_state")" || return 75
+    if [ "$running" = true ]; then
+        if [ ! -e "$pf_op/platform-install.record" ] && [ ! -L "$pf_op/platform-install.record" ]; then
+            preflight_native_phase recovery-inspect BOOT_CONTEXT_VERIFIED || return $?
+            if ! printf '%s\n' "$pf_reply" | jq -e '.oldBootEnded==true' >/dev/null; then
+                jq -nc --arg id "$pf_id" '{ok:false,errorCode:"UPDATER_LEGACY_REBOOT_REQUIRED",phase:"REBOOT_REQUIRED",
+                  operationId:$id,platformReady:false,serviceStopped:false,activationAllowed:false,signalsAuthorized:false}'
+                return 75
+            fi
+            preflight_native_phase recovery-retire STOPPED || return $?
+            preflight_native_phase recovery-backup BACKUP_READY || return $?
+        fi
+        preflight_native_phase recovery-install INSTALLED || return $?
+        preflight_native_phase recovery-start-intent START_INTENT || return $?
+        preflight_native_phase recovery-start READY || return $?
+        preflight_native_phase recovery-commit COMMITTED || return $?
+    fi
+    preflight_native_phase recovery-complete PREFLIGHT_COMPLETED || return $?
+    printf '%s\n' "$pf_reply"
+}
+
 preflight()
 {
-    local pf_expected pf_lock_library pf_previous_running pf_rc pf_entry pf_phase
+    local pf_expected pf_code pf_rc
     pf_expected="${1:-}"
     valid_sha256 "$pf_expected" &&
         [ "$(payload_manifest_sha)" = "$pf_expected" ] && payload_valid || return 1
-    for pf_entry in $PLATFORM_TARGET_FILES; do
-        [ -x "$PAYLOAD_ROOT/$pf_entry" ] || return 1
+    for pf_code in $PLATFORM_TARGET_FILES; do
+        [ -x "$PAYLOAD_ROOT/$pf_code" ] || return 1
     done
     preflight_paths_safe || return 1
-    pf_lock_library="${BRORAY_HANDOFF_PREFLIGHT_LOCK_LIBRARY:-${0%/*}/routes-api-operation.sh}"
-    regular_file "$pf_lock_library" || return 1
+    pf_code="${BRORAY_OPS_CODE_ROOT:-$APP_ROOT}"
+    regular_file "$pf_code/lib/operation-client.sh" || return 74
     BRORAY_ROOT="$APP_ROOT"
+    BRORAY_STATE_ROOT="$(root_path /opt/var/lib/broray)"
     BRORAY_ROUTES_API_LOCK="$(root_path /opt/var/lock/broray/global-operation.lock)"
-    BRORAY_UPDATER_REQUEST_LOCK="$UPDATER_STATE_ROOT/request.lock"
-    BRORAY_UPDATER_OPERATION_POINTER="$OPERATION_POINTER"
-    BRORAY_UPDATER_OPERATION_ROOT="$OPERATION_ROOT"
-    BRORAY_LEGACY_GLOBAL_LOCK="$(root_path /opt/var/lock/broray-updater.lock)"
-    . "$pf_lock_library" || return 1
-    broray_routes_api_lock_acquire system:platform-preflight updater-platform || return 1
-    trap 'preflight_exit $?' EXIT
+    BRORAY_OPS_UPDATER_ROOT="$UPDATER_STATE_ROOT"
+    BRORAY_LEGACY_GLOBAL_LOCK="$(root_path /tmp/broray-global-operation.lock)"
+    BRORAY_OPS_CODE_ROOT="$pf_code"
+    export BRORAY_ROOT BRORAY_STATE_ROOT BRORAY_ROUTES_API_LOCK BRORAY_OPS_UPDATER_ROOT
+    export BRORAY_LEGACY_GLOBAL_LOCK BRORAY_OPS_CODE_ROOT
+    . "$pf_code/lib/operation-client.sh" || return 74
+    pf_rc=0
+    preflight_resume "$pf_expected" "$pf_code" || pf_rc=$?
+    case "$pf_rc" in 0) return 0 ;; 3) ;; *) return "$pf_rc" ;; esac
+    pf_rc=0
+    broray_ops_preflight_admit "$pf_expected" || pf_rc=$?
+    if [ "$pf_rc" != 0 ]; then
+        [ -z "${BRORAY_OPS_LAST_ERROR:-}" ] || printf '%s\n' "$BRORAY_OPS_LAST_ERROR"
+        return "$pf_rc"
+    fi
+    # Generic finish can retire only PREPARED. Once STOP_INTENT is durable,
+    # every failure preserves the protected fence and its exact evidence.
+    trap 'broray_ops_finish failed OPERATION_FAILED >/dev/null 2>&1 || true' EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
-    for pf_entry in "$UPDATER_STATE_ROOT/queue"/*.json; do
-        [ ! -e "$pf_entry" ] && [ ! -L "$pf_entry" ] || return 1
-    done
-    ensure_state_root || return 1
-    PREFLIGHT_STOPPED=false
-    PREFLIGHT_COMMITTED=false
-    pf_previous_running=false
-    pf_phase="$(cat "$PHASE_FILE" 2>/dev/null || true)"
-    case "$pf_phase" in
-      preparing|installing|restarting)
-        regular_file "$DAEMON_STATE_FILE" || return 1
-        pf_previous_running="$(cat "$DAEMON_STATE_FILE")" || return 1
-        case "$pf_previous_running" in true|false) ;; *) return 1 ;; esac
-        ;;
-      *)
-        init_call status >/dev/null 2>&1 && pf_previous_running=true
-        [ ! -L "$DAEMON_STATE_FILE" ] || return 1
-        printf '%s\n' "$pf_previous_running" >"$DAEMON_STATE_FILE" && sync || return 1
-        ;;
-    esac
-    PREFLIGHT_OLD_RUNNING="$pf_previous_running"
-    preflight_stop_daemon || {
-        status_write error false PREFLIGHT_OWNER_UNCONFIRMED 'Не подтверждена безопасная остановка updater; файлы не изменялись.' false false '' '' || true
-        return 1
-    }
-    PREFLIGHT_STOPPED=true
-    if [ -e "$BACKUP_ROOT" ] || [ -L "$BACKUP_ROOT" ]; then
-        pf_phase="$(cat "$PHASE_FILE" 2>/dev/null)" || return 1
-        case "$pf_phase" in
-          preparing) ;; # No target copy is permitted in this durable phase.
-          installing|restarting|rolled-back) backup_valid && platform_restore || return 1 ;;
-          complete) platform_current || return 1 ;;
-          *) return 1 ;;
-        esac
-        rm -rf "$BACKUP_ROOT" || return 1
-        phase_write rolled-back || return 1
-    fi
-    phase_write preparing && backup_prepare && backup_valid || return 1
-    phase_write installing && sync || return 1
-    platform_install || return 1
-    phase_write restarting || return 1
-    init_call start >/dev/null 2>&1 && daemon_ready && platform_current || return 1
-    # Success is recorded only after re-reading exact installed bytes.
-    phase_write complete && sync || return 1
-    PREFLIGHT_COMMITTED=true
-    status_write success false PREFLIGHT_PLATFORM_READY 'Постоянный updater проверен и запущен до постановки обновления в очередь.' true false '' '' || return 1
-    rm -rf "$BACKUP_ROOT" || return 1
-    return 0
-}
-
-preflight_exit()
-{
-    local pf_exit_rc pf_rollback_ok pf_exit_phase
-    pf_exit_rc="$1"
-    if [ "${PREFLIGHT_STOPPED:-false}" = true ] && [ "${PREFLIGHT_COMMITTED:-false}" != true ]; then
-        pf_rollback_ok=true
-        preflight_stop_daemon || pf_rollback_ok=false
-        pf_exit_phase="$(cat "$PHASE_FILE" 2>/dev/null || true)"
-        case "$pf_exit_phase" in
-          installing|restarting)
-            [ "$pf_rollback_ok" = true ] && backup_valid && platform_restore || pf_rollback_ok=false
-            ;;
-          preparing) ;;
-          *) [ ! -e "$BACKUP_ROOT" ] || pf_rollback_ok=false ;;
-        esac
-        if [ "$pf_rollback_ok" = true ] && [ "${PREFLIGHT_OLD_RUNNING:-false}" = true ]; then
-            init_call start >/dev/null 2>&1 && daemon_ready || pf_rollback_ok=false
-        fi
-        if [ "$pf_rollback_ok" = true ]; then
-            phase_write rolled-back || true
-            status_write error false PREFLIGHT_ROLLED_BACK 'Подготовка updater не завершена; прежняя платформа восстановлена, маршруты не изменялись.' true true '' '' || true
-            rm -rf "$BACKUP_ROOT" || true
-        else
-            phase_write rollback-failed || true
-            status_write error false PREFLIGHT_ROLLBACK_FAILED 'Подготовка updater остановлена. Восстановление платформы не подтверждено; запуск обновления запрещён.' true false '' '' || true
-        fi
-    fi
-    broray_routes_api_lock_release >/dev/null 2>&1 || true
-    return "$pf_exit_rc"
+    broray_ops_preflight_stop_intent "$pf_expected" || return $?
+    broray_ops_preflight_bind_service || return $?
+    # Call in this owner shell, not a pipeline/command-substitution child.
+    # An observation-only legacy binding never authorizes a stop signal.
+    broray_ops_preflight_stage_bootguard >/dev/null || return $?
+    trap - EXIT HUP INT TERM
+    jq -nc --arg id "$BRORAY_BACKGROUND_OPERATION_ID" --arg sha "$pf_expected" '
+      {ok:false,errorCode:"UPDATER_LEGACY_REBOOT_REQUIRED",phase:"REBOOT_REQUIRED",
+       operationId:$id,expectedPlatformManifestSha256:$sha,platformReady:false,
+       serviceStopped:false,activationAllowed:false,signalsAuthorized:false}' || return 74
+    return 75
 }
 
 status_json()
@@ -949,7 +970,41 @@ status_json()
     return 1
 }
 
+
+# Read-only platform admission check; not a replacement for full preflight.
+# This command owns/settles coordinator bookkeeping but NEVER controls services.
+preflight_admission_only()
+{
+    local expected code admission_id admission_rc
+    expected="${1:-}"
+    valid_sha256 "$expected" && [ "$(payload_manifest_sha)" = "$expected" ] && payload_valid || return 1
+    code="${BRORAY_OPS_CODE_ROOT:-$APP_ROOT}"
+    [ -f "$code/lib/operation-client.sh" ] && [ ! -L "$code/lib/operation-client.sh" ] || return 74
+    BRORAY_ROOT="$APP_ROOT"
+    BRORAY_STATE_ROOT="$(root_path /opt/var/lib/broray)"
+    BRORAY_ROUTES_API_LOCK="$(root_path /opt/var/lock/broray/global-operation.lock)"
+    BRORAY_OPS_UPDATER_ROOT="$UPDATER_STATE_ROOT"
+    BRORAY_LEGACY_GLOBAL_LOCK="$(root_path /tmp/broray-global-operation.lock)"
+    BRORAY_OPS_CODE_ROOT="$code"
+    export BRORAY_ROOT BRORAY_STATE_ROOT BRORAY_ROUTES_API_LOCK BRORAY_OPS_UPDATER_ROOT
+    export BRORAY_LEGACY_GLOBAL_LOCK BRORAY_OPS_CODE_ROOT
+    . "$code/lib/operation-client.sh" || return 74
+    admission_rc=0
+    broray_ops_preflight_admit "$expected" || admission_rc=$?
+    [ "$admission_rc" = 0 ] || return "$admission_rc"
+    trap 'broray_ops_finish failed OPERATION_FAILED >/dev/null 2>&1 || true' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    admission_id="$BRORAY_BACKGROUND_OPERATION_ID"
+    broray_ops_finish completed || return 75
+    trap - EXIT HUP INT TERM
+    jq -nc --arg id "$admission_id" \
+      '{ok:true,code:"PREFLIGHT_ADMISSION_ONLY",operationId:$id,phase:"PREPARED",platformMutationAllowed:false,platformReady:false}'
+}
+
 case "${1:-}" in
+    preflight-admission) preflight_admission_only "${2:-}" ;;
     preflight) preflight "${2:-}" ;;
     schedule) schedule ;;
     finalize) finalize ;;

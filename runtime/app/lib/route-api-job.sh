@@ -18,13 +18,18 @@ broray_route_api_enter()
       "$route_app/web-new/api/routes/delete.cgi"|"$route_app/web-new/api/routes/resume.cgi"|\
       "$route_app/web-new/api/routes/custom-list.cgi"|"$route_app/web-new/api/routes/custom-validate.cgi"|\
       "$route_app/web-new/api/routes/custom-remove.cgi"|"$route_app/web-new/api/routes/custom-preview.cgi"|\
-      "$route_app/web-new/api/routes/custom-commit.cgi") ;;
+      "$route_app/web-new/api/routes/custom-commit.cgi"|\
+      "$route_app/web-new/api/routes/dot-apply.cgi"|"$route_app/web-new/api/routes/dot-test.cgi"|\
+      "$route_app/web-new/api/routes/dot-delete.cgi"|"$route_app/web-new/api/routes/dot-delete-preview.cgi") ;;
       *) return 73 ;;
     esac
     case "$route_action" in
       custom:preview|custom:commit)
         route_body="$route_bundle"; route_bundle=''
         [ -f "$route_body" ] && [ ! -L "$route_body" ] || return 74 ;;
+      dot:apply|dot:test|dot:delete)
+        route_body="${BRORAY_DOT_API_REQUEST_FILE:-}"
+        [ -n "$route_body" ] && [ -f "$route_body" ] && [ ! -L "$route_body" ] || return 74 ;;
     esac
     if [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ]; then
         route_context="$(broray_route_worker_check)" || return 73

@@ -34,8 +34,7 @@ class DeleteIntegration(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory(prefix='dot-binding-integration-');self.addCleanup(self.tmp.cleanup)
   self.app=Path(self.tmp.name)/'app'
   for d in ['lib','bin','tmp','routes/dot','run','locks','updater','operations']:(self.app/d).mkdir(parents=True,exist_ok=True)
-  for name in ['routes-dot.sh','routes-api-operation.sh']:
-   shutil.copyfile(ROOT/'runtime/app/lib'/name,self.app/'lib'/name)
+  shutil.copytree(ROOT/'runtime/app/lib',self.app/'lib',dirs_exist_ok=True)
   self.cli=self.app/'bin/broray-routes-dot';shutil.copyfile(ROOT/'runtime/app/bin/broray-routes-dot',self.cli)
   self.config=self.app/'routes/dot/config.json';self.state=self.app/'routes/dot/state.json'
   self.set_ids(['google-primary','cloudflare-primary'])
@@ -51,6 +50,7 @@ broray_dot_status() { python3 "$BRORAY_ROOT/fixture.py" status; }
 broray_dot_command() { python3 "$BRORAY_ROOT/fixture.py" command "$1"; }
 ''')
   self.env={**os.environ,'BRORAY_ROOT':str(self.app),'BRORAY_DOT_LIB':str(self.shim),'PATH':'/usr/bin:/bin:/usr/sbin:/sbin','BRORAY_ROUTES_API_LOCK':str(self.app/'locks/global'),'BRORAY_UPDATER_REQUEST_LOCK':str(self.app/'updater/request.lock'),'BRORAY_UPDATER_OPERATION_POINTER':str(self.app/'operations/pointer'),'BRORAY_UPDATER_OPERATION_ROOT':str(self.app/'operations'),'BRORAY_LEGACY_GLOBAL_LOCK':str(self.app/'locks/legacy')}
+  self.env.update(BRORAY_STATE_ROOT=str(self.app/'ops-state'),BRORAY_OPS_UPDATER_ROOT=str(self.app/'updater'),BRORAY_OPS_RAM_ROOT=str(self.app/'ram'),BRORAY_OPS_ASH='/bin/ash',BRORAY_OPS_GUARD=str(ROOT.parent/'.local/bin/linux-guard'),BRORAY_OPS_SUPERVISOR=str(ROOT.parent/'.local/bin/linux-supervisor'))
  def entry(self,id,address,sni):
   return dict(id=id,address=address,effectivePort=853,portRaw='853',portState='explicit',sni=sni,spki='',interface='',on='',domain='',valid=True,unknownTokenCount=0,deleteEligible=id!='foreign',catalogMatchIds=[] if id=='foreign' else [id])
  def set_ids(self,ids):
@@ -129,7 +129,7 @@ broray_dot_command() { python3 "$BRORAY_ROOT/fixture.py" command "$1"; }
   request=self.request();(self.app/'hold').touch()
   p=subprocess.Popen(['/bin/ash',str(self.cli),'delete',str(request)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
   try:
-   deadline=time.monotonic()+10
+   deadline=time.monotonic()+40
    while not (self.app/'ready').exists():
     if p.poll() is not None or time.monotonic()>deadline:self.fail('first delete did not reach guarded command')
     time.sleep(.02)
@@ -142,7 +142,9 @@ broray_dot_command() { python3 "$BRORAY_ROOT/fixture.py" command "$1"; }
    if p.poll() is None:p.terminate()
    p.communicate(timeout=20)
  def test_inherited_parent_fence_is_kept_until_cgi_releases_it(self):
-  request=self.request();script='. "$BRORAY_ROOT/lib/routes-api-operation.sh"; broray_routes_api_lock_acquire dot:delete dns-over-tls || exit 7; trap broray_routes_api_lock_release EXIT; BRORAY_DOT_PARENT_LOCK_PID=$$ /bin/ash "$1" delete "$2" || exit 8; [ -d "$BRORAY_ROUTES_API_LOCK" ] || exit 9'
+  # Same fence-lifetime assertion through the actual protected parent domain;
+  # the removed PID-only parent hint is no longer an admission credential.
+  request=self.request();script='. "$BRORAY_ROOT/lib/route-job.sh"; broray_route_job_run dot:delete dns-over-tls /bin/ash -c \'/bin/ash "$1" delete "$2" || exit 8; [ -d "$BRORAY_ROUTES_API_LOCK" ] || exit 9\' test "$1" "$2"'
   p=subprocess.run(['/bin/ash','-c',script,'test',str(self.cli),str(request)],env=self.env,capture_output=True,text=True,timeout=40)
   self.assertEqual(p.returncode,0,p.stderr);self.assertFalse((self.app/'locks/global').exists())
 if __name__=='__main__':

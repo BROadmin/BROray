@@ -24,11 +24,12 @@ def operation_type:
   elif startswith("subscriptions:") then "subscription_update"
   elif startswith("servers:") then "server_operation"
   elif .=="auto-switch" then "auto_switch"
+  elif .=="system:platform-preflight" then "updater_maintenance"
   elif startswith("xray:") then "xray_maintenance"
   elif startswith("dot:") then "dns_operation"
   elif startswith("keenetic:") then "router_operation"
   elif route_action then "route_operation"
-  else enum(["subscription_update","server_operation","auto_switch","xray_maintenance","dns_operation","router_operation","route_operation"];"unknown") end;
+  else enum(["subscription_update","server_operation","auto_switch","xray_maintenance","dns_operation","router_operation","route_operation","updater_maintenance"];"unknown") end;
 def source: enum(["USER","SCHEDULER","SUBSCRIPTION_AUTO","SERVER_CHECK_AUTO","AUTO_SWITCH","UPDATER","SYSTEM_RECOVERY"];"UNKNOWN");
 def error_code: enum(["CANCELLED","OPERATION_FAILED","OWNER_DISAPPEARED","OWNER_CHANGED","OPERATION_BUSY","DOMAIN_OPERATION_BUSY","STATE_UNAVAILABLE","AUTOMATION_PAUSED","CHILDREN_UNCONFIRMED","CANCEL_NOT_SUPPORTED","OWNER_UNCONFIRMED","OWNER_PUBLICATION_FAILED"];null);
 def operation_public:

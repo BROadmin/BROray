@@ -27,7 +27,7 @@ ops_route_resource_recover()
     if [ ! -e "$parent" ] && [ ! -L "$parent" ]; then return 0; fi
     ops_dir_safe "$parent" && [ "$(readlink -f "$parent")" = "$parent" ] || return 1
     "$OPS_GUARD" "$parent/resource.control.guard" "${BRORAY_OPS_ASH:-/opt/bin/ash}" \
-      "$OPS_APP/lib/routes-resource-recover.sh" "$parent/operation.lock" "$OPS_ID" "$1"
+      "${OPS_CODE:-$OPS_APP}/lib/routes-resource-recover.sh" "$parent/operation.lock" "$OPS_ID" "$1"
 }
 
 ops_route_progress_prepare()

@@ -3,12 +3,12 @@
 ops_report()
 {
     local snapshot journal build arch kernel uptime request pending report automation services xray updater
-    . "$OPS_APP/lib/operation-report-facts.sh" || return 1
+    . "${OPS_CODE:-$OPS_APP}/lib/operation-report-facts.sh" || return 1
     snapshot="$(ops_status)" || snapshot='{"ok":false,"complete":false,"operations":[],"errors":["STATE_UNAVAILABLE"],"automationPaused":null,"globalFence":"unknown"}'
     journal="$(ops_journal_snapshot)" || journal='{"complete":false,"events":[],"errors":["JOURNAL_UNAVAILABLE"],"truncated":false}'
     build='{}'
     if ops_file_safe "$OPS_APP/web-new/build.json" 8192; then
-        build="$(jq -c -L "$OPS_APP/lib" 'include "operation-report-public"; build_public' "$OPS_APP/web-new/build.json" 2>/dev/null)" || build='{}'
+        build="$(jq -c -L "${OPS_CODE:-$OPS_APP}/lib" 'include "operation-report-public"; build_public' "$OPS_APP/web-new/build.json" 2>/dev/null)" || build='{}'
     fi
     arch="$(uname -m)"
     case "$arch" in aarch64|armv7l|mips|mipsel|x86_64) ;; *) arch=unknown ;; esac
