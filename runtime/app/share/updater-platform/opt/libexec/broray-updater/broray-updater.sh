@@ -208,6 +208,45 @@ process_start_ticks()
         awk '{print $20; exit}'
 }
 
+updater_stat()
+(
+    # Entware may omit standalone stat and BusyBox FEATURE_STAT_FORMAT.
+    # An installed stat's failure remains authoritative; never mask it.
+    if command -v stat >/dev/null 2>&1; then
+        stat "$@"
+        exit $?
+    fi
+    follow=''
+    if [ "${1:-}" = -L ]; then follow=-L; shift; fi
+    [ "$#" -ge 3 ] && [ "$1" = -c ] || exit 75
+    format="$2"; shift 2
+    case "$format" in '%a'|'%a:%u'|'%u:%a:%h') ;; *) exit 75 ;; esac
+    for path in "$@"
+    do
+        if [ -n "$follow" ]; then
+            row="$(busybox stat -L -t "$path")" || exit 75
+        else
+            row="$(busybox stat -t "$path")" || exit 75
+        fi
+        # Strip the exact filename first so embedded spaces do not shift fields.
+        case "$row" in "$path "*) fields="${row#"$path "}" ;; *) exit 75 ;; esac
+        set -f
+        set -- $fields
+        [ "$#" -eq 14 ] || exit 75
+        raw_mode="$3"; owner="$4"; links="$8"
+        case "$raw_mode" in ''|*[!0-9a-fA-F]*) exit 75 ;; esac
+        [ "${#raw_mode}" -le 8 ] || exit 75
+        case "$owner" in ''|*[!0-9]*) exit 75 ;; esac
+        case "$links" in ''|*[!0-9]*) exit 75 ;; esac
+        mode="$((0x$raw_mode & 07777))"
+        case "$format" in
+            '%a') printf '%o\n' "$mode" ;;
+            '%a:%u') printf '%o:%s\n' "$mode" "$owner" ;;
+            '%u:%a:%h') printf '%s:%o:%s\n' "$owner" "$mode" "$links" ;;
+        esac
+    done
+)
+
 ensure_layout()
 {
     local command_name directory layout_modes expected_owner mode
@@ -233,7 +272,7 @@ ensure_layout()
             [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
         done
         expected_owner="$(id -u)" || return 1
-        layout_modes="$(stat -c '%a:%u' "$STATE_ROOT" "$QUEUE_ROOT" "$WORK_ROOT" "$SLOT_META_ROOT" "$OPERATION_ROOT")" || return 1
+        layout_modes="$(updater_stat -c '%a:%u' "$STATE_ROOT" "$QUEUE_ROOT" "$WORK_ROOT" "$SLOT_META_ROOT" "$OPERATION_ROOT")" || return 1
         for mode in $layout_modes
         do
             [ "$mode" = "700:$expected_owner" ] || return 1

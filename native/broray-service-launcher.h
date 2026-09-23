@@ -157,9 +157,17 @@ static int service_execute(int ashfd,const struct migration_file *script,const c
     int status;pid_t got;do{got=waitpid(child,&status,0);}while(got<0&&errno==EINTR);
     if(failed||got!=child||!WIFEXITED(status))return -1;return WEXITSTATUS(status);
 }
+static int service_interpreter_file_valid(const struct stat *st){
+    /* Entware ships root-owned BusyBox as 4755. Executing it is not a
+     * privilege transition only when BOTH real and effective UID are root.
+     * Setgid/sticky bits, writable files and additional links remain invalid. */
+    return S_ISREG(st->st_mode)&&st->st_uid==geteuid()&&st->st_nlink==1&&
+        !(st->st_mode&03022)&&(st->st_mode&0100)&&
+        (!(st->st_mode&S_ISUID)||(st->st_uid==0&&getuid()==0&&geteuid()==0));
+}
 static int service_interpreter_valid(int held,const char *path,const char *expected){
     int fs=migration_directory("/");if(fs<0)return -1;int named=migration_relative(fs,path+1);close(fs);if(named<0)return -1;
-    struct stat a,b,after;char sha[65];int bad=fstat(held,&a)||fstat(named,&b)||a.st_dev!=b.st_dev||a.st_ino!=b.st_ino||a.st_mode!=b.st_mode||!S_ISREG(a.st_mode)||a.st_uid!=geteuid()||a.st_nlink!=1||(a.st_mode&07022)||!(a.st_mode&0100)||lseek(held,0,SEEK_SET)!=0||hash_fd(held,sha)||strcmp(sha,expected)||fstat(held,&after)||after.st_nlink!=1||after.st_mode!=a.st_mode||after.st_size!=a.st_size;
+    struct stat a,b,after;char sha[65];int bad=fstat(held,&a)||fstat(named,&b)||a.st_dev!=b.st_dev||a.st_ino!=b.st_ino||a.st_mode!=b.st_mode||!service_interpreter_file_valid(&a)||lseek(held,0,SEEK_SET)!=0||hash_fd(held,sha)||strcmp(sha,expected)||fstat(held,&after)||!service_interpreter_file_valid(&after)||after.st_uid!=a.st_uid||after.st_mode!=a.st_mode||after.st_size!=a.st_size;
     close(named);return bad?-1:0;
 }
 static int service_request(int client,int base,int root,int ashfd,char **argv,const char *host_record,size_t host_size){
@@ -205,7 +213,7 @@ static int service_host(int argc,char **argv){
     int base=checked_directory(argv[2]);if(base<0||flock(base,LOCK_EX|LOCK_NB)||empty_directory(base)!=1)return service_error("LAUNCHER_DOMAIN_NOT_EMPTY_OR_OWNED");
     int root=migration_directory(argv[6]),fs=migration_directory("/");if(root<0||fs<0)return service_error("LAUNCHER_ROOT_UNCONFIRMED");
     int ashfd=migration_relative(fs,argv[7]+1);close(fs);char sha[65];struct stat ast;
-    if(ashfd<0||fstat(ashfd,&ast)||!S_ISREG(ast.st_mode)||ast.st_uid!=geteuid()||ast.st_nlink!=1||(ast.st_mode&07022)||!(ast.st_mode&0100)||hash_fd(ashfd,sha)||strcmp(sha,argv[8]))return service_error("ASH_BYTES_UNCONFIRMED");
+    if(ashfd<0||fstat(ashfd,&ast)||!service_interpreter_file_valid(&ast)||hash_fd(ashfd,sha)||strcmp(sha,argv[8]))return service_error("ASH_BYTES_UNCONFIRMED");
     if(migration_boot(boot)||capture(getpid(),&supervisor)||migration_sync_directory(argv[2],base))return service_error("LAUNCHER_IDENTITY_UNCONFIRMED");
     char *host_record=NULL;size_t host_size=0;FILE *f=open_memstream(&host_record,&host_size);if(!f)return 74;
     fprintf(f,"BROray-independent-app-service/1\n");for(int i=2;i<9;i++)fprintf(f,"%s\n",argv[i]);identity_json(f,&supervisor);fputc('\n',f);

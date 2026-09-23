@@ -1,6 +1,45 @@
 #!/opt/bin/ash
 set -u
 
+updater_stat()
+(
+    # Entware may omit standalone stat and BusyBox FEATURE_STAT_FORMAT.
+    # An installed stat's failure remains authoritative; never mask it.
+    if command -v stat >/dev/null 2>&1; then
+        stat "$@"
+        exit $?
+    fi
+    follow=''
+    if [ "${1:-}" = -L ]; then follow=-L; shift; fi
+    [ "$#" -ge 3 ] && [ "$1" = -c ] || exit 75
+    format="$2"; shift 2
+    case "$format" in '%a'|'%a:%u'|'%u:%a:%h') ;; *) exit 75 ;; esac
+    for path in "$@"
+    do
+        if [ -n "$follow" ]; then
+            row="$(busybox stat -L -t "$path")" || exit 75
+        else
+            row="$(busybox stat -t "$path")" || exit 75
+        fi
+        # Strip the exact filename first so embedded spaces do not shift fields.
+        case "$row" in "$path "*) fields="${row#"$path "}" ;; *) exit 75 ;; esac
+        set -f
+        set -- $fields
+        [ "$#" -eq 14 ] || exit 75
+        raw_mode="$3"; owner="$4"; links="$8"
+        case "$raw_mode" in ''|*[!0-9a-fA-F]*) exit 75 ;; esac
+        [ "${#raw_mode}" -le 8 ] || exit 75
+        case "$owner" in ''|*[!0-9]*) exit 75 ;; esac
+        case "$links" in ''|*[!0-9]*) exit 75 ;; esac
+        mode="$((0x$raw_mode & 07777))"
+        case "$format" in
+            '%a') printf '%o\n' "$mode" ;;
+            '%a:%u') printf '%o:%s\n' "$mode" "$owner" ;;
+            '%u:%a:%h') printf '%s:%o:%s\n' "$owner" "$mode" "$links" ;;
+        esac
+    done
+)
+
 # Installed entry uses retained authenticated code; neither PID nor init
 # status may stand in for an exact live generation. No legacy launch fallback.
 fail()
@@ -88,7 +127,7 @@ jq -e --arg id "$operation" --arg native "$native_sha" --arg migration "$migrati
 native="$state/operations/$operation/platform-bootguard/runtime"
 [ -f "$native" ] && [ ! -L "$native" ] && [ -x "$native" ] || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
 exec 8<"$native" || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
-identity="$(stat -L -c '%u:%a:%h' /proc/self/fd/8)" || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
+identity="$(updater_stat -L -c '%u:%a:%h' /proc/self/fd/8)" || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
 [ "$identity" = "$(id -u):700:1" ] || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
 actual="$(sha256sum <&8)" || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
 [ "${actual%% *}" = "$native_sha" ] || fail UPDATER_SERVICE_RUNTIME_UNCONFIRMED
