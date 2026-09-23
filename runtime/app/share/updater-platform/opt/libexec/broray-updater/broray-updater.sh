@@ -249,21 +249,29 @@ updater_stat()
 
 ensure_layout()
 {
-    local command_name directory layout_modes expected_owner mode
+    local command_name directory layout_modes expected_owner mode managed_layout
     for command_name in awk chmod cmp cp curl date df find gzip jq kill ln mkdir mv readlink rm sed sha256sum sleep sort sync tail tar tr wc
     do
         command -v "$command_name" >/dev/null 2>&1 || return 1
     done
 
-    mkdir -p \
-        "$STATE_ROOT" \
-        "$QUEUE_ROOT" \
-        "$WORK_ROOT" \
-        "$SLOT_META_ROOT" \
-        "$OPERATION_ROOT" \
-        "$RELEASES_ROOT" || return 1
+    managed_layout=false
+    if [ -e "$STATE_ROOT/generations" ] || [ -L "$STATE_ROOT/generations" ]; then
+        managed_layout=true
+    fi
+    # The supervised daemon may create its private directories on first birth.
+    # External clients must not recreate missing state or chmod its ancestors.
+    if [ -n "${BRORAY_UPDATER_GENERATION:-}" ] || [ "$managed_layout" = false ]; then
+        mkdir -p \
+            "$STATE_ROOT" \
+            "$QUEUE_ROOT" \
+            "$WORK_ROOT" \
+            "$SLOT_META_ROOT" \
+            "$OPERATION_ROOT" \
+            "$RELEASES_ROOT" || return 1
+    fi
 
-    if [ -n "${BRORAY_UPDATER_GENERATION:-}" ]; then
+    if [ -n "${BRORAY_UPDATER_GENERATION:-}" ] || [ "$managed_layout" = true ]; then
         # These paths were created with the generation's private umask. Do not
         # chmod existing state: even an unchanged chmod emits an integrity
         # event on the supervised launch ancestors. Unknown modes fail closed.
@@ -271,6 +279,7 @@ ensure_layout()
         do
             [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
         done
+        [ -d "$RELEASES_ROOT" ] && [ ! -L "$RELEASES_ROOT" ] || return 1
         expected_owner="$(id -u)" || return 1
         layout_modes="$(updater_stat -c '%a:%u' "$STATE_ROOT" "$QUEUE_ROOT" "$WORK_ROOT" "$SLOT_META_ROOT" "$OPERATION_ROOT")" || return 1
         for mode in $layout_modes
@@ -278,12 +287,12 @@ ensure_layout()
             [ "$mode" = "700:$expected_owner" ] || return 1
         done
     else
-        chmod 700 \
-            "$STATE_ROOT" \
-            "$QUEUE_ROOT" \
-            "$WORK_ROOT" \
-            "$SLOT_META_ROOT" \
-            "$OPERATION_ROOT" 2>/dev/null || true
+        for directory in "$STATE_ROOT" "$QUEUE_ROOT" "$WORK_ROOT" "$SLOT_META_ROOT" "$OPERATION_ROOT"
+        do
+            # Avoid an unchanged chmod even before generation discovery.
+            [ "$(updater_stat -c '%a' "$directory")" = 700 ] ||
+                chmod 700 "$directory" 2>/dev/null || return 1
+        done
     fi
 }
 
@@ -461,7 +470,23 @@ status_output()
 
 daemon_identity_valid()
 {
-    local pid command_line
+    local pid command_line service_entry service_identity
+    if [ -e "$STATE_ROOT/generations" ] || [ -L "$STATE_ROOT/generations" ]; then
+        # The pipe launcher deliberately has no script filename in argv.
+        # Reuse the installed entry's authenticated native generation proof;
+        # an init exit code or PID/ready-file pair alone is not readiness.
+        service_entry="$(root_path /opt/etc/init.d/S22broray-updater)"
+        [ -f "$service_entry" ] && [ ! -L "$service_entry" ] &&
+            [ -x "$service_entry" ] || return 1
+        service_identity="$("$ASH_BIN" "$service_entry" status 2>/dev/null)" || return 1
+        printf '%s\n' "$service_identity" | jq -es '
+          length == 1 and (.[0] |
+            .ok == true and .phase == "COMMIT_VERIFIED" and .platformReady == true and
+            (.generationId | type == "string" and startswith("g-") and length <= 64) and
+            (.commitReceiptSha256 | type == "string" and test("^[0-9a-f]{64}$")))
+        ' >/dev/null 2>&1
+        return $?
+    fi
     pid="$(sed -n '1p' "$DAEMON_PID" 2>/dev/null || true)"
     case "$pid" in
         ''|*[!0-9]*) return 1 ;;
