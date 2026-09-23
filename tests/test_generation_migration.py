@@ -62,6 +62,36 @@ class Migration(Generation):
  def test_manifest_extra_path_refused(self):
   p=self.payload/'SHA256SUMS';p.write_text(p.read_text()+'0'*64+'  ../../foreign\n');self.manifest_sha=hashlib.sha256(p.read_bytes()).hexdigest()
   self.assertNotEqual(self.invoke().returncode,0);self.assertFalse((self.stage/'intent.record').exists())
+ def test_staged_inspection_is_exact_and_read_only(self):
+  self.assertEqual(self.invoke().returncode,0)
+  before=self.inventory(self.stage);live=self.inventory(self.live_root)
+  r=self.invoke('migration-check-staged');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+  self.assertEqual(json.loads(r.stdout)['phase'],'STAGED_ONLY_VERIFIED')
+  self.assertEqual(self.inventory(self.stage),before);self.assertEqual(self.inventory(self.live_root),live)
+ def test_staged_inspection_cannot_create_initial_evidence(self):
+  r=self.invoke('migration-check-staged');self.assertNotEqual(r.returncode,0)
+  self.assertEqual(self.inventory(self.stage),{})
+ def test_staged_inspection_wrong_nonce_preserves_evidence(self):
+  self.assertEqual(self.invoke().returncode,0);before=self.inventory(self.stage)
+  self.assertNotEqual(self.invoke('migration-check-staged',nonce='other').returncode,0)
+  self.assertEqual(self.inventory(self.stage),before)
+ def test_staged_inspection_rejects_new_boot(self):
+  self.assertEqual(self.invoke().returncode,0)
+  p=self.stage/'intent.record';lines=p.read_text().splitlines();lines[8]='00000000-0000-0000-0000-000000000000'
+  p.write_text('\n'.join(lines)+'\n')
+  (self.stage/'staged.receipt').write_text('BROray-migration-staged/1\n'+hashlib.sha256(p.read_bytes()).hexdigest()+'\n')
+  before=self.inventory(self.stage)
+  self.assertNotEqual(self.invoke('migration-check-staged').returncode,0)
+  self.assertEqual(self.inventory(self.stage),before)
+
+def missing_staged_check(name):
+ def test(self):
+  self.assertEqual(self.invoke().returncode,0);(self.stage/name).unlink();before=self.inventory(self.stage)
+  self.assertNotEqual(self.invoke('migration-check-staged').returncode,0)
+  self.assertEqual(self.inventory(self.stage),before)
+ return test
+for index,name in enumerate(['intent.record','manifest.record','staged.receipt']+['file-'+str(i) for i in range(7)]):
+ setattr(Migration,'test_staged_inspection_missing_record_'+str(index),missing_staged_check(name))
 
 if __name__=='__main__':
  names=[n for n in Migration.__dict__ if n.startswith('test_')]

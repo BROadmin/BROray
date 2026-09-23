@@ -155,7 +155,7 @@ ops_platform_service_stop()
     current_generation=''
     if [ -e "$OPS_UPDATER/cycles" ] || [ -L "$OPS_UPDATER/cycles" ]; then
         proof="$("$native" service-cycle-current "$live" "$origin" "$migration" "$original_nonce")" || ops_error UPDATER_SERVICE_BINDING_UNCONFIRMED 75
-        current_generation="$(printf '%s\n' "$proof" | jq -er 'select(.ok==true and .phase=="SERVICE_CURRENT_DISCOVERED" and .readinessProven==false and .activationAllowed==false) | .generationId | select(type=="string" and test("^g-[A-Za-z0-9_-]{22}$"))')" || ops_error UPDATER_SERVICE_BINDING_UNCONFIRMED 75
+        current_generation="$(printf '%s\n' "$proof" | jq -er 'select(.ok==true and .phase=="SERVICE_CURRENT_DISCOVERED" and .readinessProven==false and .activationAllowed==false) | .generationId | select(type=="string" and (length==24 and startswith("g-") and (.[2:]|all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==95 or .==45))))')" || ops_error UPDATER_SERVICE_BINDING_UNCONFIRMED 75
     fi
     replay_id=''
     for file in "$OPS_ROOT"/op-*/state.json; do
@@ -194,7 +194,7 @@ ops_platform_service_stop()
     proof="$("$native" recovery-commit-check "$live" "$origin" "$migration" "$original_nonce")" || ops_error UPDATER_GENERATION_UNCONFIRMED 75
     printf '%s\n' "$proof" | jq -es 'length==1 and .[0].ok==true and .[0].phase=="COMMIT_VERIFIED" and
       .[0].platformReady==true and .[0].activationAllowed==false and
-      (.[0].generationId|type=="string" and test("^g-[A-Za-z0-9_-]{22}$"))' >/dev/null || ops_error UPDATER_GENERATION_UNCONFIRMED 75
+      (.[0].generationId|type=="string" and (length==24 and startswith("g-") and (.[2:]|all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==95 or .==45))))' >/dev/null || ops_error UPDATER_GENERATION_UNCONFIRMED 75
     generation="$(printf '%s\n' "$proof" | jq -er .generationId)"
     ops_pending_domain && ops_error DOMAIN_OPERATION_BUSY
     ops_platform_queue_clear || ops_error DOMAIN_OPERATION_BUSY
@@ -284,7 +284,7 @@ ops_platform_generation_stop_complete()
       .supervisor==$target.supervisor and .updater==$target.updater and .stopOperationId==$op and .stopNonce==$nonce and
       .platformReady==false and .platformLaunch.contract=="broray-platform-launch/1" and
       .platformLaunch.nativeSha256==$target.nativeSha256 and
-      (.serviceHostRecordSha256|type=="string" and test("^[0-9a-f]{64}$"))' >/dev/null || ops_error UPDATER_STOP_UNCONFIRMED 75
+      (.serviceHostRecordSha256|type=="string" and (type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))))' >/dev/null || ops_error UPDATER_STOP_UNCONFIRMED 75
     host_sha="$(printf '%s\n' "$PG_STATUS" | jq -er .serviceHostRecordSha256)"
     origin="$(printf '%s\n' "$PG_STATUS" | jq -er .platformLaunch.operationId)"
     ops_id_valid "$origin" && [ "$origin" != "$OPS_ID" ] || ops_error UPDATER_GENERATION_UNCONFIRMED 75

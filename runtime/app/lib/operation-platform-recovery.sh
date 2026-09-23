@@ -102,8 +102,8 @@ ops_platform_complete()
     proof="$("$generation" recovery-commit-check "$live" "$OPS_ID" "$migration_sha" "$nonce")" || ops_error PLATFORM_COMPLETION_UNCONFIRMED 75
     printf '%s\n' "$proof" | jq -es 'length==1 and .[0].ok==true and .[0].phase=="COMMIT_VERIFIED" and
       .[0].platformReady==true and .[0].activationAllowed==false and
-      (.[0].generationId|type=="string" and test("^g-[A-Za-z0-9_-]{22}$")) and
-      (.[0].commitReceiptSha256|type=="string" and test("^[0-9a-f]{64}$"))' >/dev/null || ops_error PLATFORM_COMPLETION_UNCONFIRMED 75
+      (.[0].generationId|type=="string" and (length==24 and startswith("g-") and (.[2:]|all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==95 or .==45)))) and
+      (.[0].commitReceiptSha256|type=="string" and (type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))))' >/dev/null || ops_error PLATFORM_COMPLETION_UNCONFIRMED 75
     ops_platform_completion_fence || ops_error OWNER_CHANGED
     replay=false
     if jq -e '.running==false' "$OPS_CURRENT/state.json" >/dev/null; then
@@ -132,6 +132,90 @@ ops_platform_recover_prepared()
     # Domain rollback after STOP_INTENT is a separate, not-yet-enabled stage.
     ops_pending_domain && return 1
     ops_platform_queue_clear
+}
+
+# Explicitly abandon *only staging* left by a vanished preflight caller. No
+# claim is made about legacy descendant writers: the next transaction still
+# requires supervised migration and its reboot boundary. Generic recovery and
+# finish cannot enter here. All checks and fence retirement share the guard.
+ops_platform_discard_stage()
+{
+    local nonce owner entry name saved current expected desired payload stage live generation proof running previous rc replay
+    [ "$#" = 2 ] || ops_error INVALID_REQUEST 1
+    ops_load "$1" || ops_error STATE_UNAVAILABLE 1
+    nonce="$2"; ops_nonce_valid "$nonce" || ops_error INVALID_REQUEST 1
+    ops_platform_stop_valid && ops_platform_service_record_valid || ops_error PLATFORM_STAGE_DISCARD_UNCONFIRMED 75
+    jq -e --arg nonce "$nonce" '.platformPreflight.stopNonce==$nonce and .platformPreflight.generationStop==null and
+      ((.running==true and .state=="running" and .phase=="working") or
+       (.running==false and .state=="aborted" and .phase=="finished" and .errorCode=="PREFLIGHT_STAGING_ABORTED"))' \
+      "$OPS_CURRENT/state.json" >/dev/null || ops_error PLATFORM_STAGE_DISCARD_UNCONFIRMED 75
+    # This exact early phase admits no helper, handoff, publication or guard
+    # evidence. Even an empty/unknown record is preserved and refused.
+    for entry in "$OPS_CURRENT"/* "$OPS_CURRENT"/.[!.]* "$OPS_CURRENT"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        case "${entry##*/}" in state.json|owner.json|fence|platform-service.json|platform-migration|retired-lock) ;;
+          *) ops_error PLATFORM_STAGE_DISCARD_UNCONFIRMED 75 ;;
+        esac
+    done
+    for name in state.json owner.json platform-service.json; do
+        ops_publication_private "$OPS_CURRENT/$name" 32768 || ops_error PLATFORM_STAGE_DISCARD_UNCONFIRMED 75
+    done
+    for name in pid scope action bundle startedAt owner.json; do
+        ops_publication_private "$OPS_CURRENT/fence/$name" 4096 || ops_error PLATFORM_STAGE_DISCARD_UNCONFIRMED 75
+    done
+    for entry in "$OPS_CURRENT/fence"/* "$OPS_CURRENT/fence"/.[!.]* "$OPS_CURRENT/fence"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        case "${entry##*/}" in pid|scope|action|bundle|startedAt|owner.json) ;; *) ops_error PLATFORM_STAGE_DISCARD_UNCONFIRMED 75 ;; esac
+    done
+    [ "$OPS_EXECUTOR" = "$OPS_CURRENT/owner.json" ] || ops_error OWNER_CHANGED
+    owner="$(jq -c .owner "$OPS_EXECUTOR")" || ops_error OWNER_CHANGED
+    broray_ops_classify_owner "$owner"
+    [ "$OPS_OWNER_STATUS:$OPS_OWNER_REASON" = STALE:absent ] || ops_error OWNER_CHANGED
+    running="$(jq -r .running "$OPS_CURRENT/state.json")"; replay=false
+    if ops_global_matches; then
+        [ ! -e "$OPS_CURRENT/retired-lock" ] && [ ! -L "$OPS_CURRENT/retired-lock" ] || ops_error OWNER_CHANGED
+    else
+        [ "$running" = false ] && [ ! -e "$OPS_GLOBAL" ] && [ ! -L "$OPS_GLOBAL" ] &&
+          [ -L "$OPS_CURRENT/retired-lock" ] || ops_error OWNER_CHANGED
+        previous="$OPS_GLOBAL"; OPS_GLOBAL="$OPS_CURRENT/retired-lock"
+        rc=0; ops_global_matches || rc=$?; OPS_GLOBAL="$previous"
+        [ "$rc" = 0 ] || ops_error OWNER_CHANGED
+        replay=true
+    fi
+    [ ! -e "$OPS_LEGACY" ] && [ ! -L "$OPS_LEGACY" ] || ops_error LEGACY_OPERATION_BUSY 75
+    ops_publication_ready && ops_children_absent || ops_error CHILDREN_UNCONFIRMED
+    ops_pending_domain && ops_error DOMAIN_OPERATION_BUSY
+    ops_platform_queue_clear || ops_error DOMAIN_OPERATION_BUSY
+    saved="$(jq -c .service "$OPS_CURRENT/platform-service.json")" || ops_error STATE_UNAVAILABLE 1
+    current="$(ops_platform_service_capture)" || ops_error UPDATER_SERVICE_UNCONFIRMED
+    jq -en --argjson a "$saved" --argjson b "$current" '$a==$b' >/dev/null || ops_error UPDATER_SERVICE_CHANGED
+    stage="$OPS_CURRENT/platform-migration"
+    ops_dir_safe "$stage" && ops_publication_private "$stage/intent.record" 32768 &&
+      ops_publication_private "$stage/staged.receipt" 4096 || ops_error PLATFORM_STAGE_DISCARD_UNCONFIRMED 75
+    payload="$(sed -n '4p' "$stage/intent.record")"
+    expected="$(jq -r .platformPreflight.expectedPlatformManifestSha256 "$OPS_CURRENT/state.json")"
+    desired="$(printf '%s\n' "$saved" | jq -r 'if .owner==null then "stopped" else "running" end')"
+    case "$OPS_APP" in */opt/broray) live="${OPS_APP%/opt/broray}" ;; *) ops_error UNSAFE_STATE 1 ;; esac
+    [ -n "$live" ] || live=/
+    generation="${BRORAY_OPS_GENERATION:-$OPS_CODE/bin/broray-updater-generation}"
+    ops_file_safe "$generation" 16777216 && [ -x "$generation" ] || ops_error GENERATION_RUNTIME_UNAVAILABLE 75
+    # Read-only native verification requires every original record, exact
+    # payload/before-inventory/modes, operation/nonce and the SAME boot.
+    proof="$("$generation" migration-check-staged "$stage" "$live" "$payload" "$expected" "$OPS_ID" "$nonce" "$desired")" || ops_error PLATFORM_STAGE_DISCARD_UNCONFIRMED 75
+    printf '%s\n' "$proof" | jq -es 'length==1 and .[0].ok==true and .[0].phase=="STAGED_ONLY_VERIFIED" and
+      .[0].oldBootId==.[0].currentBootId and .[0].activationAllowed==false and .[0].serviceStopped==false and
+      (.[0].intentSha256|type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102)))' >/dev/null || ops_error PLATFORM_STAGE_DISCARD_UNCONFIRMED 75
+    current="$(ops_platform_service_capture)" || ops_error UPDATER_SERVICE_UNCONFIRMED
+    jq -en --argjson a "$saved" --argjson b "$current" '$a==$b' >/dev/null || ops_error UPDATER_SERVICE_CHANGED
+    if [ "$running" = true ]; then
+        ops_state_transition aborted finished PREFLIGHT_STAGING_ABORTED || ops_error STATE_UNAVAILABLE 1
+        ops_launch_test_point platform-staging-aborted
+    fi
+    if ops_global_matches; then ops_retire_global || ops_error STATE_UNAVAILABLE 1; fi
+    "$OPS_GUARD" --sync-state "$OPS_GLOBAL" && "$OPS_GUARD" --sync-state "$OPS_CURRENT/state.json" || ops_error STATE_UNAVAILABLE 1
+    ops_launch_test_point platform-staging-retired
+    printf '%s\n' "$proof" | jq -c --arg id "$OPS_ID" --argjson replay "$replay" \
+      '.+{phase:"PREFLIGHT_STAGING_ABORTED",operationId:$id,platformReady:false,signalsAuthorized:false,replayed:$replay}'
 }
 
 ops_platform_queue_clear()

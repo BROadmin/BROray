@@ -857,10 +857,28 @@ preflight_resume()
     pf_op="$BRORAY_STATE_ROOT/operations/$pf_id"; pf_state="$pf_op/state.json"
     regular_file "$pf_state" || return 75
     jq -e '.operation=="system:platform-preflight"' "$pf_state" >/dev/null 2>&1 || return 3
+    pf_binding="$pf_op/platform-bootguard.json"
+    if [ ! -e "$pf_binding" ] && [ ! -L "$pf_binding" ] &&
+       jq -e '.platformPreflight.phase=="STOP_INTENT"' "$pf_state" >/dev/null 2>&1; then
+        # A failed, fully staged attempt may target an older manifest. First
+        # prove it never reached live mutation and abandon only its own fence.
+        # The new target still needs fresh admission and all normal gates.
+        pf_nonce="$(jq -er .platformPreflight.stopNonce "$pf_state")" || return 75
+        if ! pf_reply="$(broray_ops_call platform-preflight-discard-stage "$pf_id" "$pf_nonce")"; then
+            [ -z "$pf_reply" ] || printf '%s\n' "$pf_reply"
+            return 75
+        fi
+        printf '%s\n' "$pf_reply" | jq -es --arg id "$pf_id" 'length==1 and .[0].ok==true and
+          .[0].phase=="PREFLIGHT_STAGING_ABORTED" and .[0].operationId==$id and
+          .[0].platformReady==false and .[0].activationAllowed==false and
+          .[0].serviceStopped==false and .[0].signalsAuthorized==false' >/dev/null || {
+            preflight_recovery_error PREFLIGHT_RECOVERY_RESPONSE_INVALID; return 75
+        }
+        return 3
+    fi
     jq -e --arg sha "$expected" '.platformPreflight.expectedPlatformManifestSha256==$sha' "$pf_state" >/dev/null || {
         preflight_recovery_error PREFLIGHT_TARGET_CHANGED; return 75
     }
-    pf_binding="$pf_op/platform-bootguard.json"
     regular_file "$pf_binding" || { preflight_recovery_error PREFLIGHT_RECOVERY_EVIDENCE_INCOMPLETE; return 75; }
     pf_migration="$(jq -er .migrationIntentSha256 "$pf_binding")" || return 75
     pf_nonce="$(jq -er .stopNonce "$pf_binding")" || return 75

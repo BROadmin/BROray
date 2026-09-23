@@ -1002,6 +1002,7 @@ case "$verb" in
     platform-preflight-service-stopped) ops_platform_service_stopped "$@" ;;
     platform-preflight-service-bind) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_platform_service_bind "$@" ;;
     platform-preflight-migration-stage) ops_platform_migration_stage "$@" ;;
+    platform-preflight-discard-stage) ops_platform_discard_stage "$@" ;;
     platform-preflight-bootguard-stage) ops_platform_bootguard_stage "$@" ;;
     platform-preflight-boot-context) ops_platform_boot_context "$@" ;;
     platform-preflight-install-context) ops_platform_install_context "$@" ;;

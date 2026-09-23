@@ -44,7 +44,7 @@ else
         # full binding and terminal proof before returning a repeated reply.
         if jq -e 'has("serviceStop")' "$file" >/dev/null; then
             jq -e '.serviceStop.schemaVersion==1 and .serviceStop.contract=="broray-service-stop/1" and
-              (.serviceStop.originOperationId|type=="string" and test("^op-[A-Za-z0-9_-]+$"))' "$file" >/dev/null || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+              (.serviceStop.originOperationId|type=="string" and (length>3 and startswith("op-") and (.[3:]|all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==95 or .==45))))' "$file" >/dev/null || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
             continue
         fi
         [ -z "$operation" ] || fail UPDATER_SERVICE_IDENTITY_AMBIGUOUS
@@ -59,7 +59,7 @@ if [ "$step" = service-cycle-stop ] || [ "$step" = service-cycle-restart ]; then
     [ -f "$owner_state" ] && [ ! -L "$owner_state" ] || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
     if jq -e 'has("serviceStop")' "$owner_state" >/dev/null; then
         origin="$(jq -er '.serviceStop|select(.schemaVersion==1 and .contract=="broray-service-stop/1")|
-          .originOperationId|select(type=="string" and test("^op-[A-Za-z0-9_-]+$") and length<=96)' "$owner_state")" || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+          .originOperationId|select(type=="string" and (length>3 and startswith("op-") and (.[3:]|all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==95 or .==45))) and length<=96)' "$owner_state")" || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
         [ "$origin" != "$operation" ] || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
         operation="$origin"
     fi
@@ -68,9 +68,9 @@ binding="$state/operations/$operation/platform-bootguard.json"
 [ -f "$binding" ] && [ ! -L "$binding" ] || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
 jq -e --arg id "$operation" '
   .schemaVersion==1 and .contract=="broray-platform-bootguard/1" and .operationId==$id and
-  (.nativeSha256|type=="string" and test("^[0-9a-f]{64}$")) and
-  (.migrationIntentSha256|type=="string" and test("^[0-9a-f]{64}$")) and
-  (.stopNonce|type=="string" and test("^[0-9a-f]{32}$"))' "$binding" >/dev/null || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+  (.nativeSha256|type=="string" and (type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102)))) and
+  (.migrationIntentSha256|type=="string" and (type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102)))) and
+  (.stopNonce|type=="string" and (type=="string" and length==32 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))))' "$binding" >/dev/null || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
 native_sha="$(jq -er .nativeSha256 "$binding")" || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
 migration="$(jq -er .migrationIntentSha256 "$binding")" || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
 nonce="$(jq -er .stopNonce "$binding")" || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED

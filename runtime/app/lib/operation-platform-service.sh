@@ -384,7 +384,7 @@ ops_platform_migration_stage()
     else mkdir -m 0700 "$stage" || ops_error STATE_UNAVAILABLE 1
     fi
     response="$("$generation" migration-stage "$stage" "$live" "$payload" "$expected" "$OPS_ID" "$nonce" "$desired")" || ops_error MIGRATION_PREPARATION_UNCONFIRMED 75
-    printf '%s\n' "$response" | jq -es 'length==1 and .[0].ok==true and .[0].phase=="REBOOT_REQUIRED" and .[0].activationAllowed==false and .[0].serviceStopped==false and .[0].oldBootId==.[0].currentBootId and (.[0].intentSha256|test("^[0-9a-f]{64}$"))' >/dev/null || ops_error MIGRATION_PREPARATION_UNCONFIRMED 75
+    printf '%s\n' "$response" | jq -es 'length==1 and .[0].ok==true and .[0].phase=="REBOOT_REQUIRED" and .[0].activationAllowed==false and .[0].serviceStopped==false and .[0].oldBootId==.[0].currentBootId and (.[0].intentSha256|(type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))))' >/dev/null || ops_error MIGRATION_PREPARATION_UNCONFIRMED 75
     current="$(ops_platform_service_capture)" || ops_error UPDATER_SERVICE_UNCONFIRMED
     jq -en --argjson a "$saved" --argjson b "$current" '$a==$b' >/dev/null || ops_error UPDATER_SERVICE_CHANGED
     printf '%s\n' "$response" | jq -c --arg id "$OPS_ID" '.+{operationId:$id,platformReady:false,signalsAuthorized:false}'

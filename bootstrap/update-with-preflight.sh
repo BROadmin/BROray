@@ -25,7 +25,7 @@ prepared_candidate()
     release_sha="$(awk '$2=="release.json" {n++; sha=$1} END {if(n==1)print sha; else exit 1}' "$slot/SHA256SUMS")" || return 1
     actual="$(sha256sum "$slot/release.json")" || return 1
     [ "${actual%% *}" = "$release_sha" ] || return 1
-    jq -er '.candidateId|select(type=="string" and length>0 and length<=96 and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))' "$slot/release.json"
+    jq -er '.candidateId|select(type=="string" and length>0 and length<=96 and ((explode[0]|(.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122)) and all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==95 or .==45 or .==46)))' "$slot/release.json"
 }
 candidate="$(prepared_candidate)" || exit 1
 "$ash" "$base/prepare-persistent-updater.sh" "$slot" "$runtime_sha" "$platform_sha" || exit 1

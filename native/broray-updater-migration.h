@@ -113,9 +113,9 @@ static int migration_sync_directory(const char *path,int base){
     int bad=fstat(base,&held)||fstatat(fd,name,&named,AT_SYMLINK_NOFOLLOW)||!S_ISDIR(named.st_mode)||held.st_dev!=named.st_dev||held.st_ino!=named.st_ino||fsync(base)||fsync(fd);close(fd);return bad?-1:0;
 }
 static int migration_main(int argc,char **argv){
-    /* migration-stage|migration-boundary DIR LIVE_ROOT PAYLOAD SHA OP NONCE running|stopped */
+    /* migration-stage|migration-boundary|migration-check-staged DIR LIVE_ROOT PAYLOAD SHA OP NONCE running|stopped */
     if(argc!=9||!migration_path(argv[2])||!migration_path(argv[3])||!migration_path(argv[4])||!hex64(argv[5])||!token(argv[6],96)||!token(argv[7],64)||(strcmp(argv[8],"running")&&strcmp(argv[8],"stopped")))return 64;
-    int boundary=!strcmp(argv[1],"migration-boundary"),result=75,base=-1,live=-1,source=-1;
+    int boundary=!strcmp(argv[1],"migration-boundary"),inspect=!strcmp(argv[1],"migration-check-staged"),result=75,base=-1,live=-1,source=-1;
     char current_boot[64],old_boot[64],*intent=NULL,*prior=NULL,*prefix=NULL,*manifest_text=NULL;size_t intent_size=0,prior_size=0,prefix_size=0,manifest_size=0;
     struct migration_file target[MIGRATION_FILES],before[MIGRATION_FILES],manifest_file;memset(target,0,sizeof target);memset(before,0,sizeof before);memset(&manifest_file,0,sizeof manifest_file);
     const char *error="MIGRATION_INPUT_UNCONFIRMED";umask(077);
@@ -123,6 +123,12 @@ static int migration_main(int argc,char **argv){
     if(base<0||live<0||source<0||flock(base,LOCK_EX|LOCK_NB)||migration_boot(current_boot)||migration_sync_directory(argv[2],base))goto done;
     struct stat st;int has_intent=!fstatat(base,"intent.record",&st,AT_SYMLINK_NOFOLLOW);if(!has_intent&&errno!=ENOENT)goto done;
     error="MIGRATION_EVIDENCE_UNCONFIRMED";if(migration_names(base,has_intent))goto done;
+    /* Inspection is not a staging retry. It must never create missing evidence,
+     * cross a boot boundary or validate an already activated migration. */
+    if(inspect){
+        if(!has_intent||fstatat(base,"staged.receipt",&st,AT_SYMLINK_NOFOLLOW))goto done;
+        if(!fstatat(base,"boot.receipt",&st,AT_SYMLINK_NOFOLLOW)||errno!=ENOENT)goto done;
+    }
     if(migration_read(source,"SHA256SUMS",&manifest_file,0)||strcmp(manifest_file.sha,argv[5]))goto done;
     FILE *mf=open_memstream(&manifest_text,&manifest_size);if(!mf)goto done;int bad=0;
     for(int i=0;i<MIGRATION_FILES;i++){
@@ -150,25 +156,25 @@ static int migration_main(int argc,char **argv){
     if(fclose(record))goto done;
     if(has_intent&&(prior_size!=intent_size||memcmp(prior,intent,intent_size)))goto done;
     int staged=!fstatat(base,"staged.receipt",&st,AT_SYMLINK_NOFOLLOW);if(!staged&&errno!=ENOENT)goto done;
-    if(boundary&&!staged)goto done;
+    if((boundary||inspect)&&!staged)goto done;
     if(!boundary&&strcmp(old_boot,current_boot)){error="MIGRATION_BOOT_BOUNDARY_REQUIRES_VERIFICATION";goto done;}
     /* No mutation of live files. Intent is durable before ANY staged copy. */
-    if(migration_record(base,"intent.record",intent,intent_size,!boundary&&!has_intent))goto done;
-    if(migration_record(base,"manifest.record",manifest_file.bytes,manifest_file.size,!boundary&&!staged))goto done;
-    for(int i=0;i<MIGRATION_FILES;i++){char name[32];snprintf(name,sizeof name,"file-%d",i);if(migration_record(base,name,target[i].bytes,target[i].size,!boundary&&!staged))goto done;}
+    if(migration_record(base,"intent.record",intent,intent_size,!inspect&&!boundary&&!has_intent))goto done;
+    if(migration_record(base,"manifest.record",manifest_file.bytes,manifest_file.size,!inspect&&!boundary&&!staged))goto done;
+    for(int i=0;i<MIGRATION_FILES;i++){char name[32];snprintf(name,sizeof name,"file-%d",i);if(migration_record(base,name,target[i].bytes,target[i].size,!inspect&&!boundary&&!staged))goto done;}
     /* Current live inventory must still equal the captured before-image. */
     for(int i=0;i<MIGRATION_FILES;i++){struct migration_file again;
         if(migration_read(live,migration_paths[i],&again,1))goto done;
         int changed=again.present!=before[i].present||again.mode!=before[i].mode||strcmp(again.sha,before[i].sha);free(again.bytes);if(changed){error="MIGRATION_PLATFORM_CHANGED";goto done;}
     }
     char digest[65],receipt[128];digest_bytes(intent,intent_size,digest);int n=snprintf(receipt,sizeof receipt,"BROray-migration-staged/1\n%s\n",digest);
-    if(migration_record(base,"intent.record",intent,intent_size,0)||migration_record(base,"staged.receipt",receipt,(size_t)n,!boundary&&!staged))goto done;
+    if(migration_record(base,"intent.record",intent,intent_size,0)||migration_record(base,"staged.receipt",receipt,(size_t)n,!inspect&&!boundary&&!staged))goto done;
     if(boundary){
         if(!strcmp(old_boot,current_boot)){error="MIGRATION_REBOOT_REQUIRED";goto done;}
         char proof[256];n=snprintf(proof,sizeof proof,"BROray-migration-boot/1\n%s\n%s\n%s\n",digest,old_boot,current_boot);
         if(migration_record(base,"boot.receipt",proof,(size_t)n,1))goto done;
     }
-    printf("{\"ok\":true,\"phase\":\"%s\",\"activationAllowed\":false,\"serviceStopped\":false,\"oldBootId\":\"%s\",\"currentBootId\":\"%s\",\"intentSha256\":\"%s\"}\n",boundary?"BOOT_BOUNDARY_PROVEN":"REBOOT_REQUIRED",old_boot,current_boot,digest);result=0;
+    printf("{\"ok\":true,\"phase\":\"%s\",\"activationAllowed\":false,\"serviceStopped\":false,\"oldBootId\":\"%s\",\"currentBootId\":\"%s\",\"intentSha256\":\"%s\"}\n",inspect?"STAGED_ONLY_VERIFIED":boundary?"BOOT_BOUNDARY_PROVEN":"REBOOT_REQUIRED",old_boot,current_boot,digest);result=0;
 done:
     for(int i=0;i<MIGRATION_FILES;i++){free(target[i].bytes);free(before[i].bytes);}free(manifest_file.bytes);free(manifest_text);free(prefix);free(prior);free(intent);
     if(source>=0)close(source);if(live>=0)close(live);if(base>=0)close(base);return result?migration_error(error):0;

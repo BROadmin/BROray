@@ -2864,7 +2864,7 @@ recover_incomplete()
       def field_text($value):
         $value | tostring |
         if contains("\u0000") then error("invalid recovery field")
-        else sub("\n+$"; "") end;
+        else (split("\n") | until(length==0 or .[-1]!=""; .[:-1]) | join("\n")) end;
       if length != 1 or (.[0] | type) != "object"
       then error("ambiguous recovery state") else .[0] end |
       if field_text(.running // false) == "true" then "true"

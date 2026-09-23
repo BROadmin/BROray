@@ -44,7 +44,7 @@ ops_platform_legacy_control_stage()
     response="$("$generation" legacy-control-stage "$OPS_CURRENT" "$live" "$stage" "$migration_sha" "$service_sha" "$owner")" || ops_error LEGACY_CONTROL_EVIDENCE_UNCONFIRMED 75
     printf '%s\n' "$response" | jq -es 'length==1 and .[0].ok==true and .[0].phase=="LEGACY_CONTROL_STAGED" and
       .[0].signalsAuthorized==false and .[0].serviceStopped==false and .[0].activationAllowed==false and
-      (.[0].snapshotSha256|type)=="string" and (.[0].snapshotSha256|test("^[0-9a-f]{64}$"))' >/dev/null || ops_error LEGACY_CONTROL_EVIDENCE_UNCONFIRMED 75
+      (.[0].snapshotSha256|type)=="string" and (.[0].snapshotSha256|(type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))))' >/dev/null || ops_error LEGACY_CONTROL_EVIDENCE_UNCONFIRMED 75
 }
 
 ops_platform_recovery_code_retain()
@@ -63,7 +63,7 @@ ops_platform_recovery_code_retain()
     printf '%s\n' "$response" | jq -es --arg phase "$phase" --arg code "$code" '
       length==1 and .[0].ok==true and .[0].phase==$phase and .[0].codeRoot==$code and
       .[0].processAuthority==false and .[0].activationAllowed==false and
-      (.[0].codeManifestSha256|type)=="string" and (.[0].codeManifestSha256|test("^[0-9a-f]{64}$"))' >/dev/null || ops_error RECOVERY_CODE_EVIDENCE_UNCONFIRMED 75
+      (.[0].codeManifestSha256|type)=="string" and (.[0].codeManifestSha256|(type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))))' >/dev/null || ops_error RECOVERY_CODE_EVIDENCE_UNCONFIRMED 75
 }
 
 ops_platform_bootguard_stage()
@@ -107,7 +107,7 @@ ops_platform_bootguard_stage()
       keys==["activationAllowed","contract","expectedPlatformManifestSha256","migrationIntentSha256","nativeSha256","operationId","schemaVersion","signalsAuthorized","stopNonce"] and
       .schemaVersion==1 and .contract=="broray-platform-bootguard/1" and .operationId==$id and .stopNonce==$nonce and
       .expectedPlatformManifestSha256==$expected and .nativeSha256==$native and .signalsAuthorized==false and .activationAllowed==false and
-      (.migrationIntentSha256|type)=="string" and (.migrationIntentSha256|test("^[0-9a-f]{64}$"))' "$binding" >/dev/null || ops_error BOOT_GUARD_BINDING_UNCONFIRMED 75
+      (.migrationIntentSha256|type)=="string" and (.migrationIntentSha256|(type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))))' "$binding" >/dev/null || ops_error BOOT_GUARD_BINDING_UNCONFIRMED 75
     migration_sha="$(jq -r .migrationIntentSha256 "$binding")" || ops_error BOOT_GUARD_BINDING_UNCONFIRMED 75
     ops_platform_runtime_retain "$generation" "$native_sha" replay
     # Exact native write-once replay fsyncs the binding again. Unknown bytes
@@ -174,8 +174,8 @@ ops_platform_context()
       keys==["activationAllowed","contract","expectedPlatformManifestSha256","migrationIntentSha256","nativeSha256","operationId","schemaVersion","signalsAuthorized","stopNonce"] and
       .schemaVersion==1 and .contract=="broray-platform-bootguard/1" and .operationId==$id and .stopNonce==$nonce and
       .expectedPlatformManifestSha256==$expected and .signalsAuthorized==false and .activationAllowed==false and
-      (.migrationIntentSha256|type)=="string" and (.migrationIntentSha256|test("^[0-9a-f]{64}$")) and
-      (.nativeSha256|type)=="string" and (.nativeSha256|test("^[0-9a-f]{64}$"))' "$binding" >/dev/null || ops_error BOOT_GUARD_BINDING_UNCONFIRMED 75
+      (.migrationIntentSha256|type)=="string" and (.migrationIntentSha256|(type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102)))) and
+      (.nativeSha256|type)=="string" and (.nativeSha256|(type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102))))' "$binding" >/dev/null || ops_error BOOT_GUARD_BINDING_UNCONFIRMED 75
     native_sha="$(jq -r .nativeSha256 "$binding")"; migration_sha="$(jq -r .migrationIntentSha256 "$binding")"
     generation="$OPS_UPDATER/runtimes/$native_sha/runtime"
     ops_platform_service_path_safe "$generation" && ops_file_safe "$generation" 16777216 && [ -x "$generation" ] || ops_error GENERATION_RUNTIME_UNAVAILABLE 75
