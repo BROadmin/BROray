@@ -2,6 +2,6 @@
 0fb05108b374c0c2e6f5d18a6aef63ec70f1cff4372624b9f211705923ba629d  opt/etc/init.d/S22broray-updater
 88fcf98aac6ca1f57cb96a6441c0cd7939fbd0f0e31f7196abaf82804c6f17c0  opt/libexec/broray-updater/broray-compat.sh
 c66f665eea3f194492b032238365a3daea77649c16751f455aaaed7b08f851ea  opt/libexec/broray-updater/broray-migrate-legacy.sh
-df801ef8feb9f18a8f61af83513d331e941ffba11251c8707b92ec8a704c04a4  opt/libexec/broray-updater/broray-updater.sh
+322ee4975a7a2e7660815c9468c55ac350a85c35295366cf3b5e286569d4790f  opt/libexec/broray-updater/broray-updater.sh
 cec9f88be8c975af76854a53b4d49c3d257feae38d916edb0d16fb55aacd3000  opt/libexec/broray-updater/minisign
 fb4434356a4be4d70c9b1eb86f7bdac3e170011268b7695c3e7d904fe0070ebd  opt/libexec/broray-updater/xray-wrapper

@@ -907,7 +907,7 @@ preflight_generation_stop_resume()
           .[0].serviceStopped==false and .[0].platformReady==false' >/dev/null || {
             preflight_recovery_error PREFLIGHT_RECOVERY_RESPONSE_INVALID; return 75
         }
-        [ "$attempt" = 12 ] || sleep .2
+        [ "$attempt" = 12 ] || sleep 1
     done
     preflight_recovery_error PREFLIGHT_REPLACEMENT_STOP_UNCONFIRMED
 }

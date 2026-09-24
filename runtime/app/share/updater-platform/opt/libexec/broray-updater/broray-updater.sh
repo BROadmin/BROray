@@ -483,7 +483,8 @@ daemon_identity_valid()
           length == 1 and (.[0] |
             .ok == true and .phase == "COMMIT_VERIFIED" and .platformReady == true and
             (.generationId | type == "string" and startswith("g-") and length <= 64) and
-            (.commitReceiptSha256 | type == "string" and test("^[0-9a-f]{64}$")))
+            (.commitReceiptSha256 | type == "string" and length == 64 and
+              all(explode[]; (. >= 48 and . <= 57) or (. >= 97 and . <= 102))))
         ' >/dev/null 2>&1
         return $?
     fi
