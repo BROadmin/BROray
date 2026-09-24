@@ -99,6 +99,58 @@ preflight_recovery_error() {{ printf '%s\\n' "$1" >&2; }}
   result=subprocess.run(['/bin/ash','-c',function+stub+'preflight_generation_stop_resume op-test nonce'],env=self.env,capture_output=True,text=True,timeout=10)
   self.assertEqual(result.returncode,0,result.stdout+result.stderr)
   self.assertEqual(result.stderr,'','A rejected delay must not become a silent busy loop')
+ def test_generation_stop_client_delay_supported_by_integer_only_sleep(self):
+  source=(self.root/'runtime/app/lib/operation-client.sh').read_text()
+  name='broray_ops_preflight_stop_generation'
+  function=name+'()\n{'+source.split(name+'()\n{',1)[1].split('\n}\n',1)[0]+'\n}\n'
+  sleeper=self.home/'bin/sleep';sleeper.write_text('''#!/bin/ash
+case "$1" in ''|*[!0-9]*) echo "sleep: invalid number '$1'" >&2; exit 1;; esac
+exec /bin/sleep "$1"
+''');sleeper.chmod(0o755)
+  counter=self.home/'client-poll-count';counter.write_text('0\n')
+  stub=f'''BRORAY_BACKGROUND_OPERATION_ID=op-fixture
+BRORAY_BACKGROUND_OPERATION_TOKEN=token
+BRORAY_PREFLIGHT_STOP_NONCE=nonce
+broray_ops_call() {{
+ n="$(cat {counter})"; n=$((n+1)); printf '%s\\n' "$n" >{counter}
+ if [ "$n" -lt 2 ]; then
+  printf '%s\\n' '{{"ok":true,"phase":"STOPPING","serviceStopped":false,"platformReady":false}}'
+ else
+  printf '%s\\n' '{{"ok":true,"phase":"STOPPED","serviceStopped":true,"platformReady":false}}'
+ fi
+}}
+'''
+  result=subprocess.run(['/bin/ash','-c',function+stub+name+' generation manifest'],env=self.env,capture_output=True,text=True,timeout=10)
+  self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+  self.assertEqual(json.loads(result.stdout)['phase'],'STOPPED')
+  self.assertEqual(result.stderr,'','Stop-client pacing must work on integer-only target sleep')
+ def test_protected_service_stop_delay_supported_by_integer_only_sleep(self):
+  source=(self.root/'runtime/app/lib/operation-platform-generation.sh').read_text()
+  body=source.split('ops_platform_service_stop()\n{',1)[1].split('\n}\n',1)[0]
+  # Deterministically enter the pending native-result branch of the exact
+  # production loop. The separate native lifecycle test covers authorization.
+  loop='attempt=0'+body.split('    attempt=0',1)[1]
+  sleeper=self.home/'bin/sleep';sleeper.write_text('''#!/bin/ash
+case "$1" in ''|*[!0-9]*) echo "sleep: invalid number '$1'" >&2; exit 1;; esac
+exec /bin/sleep "$1"
+''');sleeper.chmod(0o755)
+  counter=self.home/'service-poll-count';counter.write_text('0\n')
+  stub=f'''ops_platform_generation_stop() {{
+ n="$(cat {counter})"; n=$((n+1)); printf '%s\\n' "$n" >{counter}
+ if [ "$n" -lt 2 ]; then
+  printf '%s\\n' '{{"ok":true,"phase":"STOPPING","serviceStopped":false,"platformReady":false}}'
+ else
+  printf '%s\\n' '{{"ok":true,"phase":"STOPPED","serviceStopped":true,"platformReady":false}}'
+ fi
+}}
+ops_platform_generation_stop_complete() {{ printf '%s\\n' '{{"phase":"STOPPED"}}'; }}
+ops_error() {{ echo "$1" >&2; exit 75; }}
+'''
+  result=subprocess.run(['/bin/ash','-c','set -e\n'+stub+'service_poll() {\n'+loop+'\n}\nservice_poll'],env=self.env,capture_output=True,text=True,timeout=10)
+  self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+  self.assertEqual(json.loads(result.stdout)['phase'],'STOPPED')
+  self.assertEqual(counter.read_text(),'2\n')
+  self.assertEqual(result.stderr,'')
 
 if __name__=='__main__':
  tests=[cls(n) for cls in [JqPortability,BootguardPortability,RequestReadinessPortability] for n in cls.__dict__ if n.startswith('test_')]

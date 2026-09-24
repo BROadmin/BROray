@@ -115,6 +115,14 @@ class ReplacementLifecycle(ReplacementCommit):
  def test_replaced_platform_public_lifecycle_preserves_both_origins(self):
   self.test_commit_and_completion_require_exact_readiness_and_preserve_evidence()
   f=self.parent_fixture;op=self.replacement_operation
+  # Match the physical Entware utility contract in the retained coordinator's
+  # real PATH. Do not alter the coordinator, native proof or service replies.
+  sleeper=self.root/'opt/bin/sleep';self.assertFalse(sleeper.exists())
+  sleeper.write_text('''#!/bin/ash
+case "$1" in ''|*[!0-9]*) echo "sleep: invalid number '$1'" >&2; exit 1;; esac
+exec /bin/sleep "$1"
+''');sleeper.chmod(0o755)
+  self.addCleanup(lambda:sleeper.unlink(missing_ok=True))
   old=(f.op/'state.json').read_bytes();new=(op/'state.json').read_bytes();platform=self.snapshot()
   first=self.replacement_ready['generationId']
   unrelated=subprocess.Popen(['/bin/ash','-c','while :; do sleep 1; done','xray-unrelated-fixture'],

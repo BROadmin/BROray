@@ -370,7 +370,7 @@ broray_ops_preflight_stop_generation()
             printf '%s\n' "$response";return 0
         fi
         printf '%s\n' "$response" | jq -e '.ok==false' >/dev/null 2>&1 && { printf '%s\n' "$response";return 2; }
-        [ "$attempt" = 12 ] || sleep .2
+        [ "$attempt" = 12 ] || sleep 1
     done
     return 75
 }

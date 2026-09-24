@@ -341,7 +341,7 @@ ops_platform_service_stop()
             return $?
         fi
         printf '%s\n' "$response" | jq -e '.ok==true and .phase=="STOPPING" and .serviceStopped==false and .platformReady==false' >/dev/null || ops_error UPDATER_STOP_UNCONFIRMED 75
-        [ "$attempt" = 12 ] || sleep .2
+        [ "$attempt" = 12 ] || sleep 1
     done
     ops_error UPDATER_STOP_UNCONFIRMED 75
 }

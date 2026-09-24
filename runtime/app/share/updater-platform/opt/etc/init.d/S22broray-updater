@@ -1,4 +1,5 @@
 #!/opt/bin/ash
+# Retained coordinator revision: integer-only protected stop polling (20260924).
 set -u
 
 updater_stat()

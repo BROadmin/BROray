@@ -1,5 +1,5 @@
 4d98d0be946e9dc8669d8f7d762b09c8b2920522bb86625bb1d45af2ecfe09fb  opt/bin/broray-updaterctl
-0fb05108b374c0c2e6f5d18a6aef63ec70f1cff4372624b9f211705923ba629d  opt/etc/init.d/S22broray-updater
+c71414cf7262c9f047d217fba389c44e238845c047579bcf659c9d03b43fad45  opt/etc/init.d/S22broray-updater
 88fcf98aac6ca1f57cb96a6441c0cd7939fbd0f0e31f7196abaf82804c6f17c0  opt/libexec/broray-updater/broray-compat.sh
 c66f665eea3f194492b032238365a3daea77649c16751f455aaaed7b08f851ea  opt/libexec/broray-updater/broray-migrate-legacy.sh
 322ee4975a7a2e7660815c9468c55ac350a85c35295366cf3b5e286569d4790f  opt/libexec/broray-updater/broray-updater.sh
