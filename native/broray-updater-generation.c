@@ -43,6 +43,8 @@ static void platform_exec_root(char **args),platform_state_json(FILE *f,const ch
 static int platform_control(const struct ucred *peer,const char *verb,const char *op,const char *nonce);
 enum sc_action {SC_START,SC_STATUS,SC_CURRENT,SC_STOP,SC_RESTART};
 static int service_cycle_main(int argc,char **argv,int action),service_cycle_available(const char *root);
+static int replacement_start_prepare(char **argv,int op,const char *op_path,const char *native);
+static int replacement_start_main(int argc,char **argv);
 static int generation_boot_retirement_valid(int base,const char *domain,const char *manifest_sha,const char *current);
 static int service_transition_fd=-1;
 static int service_transition_prepare(int argc,char **argv),service_transition_enter(const char *domain);
@@ -460,6 +462,9 @@ static int control(int argc,char **argv){return control_exchange(argc,argv,1);}
 #include "broray-platform-launch.h"
 #include "broray-updater-service-cycle.h"
 int main(int argc,char **argv){
+    if(argc>1&&(!strncmp(argv[1],"replacement-service-",20)||!strcmp(argv[1],"replacement-origin-proof")))return replacement_service_entry(argc,argv);
+    if(argc>1&&(!strcmp(argv[1],"replacement-start")||!strcmp(argv[1],"replacement-commit")||!strcmp(argv[1],"replacement-commit-check")||!strcmp(argv[1],"replacement-origin-check")))return replacement_start_main(argc,argv);
+    if(argc>1&&(!strcmp(argv[1],"replacement-backup")||!strcmp(argv[1],"replacement-install")||!strcmp(argv[1],"replacement-rollback")||!strcmp(argv[1],"replacement-start-intent")))return service_replacement_backup(argc,argv);
     if(argc==3&&!strcmp(argv[1],"generation-boot-verify"))return generation_boot_verify_main(argc,argv);
     if(argc==6){
         if(!strcmp(argv[1],"service-cycle-start"))return service_cycle_main(argc,argv,SC_START);

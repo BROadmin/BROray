@@ -224,7 +224,8 @@ class PreflightAfterBoot(UpdaterPreflight):
  def setUp(self):
   from test_installed_init_control import InstalledInit
   from test_native_platform_install import FILES
-  fixture=InstalledInit('test_installed_init_resumes_install_boundary_without_unsupervised_daemon')
+  fixture_type=getattr(self,'fixture_type',InstalledInit)
+  fixture=fixture_type('test_installed_init_resumes_install_boundary_without_unsupervised_daemon')
   try:fixture.setUp()
   finally:self._cleanups.extend(fixture._cleanups);fixture._cleanups=[]
   self.parent_fixture=fixture;self.home=fixture.root;self.root=self.home/'router';self.payload=PLATFORM

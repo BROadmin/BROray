@@ -817,6 +817,101 @@ preflight_native_phase()
     pf_reply="$output"
 }
 
+# Use the authenticated payload's read-only entry to locate the installed
+# generation. Its retained native closure, not init exit status or daemon.pid,
+# proves readiness. Ledger fields only locate the second native STATUS proof.
+preflight_installed()
+{
+    local reply ledger digest proof live
+    reply="$(BRORAY_UPDATER_ROOT_PREFIX="$ROOT_PREFIX" "$ASH" "$PAYLOAD_ROOT/opt/etc/init.d/S22broray-updater" status)" || {
+        [ -z "$reply" ] || printf '%s\n' "$reply"
+        return 75
+    }
+    printf '%s\n' "$reply" | jq -es 'length==1 and .[0].ok==true and
+      .[0].platformReady==true and .[0].activationAllowed==false and
+      (.[0].generationId|type=="string" and length==24 and startswith("g-") and
+        all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==95 or .==45))' >/dev/null || return 75
+    pf_old_generation="$(printf '%s\n' "$reply" | jq -er .generationId)" || return 75
+    ledger="$UPDATER_STATE_ROOT/generations/$pf_old_generation/state.json"
+    regular_file "$ledger" || return 75
+    pf_old_manifest="$(jq -er .platformManifestSha256 "$ledger")" || return 75
+    digest="$(jq -er .platformLaunch.nativeSha256 "$ledger")" || return 75
+    valid_sha256 "$digest" && valid_sha256 "$pf_old_manifest" || return 75
+    pf_old_native="$UPDATER_STATE_ROOT/runtimes/$digest/runtime"
+    regular_file "$pf_old_native" && [ -x "$pf_old_native" ] || return 75
+    proof="$(sha256sum "$pf_old_native")" || return 75
+    [ "${proof%% *}" = "$digest" ] || return 75
+    pf_old_origin="$(jq -er .platformLaunch.operationId "$ledger")" || return 75
+    pf_old_nonce="$(jq -er .platformLaunch.stopNonce "$ledger")" || return 75
+    proof="$("$pf_old_native" control "${ledger%/state.json}" STATUS "$pf_old_generation" "$pf_old_manifest" "$pf_old_origin" "$pf_old_nonce")" || return 75
+    printf '%s\n' "$proof" | jq -es --arg gen "$pf_old_generation" --arg manifest "$pf_old_manifest" --arg native "$digest" '
+      length==1 and .[0].contract=="broray-updater-generation/2" and .[0].supervisedFromBirth==true and
+      .[0].state=="RUNNING" and .[0].platformReady==true and .[0].generationId==$gen and
+      .[0].platformManifestSha256==$manifest and .[0].platformLaunch.nativeSha256==$native' >/dev/null || return 75
+    proof="$(sha256sum "$2/bin/broray-updater-generation")" || return 75
+    if [ "$pf_old_manifest" != "$1" ] || [ "$digest" != "${proof%% *}" ]; then return 4; fi
+    printf '%s\n' "$reply" | jq -c --arg id "$pf_old_origin" '.phase="PREFLIGHT_COMPLETED"|.operationId=$id|.replayed=true'
+}
+
+preflight_replacement_phase()
+{
+    local reply rc
+    rc=0
+    reply="$(broray_ops_call "platform-replacement-$1" "$pf_id" "$pf_nonce")" || rc=$?
+    if [ "$rc" != 0 ]; then
+        [ -z "$reply" ] || printf '%s\n' "$reply"
+        [ -n "$reply" ] || preflight_recovery_error PREFLIGHT_REPLACEMENT_UNCONFIRMED
+        return "$rc"
+    fi
+    printf '%s\n' "$reply" | jq -es --arg phase "$2" 'length==1 and .[0].ok==true and
+      .[0].phase==$phase and .[0].activationAllowed==false' >/dev/null || {
+        preflight_recovery_error PREFLIGHT_RECOVERY_RESPONSE_INVALID; return 75
+    }
+    pf_reply="$reply"
+}
+
+preflight_replacement_resume()
+{
+    local pf_id pf_nonce pf_op pf_reply
+    pf_id="$1"; pf_nonce="$2"; pf_op="$BRORAY_STATE_ROOT/operations/$pf_id"
+    # Presence chooses the validator, never supplies proof. A START intent may
+    # already have a live B generation; do not re-enter an A-only install step.
+    if [ ! -e "$pf_op/platform-replacement-start" ] && [ ! -L "$pf_op/platform-replacement-start" ]; then
+        if [ ! -e "$pf_op/platform-replacement-backup.record" ] && [ ! -L "$pf_op/platform-replacement-backup.record" ]; then
+            preflight_replacement_phase backup BACKUP_READY || return $?
+        fi
+        preflight_replacement_phase install INSTALLED || return $?
+        preflight_replacement_phase start-intent START_INTENT || return $?
+    fi
+    preflight_replacement_phase start READY || return $?
+    preflight_replacement_phase commit COMMITTED || return $?
+    preflight_replacement_phase complete PREFLIGHT_COMPLETED || return $?
+    printf '%s\n' "$pf_reply"
+}
+
+preflight_generation_stop_resume()
+{
+    local attempt reply rc
+    attempt=0
+    while [ "$attempt" -lt 12 ]; do
+        attempt=$((attempt+1)); rc=0
+        reply="$(broray_ops_call platform-preflight-resume-generation-stop "$1" "$2")" || rc=$?
+        if [ "$rc" != 0 ]; then
+            [ -z "$reply" ] || printf '%s\n' "$reply"
+            [ -n "$reply" ] || preflight_recovery_error PREFLIGHT_REPLACEMENT_STOP_UNCONFIRMED
+            return "$rc"
+        fi
+        if printf '%s\n' "$reply" | jq -es 'length==1 and .[0].ok==true and .[0].phase=="STOPPED" and
+          .[0].serviceStopped==true and .[0].platformReady==false' >/dev/null; then return 0; fi
+        printf '%s\n' "$reply" | jq -es 'length==1 and .[0].ok==true and .[0].phase=="STOPPING" and
+          .[0].serviceStopped==false and .[0].platformReady==false' >/dev/null || {
+            preflight_recovery_error PREFLIGHT_RECOVERY_RESPONSE_INVALID; return 75
+        }
+        [ "$attempt" = 12 ] || sleep .2
+    done
+    preflight_recovery_error PREFLIGHT_REPLACEMENT_STOP_UNCONFIRMED
+}
+
 preflight_resume()
 {
     local expected code pf_id pf_op pf_state pf_binding pf_native pf_live pf_migration pf_nonce pf_reply
@@ -832,6 +927,10 @@ preflight_resume()
     elif [ -e "$BRORAY_ROUTES_API_LOCK" ]; then
         return 3 # Existing admission classifies/preserves legacy or foreign locks.
     else
+        if [ -e "$UPDATER_STATE_ROOT/generations" ] || [ -L "$UPDATER_STATE_ROOT/generations" ]; then
+            preflight_installed "$expected" "$code"
+            return $?
+        fi
         # Lost completion replies have no global fence. Discover one matching
         # completed operation, then re-prove its live generation below. A bare
         # terminal flag is never readiness; multiple matches are ambiguous.
@@ -841,6 +940,19 @@ preflight_resume()
             jq -e --arg sha "$expected" '.operation=="system:platform-preflight" and
               .state=="completed" and .running==false and
               .platformPreflight.expectedPlatformManifestSha256==$sha' "$file" >/dev/null 2>&1 || continue
+            # A service stop preserves its launch origin; it is not another
+            # installation of these bytes. Preserve/refuse malformed evidence
+            # instead of using it as an origin or silently discarding it.
+            if jq -e 'has("serviceStop")' "$file" >/dev/null; then
+                jq -e '((.serviceStop.schemaVersion==1 and .serviceStop.contract=="broray-service-stop/1") or
+                  (.serviceStop.schemaVersion==2 and .serviceStop.contract=="broray-service-stop/2" and .serviceStop.originKind=="supervised-replacement")) and
+                  (.serviceStop.originOperationId|type=="string" and
+                    length>3 and length<=96 and startswith("op-") and
+                    (.[3:]|all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==95 or .==45)))' "$file" >/dev/null || {
+                    preflight_recovery_error PREFLIGHT_RECOVERY_EVIDENCE_INCOMPLETE; return 75
+                }
+                continue
+            fi
             [ -z "$selected" ] || { preflight_recovery_error PREFLIGHT_RECOVERY_AMBIGUOUS; return 75; }
             selected="${file%/state.json}"; selected="${selected##*/}"
         done
@@ -857,6 +969,19 @@ preflight_resume()
     pf_op="$BRORAY_STATE_ROOT/operations/$pf_id"; pf_state="$pf_op/state.json"
     regular_file "$pf_state" || return 75
     jq -e '.operation=="system:platform-preflight"' "$pf_state" >/dev/null 2>&1 || return 3
+    if jq -e '.platformPreflight.generationStop!=null' "$pf_state" >/dev/null; then
+        jq -e --arg sha "$expected" '.platformPreflight.expectedPlatformManifestSha256==$sha and
+          (.platformPreflight.phase=="STOP_INTENT" or .platformPreflight.phase=="STOPPED") and
+          (has("serviceStop")|not)' "$pf_state" >/dev/null || {
+            preflight_recovery_error PREFLIGHT_TARGET_CHANGED; return 75
+        }
+        pf_nonce="$(jq -er .platformPreflight.stopNonce "$pf_state")" || return 75
+        if jq -e '.platformPreflight.phase=="STOP_INTENT"' "$pf_state" >/dev/null; then
+            preflight_generation_stop_resume "$pf_id" "$pf_nonce" || return $?
+        fi
+        preflight_replacement_resume "$pf_id" "$pf_nonce"
+        return $?
+    fi
     pf_binding="$pf_op/platform-bootguard.json"
     if [ ! -e "$pf_binding" ] && [ ! -L "$pf_binding" ] &&
        jq -e '.platformPreflight.phase=="STOP_INTENT"' "$pf_state" >/dev/null 2>&1; then
@@ -917,7 +1042,8 @@ preflight_resume()
 
 preflight()
 {
-    local pf_expected pf_code pf_rc
+    local pf_expected pf_code pf_rc pf_old_generation pf_old_manifest pf_old_native pf_old_origin pf_old_nonce
+    local pf_replace
     pf_expected="${1:-}"
     valid_sha256 "$pf_expected" &&
         [ "$(payload_manifest_sha)" = "$pf_expected" ] && payload_valid || return 1
@@ -938,7 +1064,8 @@ preflight()
     . "$pf_code/lib/operation-client.sh" || return 74
     pf_rc=0
     preflight_resume "$pf_expected" "$pf_code" || pf_rc=$?
-    case "$pf_rc" in 0) return 0 ;; 3) ;; *) return "$pf_rc" ;; esac
+    pf_replace=false
+    case "$pf_rc" in 0) return 0 ;; 3) ;; 4) pf_replace=true ;; *) return "$pf_rc" ;; esac
     pf_rc=0
     broray_ops_preflight_admit "$pf_expected" || pf_rc=$?
     if [ "$pf_rc" != 0 ]; then
@@ -952,6 +1079,20 @@ preflight()
     trap 'exit 130' INT
     trap 'exit 143' TERM
     broray_ops_preflight_stop_intent "$pf_expected" || return $?
+    if [ "$pf_replace" = true ]; then
+        # Only the old authenticated runtime can address A. All platform
+        # writers/install/start calls still come from the new verified slot.
+        BRORAY_OPS_GENERATION="$pf_old_native"
+        export BRORAY_OPS_GENERATION
+        # Keep this in the admitted owner shell (no command substitution).
+        broray_ops_preflight_stop_generation "$pf_old_generation" "$pf_old_manifest" >/dev/null || {
+            preflight_recovery_error PREFLIGHT_REPLACEMENT_STOP_UNCONFIRMED; return 75
+        }
+        unset BRORAY_OPS_GENERATION
+        trap - EXIT HUP INT TERM
+        preflight_replacement_resume "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_PREFLIGHT_STOP_NONCE"
+        return $?
+    fi
     broray_ops_preflight_bind_service || return $?
     # Call in this owner shell, not a pipeline/command-substitution child.
     # An observation-only legacy binding never authorizes a stop signal.

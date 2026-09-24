@@ -1011,6 +1011,15 @@ case "$verb" in
     platform-preflight-stop-generation) ops_platform_generation_stop "$@" ;;
     platform-preflight-stop-complete) ops_platform_generation_stop_complete guard "$@" ;;
     platform-preflight-stop-settle) ops_platform_generation_stop_complete settle "$@" ;;
+    platform-replacement-backup) ops_platform_replacement_transaction backup "$@" ;;
+    platform-replacement-install) ops_platform_replacement_transaction install "$@" ;;
+    platform-replacement-rollback) ops_platform_replacement_transaction rollback "$@" ;;
+    platform-replacement-start-intent) ops_platform_replacement_transaction start-intent "$@" ;;
+    platform-preflight-resume-generation-stop) ops_platform_generation_stop resume "$@" ;;
+    platform-replacement-start) ops_platform_replacement_transaction start "$@" ;;
+    platform-replacement-commit) ops_platform_replacement_transaction commit "$@" ;;
+    platform-replacement-complete) ops_platform_replacement_complete "$@" ;;
+    platform-replacement-public-status) ops_platform_replacement_public_status "$@" ;;
     platform-preflight-stop-intent) ops_platform_stop_intent "$@" ;;
     platform-supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" platform ;;
     supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" ;;

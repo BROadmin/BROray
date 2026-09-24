@@ -6,12 +6,23 @@
 #define SC_LIMIT 128
 struct sc_node {char id[65],born[64],launch[65],transaction[65],host[65],chain[65];unsigned index;};
 struct sc_context {
-    int state,guard,op,up,cycles,transition,may_publish;
+    int state,guard,op,up,cycles,transition,may_publish,replacement;
     char root[PATH_MAX],statepath[PATH_MAX],oppath[PATH_MAX],uppath[PATH_MAX],cyclepath[PATH_MAX];
     char origin[97],migration[65],nonce[65],native[65],tree[65],seal[65],initial[65];
     struct bg_input input;struct sc_node nodes[SC_LIMIT];unsigned count,baseline,current;
 };
 static struct sc_context sc;
+/* Validated replacement attempts are historical members of the same origin.
+ * They never become live service nodes merely by appearing in this list. */
+static char rs_owned[SC_LIMIT][65];static unsigned rs_owned_count;
+static int rs_attempts(struct sc_node *,const struct migration_file *,const struct migration_file *,const char *,const char *,int,int);
+static int rs_birth(struct sc_node *,int);
+
+
+static int rs_service_read(void);
+static int rs_initial_boot_ready(char **argv,struct sc_node *n);
+static int rs_prior_history(void);
+static int rs_history_member(const char *family,const char *id);
 static int sc_stopped_seal(struct sc_node *n,int publish);
 struct gb_record;
 static int sc_boot_proof(struct sc_node *n,struct gb_record *b,char sha[65]);
@@ -112,26 +123,73 @@ static int gb_parent(const char *domain,const char *id,char up[PATH_MAX]){
     if(!p||strcmp(p+1,id))return -1;*p=0;p=strrchr(up,'/');
     if(!p||strcmp(p+1,"generations"))return -1;*p=0;return 0;
 }
-static int gb_measure(int base,const char *domain,struct gb_record *b){
+/* Boot evidence belongs to its sealed lifecycle origin. Replacement origins
+ * have their own cycles-op-* directory; the legacy cycles directory is not
+ * necessarily the origin of the generation being verified. Select by the
+ * independently bound seal, never directory order, age or a live PID. */
+static int gb_cycle_directory(const char *up,const char *seal){
+    int parent=checked_directory(up),selected=-1,bad=0;DIR *d=NULL;
+    if(parent<0)return -1;d=directory_stream(parent);if(!d){close(parent);return -1;}
+    struct dirent *e;errno=0;
+    while((e=readdir(d))){
+        if(strcmp(e->d_name,"cycles")&&strncmp(e->d_name,"cycles-op-",10))continue;
+        char path[PATH_MAX],anchor[128];struct migration_file record;memset(&record,0,sizeof record);
+        if(sc_join(path,up,e->d_name)){bad=1;break;}
+        int fd=checked_directory(path);
+        if(fd<0||sc_file(fd,"origin.record",&record)){if(fd>=0)close(fd);free(record.bytes);bad=1;break;}
+        if(!strcmp(record.sha,seal)){
+            int n=snprintf(anchor,sizeof anchor,"BROray-service-origin-anchor/1\n%s\n",seal);
+            if(selected>=0||n<0||n>=(int)sizeof anchor||bg_record_exact(fd,"origin.anchor",anchor,(size_t)n))bad=1;
+            else{selected=fd;fd=-1;}
+        }
+        free(record.bytes);if(fd>=0)close(fd);if(bad)break;errno=0;
+    }
+    if(!e&&errno)bad=1;closedir(d);close(parent);
+    if(bad&&selected>=0){close(selected);selected=-1;}return selected;
+}
+/* A later updater may verify an earlier boot's history. The sealed origin,
+ * not the verifier's executable, pins that historical native runtime. Open
+ * the retained bytes without symlinks and verify their exact private identity;
+ * this is read-only provenance and grants no process/signal authority. */
+static int gb_origin_native(const char *up,const struct migration_file *origin,const char *manifest_sha,char native[65]){
+    char *copy=strdup(origin->bytes),*rows[7],*cursor=copy,path[PATH_MAX],sha[65];int root=-1,fd=-1,result=-1;
+    if(!copy)return -1;
+    for(unsigned i=0;i<7;i++){rows[i]=cursor;char *end=strchr(cursor,'\n');if(!end)goto done;*end=0;cursor=end+1;}
+    if(strcmp(rows[0],"BROray-service-origin/1")||!migration_path(rows[1])||!token(rows[2],96)||
+       !hex64(rows[3])||!token(rows[4],32)||strlen(rows[4])!=32||!hex64(rows[5])||strcmp(rows[6],manifest_sha))goto done;
+    const char *prefix=strcmp(rows[1],"/")?rows[1]:"";
+    int n=snprintf(path,sizeof path,"%s/opt/var/lib/broray-updater",prefix);
+    if(n<0||n>=(int)sizeof path||strcmp(path,up))goto done;
+    n=snprintf(path,sizeof path,"%s/runtimes/%s/runtime",up,rows[5]);
+    if(n<0||n>=(int)sizeof path)goto done;
+    root=migration_directory("/");if(root<0)goto done;fd=migration_relative(root,path+1);struct stat st;
+    if(fd<0||fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_uid!=geteuid()||st.st_nlink!=1||
+       (st.st_mode&07777)!=0700||hash_fd(fd,sha)||strcmp(sha,rows[5]))goto done;
+    strcpy(native,rows[5]);result=0;
+ done:if(fd>=0)close(fd);if(root>=0)close(root);free(copy);return result;
+}
+static int gb_measure_ledger(int base,const char *domain,struct gb_record *b,const struct migration_file *pinned,const char *native){
     char current[64],up[PATH_MAX],path[PATH_MAX],hostpath[PATH_MAX],name[128],prefix[512],sha[65],prior[65]="";
-    struct migration_file ready,origin,host;memset(&ready,0,sizeof ready);memset(&origin,0,sizeof origin);memset(&host,0,sizeof host);
-    int cycles=-1,h=-1,witness=-1,result=-1;DIR *dir=NULL;unsigned long maximum=0,found=0,anchor=0;
+    struct migration_file ready,host;memset(&ready,0,sizeof ready);if(pinned)ready=*pinned;memset(&host,0,sizeof host);
+    int h=-1,witness=-1,result=-1;DIR *dir=NULL;unsigned long maximum=0,found=0,anchor=0;
     if(migration_boot(current)||!token(b->id,64)||!hex64(b->manifest)||strlen(b->from)!=36||strlen(b->through)!=36||
        !token(b->from,36)||!token(b->through,36)||!strcmp(b->from,current)||!strcmp(b->from,b->through)||
-       gb_parent(domain,b->id,up)||sc_join(path,up,"cycles"))goto done;
+       gb_parent(domain,b->id,up))goto done;
     scope_digest(domain,sha);if(strcmp(sha,b->scope))goto done;
-    cycles=checked_directory(path);if(cycles<0||sc_file(cycles,"origin.record",&origin)||strcmp(origin.sha,b->seal))goto done;
+    const char *accepted=NULL;int pn=0;
+    if(pinned){
     int nn=snprintf(name,sizeof name,"ready-%s.record",b->id);
-    int pn=snprintf(prefix,sizeof prefix,"BROray-service-ready/1\n%s\n%s\n%s\n%s\n",b->seal,b->launch,b->transaction,b->host);
-    if(nn<0||nn>=(int)sizeof name||pn<0||pn>=(int)sizeof prefix||sc_file(cycles,name,&ready)||
+    pn=snprintf(prefix,sizeof prefix,"BROray-service-ready/1\n%s\n%s\n%s\n%s\n",b->seal,b->launch,b->transaction,b->host);
+    if(nn<0||nn>=(int)sizeof name||pn<0||pn>=(int)sizeof prefix||!hex64(native)||
        strcmp(ready.sha,b->ready)||ready.size<=(size_t)pn||memcmp(ready.bytes,prefix,(size_t)pn))goto done;
-    const char *accepted=ready.bytes+pn,*rev=strstr(accepted,",\"revision\":");char field[256],observed[65];
+    accepted=ready.bytes+pn;const char *rev=strstr(accepted,",\"revision\":");char field[256],observed[65];
     if(!rev||sscanf(rev,",\"revision\":%lu,",&anchor)!=1||!anchor||anchor>1000000||
        sc_field(accepted,"generationId",observed,sizeof observed)||strcmp(observed,b->id)||
        sc_field(accepted,"bootId",observed,sizeof observed)||strcmp(observed,b->from)||
        !strstr(accepted,"\"state\":\"RUNNING\",\"supervisedFromBirth\":true,")||!strstr(accepted,"\"platformReady\":true,"))goto done;
-    if(peer_executable_hash(getpid(),sha))goto done;
-    snprintf(field,sizeof field,"\"nativeSha256\":\"%s\"",sha);if(!strstr(accepted,field))goto done;
+    snprintf(field,sizeof field,"\"nativeSha256\":\"%s\"",native);if(!strstr(accepted,field))goto done;
+    }else{anchor=1;if(!hex64(native))goto done;}
+    char observed[65];
     if(sc_join(path,up,"hosts")||sc_join(hostpath,path,b->id))goto done;
     h=checked_directory(hostpath);if(h<0||sc_file(h,"host.record",&host)||strcmp(host.sha,b->host)||service_journal_digest(h,b->journal))goto done;
     if(sc_field(host.bytes,"bootId",observed,sizeof observed)||strcmp(observed,b->from))goto done;
@@ -146,6 +204,10 @@ static int gb_measure(int base,const char *domain,struct gb_record *b){
         }
         if(!strcmp(s,"boot-ended.receipt")||!strcmp(s,"boot-ended.receipt.pending")){
             char pending[128];struct sc_record_pair pair;if(sc_record_names(base,"boot-ended.receipt",pending,&pair)||!pair.names){bad=1;break;}
+            errno=0;continue;
+        }
+        if(!strcmp(s,"pending-boot-ended.receipt")||!strcmp(s,"pending-boot-ended.receipt.pending")){
+            char pending[128];struct sc_record_pair pair;if(pinned||sc_record_names(base,"pending-boot-ended.receipt",pending,&pair)||!pair.names){bad=1;break;}
             errno=0;continue;
         }
         unsigned long nr=1;char extra,want[64];
@@ -165,7 +227,13 @@ static int gb_measure(int base,const char *domain,struct gb_record *b){
         if(safe_bytes_at(base,name,&bytes,&size))goto done;
         int k=snprintf(prefix,sizeof prefix,"{\"schemaVersion\":2,\"contract\":\"broray-updater-generation/2\",\"generationId\":\"%s\",\"platformManifestSha256\":\"%s\",\"bootId\":\"%s\",\"revision\":%lu,\"previousRecordSha256\":\"%s\",",b->id,b->manifest,b->from,nr,prior);
         bad=k<0||k>=(int)sizeof prefix||size<(size_t)k+2||memchr(bytes,0,size)||memcmp(bytes,prefix,(size_t)k)||memcmp(bytes+size-2,"}\n",2)||!strstr(bytes,"\"supervisedFromBirth\":true,");
-        if(nr==anchor&&(size!=ready.size-(size_t)pn||memcmp(bytes,accepted,size)))bad=1;
+        if(pinned&&nr==anchor&&(size!=ready.size-(size_t)pn||memcmp(bytes,accepted,size)))bad=1;
+        if(!pinned&&nr==1){digest_bytes(bytes,size,sha);if(strcmp(sha,b->ready))bad=1;}
+        if(!pinned&&nr==maximum){
+            const char *keys[]={"nativeSha256","startIntentSha256","transactionRecordSha256","serviceHostRecordSha256"};
+            const char *values[]={native,b->launch,b->transaction,b->host};
+            for(unsigned j=0;j<4;j++){char field[192];int z=snprintf(field,sizeof field,"\"%s\":\"%s\"",keys[j],values[j]);if(z<0||z>=(int)sizeof field||!strstr(bytes,field))bad=1;}
+        }
         if(!bad){
             digest_bytes(bytes,size,prior);char expected[384];
             int w=snprintf(expected,sizeof expected,"BROray-platform-ledger-witness/1\n%s\n%s\n%s\n%lu\n%s\n",b->id,b->manifest,b->from,nr,prior);
@@ -175,7 +243,18 @@ static int gb_measure(int base,const char *domain,struct gb_record *b){
         free(bytes);if(bad)goto done;
     }
     b->total=maximum;strcpy(b->last,prior);gen_sha_end(&inventory,b->inventory);result=0;
- done:if(witness>=0)close(witness);if(dir)closedir(dir);if(cycles>=0)close(cycles);if(h>=0)close(h);free(ready.bytes);free(origin.bytes);free(host.bytes);return result;
+ done:if(witness>=0)close(witness);if(dir)closedir(dir);if(h>=0)close(h);free(host.bytes);return result;
+}
+static int gb_measure(int base,const char *domain,struct gb_record *b){
+    char up[PATH_MAX],name[128],native[65];int cycles=-1,result=-1;
+    struct migration_file ready,origin;memset(&ready,0,sizeof ready);memset(&origin,0,sizeof origin);
+    int n=snprintf(name,sizeof name,"ready-%s.record",b->id);
+    if(n<0||n>=(int)sizeof name||gb_parent(domain,b->id,up))goto done;
+    cycles=gb_cycle_directory(up,b->seal);
+    if(cycles<0||sc_file(cycles,"origin.record",&origin)||strcmp(origin.sha,b->seal)||
+       gb_origin_native(up,&origin,b->manifest,native)||sc_file(cycles,name,&ready))goto done;
+    result=gb_measure_ledger(base,domain,b,&ready,native);
+ done:if(cycles>=0)close(cycles);free(ready.bytes);free(origin.bytes);return result;
 }
 static int gb_validate(int base,const char *domain,struct gb_record *out){
     struct migration_file record;memset(&record,0,sizeof record);struct gb_record b;memset(&b,0,sizeof b);
@@ -189,8 +268,53 @@ static int gb_validate(int base,const char *domain,struct gb_record *out){
     if(out)*out=b;result=0;
  done:free(record.bytes);return result;
 }
+
+/* An interrupted replacement has no READY pin. Its separately named receipt
+ * proves only an ended boot plus the complete independently witnessed birth
+ * ledger. It cannot authorize STOPPED, readiness, a signal or app activation. */
+static int rs_pending_text(const struct gb_record *b,char out[2048]){
+    return snprintf(out,2048,"BROray-generation-pending-boot-ended/1\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%lu\n%s\n%s\n",b->id,b->manifest,b->from,b->through,b->scope,b->seal,b->ready,b->host,b->journal,b->launch,b->transaction,b->total,b->inventory,b->last);
+}
+static int rs_pending_measure(int base,const char *domain,struct gb_record *b){
+    char up[PATH_MAX],path[PATH_MAX],startpath[PATH_MAX],native[65],sha[65],*copy=NULL;int start=-1,runtime=-1,result=-1;
+    struct migration_file launch,transaction,first;memset(&launch,0,sizeof launch);memset(&transaction,0,sizeof transaction);memset(&first,0,sizeof first);
+    if(gb_parent(domain,b->id,up)||sc_join(path,up,"starts")||sc_join(startpath,path,b->id))goto done;
+    start=checked_directory(startpath);
+    if(start<0||sc_file(start,"launch.record",&launch)||strcmp(launch.sha,b->launch)||
+       sc_file(start,"transaction.record",&transaction)||strcmp(transaction.sha,b->transaction)||sc_file(base,"state.json",&first)||strcmp(first.sha,b->ready))goto done;
+    copy=strdup(launch.bytes);if(!copy)goto done;char *cursor=copy,*rows[10];
+    for(unsigned i=0;i<10;i++){rows[i]=cursor;char *nl=strchr(cursor,'\n');if(!nl)goto done;*nl=0;cursor=nl+1;}
+    if(strcmp(rows[0],"BROray-platform-launch/2")||!migration_path(rows[1])||strcmp(rows[2],domain)||strcmp(rows[3],b->id)||
+       strcmp(rows[4],b->manifest)||!hex64(rows[5])||!migration_path(rows[6])||!hex64(rows[7])||!token(rows[8],96)||!token(rows[9],32)||strlen(rows[9])!=32)goto done;
+    strcpy(native,rows[5]);digest_bytes(cursor,strlen(cursor),sha);if(strcmp(sha,b->manifest))goto done;
+    const char *prefix=strcmp(rows[1],"/")?rows[1]:"";
+    int k=snprintf(path,sizeof path,"%s/opt/var/lib/broray-updater",prefix);if(k<0||k>=(int)sizeof path||strcmp(path,up))goto done;
+    char txprefix[160];k=snprintf(txprefix,sizeof txprefix,"BROray-platform-replacement-start-intent/1\nSTART_INTENT\n%s\n",b->seal);
+    if(k<0||k>=(int)sizeof txprefix||transaction.size<=(size_t)k||memcmp(transaction.bytes,txprefix,(size_t)k))goto done;
+    digest_bytes(transaction.bytes+k,transaction.size-(size_t)k,sha);if(strcmp(sha,b->seal))goto done;
+    k=snprintf(path,sizeof path,"%s/runtimes/%s/runtime",up,native);if(k<0||k>=(int)sizeof path)goto done;
+    int root=migration_directory("/");if(root<0)goto done;runtime=migration_relative(root,path+1);close(root);struct stat st;
+    if(runtime<0||fstat(runtime,&st)||!S_ISREG(st.st_mode)||st.st_uid!=geteuid()||st.st_nlink!=1||(st.st_mode&07777)!=0700||hash_fd(runtime,sha)||strcmp(sha,native))goto done;
+    result=gb_measure_ledger(base,domain,b,NULL,native);
+done:if(start>=0)close(start);if(runtime>=0)close(runtime);free(copy);free(launch.bytes);free(transaction.bytes);free(first.bytes);return result;
+}
+static int rs_pending_validate(int base,const char *domain,struct gb_record *out){
+    struct migration_file f;memset(&f,0,sizeof f);struct gb_record b;memset(&b,0,sizeof b);char text[2048],extra;int result=-1;
+    if(sc_file(base,"pending-boot-ended.receipt",&f))goto done;
+    int fields=sscanf(f.bytes,"BROray-generation-pending-boot-ended/1\n%64s\n%64s\n%63s\n%63s\n%64s\n%64s\n%64s\n%64s\n%64s\n%64s\n%64s\n%lu\n%64s\n%64s\n%c",b.id,b.manifest,b.from,b.through,b.scope,b.seal,b.ready,b.host,b.journal,b.launch,b.transaction,&b.total,b.inventory,b.last,&extra);
+    int n=rs_pending_text(&b,text);
+    if(fields!=14||n<0||n>=2048||f.size!=(size_t)n||memcmp(f.bytes,text,(size_t)n)||!hex64(b.seal)||!hex64(b.ready)||!hex64(b.host)||!hex64(b.launch)||!hex64(b.transaction)||!hex64(b.inventory)||!hex64(b.last))goto done;
+    struct gb_record actual=b;if(rs_pending_measure(base,domain,&actual))goto done;n=rs_pending_text(&actual,text);
+    if(n<0||n>=2048||f.size!=(size_t)n||memcmp(f.bytes,text,(size_t)n))goto done;
+    if(out)*out=b;result=0;
+done:free(f.bytes);return result;
+}
 static int generation_boot_retirement_valid(int base,const char *domain,const char *manifest_sha,const char *current){
-    struct gb_record b;return gb_validate(base,domain,&b)||strcmp(b.manifest,manifest_sha)||(current&&!strcmp(current,b.id))?-1:0;
+    /* History may precede a platform upgrade. gb_validate binds EVERY record
+     * and witness to that origin's own sealed manifest/native bytes. Requiring
+     * the new platform's manifest here would reject valid older boot history,
+     * unlike the already-supported ordinary retired-generation proof. */
+    struct gb_record b;return !hex64(manifest_sha)||(gb_validate(base,domain,&b)&&rs_pending_validate(base,domain,&b))||(current&&!strcmp(current,b.id))?-1:0;
 }
 static int generation_boot_verify_main(int argc,char **argv){
     if(argc!=3)return 64;int fd=checked_directory(argv[2]);struct gb_record b;
@@ -242,6 +366,10 @@ static int sc_lock_exact(int parent,const char *name,int create){
        flock(fd,LOCK_EX|LOCK_NB)||(create&&(fsync(fd)||fsync(parent)))){close(fd);return -1;}return fd;
 }
 static int sc_call(char **argv,const char *verb,char *reply,size_t capacity){
+    if(sc.replacement){
+        if(!strcmp(verb,"recovery-commit-check"))verb="replacement-origin-proof";
+        else if(!strcmp(verb,"recovery-service-stop"))verb="replacement-service-stop-exec";
+    }
     int p[2];if(pipe2(p,O_CLOEXEC))return 75;pid_t child=fork();if(child<0){close(p[0]);close(p[1]);return 75;}
     if(!child){close(p[0]);if(dup2(p[1],1)<0)_exit(74);close(p[1]);
         int flags=fcntl(sc.guard,F_GETFD);if(flags<0||fcntl(sc.guard,F_SETFD,flags&~FD_CLOEXEC))_exit(74);
@@ -333,15 +461,18 @@ static int sc_restart_incomplete(struct sc_node *n){
 
 static int sc_create_seal(char **argv){
     char reply[8192],parent[PATH_MAX],start[PATH_MAX],anchor[128];char *text=NULL;size_t size=0;int starts=-1,result=-1;
-    /* The old proof is used exactly once, while its completed generation is
-     * still live. Future cycles never re-enter recovery-complete/retire. */
-    if(sc_call(argv,"recovery-commit-check",reply,sizeof reply)||!strstr(reply,"\"phase\":\"COMMIT_VERIFIED\"")||
-       !strstr(reply,"\"platformReady\":true")||sc_field(reply,"generationId",sc.initial,sizeof sc.initial)||
+    /* Initial proof may be live or an exact committed generation from an
+     * ended kernel boot. The latter explicitly grants no live readiness. */
+    if(sc_call(argv,"recovery-commit-check",reply,sizeof reply)||
+       !((strstr(reply,"\"phase\":\"COMMIT_VERIFIED\"")&&strstr(reply,"\"platformReady\":true"))||
+         (sc.replacement&&strstr(reply,"\"phase\":\"COMMITTED_BOOT_ENDED\"")&&strstr(reply,"\"platformReady\":false")))||
+       sc_field(reply,"generationId",sc.initial,sizeof sc.initial)||
        sc_tree_hash(sc.op,sc.tree)||sc_join(parent,sc.uppath,"starts"))goto done;
     starts=checked_directory(parent);if(starts<0)goto done;DIR *dir=directory_stream(starts);if(!dir)goto done;
     struct dirent *e;int bad=0;errno=0;
     while((e=readdir(dir))){
         if(!strcmp(e->d_name,".")||!strcmp(e->d_name,".."))continue;
+        if(sc.replacement&&strcmp(e->d_name,sc.initial))continue;
         if(sc.count>=SC_LIMIT-1||!token(e->d_name,64)||sc_join(start,parent,e->d_name)){bad=1;break;}
         int fd=checked_directory(start);struct migration_file launch,transaction,host;
         memset(&launch,0,sizeof launch);memset(&transaction,0,sizeof transaction);memset(&host,0,sizeof host);
@@ -357,7 +488,7 @@ static int sc_create_seal(char **argv){
     if(!e&&errno)bad=1;closedir(dir);if(bad||!sc.count)goto done;sc.baseline=sc.count;
     if(sc_seal_text(&text,&size))goto done;
     if(sc.cycles<0){
-        if(mkdirat(sc.up,"cycles",0700)||fsync(sc.up))goto done;
+        const char *name=strrchr(sc.cyclepath,'/');if(!name||mkdirat(sc.up,name+1,0700)||fsync(sc.up))goto done;
         sc.cycles=checked_directory(sc.cyclepath);
     }
     if(sc.cycles<0||sc_origin_partial_names(sc.cycles))goto done;
@@ -454,7 +585,7 @@ static int sc_derive(struct sc_node *previous,const char *born,unsigned index,st
     char retired[65],host[65],ready[65],stop_tree[65],seed[1024],seed_sha[65],domain[PATH_MAX],parent[PATH_MAX];
     struct migration_file manifest;memset(&manifest,0,sizeof manifest);int result=-1;
     if(sc_predecessor(previous,retired,host,ready,stop_tree)||
-       sc_file(sc.op,"platform-migration/manifest.record",&manifest)||strcmp(manifest.sha,sc.input.manifest))goto done;
+       sc_file(sc.op,sc.replacement?"platform-replacement-target/manifest.record":"platform-migration/manifest.record",&manifest)||strcmp(manifest.sha,sc.input.manifest))goto done;
     int sn=snprintf(seed,sizeof seed,"BROray-service-generation/1\n%s\n%u\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",sc.seal,index,previous->id,previous->chain,retired,host,ready,stop_tree,born);
     if(sn<0||sn>=(int)sizeof seed)goto done;digest_bytes(seed,(size_t)sn,seed_sha);
     memset(next,0,sizeof *next);platform_generation_id(seed_sha,next->id);strcpy(next->born,born);next->index=index;
@@ -489,6 +620,10 @@ static int sc_namespace(const char *family,int allow_missing_current){
             if(fstatat(fd,e->d_name,&st,AT_SYMLINK_NOFOLLOW)||!S_ISREG(st.st_mode)||st.st_uid!=geteuid()||(st.st_mode&07777)!=0600||st.st_nlink!=1||st.st_size){bad=1;break;}errno=0;continue;
         }
         int at=-1;for(unsigned i=0;i<sc.count;i++)if(!strcmp(sc.nodes[i].id,e->d_name))at=(int)i;
+        if(at<0&&sc.replacement&&rs_history_member(family,e->d_name)==0){
+            if(fstatat(fd,e->d_name,&st,AT_SYMLINK_NOFOLLOW)||!S_ISDIR(st.st_mode)||st.st_uid!=geteuid()||(st.st_mode&07777)!=0700){bad=1;break;}
+            errno=0;continue;
+        }
         if(at<0||seen[at]++||fstatat(fd,e->d_name,&st,AT_SYMLINK_NOFOLLOW)||!S_ISDIR(st.st_mode)||st.st_uid!=geteuid()||(st.st_mode&07777)!=0700){bad=1;break;}errno=0;
     }
     if(!e&&errno)bad=1;closedir(d);close(fd);
@@ -533,7 +668,7 @@ static int sc_collect(void){
         if(!bad){sc.current=sc.count;sc.nodes[sc.count++]=next;bad=sc_ready_host(&sc.nodes[sc.current]);}
         free(f.bytes);free(copy);free(record);free(launch);free(transaction);if(bad)return -1;
     }
-    if(sc.count>=SC_LIMIT||sc_cycle_names(index-1)||sc_namespace("starts",1)||sc_namespace("generations",1)||sc_namespace("hosts",1))return -1;
+    if(sc.count>=SC_LIMIT||(sc.replacement&&rs_prior_history())||sc_cycle_names(index-1)||sc_namespace("starts",1)||sc_namespace("generations",1)||sc_namespace("hosts",1))return -1;
     for(unsigned i=0;i<sc.count;i++)if(i!=sc.current){char a[65],b[65];struct gb_record ended;if(sc_terminal(&sc.nodes[i],a,b)&&(sc_boot_proof(&sc.nodes[i],&ended,a)||sc_boot_markers(&sc.nodes[i],0)))return -1;}
     return 0;
 }
@@ -774,36 +909,52 @@ static int service_cycle_main(int argc,char **argv,int action){
     int result=75,fresh=0,mig=-1;const char *why="SERVICE_ORIGIN_UNCONFIRMED";char path[PATH_MAX],canonical[PATH_MAX],reply[16384],ready[65];
     if(argc!=6||!migration_path(argv[2])||!token(argv[3],96)||!hex64(argv[4])||!token(argv[5],32)||strlen(argv[5])!=32)return 64;
     memset(&sc,0,sizeof sc);sc.state=sc.guard=sc.op=sc.up=sc.cycles=sc.transition=-1;sc.may_publish=action==SC_START||action==SC_STOP||action==SC_RESTART;umask(077);
+    sc.replacement=!strncmp(argv[1],"replacement-service-",20);
     if(!realpath(argv[2],canonical)||strcmp(canonical,argv[2])||migration_boot(boot))goto done;
     strcpy(sc.root,argv[2]);strcpy(sc.origin,argv[3]);strcpy(sc.migration,argv[4]);strcpy(sc.nonce,argv[5]);
     const char *prefix=strcmp(sc.root,"/")?sc.root:"";
     int n=snprintf(sc.statepath,sizeof sc.statepath,"%s/opt/var/lib/broray",prefix);if(n<0||n>=(int)sizeof sc.statepath)goto done;
     n=snprintf(sc.uppath,sizeof sc.uppath,"%s/opt/var/lib/broray-updater",prefix);if(n<0||n>=(int)sizeof sc.uppath)goto done;
     if(sc_join(path,sc.statepath,"operations")||sc_join(sc.oppath,path,sc.origin)||sc_join(sc.cyclepath,sc.uppath,"cycles"))goto done;
+    char cycle_name[128]="cycles";
+    if(sc.replacement){
+        n=snprintf(cycle_name,sizeof cycle_name,"cycles-%s",sc.origin);
+        if(n<0||n>=(int)sizeof cycle_name||sc_join(sc.cyclepath,sc.uppath,cycle_name))goto done;
+    }
     sc.state=checked_directory(sc.statepath);if(sc.state<0)goto done;
     sc.guard=recovery_inherited_guard(sc.state);if(sc.guard<0)sc.guard=sc_lock_exact(sc.state,"operations.guard",0);
     if(sc.guard<0){why="SERVICE_TRANSITION_BUSY";goto done;}
     sc.op=checked_directory(sc.oppath);sc.up=checked_directory(sc.uppath);
     int self=open("/proc/self/exe",O_RDONLY|O_CLOEXEC);if(self<0)goto done;int bad=hash_fd(self,sc.native);close(self);if(bad||sc.op<0||sc.up<0)goto done;
+    if(sc.replacement){if(rs_service_read())goto done;}
+    else{
     if(sc_join(path,sc.oppath,"platform-migration"))goto done;mig=checked_directory(path);
     if(mig<0||bg_source(mig,path,sc.root,sc.migration,&sc.input)||strcmp(sc.input.operation,sc.origin)||strcmp(sc.input.nonce,sc.nonce))goto done;
     char *verify[]={argv[0],"recovery-code-verify",sc.oppath,sc.root,path,sc.migration,NULL};
     if(recovery_code_impl(6,verify,0))goto done;
-    int exists=bg_exists(sc.up,"cycles");if(exists<0)goto done;
+    }
+    int exists=bg_exists(sc.up,cycle_name);if(exists<0)goto done;
     if(!exists){
-        if(action!=SC_START||sc_pending_global()!=0||sc_create_seal(argv))goto done;fresh=1;
+        /* A completed preflight can already own a live, ready generation
+         * before the first ordinary init start. STOP must authenticate and
+         * seal that same origin before entering its existing protected stop;
+         * it must not require a redundant start or launch another process. */
+        if((action!=SC_START&&action!=SC_STOP)||sc_pending_global()!=0||sc_create_seal(argv))goto done;fresh=1;
     }else{
         sc.cycles=checked_directory(sc.cyclepath);if(sc.cycles<0)goto done;
         int lock=bg_exists(sc.cycles,"transition.lock");if(lock<0)goto done;
         if(!lock){
-            if(action!=SC_START||sc_pending_global()!=0||sc_origin_partial_names(sc.cycles)||sc_create_seal(argv))goto done;
+            if((action!=SC_START&&action!=SC_STOP)||sc_pending_global()!=0||sc_origin_partial_names(sc.cycles)||sc_create_seal(argv))goto done;
             fresh=1;
         }else if(sc_seal_read())goto done;
     }
     sc.transition=sc_inherited_lock(sc.cycles,"transition.lock");
     if(sc.transition<0)sc.transition=sc_lock_exact(sc.cycles,"transition.lock",fresh);
     if(sc.transition<0){why="SERVICE_TRANSITION_BUSY";goto done;}
-    why="SERVICE_CYCLE_HISTORY_UNCONFIRMED";if(sc_collect())goto done;
+    why="SERVICE_CYCLE_HISTORY_UNCONFIRMED";
+    if(sc.replacement&&sc.count==sc.baseline&&!strcmp(sc.nodes[sc.current].id,sc.initial)&&
+       strcmp(sc.nodes[sc.current].born,boot)&&rs_initial_boot_ready(argv,&sc.nodes[sc.current]))goto done;
+    if(sc_collect())goto done;
     struct sc_node *current=&sc.nodes[sc.current];
     if(action==SC_CURRENT){
         printf("{\"ok\":true,\"phase\":\"SERVICE_CURRENT_DISCOVERED\",\"generationId\":\"%s\",\"readinessProven\":false,\"activationAllowed\":false}\n",current->id);result=0;goto done;
@@ -812,6 +963,11 @@ static int service_cycle_main(int argc,char **argv,int action){
     if(resume_restart<0)goto done;
     if(action==SC_STOP||(action==SC_RESTART&&!resume_restart&&!strcmp(current->born,boot))){
         why="SERVICE_STOP_UNCONFIRMED";
+        /* The stop coordinator rechecks this lifecycle through read-only
+         * status. Publish the same authenticated READY evidence as start
+         * before entering it, including the initial preflight generation.
+         * A completed stop still follows its existing terminal replay. */
+        if(!sc_live(current)&&sc_ready(current,1,ready))goto done;
         if(sc_call(argv,"recovery-service-stop",reply,sizeof reply)||!strstr(reply,"\"phase\":\"SERVICE_STOP_COMPLETED\"")||
            sc_stopped_seal(current,1))goto done;
         if(action==SC_STOP){fputs(reply,stdout);result=0;goto done;}
@@ -857,29 +1013,53 @@ static int service_transition_prepare(int argc,char **argv){
     service_transition_fd=fcntl((int)fd,F_DUPFD_CLOEXEC,3);
     return service_transition_fd<0||unsetenv("BRORAY_SERVICE_TRANSITION_FD")?-1:0;
 }
-static int service_transition_parent(void){
+static int service_transition_parent(char directory[PATH_MAX]){
     struct identity before,after;char sha[65],path[64],bytes[16384];pid_t parent=getppid();
     if(parent<=1||capture(parent,&before)||peer_executable_hash(parent,sha)||strcmp(sha,pl.native))return -1;
     snprintf(path,sizeof path,"/proc/%d/cmdline",parent);ssize_t size=read_file(path,bytes,sizeof bytes-1);if(size<=0)return -1;
-    char *parts[6];size_t at=0;unsigned count=0;
-    while(at<(size_t)size&&count<6){char *end=memchr(bytes+at,0,(size_t)size-at);if(!end)return -1;parts[count++]=bytes+at;at=(size_t)(end-bytes)+1;}
-    if(count!=6||at!=(size_t)size||
-       (strcmp(parts[1],"recovery-resume")&&strcmp(parts[1],"service-cycle-start")&&strcmp(parts[1],"service-cycle-restart"))||
-       strcmp(parts[2],pl.root)||strcmp(parts[3],pl.op)||!hex64(parts[4])||strcmp(parts[5],pl.nonce)||
-       capture(parent,&after)||!identity_equal(&before,&after))return -1;
+    char *parts[7];size_t at=0;unsigned count=0;
+    while(at<(size_t)size&&count<7){char *end=memchr(bytes+at,0,(size_t)size-at);if(!end)return -1;parts[count++]=bytes+at;at=(size_t)(end-bytes)+1;}
+    if(at!=(size_t)size||count<6||strcmp(parts[2],pl.root)||strcmp(parts[3],pl.op))return -1;
+    const char *prefix=strcmp(pl.root,"/")?pl.root:"";int n;
+    if(count==7&&!strcmp(parts[1],"replacement-start")){
+        /* This parent has authenticated the protected replacement intent.
+         * Bind its exact state/fence and PRIVATE transition inode; neither an
+         * environment descriptor nor the old origin's lock authorizes B. */
+        if(strcmp(parts[4],pl.nonce)||strcmp(parts[5],pl.manifest)||!hex64(parts[6]))return -1;
+        char op_path[PATH_MAX],fence[PATH_MAX],expected[PATH_MAX],link[PATH_MAX];
+        n=snprintf(op_path,sizeof op_path,"%s/opt/var/lib/broray/operations/%s",prefix,pl.op);
+        if(n<0||n>=(int)sizeof op_path)return -1;
+        int op=checked_directory(op_path);struct migration_file state;memset(&state,0,sizeof state);
+        int bad=op<0||sc_file(op,"state.json",&state)||strcmp(state.sha,parts[6]);
+        if(op>=0)close(op);free(state.bytes);if(bad)return -1;
+        n=snprintf(fence,sizeof fence,"%s/opt/var/lock/broray/global-operation.lock",prefix);
+        if(n<0||n>=(int)sizeof fence||sc_join(expected,op_path,"fence"))return -1;
+        ssize_t got=readlink(fence,link,sizeof link);
+        if(got!=(ssize_t)strlen(expected)||memcmp(link,expected,(size_t)got)||
+           sc_join(directory,op_path,"platform-replacement-start"))return -1;
+    }else{
+        int replacement=count==6&&(!strcmp(parts[1],"replacement-service-start")||!strcmp(parts[1],"replacement-service-restart"));
+        if(count!=6||(!replacement&&strcmp(parts[1],"recovery-resume")&&strcmp(parts[1],"service-cycle-start")&&strcmp(parts[1],"service-cycle-restart"))||
+           !hex64(parts[4])||strcmp(parts[5],pl.nonce))return -1;
+        n=replacement?snprintf(directory,PATH_MAX,"%s/opt/var/lib/broray-updater/cycles-%s",prefix,pl.op):
+                      snprintf(directory,PATH_MAX,"%s/opt/var/lib/broray-updater/cycles",prefix);
+        if(n<0||n>=PATH_MAX)return -1;
+    }
+    if(capture(parent,&after)||!identity_equal(&before,&after))return -1;
     return 0;
 }
 static int service_transition_enter(const char *domain){
     char parent[PATH_MAX],path[PATH_MAX];if(strlen(domain)>=sizeof parent)return -1;strcpy(parent,domain);
     char *end=strrchr(parent,'/');if(!end)return -1;*end=0;end=strrchr(parent,'/');
     if(!end||strcmp(end+1,"generations"))return service_transition_fd<0?0:-1;*end=0;
-    if(sc_join(path,parent,"cycles"))return -1;struct stat st;
+    if(service_transition_fd>=0){if(!pl.enabled||service_transition_parent(path))return -1;}
+    else if(sc_join(path,parent,"cycles"))return -1;struct stat st;
     if(lstat(path,&st)){return errno==ENOENT&&service_transition_fd<0?0:-1;}
     int directory=checked_directory(path);if(directory<0)return -1;
     struct stat named,held;int result=-1;
     if(fstatat(directory,"transition.lock",&named,AT_SYMLINK_NOFOLLOW)||!S_ISREG(named.st_mode)||named.st_uid!=geteuid()||named.st_nlink!=1||(named.st_mode&07777)!=0600||named.st_size)goto done;
     if(service_transition_fd>=0){
-        if(!pl.enabled||service_transition_parent()||fstat(service_transition_fd,&held)||held.st_dev!=named.st_dev||held.st_ino!=named.st_ino||
+        if(fstat(service_transition_fd,&held)||held.st_dev!=named.st_dev||held.st_ino!=named.st_ino||
            held.st_mode!=named.st_mode||held.st_uid!=named.st_uid||held.st_nlink!=1||held.st_size||
            (fcntl(service_transition_fd,F_GETFL)&O_ACCMODE)!=O_RDWR||flock(service_transition_fd,LOCK_EX|LOCK_NB))goto done;
     }else{
@@ -891,3 +1071,662 @@ static int service_transition_enter(const char *domain){
  done:close(directory);return result;
 }
 static void service_transition_release(void){if(service_transition_fd>=0){close(service_transition_fd);service_transition_fd=-1;}}
+
+/* Replacement start uses the existing from-birth launcher. Its transaction is
+ * distinct from legacy boot migration and never claims an old boot ended. */
+static int rs_context(const char *root,const char *operation,const char *nonce){
+    char path[PATH_MAX];memset(&sc,0,sizeof sc);sc.state=sc.guard=sc.op=sc.up=sc.cycles=sc.transition=-1;sc.may_publish=1;
+    if(!migration_path(root)||!token(operation,96)||!token(nonce,32)||strlen(nonce)!=32||migration_boot(boot))return -1;
+    rs_owned_count=0;strcpy(sc.root,root);strcpy(sc.origin,operation);strcpy(sc.nonce,nonce);
+    const char *prefix=strcmp(root,"/")?root:"";
+    if(snprintf(sc.statepath,sizeof sc.statepath,"%s/opt/var/lib/broray",prefix)>=(int)sizeof sc.statepath||
+       snprintf(sc.uppath,sizeof sc.uppath,"%s/opt/var/lib/broray-updater",prefix)>=(int)sizeof sc.uppath||
+       sc_join(path,sc.statepath,"operations")||sc_join(sc.oppath,path,operation)||
+       sc_join(sc.cyclepath,sc.oppath,"platform-replacement-start"))return -1;
+    sc.state=checked_directory(sc.statepath);sc.op=checked_directory(sc.oppath);sc.up=checked_directory(sc.uppath);
+    if(sc.state<0||sc.op<0||sc.up<0||(sc.guard=recovery_inherited_guard(sc.state))<0||peer_executable_hash(getpid(),sc.native))return -1;
+    return 0;
+}
+static int rs_fence_check(const char *state_sha,int completed){
+    char path[PATH_MAX],wanted[PATH_MAX],link[PATH_MAX];struct migration_file state;memset(&state,0,sizeof state);
+    const char *prefix=strcmp(sc.root,"/")?sc.root:"";
+    if(snprintf(path,sizeof path,"%s/opt/var/lock/broray/global-operation.lock",prefix)>=(int)sizeof path||sc_join(wanted,sc.oppath,"fence"))return -1;
+    ssize_t n=readlink(path,link,sizeof link);
+    if(n!=(ssize_t)strlen(wanted)||memcmp(link,wanted,(size_t)n)){
+        if(!completed||sc_join(path,sc.oppath,"retired-lock"))return -1;
+        n=readlink(path,link,sizeof link);
+        if(n!=(ssize_t)strlen(wanted)||memcmp(link,wanted,(size_t)n))return -1;
+    }
+    if(sc_file(sc.op,"state.json",&state))return -1;
+    int bad=strcmp(state.sha,state_sha);free(state.bytes);return bad?-1:0;
+}
+static int rs_fence(const char *state_sha){return rs_fence_check(state_sha,0);}
+/* Terminal generation/host directories retain their control socket as
+ * evidence. This inventory is used only after full retirement proof; it never
+ * connects to that socket or interprets its presence as a live owner. The
+ * ordinary operation-tree verifier continues to reject all sockets. */
+static int rs_history_tree(int fd,const char *root,char sha[65]){
+    DIR *d=directory_stream(fd);if(!d)return -1;
+    char (*names)[NAME_MAX+1]=calloc(4096,sizeof *names);if(!names){closedir(d);return -1;}
+    unsigned count=0;int bad=0;struct dirent *e;errno=0;
+    while((e=readdir(d))){
+        if(!strcmp(e->d_name,".")||!strcmp(e->d_name,".."))continue;
+        if(count==4096){bad=1;break;}strcpy(names[count++],e->d_name);errno=0;
+    }
+    if(!e&&errno)bad=1;closedir(d);qsort(names,count,sizeof *names,sc_namecmp);
+    struct gen_sha hash;gen_sha_init(&hash);
+    for(unsigned i=0;i<count&&!bad;i++){
+        struct stat before,after;char meta[160],value[65],path[PATH_MAX];
+        if(fstatat(fd,names[i],&before,AT_SYMLINK_NOFOLLOW)||before.st_uid!=geteuid()){bad=1;break;}
+        int n=snprintf(meta,sizeof meta,"%o\n",(unsigned)(before.st_mode&0177777));
+        if(n<0||n>=(int)sizeof meta){bad=1;break;}
+        gen_sha_add(&hash,names[i],strlen(names[i])+1);gen_sha_add(&hash,meta,(size_t)n);
+        if(S_ISREG(before.st_mode)){
+            struct migration_file file;memset(&file,0,sizeof file);bad=migration_read(fd,names[i],&file,0);
+            if(!bad)gen_sha_add(&hash,file.sha,64);free(file.bytes);
+        }else if(S_ISDIR(before.st_mode)){
+            if((before.st_mode&07777)!=0700||sc_join(path,root,names[i])){bad=1;break;}
+            int child=checked_directory(path);if(child<0){bad=1;break;}
+            bad=sc_tree_hash_at(child,path,value);close(child);if(!bad)gen_sha_add(&hash,value,64);
+        }else if(S_ISSOCK(before.st_mode)&&!strcmp(names[i],"control")&&(before.st_mode&07777)==0700&&before.st_nlink==1){
+            n=snprintf(meta,sizeof meta,"terminal-control\n%llu\n%llu\n",(unsigned long long)before.st_dev,(unsigned long long)before.st_ino);
+            if(n<0||n>=(int)sizeof meta)bad=1;else gen_sha_add(&hash,meta,(size_t)n);
+        }else bad=1;
+        if(fstatat(fd,names[i],&after,AT_SYMLINK_NOFOLLOW)||before.st_dev!=after.st_dev||before.st_ino!=after.st_ino||
+           before.st_mode!=after.st_mode||before.st_uid!=after.st_uid||before.st_nlink!=after.st_nlink||before.st_size!=after.st_size)bad=1;
+    }
+    free(names);if(bad)return -1;gen_sha_end(&hash,sha);return 0;
+}
+/* Bind all pre-existing updater history and the already validated transaction.
+ * B's own lifecycle directories are excluded by its independently derived ID.
+ * New/removed/changed foreign history invalidates the exact record on replay. */
+static int rs_history(const char *id,char **text,size_t *size){
+    FILE *out=open_memstream(text,size);if(!out)return -1;int bad=0;
+    const char *families[]={"starts","generations","hosts"};
+    fputs("BROray-platform-replacement-history/1\n",out);
+    for(unsigned family=0;family<3&&!bad;family++){
+        char path[PATH_MAX];if(sc_join(path,sc.uppath,families[family])){bad=1;break;}
+        int fd=checked_directory(path);if(fd<0){bad=1;break;}
+        DIR *d=directory_stream(fd);if(!d){close(fd);bad=1;break;}
+        char names[SC_LIMIT][65];unsigned count=0;struct dirent *e;errno=0;
+        while((e=readdir(d))){
+            const char *n=e->d_name;
+            if(!strcmp(n,".")||!strcmp(n,"..")||!strcmp(n,id))continue;
+            int owned=0;if(sc.replacement)for(unsigned i=0;i<sc.count;i++)if(!strcmp(n,sc.nodes[i].id))owned=1;
+            for(unsigned i=0;i<rs_owned_count;i++)if(!strcmp(n,rs_owned[i]))owned=1;
+            if(owned)continue;
+            if(!strcmp(families[family],"generations")&&!strcmp(n,".generation-lifetime.lock")){
+                struct stat st;
+                if(fstatat(fd,n,&st,AT_SYMLINK_NOFOLLOW)||!S_ISREG(st.st_mode)||st.st_uid!=geteuid()||st.st_nlink!=1||st.st_size||(st.st_mode&07777)!=0600){bad=1;break;}
+                fprintf(out,"generation-exclusion\t%llu\t%llu\n",(unsigned long long)st.st_dev,(unsigned long long)st.st_ino);errno=0;continue;
+            }
+            if(count==SC_LIMIT||!token(n,64)){bad=1;break;}strcpy(names[count++],n);errno=0;
+        }
+        if(!e&&errno)bad=1;closedir(d);
+        for(unsigned i=0;i<count;i++)for(unsigned j=i+1;j<count;j++)if(strcmp(names[i],names[j])>0){char temp[65];strcpy(temp,names[i]);strcpy(names[i],names[j]);strcpy(names[j],temp);}
+        for(unsigned i=0;i<count&&!bad;i++){
+            char full[PATH_MAX],sha[65];if(sc_join(full,path,names[i])){bad=1;break;}
+            int child=checked_directory(full);if(child<0){bad=1;break;}
+            bad=rs_history_tree(child,full,sha);close(child);
+            if(!bad)fprintf(out,"%s/%s\t%s\n",families[family],names[i],sha);
+        }
+        close(fd);
+    }
+    /* Older lifecycle origins remain frozen evidence outside B's scope. */
+    DIR *origins=directory_stream(sc.up);if(!origins)bad=1;
+    if(origins){char names[SC_LIMIT][128];unsigned count=0;struct dirent *e;errno=0;
+        while((e=readdir(origins))){
+            if(strcmp(e->d_name,"cycles")&&strncmp(e->d_name,"cycles-op-",10))continue;
+            char path[PATH_MAX];if(sc_join(path,sc.uppath,e->d_name)){bad=1;break;}
+            if(!strcmp(path,sc.cyclepath)||(!strncmp(e->d_name,"cycles-",7)&&!strcmp(e->d_name+7,sc.origin)))continue;
+            if(count==SC_LIMIT||strlen(e->d_name)>=sizeof names[0]){bad=1;break;}strcpy(names[count++],e->d_name);errno=0;
+        }
+        if(!e&&errno)bad=1;closedir(origins);
+        for(unsigned i=0;i<count;i++)for(unsigned j=i+1;j<count;j++)if(strcmp(names[i],names[j])>0){char temp[128];strcpy(temp,names[i]);strcpy(names[i],names[j]);strcpy(names[j],temp);}
+        for(unsigned i=0;i<count&&!bad;i++){
+            char path[PATH_MAX],sha[65];if(sc_join(path,sc.uppath,names[i])){bad=1;break;}
+            int fd=checked_directory(path);if(fd<0){bad=1;break;}
+            bad=sc_tree_hash_at(fd,path,sha);close(fd);if(!bad)fprintf(out,"%s\t%s\n",names[i],sha);
+        }
+    }
+    const char *fixed[]={"platform-replacement-backup","platform-replacement-target","platform-replacement-install"};
+    for(unsigned i=0;i<3&&!bad;i++){
+        char path[PATH_MAX],sha[65];if(sc_join(path,sc.oppath,fixed[i])){bad=1;break;}
+        int fd=checked_directory(path);if(fd<0){bad=1;break;}
+        bad=sc_tree_hash_at(fd,path,sha);close(fd);if(!bad)fprintf(out,"%s\t%s\n",fixed[i],sha);
+    }
+    if(fclose(out))bad=1;return bad?-1:0;
+}
+static int rs_prior_history(void){
+    char *text=NULL;size_t size=0;int bad=rs_history(sc.initial,&text,&size);
+    if(!bad)bad=bg_record_exact(sc.op,"platform-replacement-start/history.record",text,size);
+    free(text);return bad;
+}
+static int rs_history_member(const char *family,const char *id){
+    if(!token(id,64))return -1;
+    for(unsigned i=0;i<rs_owned_count;i++)if(!strcmp(id,rs_owned[i]))return 0;
+    struct migration_file f;memset(&f,0,sizeof f);char prefix[128];int result=-1;
+    int n=snprintf(prefix,sizeof prefix,"%s/%s\t",family,id);
+    if(n<0||n>=(int)sizeof prefix||sc_file(sc.op,"platform-replacement-start/history.record",&f))goto done;
+    char *cursor=f.bytes,*line;
+    while((line=sc_line(&cursor)))if(!strncmp(line,prefix,(size_t)n)&&hex64(line+n)){result=0;break;}
+done:free(f.bytes);return result;
+}
+static int rs_launch(const char *intent,size_t intent_size,const char *manifest,size_t manifest_size,
+        const char *id,const char *shell,const char *shell_sha,char **launch,size_t *ls,char **transaction,size_t *ts){
+    char domain[PATH_MAX],parent[PATH_MAX];
+    if(sc_join(parent,sc.uppath,"generations")||sc_join(domain,parent,id))return -1;
+    FILE *f=open_memstream(launch,ls);if(!f)return -1;
+    fprintf(f,"BROray-platform-launch/2\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",sc.root,domain,id,sc.input.manifest,sc.native,shell,shell_sha,sc.origin,sc.nonce);
+    fwrite(manifest,1,manifest_size,f);if(fclose(f))return -1;
+    f=open_memstream(transaction,ts);if(!f)return -1;
+    fprintf(f,"BROray-platform-replacement-start-intent/1\nSTART_INTENT\n%s\n",sc.seal);fwrite(intent,1,intent_size,f);return fclose(f)?-1:0;
+}
+/* Retain the authenticated coordinator closure for a supervised replacement.
+ * This is explicitly not a legacy migration or an ended-boot receipt. The
+ * descriptor and its independent anchor precede the write-once closure; a
+ * partial publication is evidence requiring recovery, never a fresh origin. */
+static int rs_code(const char *source){
+    int src=-1,base=-1,code=-1,bin=-1,lib=-1,runtime=-1,result=-1;
+    char directory[PATH_MAX],codepath[PATH_MAX],path[PATH_MAX],store[PATH_MAX];
+    char descriptor[1024],anchor[160],receipt[128],sha[65],manifest_sha[65];
+    char *manifest=NULL;size_t size=0;struct migration_file files[RC_FILES];memset(files,0,sizeof files);
+    if(sc_join(directory,sc.oppath,"platform-replacement-code")||sc_join(codepath,directory,"code")||
+       sc_join(store,sc.uppath,"runtimes")||sc_join(path,store,sc.native))goto done;
+    runtime=checked_directory(path);if(runtime<0||runtime_names(runtime)||bg_runtime_valid(runtime,sc.native))goto done;
+    int exists=bg_exists(sc.op,"platform-replacement-code"),bound=bg_exists(sc.op,"platform-replacement-service.json"),
+        anchored=bg_exists(sc.op,"platform-replacement-service.anchor");
+    if(exists<0||bound<0||anchored<0||exists!=bound||exists!=anchored||(!source&&!exists))goto done;
+    src=source?migration_directory(source):checked_directory(codepath);
+    if(src<0||rc_load(src,files,&manifest,&size,manifest_sha))goto done;
+    int dn=snprintf(descriptor,sizeof descriptor,"{\"schemaVersion\":1,\"contract\":\"broray-replacement-service/1\",\"operationId\":\"%s\",\"stopNonce\":\"%s\",\"startIntentSha256\":\"%s\",\"nativeSha256\":\"%s\",\"platformManifestSha256\":\"%s\",\"codeManifestSha256\":\"%s\",\"processAuthority\":false}\n",sc.origin,sc.nonce,sc.seal,sc.native,sc.input.manifest,manifest_sha);
+    if(dn<0||dn>=(int)sizeof descriptor)goto done;digest_bytes(descriptor,(size_t)dn,sha);
+    int an=snprintf(anchor,sizeof anchor,"BROray-replacement-service-anchor/1\n%s\n",sha),
+        rn=snprintf(receipt,sizeof receipt,"BROray-recovery-code-staged/1\n%s\n",manifest_sha);
+    if(an<0||an>=(int)sizeof anchor||rn<0||rn>=(int)sizeof receipt||rc_exact(src,files)||
+       migration_record(sc.op,"platform-replacement-service.anchor",anchor,(size_t)an,!exists)||
+       migration_record(sc.op,"platform-replacement-service.json",descriptor,(size_t)dn,!exists))goto done;
+    if(!exists&&(mkdirat(sc.op,"platform-replacement-code",0700)||fsync(sc.op)))goto done;
+    base=checked_directory(directory);if(base<0||(!exists&&(bg_empty(base)||mkdirat(base,"code",0700)||fsync(base))))goto done;
+    code=checked_directory(codepath);if(code<0||(!exists&&(bg_empty(code)||mkdirat(code,"bin",0700)||mkdirat(code,"lib",0700)||fsync(code))))goto done;
+    if(sc_join(path,codepath,"bin"))goto done;bin=checked_directory(path);
+    if(sc_join(path,codepath,"lib"))goto done;lib=checked_directory(path);
+    if(bin<0||lib<0||(exists?rc_complete(base,code,bin,lib):(bg_empty(bin)||bg_empty(lib)))||
+       migration_record(base,"manifest.record",manifest,size,!exists))goto done;
+    for(int i=0;i<RC_FILES;i++){
+        int fd=i?lib:bin;const char *name=rc_paths[i]+4;
+        if((!exists&&bg_candidate(fd,name,files[i].bytes,files[i].size,files[i].mode))||
+           bg_exact(fd,name,files[i].bytes,files[i].size,files[i].mode)||bg_sync_file(fd,name,files[i].mode))goto done;
+    }
+    if(migration_record(base,"staged.receipt",receipt,(size_t)rn,!exists)||rc_complete(base,code,bin,lib)||
+       rc_exact(code,files)||rc_exact(src,files)||bg_record_exact(base,"manifest.record",manifest,size)||
+       bg_record_exact(sc.op,"platform-replacement-service.json",descriptor,(size_t)dn)||
+       bg_record_exact(sc.op,"platform-replacement-service.anchor",anchor,(size_t)an)||
+       fsync(bin)||fsync(lib)||fsync(code)||migration_sync_directory(directory,base)||migration_sync_directory(sc.oppath,sc.op))goto done;
+    result=0;
+done:
+    if(src>=0)close(src);if(base>=0)close(base);if(code>=0)close(code);if(bin>=0)close(bin);if(lib>=0)close(lib);if(runtime>=0)close(runtime);
+    rc_free(files);free(manifest);return result;
+}
+static int rs_service_read(void){
+    struct migration_file intent;memset(&intent,0,sizeof intent);char *copy=NULL;int result=-1;
+    if(sc_file(sc.op,"platform-replacement-start/intent.record",&intent)||strcmp(intent.sha,sc.migration))goto done;
+    copy=strdup(intent.bytes);if(!copy)goto done;char *cursor=copy,*rows[14];
+    for(unsigned i=0;i<14;i++){rows[i]=sc_line(&cursor);if(!rows[i])goto done;}
+    if(*cursor||strcmp(rows[0],"BROray-platform-replacement-start/1")||strcmp(rows[1],"START_INTENT")||
+       strcmp(rows[2],sc.root)||strcmp(rows[3],sc.origin)||strcmp(rows[4],sc.nonce)||strcmp(rows[6],sc.native)||!hex64(rows[7]))goto done;
+    strcpy(sc.seal,intent.sha);strcpy(sc.input.manifest,rows[7]);rs_owned_count=0;
+    int saved_cycles=sc.cycles;char path[PATH_MAX],saved_path[PATH_MAX];strcpy(saved_path,sc.cyclepath);struct migration_file manifest;memset(&manifest,0,sizeof manifest);
+    struct sc_node node;memset(&node,0,sizeof node);strcpy(node.id,rows[13]);
+    if(sc_join(path,sc.oppath,"platform-replacement-start"))goto done;
+    strcpy(sc.cyclepath,path);sc.cycles=checked_directory(path);
+    int bad=sc.cycles<0||sc_file(sc.op,"platform-replacement-target/manifest.record",&manifest)||strcmp(manifest.sha,rows[7])||
+        rs_birth(&node,0)||rs_attempts(&node,&intent,&manifest,rows[8],rows[9],0,0);
+    if(sc.cycles>=0)close(sc.cycles);sc.cycles=saved_cycles;strcpy(sc.cyclepath,saved_path);free(manifest.bytes);
+    if(bad)goto done;result=rs_code(NULL);
+done:free(copy);free(intent.bytes);return result;
+}
+static int replacement_service_code_verify(const char *root,const char *origin,const char *start){
+    char path[PATH_MAX],nonce[65];const char *prefix=strcmp(root,"/")?root:"";
+    int op=-1,result=-1,context=0;struct migration_file binding;memset(&binding,0,sizeof binding);
+    if(!migration_path(root)||!token(origin,96)||!hex64(start)||
+       snprintf(path,sizeof path,"%s/opt/var/lib/broray/operations/%s",prefix,origin)>=(int)sizeof path)goto done;
+    op=checked_directory(path);
+    if(op<0||sc_file(op,"platform-replacement-service.json",&binding)||sc_field(binding.bytes,"stopNonce",nonce,sizeof nonce)||strlen(nonce)!=32)goto done;
+    context=1;if(rs_context(root,origin,nonce))goto done;strcpy(sc.migration,start);result=rs_service_read();
+done:if(context)sc_close();if(op>=0)close(op);free(binding.bytes);return result;
+}
+static int replacement_start_prepare(char **argv,int op,const char *op_path,const char *native){
+    (void)op;(void)op_path;int result=75,starts=-1,start=-1;char path[PATH_MAX],parent[PATH_MAX],seed[768],seed_sha[65],id[65],history_sha[65];
+    char anchor[256],binding[320],launch_sha[65],transaction_sha[65];
+    char *history=NULL,*intent=NULL,*launch=NULL,*transaction=NULL;size_t hs=0,is=0,ls=0,ts=0;
+    struct migration_file installed,manifest;memset(&installed,0,sizeof installed);memset(&manifest,0,sizeof manifest);
+    if(rs_context(argv[6],argv[10],argv[11])||strcmp(native,sc.native)||rs_fence(argv[14])||
+       sc_file(sc.op,"platform-replacement-install/installed.receipt",&installed)||
+       sc_file(sc.op,"platform-replacement-target/manifest.record",&manifest)||strcmp(manifest.sha,argv[12]))goto done;
+    strcpy(sc.input.manifest,argv[12]);
+    int sn=snprintf(seed,sizeof seed,"BROray-platform-replacement-generation/1\n%s\n%s\n%s\n%s\n%s\n%s\n",sc.origin,sc.nonce,boot,sc.native,installed.sha,argv[14]);
+    if(sn<0||sn>=(int)sizeof seed)goto done;digest_bytes(seed,(size_t)sn,seed_sha);platform_generation_id(seed_sha,id);
+    if(rs_history(id,&history,&hs))goto done;digest_bytes(history,hs,history_sha);
+    FILE *f=open_memstream(&intent,&is);if(!f)goto done;
+    fprintf(f,"BROray-platform-replacement-start/1\nSTART_INTENT\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
+            sc.root,sc.origin,sc.nonce,boot,sc.native,sc.input.manifest,argv[7],argv[8],argv[14],installed.sha,history_sha,id);
+    if(fclose(f))goto done;digest_bytes(intent,is,sc.seal);
+    if(rs_launch(intent,is,manifest.bytes,manifest.size,id,argv[7],argv[8],&launch,&ls,&transaction,&ts))goto done;
+    digest_bytes(launch,ls,launch_sha);digest_bytes(transaction,ts,transaction_sha);
+    int an=snprintf(anchor,sizeof anchor,"BROray-platform-replacement-start-anchor/1\n%s\n",sc.seal);
+    int bn=snprintf(binding,sizeof binding,"BROray-platform-replacement-start-binding/1\n%s\n%s\n%s\n",sc.seal,launch_sha,transaction_sha);
+    if(an<0||an>=(int)sizeof anchor||bn<0||bn>=(int)sizeof binding||sc_join(parent,sc.uppath,"starts")||sc_join(path,parent,id))goto done;
+    starts=checked_directory(parent);if(starts<0)goto done;
+    int exists=bg_exists(sc.op,"platform-replacement-start"),bound=bg_exists(sc.op,"platform-replacement-start.record"),present=bg_exists(starts,id);
+    if(exists<0||bound<0||present<0||exists!=bound||exists!=present)goto done;
+    if(!exists){
+        if(migration_record(sc.op,"platform-replacement-start.record",binding,(size_t)bn,1)||mkdirat(sc.op,"platform-replacement-start",0700)||fsync(sc.op)||mkdirat(starts,id,0700)||fsync(starts))goto done;
+    }
+    sc.cycles=checked_directory(sc.cyclepath);start=checked_directory(path);if(sc.cycles<0||start<0||(!exists&&(bg_empty(sc.cycles)||bg_empty(start))))goto done;
+    if(migration_record(sc.op,"platform-replacement-start.record",binding,(size_t)bn,0)||
+       migration_record(sc.cycles,"intent.record",intent,is,!exists)||migration_record(sc.cycles,"history.record",history,hs,!exists)||
+       migration_record(sc.cycles,"intent.anchor",anchor,(size_t)an,!exists)||
+       migration_record(start,"launch.record",launch,ls,!exists)||migration_record(start,"transaction.record",transaction,ts,!exists)||
+       migration_sync_directory(path,start)||migration_sync_directory(sc.cyclepath,sc.cycles)||rs_fence(argv[14]))goto done;
+    sc.transition=sc_lock_exact(sc.cycles,"transition.lock",!exists);if(sc.transition<0)goto done;
+    const char *names[]={"intent.record","history.record","intent.anchor","transition.lock"},*start_names[]={"launch.record","transaction.record"};
+    if(rc_names(sc.cycles,names,4)||rc_names(start,start_names,2)||pl_load(path,launch_sha,transaction_sha,0))goto done;
+    char source[PATH_MAX];const char *suffix="/share/updater-platform";size_t length=strlen(argv[15]),tail=strlen(suffix);
+    if(length<=tail||length-tail>=sizeof source||strcmp(argv[15]+length-tail,suffix))goto done;
+    memcpy(source,argv[15],length-tail);source[length-tail]=0;
+    if(rs_code(source))goto done;
+    printf("{\"ok\":true,\"phase\":\"START_INTENT\",\"generationId\":\"%s\",\"intentSha256\":\"%s\",\"platformReady\":false,\"activationAllowed\":false}\n",id,sc.seal);result=0;
+done:
+    free(installed.bytes);free(manifest.bytes);free(history);free(intent);free(launch);free(transaction);
+    if(start>=0)close(start);if(starts>=0)close(starts);sc_close();return result?service_error("PLATFORM_REPLACEMENT_START_INTENT_UNCONFIRMED"):0;
+}
+static int rs_commit_record(struct sc_node *n,const char *ready,const char *history_sha,
+                            const char *initial_state,int publish,char sha[65]){
+    char record[PATH_MAX+1024],anchor[160];
+    int rn=snprintf(record,sizeof record,"BROray-platform-replacement-committed/1\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
+        sc.root,sc.origin,sc.nonce,n->born,sc.native,sc.input.manifest,n->id,sc.seal,ready,history_sha,initial_state);
+    if(rn<0||rn>=(int)sizeof record)return -1;digest_bytes(record,(size_t)rn,sha);
+    int an=snprintf(anchor,sizeof anchor,"BROray-platform-replacement-commit-anchor/1\n%s\n",sha);
+    if(an<0||an>=(int)sizeof anchor)return -1;
+    int a=bg_exists(sc.op,"platform-replacement-committed.anchor"),r=bg_exists(sc.op,"platform-replacement-committed.record");
+    /* A partial/missing pair is evidence requiring recovery, never a fresh
+     * commit. Replaying a completed publication only compares exact bytes. */
+    if(a<0||r<0||a!=r||(!r&&!publish))return -1;
+    if(migration_record(sc.op,"platform-replacement-committed.anchor",anchor,(size_t)an,!r)||
+       migration_record(sc.op,"platform-replacement-committed.record",record,(size_t)rn,!r)||
+       migration_sync_directory(sc.oppath,sc.op)||
+       bg_record_exact(sc.op,"platform-replacement-committed.anchor",anchor,(size_t)an)||
+       bg_record_exact(sc.op,"platform-replacement-committed.record",record,(size_t)rn))return -1;
+    return 0;
+}
+/* Preparation may precede reboot without creating any process. Bind actual
+ * execution to its own durable birth record; never rewrite the start intent.
+ * Missing birth evidence is fresh only while both process domains are absent
+ * and the exact launch directory still contains its two preparation records.
+ * Once any runtime evidence exists, absence/corruption is a refusal. */
+static int rs_birth(struct sc_node *n,int publish){
+    int a=sc_record_exists(sc.cycles,"birth.anchor"),r=sc_record_exists(sc.cycles,"birth.record");
+    struct migration_file saved;memset(&saved,0,sizeof saved);char record[384],anchor[160],sha[65],born[64];int result=-1;
+    if(a<0||r<0||a!=r||(!r&&!publish))goto done;
+    if(r){
+        char seal[65],id[65],extra;
+        if(sc_service_file(sc.cycles,"birth.record",&saved,NULL)||
+           sscanf(saved.bytes,"BROray-replacement-birth/1\n%64s\n%64s\n%63s\n%c",seal,id,born,&extra)!=3||
+           strcmp(seal,sc.seal)||strcmp(id,n->id)||strlen(born)!=36||!token(born,36))goto done;
+    }else{
+        const char *prepared[]={"intent.record","history.record","intent.anchor","transition.lock"};
+        const char *launch[]={"launch.record","transaction.record"};struct stat st;
+        if(rc_names(sc.cycles,prepared,4)||lstat(pl.host,&st)==0||errno!=ENOENT||lstat(pl.domain,&st)==0||errno!=ENOENT)goto done;
+        int start=checked_directory(pl.startdir);if(start<0)goto done;int bad=rc_names(start,launch,2);close(start);if(bad)goto done;
+        strcpy(born,boot);
+    }
+    int rn=snprintf(record,sizeof record,"BROray-replacement-birth/1\n%s\n%s\n%s\n",sc.seal,n->id,born);
+    if(rn<0||rn>=(int)sizeof record||(r&&(saved.size!=(size_t)rn||memcmp(saved.bytes,record,(size_t)rn))))goto done;
+    digest_bytes(record,(size_t)rn,sha);int an=snprintf(anchor,sizeof anchor,"BROray-replacement-birth-anchor/1\n%s\n",sha);
+    if(an<0||an>=(int)sizeof anchor||sc_publish(sc.cycles,"birth.anchor",anchor,(size_t)an,!r)||
+       sc_publish(sc.cycles,"birth.record",record,(size_t)rn,!r)||migration_sync_directory(sc.cyclepath,sc.cycles))goto done;
+    strcpy(n->born,born);result=0;
+done:free(saved.bytes);return result;
+}
+static int rs_pending_node(struct sc_node *n,struct gb_record *b,char sha[65]){
+    char path[PATH_MAX],parent[PATH_MAX];struct migration_file f;memset(&f,0,sizeof f);int result=-1;
+    if(sc_join(parent,sc.uppath,"generations")||sc_join(path,parent,n->id))return -1;
+    int fd=checked_directory(path);
+    if(fd<0||rs_pending_validate(fd,path,b)||strcmp(b->id,n->id)||strcmp(b->from,n->born)||strcmp(b->manifest,sc.input.manifest)||
+       strcmp(b->seal,sc.seal)||strcmp(b->launch,n->launch)||strcmp(b->transaction,n->transaction)||sc_file(fd,"pending-boot-ended.receipt",&f))goto done;
+    strcpy(n->host,b->host);strcpy(sha,f.sha);result=0;
+done:if(fd>=0)close(fd);free(f.bytes);return result;
+}
+static int rs_pending_retire(struct sc_node *n){
+    if(!strcmp(n->born,boot)||sc_load_node(n)||pl_exact())return -1;
+    int domain=checked_directory(pl.domain),host=checked_directory(pl.host),gens=-1,whole=-1,life=-1,result=-1;
+    struct migration_file first,h,saved;memset(&first,0,sizeof first);memset(&h,0,sizeof h);memset(&saved,0,sizeof saved);
+    struct gb_record b;memset(&b,0,sizeof b);char path[PATH_MAX],text[2048],sha[65];
+    if(domain<0||host<0||sc_join(path,sc.uppath,"generations"))goto done;gens=checked_directory(path);
+    if(gens<0||(whole=sc_lock_exact(gens,".generation-lifetime.lock",0))<0||(life=sc_lock_exact(domain,"lifetime.lock",0))<0||
+       flock(host,LOCK_EX|LOCK_NB)||sc_file(domain,"state.json",&first)||sc_file(host,"host.record",&h))goto done;
+    strcpy(b.id,n->id);strcpy(b.from,n->born);strcpy(b.through,boot);strcpy(b.manifest,sc.input.manifest);
+    strcpy(b.scope,"");scope_digest(pl.domain,b.scope);strcpy(b.seal,sc.seal);strcpy(b.ready,first.sha);
+    strcpy(b.host,h.sha);strcpy(b.launch,n->launch);strcpy(b.transaction,n->transaction);
+    int exists=sc_record_exists(domain,"pending-boot-ended.receipt");if(exists<0)goto done;
+    if(exists){
+        if(sc_service_file(domain,"pending-boot-ended.receipt",&saved,NULL))goto done;
+        char *copy=strdup(saved.bytes);if(!copy)goto done;char *cursor=copy,*row=NULL;
+        for(int i=0;i<5;i++){row=sc_line(&cursor);if(!row)break;}
+        int valid=row&&strlen(row)==36&&token(row,36)&&strcmp(row,n->born);if(valid)strcpy(b.through,row);free(copy);if(!valid)goto done;
+    }
+    if(rs_pending_measure(domain,pl.domain,&b))goto done;int k=rs_pending_text(&b,text);
+    if(k<0||k>=2048||sc_publish(domain,"pending-boot-ended.receipt",text,(size_t)k,1)||rs_pending_node(n,&b,sha))goto done;
+    result=0;
+done:if(life>=0)close(life);if(whole>=0)close(whole);if(gens>=0)close(gens);if(host>=0)close(host);if(domain>=0)close(domain);free(first.bytes);free(h.bytes);free(saved.bytes);return result;
+}
+/* PID projections are archived only as bytes already bound to this ended
+ * generation. They provide no signal authority. Absent projections are legal
+ * before READY; a durable presence mask makes interrupted archival replayable. */
+static int rs_pending_markers(struct sc_node *n,int publish){
+    struct gb_record b;char proof[65],name[128],dir_name[128],path[PATH_MAX],parent[PATH_MAX],record[256],expected[32];
+    struct migration_file latest,saved;memset(&latest,0,sizeof latest);memset(&saved,0,sizeof saved);
+    int domain=-1,archive=-1,result=-1;unsigned mask=0;long pid=0;
+    if(rs_pending_node(n,&b,proof)||sc_join(parent,sc.uppath,"generations")||sc_join(path,parent,n->id))goto done;
+    domain=checked_directory(path);record_name(b.total,name);
+    if(domain<0||sc_file(domain,name,&latest)||strcmp(latest.sha,b.last))goto done;
+    const char *u=strstr(latest.bytes,",\"updater\":{\"pid\":");
+    if(!u||sscanf(u,",\"updater\":{\"pid\":%ld,",&pid)!=1||pid<=1||pid>INT_MAX)goto done;
+    int k=snprintf(expected,sizeof expected,"%ld\n",pid);if(k<=0||k>=(int)sizeof expected)goto done;
+    snprintf(name,sizeof name,"residue-%s.record",n->id);snprintf(dir_name,sizeof dir_name,"residue-%s",n->id);
+    int exists=sc_record_exists(sc.cycles,name);if(exists<0||(!exists&&!publish))goto done;
+    const char *files[]={"daemon.pid","daemon.ready","daemon.lock"};
+    if(exists){
+        char observed[65],extra;long p;
+        if(sc_service_file(sc.cycles,name,&saved,NULL)||sscanf(saved.bytes,"BROray-pending-residue/1\n%64s\n%ld\n%u\n%c",observed,&p,&mask,&extra)!=3||strcmp(observed,proof)||p!=pid||mask>7)goto done;
+    }else for(unsigned i=0;i<3;i++){int present=bg_exists(sc.up,files[i]);if(present<0)goto done;if(present)mask|=1U<<i;}
+    int rn=snprintf(record,sizeof record,"BROray-pending-residue/1\n%s\n%ld\n%u\n",proof,pid,mask);
+    if(rn<0||rn>=(int)sizeof record||(exists&&(saved.size!=(size_t)rn||memcmp(saved.bytes,record,(size_t)rn))))goto done;
+    if(sc_join(path,sc.cyclepath,dir_name))goto done;
+    /* Validate all existing source markers before publishing any intent. */
+    if(!exists)for(unsigned i=0;i<3;i++)if(mask&(1U<<i)){
+        if(i<2){if(bg_record_exact(sc.up,files[i],expected,(size_t)k))goto done;}
+        else{int lock=openat(sc.up,files[i],O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);struct stat st;
+            int bad=lock<0;if(!bad)bad=fstat(lock,&st)||st.st_uid!=geteuid()||(st.st_mode&07777)!=0700||bg_empty(lock);if(lock>=0)close(lock);if(bad)goto done;}
+    }
+    if(sc_publish(sc.cycles,name,record,(size_t)rn,publish))goto done;
+    archive=sc_directory(sc.cycles,dir_name,path,publish);if(archive<0)goto done;
+    DIR *d=directory_stream(archive);if(!d)goto done;struct dirent *e;int bad=0;errno=0;
+    while((e=readdir(d))){if(strcmp(e->d_name,".")&&strcmp(e->d_name,"..")&&strcmp(e->d_name,files[0])&&strcmp(e->d_name,files[1])&&strcmp(e->d_name,files[2])){bad=1;break;}errno=0;}
+    if(!e&&errno)bad=1;closedir(d);if(bad)goto done;
+    for(unsigned i=0;i<3;i++){
+        int z=bg_exists(archive,files[i]),a=publish?bg_exists(sc.up,files[i]):0;if(z<0||a<0||a+z!=!!(mask&(1U<<i)))goto done;
+        if(!(mask&(1U<<i)))continue;int dir=a?sc.up:archive;struct stat before,after;
+        if(fstatat(dir,files[i],&before,AT_SYMLINK_NOFOLLOW)||before.st_uid!=geteuid())goto done;
+        if(i<2){if(bg_record_exact(dir,files[i],expected,(size_t)k))goto done;}
+        else{int lock=openat(dir,files[i],O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+            if(lock<0)goto done;bad=(before.st_mode&07777)!=0700||bg_empty(lock);close(lock);if(bad)goto done;}
+        if(a&&(syscall(SYS_renameat2,sc.up,files[i],archive,files[i],1)||fsync(sc.up)||fsync(archive)||
+            fstatat(archive,files[i],&after,AT_SYMLINK_NOFOLLOW)||!sc_same_record(&before,&after)||before.st_nlink!=after.st_nlink))goto done;
+    }
+    result=0;
+done:if(domain>=0)close(domain);if(archive>=0)close(archive);free(latest.bytes);free(saved.bytes);return result;
+}
+static int rs_attempt_names(unsigned attempts){
+    DIR *d=directory_stream(sc.cycles);if(!d)return -1;struct dirent *e;int bad=0;errno=0;
+    while((e=readdir(d))){const char *name=e->d_name;if(!strcmp(name,".")||!strcmp(name,".."))continue;
+        int allowed=!strcmp(name,"intent.record")||!strcmp(name,"history.record")||!strcmp(name,"intent.anchor")||!strcmp(name,"birth.record")||!strcmp(name,"birth.anchor")||!strcmp(name,"transition.lock");
+        char want[128];for(unsigned i=1;!allowed&&i<=attempts;i++){snprintf(want,sizeof want,"attempt-%020u.record",i);allowed=!strcmp(name,want);}
+        for(unsigned i=0;!allowed&&i<rs_owned_count;i++){
+            snprintf(want,sizeof want,"ready-%s.record",rs_owned[i]);allowed=!strcmp(name,want);
+            if(!allowed){snprintf(want,sizeof want,"residue-%s.record",rs_owned[i]);allowed=!strcmp(name,want);}
+            if(!allowed){snprintf(want,sizeof want,"residue-%s",rs_owned[i]);allowed=!strcmp(name,want);}
+            if(!allowed&&i){snprintf(want,sizeof want,"birth-%s.record",rs_owned[i]);allowed=!strcmp(name,want);}
+            if(!allowed&&i){snprintf(want,sizeof want,"birth-%s.anchor",rs_owned[i]);allowed=!strcmp(name,want);}
+        }
+        if(!allowed){bad=1;break;}errno=0;
+    }
+    if(!e&&errno)bad=1;closedir(d);return bad?-1:0;
+}
+static int rs_attempt_record(struct sc_node *previous,const char *born,unsigned index,struct sc_node *next,char text[640]){
+    struct gb_record b;char proof[65],seed[512],sha[65];
+    if(!previous->born[0]||strlen(born)!=36||!token(born,36)||!strcmp(born,previous->born)||rs_pending_node(previous,&b,proof))return -1;
+    int k=snprintf(seed,sizeof seed,"BROray-replacement-retry/1\n%s\n%u\n%s\n%s\n%s\n",sc.seal,index,previous->id,proof,born);
+    if(k<0||k>=(int)sizeof seed)return -1;digest_bytes(seed,(size_t)k,sha);memset(next,0,sizeof *next);
+    platform_generation_id(sha,next->id);strcpy(next->born,born);
+    k=snprintf(text,640,"%s%s\n",seed,next->id);
+    if(k<=0||k>=640)return -1;digest_bytes(text,(size_t)k,next->chain);return k;
+}
+/* A retry intent is preparation, not proof of process birth. As for the
+ * original start, bind execution separately without rewriting its intent.
+ * Return 1 only for an intact, unexecuted preparation. A missing pair after
+ * any host/generation evidence, or a partial pair, is never recreated. */
+static int rs_retry_birth(struct sc_node *n,int publish){
+    char name[128],anchor_name[128],record[512],anchor[160],sha[65],born[64];
+    struct migration_file saved;memset(&saved,0,sizeof saved);int result=-1;
+    snprintf(name,sizeof name,"birth-%s.record",n->id);snprintf(anchor_name,sizeof anchor_name,"birth-%s.anchor",n->id);
+    int a=sc_record_exists(sc.cycles,anchor_name),r=sc_record_exists(sc.cycles,name);
+    if(!hex64(n->chain)||a<0||r<0||a!=r)goto done;
+    if(r){
+        char seal[65],id[65],attempt[65],extra;
+        if(sc_service_file(sc.cycles,name,&saved,NULL)||
+           sscanf(saved.bytes,"BROray-replacement-retry-birth/1\n%64s\n%64s\n%64s\n%63s\n%c",seal,id,attempt,born,&extra)!=4||
+           strcmp(seal,sc.seal)||strcmp(id,n->id)||strcmp(attempt,n->chain)||strlen(born)!=36||!token(born,36))goto done;
+    }else{
+        char path[PATH_MAX],parent[PATH_MAX];struct stat st;
+        for(unsigned i=0;i<2;i++){
+            if(sc_join(parent,sc.uppath,i?"hosts":"generations")||sc_join(path,parent,n->id)||
+               lstat(path,&st)==0||errno!=ENOENT)goto done;
+        }
+        if(sc_join(parent,sc.uppath,"starts")||sc_join(path,parent,n->id))goto done;
+        if(lstat(path,&st)==0){
+            const char *names[]={"launch.record","transaction.record"};
+            int start=checked_directory(path);if(start<0)goto done;
+            int bad=rc_names(start,names,2);close(start);if(bad||sc_load_node(n))goto done;
+        }else if(errno!=ENOENT||publish)goto done;
+        if(!publish){n->born[0]=0;result=1;goto done;}
+        strcpy(born,boot);
+    }
+    int rn=snprintf(record,sizeof record,"BROray-replacement-retry-birth/1\n%s\n%s\n%s\n%s\n",sc.seal,n->id,n->chain,born);
+    if(rn<=0||rn>=(int)sizeof record||(r&&(saved.size!=(size_t)rn||memcmp(saved.bytes,record,(size_t)rn))))goto done;
+    digest_bytes(record,(size_t)rn,sha);int an=snprintf(anchor,sizeof anchor,"BROray-replacement-retry-birth-anchor/1\n%s\n",sha);
+    if(an<=0||an>=(int)sizeof anchor||sc_publish(sc.cycles,anchor_name,anchor,(size_t)an,!r)||
+       sc_publish(sc.cycles,name,record,(size_t)rn,!r)||migration_sync_directory(sc.cyclepath,sc.cycles))goto done;
+    strcpy(n->born,born);result=0;
+done:free(saved.bytes);return result;
+}
+static int rs_attempt_materialize(struct sc_node *n,const struct migration_file *intent,const struct migration_file *manifest,const char *shell,const char *shellsha,int publish){
+    char *launch=NULL,*transaction=NULL;size_t ls=0,ts=0;char path[PATH_MAX],parent[PATH_MAX],domain[PATH_MAX],host[PATH_MAX];
+    int starts=-1,fd=-1,result=-1;
+    if(rs_launch(intent->bytes,intent->size,manifest->bytes,manifest->size,n->id,shell,shellsha,&launch,&ls,&transaction,&ts))goto done;
+    digest_bytes(launch,ls,n->launch);digest_bytes(transaction,ts,n->transaction);
+    if(!publish){result=0;goto done;}
+    if(sc_join(parent,sc.uppath,"starts")||sc_join(path,parent,n->id))goto done;
+    starts=checked_directory(parent);if(starts<0)goto done;fd=sc_directory(starts,n->id,path,1);if(fd<0)goto done;
+    if(sc_join(parent,sc.uppath,"generations")||sc_join(domain,parent,n->id)||sc_join(parent,sc.uppath,"hosts")||sc_join(host,parent,n->id))goto done;
+    struct stat st;int born=lstat(domain,&st)==0||lstat(host,&st)==0;
+    if(sc_publish(fd,"transaction.record",transaction,ts,!born)||sc_publish(fd,"launch.record",launch,ls,!born))goto done;
+    result=0;
+done:if(fd>=0)close(fd);if(starts>=0)close(starts);free(launch);free(transaction);return result;
+}
+static int rs_attempts(struct sc_node *n,const struct migration_file *intent,const struct migration_file *manifest,const char *shell,const char *shellsha,int publish,int materialize){
+    rs_owned_count=0;strcpy(rs_owned[rs_owned_count++],n->id);
+    if(rs_attempt_materialize(n,intent,manifest,shell,shellsha,0))return -1;
+    unsigned index=1;
+    for(;index<SC_LIMIT;index++){
+        char name[80],record[640];snprintf(name,sizeof name,"attempt-%020u.record",index);
+        int exists=sc_record_exists(sc.cycles,name);if(exists<0)return -1;if(!exists)break;
+        struct migration_file f;memset(&f,0,sizeof f);char *copy=NULL;struct sc_node next;int bad=1;
+        if(!sc_service_file(sc.cycles,name,&f,NULL)){
+            copy=strdup(f.bytes);if(copy){char *cursor=copy,*row=NULL;
+                for(unsigned i=0;i<6;i++){row=sc_line(&cursor);if(!row)break;}
+                int k=row?rs_attempt_record(n,row,index,&next,record):-1;
+                if(k>0&&k<640&&f.size==(size_t)k&&!memcmp(f.bytes,record,(size_t)k)&&
+                   !rs_pending_markers(n,0)&&!sc_publish(sc.cycles,name,record,(size_t)k,0))bad=0;
+            }
+        }
+        free(copy);free(f.bytes);if(bad)return -1;
+        for(unsigned i=0;i<rs_owned_count;i++)if(!strcmp(next.id,rs_owned[i]))return -1;
+        *n=next;strcpy(rs_owned[rs_owned_count++],n->id);
+        if(rs_attempt_materialize(n,intent,manifest,shell,shellsha,0)||rs_retry_birth(n,0)<0)return -1;
+    }
+    if(index==SC_LIMIT||rs_attempt_names(index-1))return -1;
+    /* Validate the unchanged pre-replacement history BEFORE publishing the
+     * boot receipt, archival intent or a successor launch. */
+    if(materialize){
+        char *history=NULL;size_t hs=0;int bad=rs_history(n->id,&history,&hs);
+        if(!bad)bad=bg_record_exact(sc.cycles,"history.record",history,hs);free(history);if(bad)return -1;
+    }
+    /* Service discovery only authenticates this immutable attempt chain.
+     * sc_collect subsequently validates the same history with ALL sealed
+     * ordinary service cycles loaded. Checking it before that collection
+     * would misclassify a legitimate later cycle as foreign history. */
+    if(publish&&n->born[0]&&strcmp(n->born,boot)){
+        if(sc_record_exists(sc.op,"platform-replacement-committed.record")!=0||sc_record_exists(sc.op,"platform-replacement-committed.anchor")!=0||
+           rs_pending_retire(n)||rs_pending_markers(n,1))return -1;
+        struct sc_node next;char record[640],name[80];int k=rs_attempt_record(n,boot,index,&next,record);
+        snprintf(name,sizeof name,"attempt-%020u.record",index);
+        if(k<=0||k>=640||sc_publish(sc.cycles,name,record,(size_t)k,1))return -1;
+        *n=next;strcpy(rs_owned[rs_owned_count++],n->id);
+    }
+    if(rs_attempt_materialize(n,intent,manifest,shell,shellsha,materialize&&publish))return -1;
+    return rs_owned_count>1?rs_retry_birth(n,materialize&&publish):0;
+}
+
+static int replacement_start_main(int argc,char **argv){
+    /* LIVE OP NONCE EXPECTED_MANIFEST STATE_SHA */
+    if(argc!=7||!hex64(argv[5])||!hex64(argv[6]))return 64;
+    int origin_check=!strcmp(argv[1],"replacement-origin-check");
+    int committing=!strcmp(argv[1],"replacement-commit"),checking=origin_check||!strcmp(argv[1],"replacement-commit-check");
+    int starting=!committing&&!checking;
+    int result=75;char *copy=NULL,*history=NULL,*launch=NULL,*transaction=NULL;size_t hs=0,ls=0,ts=0;
+    struct migration_file intent,manifest,installed;memset(&intent,0,sizeof intent);memset(&manifest,0,sizeof manifest);memset(&installed,0,sizeof installed);
+    char launch_sha[65],transaction_sha[65],binding[320],anchor[256],history_sha[65],ready[65];
+    if(rs_context(argv[2],argv[3],argv[4])||rs_fence_check(argv[6],checking))goto done;
+    sc.cycles=checked_directory(sc.cyclepath);
+    if(sc.cycles<0||sc_file(sc.cycles,"intent.record",&intent)||sc_file(sc.op,"platform-replacement-target/manifest.record",&manifest)||
+       sc_file(sc.op,"platform-replacement-install/installed.receipt",&installed))goto done;
+    copy=strdup(intent.bytes);if(!copy)goto done;char *cursor=copy,*rows[14];
+    for(unsigned i=0;i<14;i++){rows[i]=sc_line(&cursor);if(!rows[i])goto done;}
+    if(*cursor||strcmp(rows[0],"BROray-platform-replacement-start/1")||strcmp(rows[1],"START_INTENT")||
+       strcmp(rows[2],sc.root)||strcmp(rows[3],sc.origin)||strcmp(rows[4],sc.nonce)||strlen(rows[5])!=36||!token(rows[5],36)||
+       strcmp(rows[6],sc.native)||strcmp(rows[7],argv[5])||strcmp(manifest.sha,argv[5])||
+       !migration_path(rows[8])||!hex64(rows[9])||!hex64(rows[10])||(!checking&&strcmp(rows[10],argv[6]))||strcmp(rows[11],installed.sha)||
+       !hex64(rows[12])||!token(rows[13],64))goto done;
+    strcpy(sc.input.manifest,argv[5]);strcpy(sc.seal,intent.sha);
+    struct sc_node *n=&sc.nodes[0];strcpy(n->id,rows[13]);strcpy(n->born,rows[5]);sc.count=sc.baseline=1;
+    if(rs_launch(intent.bytes,intent.size,manifest.bytes,manifest.size,n->id,rows[8],rows[9],&launch,&ls,&transaction,&ts))goto done;
+    digest_bytes(launch,ls,launch_sha);digest_bytes(transaction,ts,transaction_sha);
+    strcpy(n->launch,launch_sha);strcpy(n->transaction,transaction_sha);
+    int an=snprintf(anchor,sizeof anchor,"BROray-platform-replacement-start-anchor/1\n%s\n",sc.seal);
+    int bn=snprintf(binding,sizeof binding,"BROray-platform-replacement-start-binding/1\n%s\n%s\n%s\n",sc.seal,launch_sha,transaction_sha);
+    if(an<0||an>=(int)sizeof anchor||bn<0||bn>=(int)sizeof binding||
+       bg_record_exact(sc.cycles,"intent.anchor",anchor,(size_t)an)||bg_record_exact(sc.op,"platform-replacement-start.record",binding,(size_t)bn)||sc_load_node(n))goto done;
+    sc.transition=sc_lock_exact(sc.cycles,"transition.lock",0);if(sc.transition<0)goto done;
+    char ready_name[128];int nn=snprintf(ready_name,sizeof ready_name,"ready-%s.record",n->id);
+    if(nn<0||nn>=(int)sizeof ready_name)goto done;
+    const char *names[]={"intent.record","history.record","intent.anchor","transition.lock","birth.anchor","birth.record",ready_name};
+    (void)names;
+    if(rs_birth(n,starting)||rs_attempts(n,&intent,&manifest,rows[8],rows[9],starting,1))goto done;
+    if(!origin_check&&strcmp(n->born,boot))goto done;
+    if(rs_history(n->id,&history,&hs))goto done;digest_bytes(history,hs,history_sha);
+    if(strcmp(history_sha,rows[12])||bg_record_exact(sc.cycles,"history.record",history,hs)||sc_load_node(n))goto done;
+    nn=snprintf(ready_name,sizeof ready_name,"ready-%s.record",n->id);if(nn<0||nn>=(int)sizeof ready_name)goto done;
+    if(origin_check&&strcmp(n->born,boot)){
+        char commit_sha[65];struct migration_file pinned;memset(&pinned,0,sizeof pinned);
+        struct gb_record ended;memset(&ended,0,sizeof ended);int domain=-1,bad=1;
+        if(sc_file(sc.cycles,ready_name,&pinned)||
+           sc_field(pinned.bytes,"serviceHostRecordSha256",n->host,sizeof n->host)||!hex64(n->host))goto historical_done;
+        strcpy(ended.id,n->id);strcpy(ended.manifest,sc.input.manifest);strcpy(ended.from,n->born);strcpy(ended.through,boot);
+        strcpy(ended.seal,sc.seal);strcpy(ended.ready,pinned.sha);strcpy(ended.host,n->host);
+        strcpy(ended.launch,n->launch);strcpy(ended.transaction,n->transaction);scope_digest(pl.domain,ended.scope);
+        domain=checked_directory(pl.domain);
+        if(domain<0||rs_commit_record(n,pinned.sha,rows[12],rows[10],0,commit_sha)||
+           gb_measure_ledger(domain,pl.domain,&ended,&pinned,sc.native)||pl_exact()||rs_fence_check(argv[6],1))goto historical_done;
+        printf("{\"ok\":true,\"phase\":\"COMMITTED_BOOT_ENDED\",\"generationId\":\"%s\",\"commitReceiptSha256\":\"%s\",\"platformReady\":false,\"activationAllowed\":false}\n",n->id,commit_sha);bad=0;
+historical_done:
+        if(domain>=0)close(domain);free(pinned.bytes);if(!bad)result=0;goto done;
+    }
+    int replay=!sc_live(n);
+    if(!replay&&(!starting||sc_start(n)))goto done;
+    if(sc_live(n)||sc_ready(n,starting,ready)||rs_fence_check(argv[6],checking)||
+       bg_record_exact(sc.cycles,"intent.record",intent.bytes,intent.size)||bg_record_exact(sc.cycles,"intent.anchor",anchor,(size_t)an)||
+       bg_record_exact(sc.op,"platform-replacement-start.record",binding,(size_t)bn))goto done;
+    free(history);history=NULL;hs=0;if(rs_history(n->id,&history,&hs)||bg_record_exact(sc.cycles,"history.record",history,hs))goto done;
+    if(!starting){
+        char commit_sha[65];
+        if(rs_commit_record(n,ready,rows[12],rows[10],committing,commit_sha)||sc_live(n)||
+           sc_ready(n,0,ready)||rs_fence_check(argv[6],checking))goto done;
+        printf("{\"ok\":true,\"phase\":\"%s\",\"generationId\":\"%s\",\"commitReceiptSha256\":\"%s\",\"platformReady\":true,\"activationAllowed\":false}\n",
+               committing?"COMMITTED":"COMMIT_VERIFIED",n->id,commit_sha);result=0;goto done;
+    }
+    printf("{\"ok\":true,\"phase\":\"READY\",\"generationId\":\"%s\",\"readinessSha256\":\"%s\",\"replayed\":%s,\"platformReady\":true,\"activationAllowed\":false}\n",n->id,ready,replay?"true":"false");result=0;
+done:
+    free(copy);free(history);free(launch);free(transaction);free(intent.bytes);free(manifest.bytes);free(installed.bytes);sc_close();
+    return result?service_replacement_error(starting?"PLATFORM_REPLACEMENT_START_UNCONFIRMED":"PLATFORM_REPLACEMENT_COMMIT_UNCONFIRMED"):0;
+}
+/* A lifecycle READY projection may be initialized after boot only from the
+ * original immutable COMMITTED pin. No generation ledger is reconstructed.
+ * The canonical coordinator rechecks completed state/fence/retained closure;
+ * its native historical proof checks the entire ledger and witness chain. */
+static int rs_initial_boot_ready(char **argv,struct sc_node *n){
+    char name[128],source[256],prefix[512],reply[8192],id[65];
+    struct migration_file original;memset(&original,0,sizeof original);char *text=NULL;size_t size=0;int result=-1;
+    int nn=snprintf(name,sizeof name,"ready-%s.record",n->id);
+    int sn=snprintf(source,sizeof source,"platform-replacement-start/%s",name);
+    int pn=snprintf(prefix,sizeof prefix,"BROray-service-ready/1\n%s\n%s\n%s\n%s\n",sc.migration,n->launch,n->transaction,n->host);
+    if(nn<0||nn>=(int)sizeof name||sn<0||sn>=(int)sizeof source||pn<0||pn>=(int)sizeof prefix||
+       !strcmp(n->born,boot)||sc_file(sc.op,source,&original)||original.size<=(size_t)pn||memcmp(original.bytes,prefix,(size_t)pn))goto done;
+    FILE *f=open_memstream(&text,&size);if(!f)goto done;
+    fprintf(f,"BROray-service-ready/1\n%s\n%s\n%s\n%s\n",sc.seal,n->launch,n->transaction,n->host);
+    fwrite(original.bytes+pn,1,original.size-(size_t)pn,f);if(fclose(f))goto done;
+    int exists=sc_record_exists(sc.cycles,name);if(exists<0)goto done;
+    if(exists){result=sc_publish(sc.cycles,name,text,size,0);goto done;}
+    if(!sc.may_publish||sc_record_exists(sc.cycles,"cycle-00000000000000000001.record")!=0||
+       sc_call(argv,"recovery-commit-check",reply,sizeof reply)||
+       !strstr(reply,"\"phase\":\"COMMITTED_BOOT_ENDED\"")||!strstr(reply,"\"platformReady\":false")||
+       sc_field(reply,"generationId",id,sizeof id)||strcmp(id,n->id)||
+       sc_publish(sc.cycles,name,text,size,1))goto done;
+    result=0;
+done:free(original.bytes);free(text);return result;
+}
+/* Installed S22 entry. Discovery supplies identifiers, not execution authority.
+ * Authenticate the retained closure and the exact opened runtime before any
+ * shell exec. The canonical coordinator repeats the completed-state/fence
+ * proof; native live readiness alone cannot substitute for that proof. */
+static int replacement_service_entry(int argc,char **argv){
+    if(argc!=6||!migration_path(argv[2])||!token(argv[3],96)||!hex64(argv[4])||!token(argv[5],32)||strlen(argv[5])!=32)return 64;
+    int action=-1,origin_proof=!strcmp(argv[1],"replacement-origin-proof"),stop_exec=!strcmp(argv[1],"replacement-service-stop-exec");
+    if(!strcmp(argv[1],"replacement-service-status"))action=SC_STATUS;
+    if(!strcmp(argv[1],"replacement-service-start"))action=SC_START;
+    if(!strcmp(argv[1],"replacement-service-stop"))action=SC_STOP;
+    if(!strcmp(argv[1],"replacement-service-restart"))action=SC_RESTART;
+    if(!strcmp(argv[1],"replacement-service-current"))action=SC_CURRENT;
+    if(action<0&&!origin_proof&&!stop_exec)return 64;
+    char state[PATH_MAX],code[PATH_MAX],app[PATH_MAX],guard[PATH_MAX],shell[PATH_MAX],controller[PATH_MAX];
+    char global[PATH_MAX],legacy[PATH_MAX],ram[PATH_MAX],path[PATH_MAX*2+80];
+    const char *prefix=strcmp(argv[2],"/")?argv[2]:"";
+    int base=-1,held=-1,result=75,context=0;
+    if(snprintf(state,sizeof state,"%s/opt/var/lib/broray",prefix)>=(int)sizeof state)goto done;
+    base=checked_directory(state);if(base<0)goto done;
+    held=recovery_inherited_guard(base);if(held<0)held=sc_lock_exact(base,"operations.guard",0);if(held<0)goto done;
+    context=1;if(rs_context(argv[2],argv[3],argv[5]))goto done;strcpy(sc.migration,argv[4]);if(rs_service_read())goto done;
+    char cycle_name[128];int cn=snprintf(cycle_name,sizeof cycle_name,"cycles-%s",sc.origin);
+    if(cn<0||cn>=(int)sizeof cycle_name)goto done;int exists=bg_exists(sc.up,cycle_name);if(exists<0)goto done;
+    if(action>=0&&(action!=SC_STATUS||exists)){
+        sc_close();context=0;result=service_cycle_main(argc,argv,action);close(held);close(base);return result;
+    }
+#define RSE_PATH(dest,fmt,...) do{int n=snprintf(dest,sizeof dest,fmt,__VA_ARGS__);if(n<0||n>=(int)sizeof dest)goto done;}while(0)
+    RSE_PATH(app,"%s/opt/broray",prefix);RSE_PATH(code,"%s/platform-replacement-code/code",sc.oppath);
+    RSE_PATH(shell,"%s/opt/bin/ash",prefix);RSE_PATH(guard,"%s/bin/broray-ops-guard",code);
+    RSE_PATH(controller,"%s/lib/operation-coordinator.sh",code);
+    RSE_PATH(global,"%s/opt/var/lock/broray/global-operation.lock",prefix);RSE_PATH(legacy,"%s/tmp/broray-global-operation.lock",prefix);
+    RSE_PATH(ram,"%s/tmp/broray-operations",prefix);RSE_PATH(path,"%s/opt/bin:%s/opt/sbin:/usr/bin:/bin:/usr/sbin:/sbin",prefix,prefix);
+#undef RSE_PATH
+    if(clearenv())goto done;
+    const char *keys[]={"PATH","LC_ALL","BRORAY_ROOT","BRORAY_STATE_ROOT","BRORAY_OPS_CODE_ROOT","BRORAY_OPS_GUARD","BRORAY_OPS_ASH","BRORAY_ROUTES_API_LOCK","BRORAY_OPS_UPDATER_ROOT","BRORAY_LEGACY_GLOBAL_LOCK","BRORAY_OPS_RAM_ROOT","BRORAY_OPS_GUARD_HELD"};
+    const char *values[]={path,"C",app,state,code,guard,shell,global,sc.uppath,legacy,ram,"1"};
+    for(unsigned i=0;i<sizeof keys/sizeof keys[0];i++)if(setenv(keys[i],values[i],1))goto done;
+    int flags=fcntl(sc.guard,F_GETFD);if(flags<0||fcntl(sc.guard,F_SETFD,flags&~FD_CLOEXEC)||chdir("/"))goto done;
+    char *command[]={shell,controller,stop_exec?"platform-service-stop":"platform-replacement-public-status",argv[3],argv[4],argv[5],origin_proof?"origin":NULL,NULL};
+    execv(shell,command);
+done:
+    if(context)sc_close();if(held>=0)close(held);if(base>=0)close(base);
+    return result?service_replacement_error("REPLACEMENT_SERVICE_ENTRY_UNCONFIRMED"):0;
+}

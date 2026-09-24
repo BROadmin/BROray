@@ -8,6 +8,11 @@ static struct service_receipt *service_receipts;
 static unsigned service_count;
 static char service_terminal[512];
 static int service_error(const char *reason){fprintf(stderr,"SERVICE_FIRST_ERROR=%s\n",reason);return 75;}
+/* Empty exit 75 is reserved by operation-client for an unexecuted guard wait.
+ * A protected replacement refusal is final, including after durable writes. */
+static int service_replacement_error(const char *reason){
+    printf("{\"ok\":false,\"errorCode\":\"%s\"}\n",reason);return service_error(reason);
+}
 static int service_scope_valid(int argc,char **argv,int client){
     return argc==(client?14:9)&&migration_path(argv[2])&&migration_path(argv[3])&&token(argv[4],64)&&hex64(argv[5])&&migration_path(argv[6])&&migration_path(argv[7])&&hex64(argv[8]);
 }
@@ -305,10 +310,18 @@ static int service_host_retired_proof(int argc,char **argv,int inherited,int *re
     fputs("BROray-independent-app-service/1\n",f);for(int i=2;i<9;i++)fprintf(f,"%s\n",argv[i]);
     if(fclose(f)||host_size<=scope_size+1||memcmp(host,scope,scope_size)||host[scope_size]!='{'||
        host[host_size-1]!='\n'||memchr(host+scope_size,'\n',host_size-scope_size-1))goto done;
+    /* Terminal evidence belongs to the host's pinned birth boot, which can
+     * precede a restart of the protected installer. This is read-only history,
+     * never live-process or readiness authority. The host hash was checked
+     * above; require its one canonical boot field and the same ledger boot. */
+    const char *born=strstr(host+scope_size,"\"bootId\":\"");char historical_boot[64];
+    if(!born||strstr(born+10,"\"bootId\":\""))goto done;
+    born+=10;if(strlen(born)<37||born[36]!='"')goto done;
+    memcpy(historical_boot,born,36);historical_boot[36]=0;if(!token(historical_boot,63))goto done;
     /* Existing verifier binds the immutable generation ledger, its RETIRE
      * receipt, the exact host hash and every completed host request. A free
      * directory lock or a receipt pathname alone is never sufficient. */
-    if(service_retirement_text(base,argv,host,host_size,terminal_text)||
+    if(service_retirement_text_at(base,argv,host,host_size,terminal_text,historical_boot)||
        bg_record_exact(base,"retirement.receipt",terminal_text,strlen(terminal_text))||
        bg_record_exact(base,"host.record",host,host_size))goto done;
     named=checked_directory(argv[2]);
@@ -353,6 +366,7 @@ static int service_stop_generations(int parent,const char *path,int lock,const c
     }
     if(!e&&errno)bad=1;closedir(d);return bad||!count?-1:0;
 }
+static int replacement_service_code_verify(const char *root,const char *origin,const char *start);
 static int service_stop_guard(int argc,char **argv){
     /* HOST DOMAIN GEN MANIFEST LIVE ASH ASH_SHA HOST_SHA ORIGIN MIGRATION STOP_OP NONCE */
     int check=argc>1&&!strcmp(argv[1],"service-stop-check");
@@ -395,8 +409,19 @@ static int service_stop_guard(int argc,char **argv){
     char *launch=strstr(snapshot,"\"platformLaunch\":{");if(!launch)goto done;
     snprintf(field,sizeof field,"\"nativeSha256\":\"%s\"",native);if(!strstr(launch,field))goto done;
     snprintf(field,sizeof field,"\"operationId\":\"%s\"",argv[10]);if(!strstr(launch,field))goto done;
-    char *verify[]={argv[0],"recovery-code-verify",origin,argv[6],migration,argv[11],NULL};
-    if(recovery_code_impl(6,verify,0))goto done;
+    int origin_fd=checked_directory(origin);if(origin_fd<0)goto done;
+    int replacement=bg_exists(origin_fd,"platform-replacement-service.json"),replacement_anchor=bg_exists(origin_fd,"platform-replacement-service.anchor");close(origin_fd);
+    if(replacement<0||replacement_anchor<0||replacement!=replacement_anchor)goto done;
+    if(replacement){
+        if(replacement_service_code_verify(argv[6],argv[10],argv[11])||
+           snprintf(code,sizeof code,"%s/platform-replacement-code/code",origin)>=(int)sizeof code||
+           snprintf(controller,sizeof controller,"%s/lib/operation-coordinator.sh",code)>=(int)sizeof controller||
+           snprintf(guardpath,sizeof guardpath,"%s/bin/broray-ops-guard",code)>=(int)sizeof guardpath||
+           snprintf(nativepath,sizeof nativepath,"%s/runtimes/%s/runtime",updater,native)>=(int)sizeof nativepath)goto done;
+    }else{
+        char *verify[]={argv[0],"recovery-code-verify",origin,argv[6],migration,argv[11],NULL};
+        if(recovery_code_impl(6,verify,0))goto done;
+    }
     fs=migration_directory("/");if(fs<0)goto done;ash=migration_relative(fs,argv[7]+1);
     if(ash<0||service_interpreter_valid(ash,argv[7],argv[8])||service_stop_generations(parent,generations,lock,argv[5]))goto done;
     if(check){
@@ -421,4 +446,275 @@ done:
     if(state>=0)close(state);if(guard>=0)close(guard);if(parent>=0)close(parent);if(lock>=0)close(lock);
     if(host>=0)close(host);if(ash>=0)close(ash);if(fs>=0)close(fs);if(inherited_host>=0)close(inherited_host);
     return result?service_error("STOP_SETTLEMENT_EXCLUSION_UNCONFIRMED"):0;
+}
+
+/* The enclosing replacement transaction holds all three exclusions. Restore
+ * only the exact inodes retained by this install, never a guessed file copy. */
+static int service_replacement_rollback_files(int op,int live,const char *op_path,int install,
+        int installed,const char *intent_sha,const char *backup_sha,const char *target_sha,
+        const struct migration_file before[MIGRATION_FILES],const struct migration_file after[MIGRATION_FILES],
+        int parents[MIGRATION_FILES],char entries[MIGRATION_FILES][NAME_MAX+1],int *replayed){
+    int base=-1,result=-1;char path[PATH_MAX],record[384],sha[65],binding[128],receipt[320],anchor[128],receipt_sha[65];
+    int n=snprintf(record,sizeof record,"BROray-platform-replacement-rollback/1\nROLLING_BACK\n%s\n%s\n%s\n",intent_sha,backup_sha,target_sha);
+    if(n<0||n>=(int)sizeof record)return -1;digest_bytes(record,(size_t)n,sha);
+    int bn=snprintf(binding,sizeof binding,"BROray-platform-replacement-rollback-binding/1\n%s\n",sha);
+    if(bn<0||bn>=(int)sizeof binding)return -1;
+    int exists=bg_exists(op,"platform-replacement-rollback"),bound=bg_exists(op,"platform-replacement-rollback.record");
+    if(exists<0||bound<0||exists!=bound||snprintf(path,sizeof path,"%s/platform-replacement-rollback",op_path)>=(int)sizeof path)return -1;
+    if(!exists){
+        /* Validate every current/previous inode before making any rollback
+         * intent durable. Unknown changes leave the entire installation alone. */
+        for(int i=0;i<MIGRATION_FILES;i++){
+            char rejected[128];snprintf(rejected,sizeof rejected,".broray-pt-%s-%d.rejected",intent_sha,i);
+            if(bg_exists(parents[i],rejected)!=0||pt_install_entry(install,parents[i],entries[i],i,intent_sha,&before[i],&after[i],installed,0))return -1;
+        }
+        if(migration_record(op,"platform-replacement-rollback.record",binding,(size_t)bn,1)||mkdirat(op,"platform-replacement-rollback",0700)||fsync(op))return -1;
+    }
+    base=checked_directory(path);
+    if(base<0||(!exists&&bg_empty(base))||pt_rollback_names(base)||
+       migration_record(op,"platform-replacement-rollback.record",binding,(size_t)bn,0)||migration_record(base,"intent.record",record,(size_t)n,!exists))goto done;
+    int complete=bg_exists(base,"restored.receipt"),anchored=bg_exists(base,"restored.anchor");
+    if(complete<0||anchored<0||complete!=anchored)goto done;
+    for(int i=0;i<MIGRATION_FILES;i++)if(pt_rollback_entry(base,install,parents[i],entries[i],i,intent_sha,sha,&before[i],&after[i],installed,complete,0))goto done;
+    for(int i=0;i<MIGRATION_FILES;i++){
+        if(bg_record_exact(op,"platform-replacement-rollback.record",binding,(size_t)bn)||
+           bg_record_exact(base,"intent.record",record,(size_t)n)||pt_rollback_names(base)||pt_install_names(install)||
+           pt_rollback_entry(base,install,parents[i],entries[i],i,intent_sha,sha,&before[i],&after[i],installed,complete,1))goto done;
+    }
+    int rn=snprintf(receipt,sizeof receipt,"BROray-platform-replacement-restored/1\n%s\n%s\nservice-state-not-restored\n",sha,backup_sha);
+    if(rn<0||rn>=(int)sizeof receipt)goto done;digest_bytes(receipt,(size_t)rn,receipt_sha);
+    int an=snprintf(anchor,sizeof anchor,"BROray-platform-replacement-restored-anchor/1\n%s\n",receipt_sha);
+    if(an<0||an>=(int)sizeof anchor||pt_inventory(live,before)||
+       migration_record(base,"restored.anchor",anchor,(size_t)an,!complete)||migration_record(base,"restored.receipt",receipt,(size_t)rn,!complete)||
+       migration_sync_directory(path,base)||pt_rollback_names(base)||pt_inventory(live,before)||
+       bg_record_exact(op,"platform-replacement-rollback.record",binding,(size_t)bn)||bg_record_exact(base,"intent.record",record,(size_t)n))goto done;
+    for(int i=0;i<MIGRATION_FILES;i++)if(pt_rollback_entry(base,install,parents[i],entries[i],i,intent_sha,sha,&before[i],&after[i],installed,1,0))goto done;
+    *replayed=complete;result=0;
+done:if(base>=0)close(base);return result;
+}
+
+/* The caller retains operation, generation and host exclusion, and has
+ * verified the complete immutable replacement backup. Seven-file writes use
+ * the existing inode-bound, no-replace transaction primitive. */
+static int service_replacement_install(char **argv,int op,int live,const char *op_path,
+                                      const struct migration_file before[MIGRATION_FILES],const char *backup_sha,int *installed_replay){
+    int rollback=!strcmp(argv[1],"replacement-rollback");
+    int source=-1,stage=-1,base=-1,result=75,replay=0,parents[MIGRATION_FILES];
+    for(int i=0;i<MIGRATION_FILES;i++)parents[i]=-1;
+    struct migration_file after[MIGRATION_FILES],manifest_file;memset(after,0,sizeof after);memset(&manifest_file,0,sizeof manifest_file);
+    char path[PATH_MAX],entries[MIGRATION_FILES][NAME_MAX+1],intent[768],intent_sha[65],binding[128],ready[192],anchor[128],ready_sha[65];
+    char target_intent[768],target_sha[65],target_binding[128];
+    if(rollback){
+        if(snprintf(path,sizeof path,"%s/platform-replacement-target",op_path)>=(int)sizeof path)goto done;
+        source=checked_directory(path);
+    }else source=migration_directory(argv[15]);
+    if(source<0||migration_read(source,rollback?"manifest.record":"SHA256SUMS",&manifest_file,0)||strcmp(manifest_file.sha,argv[12])||(rollback&&manifest_file.mode!=0600))goto done;
+    for(int i=0;i<MIGRATION_FILES;i++){
+        char name[32];snprintf(name,sizeof name,"file-%d",i);
+        if(migration_read(source,rollback?name:migration_paths[i],&after[i],0)||after[i].mode!=(rollback?0600:0755))goto done;
+        after[i].mode=0755;
+    }
+    unsigned seen=0;size_t offset=0;
+    while(offset<manifest_file.size){
+        char *line=manifest_file.bytes+offset,*nl=memchr(line,'\n',manifest_file.size-offset);if(!nl)goto done;
+        int matched=0;for(int i=0;i<MIGRATION_FILES;i++){
+            char row[256];int n=snprintf(row,sizeof row,"%s  %s",after[i].sha,migration_paths[i]);
+            if(n==(int)(nl-line)&&!memcmp(line,row,(size_t)n)&&!(seen&(1U<<i))){seen|=1U<<i;matched=1;break;}
+        }
+        if(!matched)goto done;offset=(size_t)(nl-manifest_file.bytes)+1;
+    }
+    if(seen!=((1U<<MIGRATION_FILES)-1))goto done;
+    int tn=snprintf(target_intent,sizeof target_intent,"BROray-platform-replacement-target/1\n%s\n%s\n%s\n%s\n",argv[10],argv[11],argv[12],backup_sha);
+    if(tn<0||tn>=(int)sizeof target_intent)goto done;digest_bytes(target_intent,(size_t)tn,target_sha);
+    int tbn=snprintf(target_binding,sizeof target_binding,"BROray-platform-replacement-target-binding/1\n%s\n",target_sha);
+    if(tbn<0||tbn>=(int)sizeof target_binding)goto done;
+    int exists=bg_exists(op,"platform-replacement-target"),bound=bg_exists(op,"platform-replacement-target.record");
+    if(exists<0||bound<0||exists!=bound||(rollback&&!exists))goto done;
+    if(snprintf(path,sizeof path,"%s/platform-replacement-target",op_path)>=(int)sizeof path)goto done;
+    if(!exists){
+        if(pt_inventory(live,before)||migration_record(op,"platform-replacement-target.record",target_binding,(size_t)tbn,1)||
+           mkdirat(op,"platform-replacement-target",0700)||fsync(op))goto done;
+    }
+    stage=checked_directory(path);if(stage<0||(!exists&&bg_empty(stage)))goto done;
+    if(migration_record(op,"platform-replacement-target.record",target_binding,(size_t)tbn,0)||
+       migration_record(stage,"intent.record",target_intent,(size_t)tn,!exists)||
+       migration_record(stage,"manifest.record",manifest_file.bytes,manifest_file.size,!exists))goto done;
+    const char *names[MIGRATION_FILES+3]={"intent.record","manifest.record","ready.receipt"};char files[MIGRATION_FILES][32];
+    for(int i=0;i<MIGRATION_FILES;i++){
+        snprintf(files[i],sizeof files[i],"file-%d",i);names[3+i]=files[i];
+        if(migration_record(stage,files[i],after[i].bytes,after[i].size,!exists))goto done;
+    }
+    if(migration_record(stage,"ready.receipt",target_binding,(size_t)tbn,!exists)||rc_names(stage,names,MIGRATION_FILES+3)||migration_sync_directory(path,stage))goto done;
+    int in=snprintf(intent,sizeof intent,"BROray-platform-replacement-install/1\nINSTALLING\n%s\n%s\n%s\n%s\n%s\n",argv[10],argv[11],argv[12],backup_sha,target_sha);
+    if(in<0||in>=(int)sizeof intent)goto done;digest_bytes(intent,(size_t)in,intent_sha);
+    int bn=snprintf(binding,sizeof binding,"BROray-platform-replacement-install-binding/1\n%s\n",intent_sha);
+    if(bn<0||bn>=(int)sizeof binding)goto done;
+    exists=bg_exists(op,"platform-replacement-install");bound=bg_exists(op,"platform-replacement-install.record");
+    if(exists<0||bound<0||exists!=bound||(rollback&&!exists))goto done;
+    if(!rollback&&(bg_exists(op,"platform-replacement-rollback")!=0||bg_exists(op,"platform-replacement-rollback.record")!=0))goto done;
+    if(snprintf(path,sizeof path,"%s/platform-replacement-install",op_path)>=(int)sizeof path)goto done;
+    if(!exists){
+        if(pt_inventory(live,before)||migration_record(op,"platform-replacement-install.record",binding,(size_t)bn,1)||
+           mkdirat(op,"platform-replacement-install",0700)||fsync(op))goto done;
+    }
+    base=checked_directory(path);if(base<0||(!exists&&bg_empty(base))||pt_install_names(base)||
+       migration_record(op,"platform-replacement-install.record",binding,(size_t)bn,0)||migration_record(base,"intent.record",intent,(size_t)in,!exists))goto done;
+    int completed=bg_exists(base,"installed.receipt"),anchored=bg_exists(base,"installed.anchor");
+    if(completed<0||anchored<0||completed!=anchored)goto done;replay=completed;
+    for(int i=0;i<MIGRATION_FILES;i++){
+        parents[i]=bg_parent(live,migration_paths[i],entries[i]);
+        if(parents[i]<0)goto done;
+    }
+    if(rollback){
+        int rn=snprintf(ready,sizeof ready,"BROray-platform-replacement-installed/1\n%s\n%s\n",intent_sha,argv[12]);
+        if(rn<0||rn>=(int)sizeof ready)goto done;digest_bytes(ready,(size_t)rn,ready_sha);
+        int an=snprintf(anchor,sizeof anchor,"BROray-platform-replacement-installed-anchor/1\n%s\n",ready_sha);
+        if(an<0||an>=(int)sizeof anchor||(completed&&(bg_record_exact(base,"installed.receipt",ready,(size_t)rn)||bg_record_exact(base,"installed.anchor",anchor,(size_t)an)))||
+           service_replacement_rollback_files(op,live,op_path,base,completed,intent_sha,backup_sha,target_sha,before,after,parents,entries,installed_replay))goto done;
+        result=0;goto done;
+    }
+    for(int i=0;i<MIGRATION_FILES;i++)if(pt_install_entry(base,parents[i],entries[i],i,intent_sha,&before[i],&after[i],completed,0))goto done;
+    /* All before/staged/current inodes are validated before the first write.
+     * Every mutation has its own durable intent and exact completion record. */
+    for(int i=0;i<MIGRATION_FILES;i++){
+        if(bg_record_exact(op,"platform-replacement-install.record",binding,(size_t)bn)||
+           bg_record_exact(base,"intent.record",intent,(size_t)in)||
+           bg_record_exact(stage,files[i],after[i].bytes,after[i].size)||
+           pt_install_entry(base,parents[i],entries[i],i,intent_sha,&before[i],&after[i],completed,1))goto done;
+    }
+    int rn=snprintf(ready,sizeof ready,"BROray-platform-replacement-installed/1\n%s\n%s\n",intent_sha,argv[12]);
+    if(rn<0||rn>=(int)sizeof ready)goto done;digest_bytes(ready,(size_t)rn,ready_sha);
+    int an=snprintf(anchor,sizeof anchor,"BROray-platform-replacement-installed-anchor/1\n%s\n",ready_sha);
+    if(an<0||an>=(int)sizeof anchor||pt_inventory(live,after)||
+       migration_record(base,"installed.anchor",anchor,(size_t)an,!completed)||migration_record(base,"installed.receipt",ready,(size_t)rn,!completed)||
+       pt_install_names(base)||migration_sync_directory(path,base)||pt_inventory(live,after))goto done;
+    for(int i=0;i<MIGRATION_FILES;i++)if(pt_install_entry(base,parents[i],entries[i],i,intent_sha,&before[i],&after[i],1,0))goto done;
+    *installed_replay=replay;result=0;
+done:
+    for(int i=0;i<MIGRATION_FILES;i++){free(after[i].bytes);if(parents[i]>=0)close(parents[i]);}free(manifest_file.bytes);
+    if(base>=0)close(base);if(stage>=0)close(stage);if(source>=0)close(source);
+    return result?service_error(rollback?"PLATFORM_REPLACEMENT_ROLLBACK_UNCONFIRMED":"PLATFORM_REPLACEMENT_INSTALL_UNCONFIRMED"):0;
+}
+
+/* Same-boot replacement backup. This bounded writer changes only private
+ * operation evidence. It does not authorize installation, release the fence,
+ * execute a helper, or invent a legacy boot boundary. */
+static int service_replacement_backup(int argc,char **argv){
+    /* HOST DOMAIN GEN OLD_MANIFEST LIVE ASH ASH_SHA HOST_SHA OP NONCE
+     * NEW_MANIFEST OLD_NATIVE STATE_SHA */
+    int rollback=argc>1&&!strcmp(argv[1],"replacement-rollback");
+    int start=argc>1&&!strcmp(argv[1],"replacement-start-intent");
+    int install=rollback||start||(argc>1&&!strcmp(argv[1],"replacement-install"));
+    if(argc!=((install&&!rollback)?16:15)||!service_scope_valid(9,argv,0)||!hex64(argv[9])||!token(argv[10],96)||
+       !token(argv[11],32)||strlen(argv[11])!=32||!hex64(argv[12])||!hex64(argv[13])||!hex64(argv[14])||
+       ((install&&!rollback)&&!migration_path(argv[15])))return 64;
+    int state=-1,guard=-1,parent=-1,lock=-1,host=-1,op=-1,live=-1,base=-1,result=75,replay=0;
+    char statepath[PATH_MAX],generations[PATH_MAX],oppath[PATH_MAX],fence[PATH_MAX],want[PATH_MAX],backup[PATH_MAX];
+    char host_receipt[65],native[65],inventory_sha[65],intent_sha[65],receipt[192],anchor[128],anchor_sha[65],field[256];
+    char *inventory=NULL,*target=NULL,*intent=NULL,*execution=NULL;size_t inventory_size=0,target_size=0,intent_size=0,execution_size=0;
+    struct migration_file before[MIGRATION_FILES],operation_state,prior_executor;
+    memset(before,0,sizeof before);memset(&operation_state,0,sizeof operation_state);memset(&prior_executor,0,sizeof prior_executor);
+    struct identity executor;const char *prefix=strcmp(argv[6],"/")?argv[6]:"";umask(077);
+#define RB_PATH(dest,fmt,...) do{int n=snprintf(dest,sizeof dest,fmt,__VA_ARGS__);if(n<0||n>=(int)sizeof dest)goto done;}while(0)
+    RB_PATH(statepath,"%s/opt/var/lib/broray",prefix);RB_PATH(oppath,"%s/operations/%s",statepath,argv[10]);
+    RB_PATH(generations,"%s/opt/var/lib/broray-updater/generations",prefix);
+    RB_PATH(fence,"%s/opt/var/lock/broray/global-operation.lock",prefix);RB_PATH(want,"%s/fence",oppath);
+    RB_PATH(backup,"%s/platform-replacement-backup",oppath);
+#undef RB_PATH
+    state=checked_directory(statepath);op=checked_directory(oppath);live=migration_directory(argv[6]);
+    if(state<0||op<0||live<0||(guard=recovery_inherited_guard(state))<0||migration_boot(boot)||
+       peer_executable_hash(getpid(),native)||capture(getpid(),&executor))goto done;
+    char link[PATH_MAX];ssize_t linked=readlink(fence,link,sizeof link);
+    if(linked!=(ssize_t)strlen(want)||memcmp(link,want,(size_t)linked)||
+       migration_read(op,"state.json",&operation_state,0)||operation_state.mode!=0600||
+       strcmp(operation_state.sha,argv[14])||memchr(operation_state.bytes,0,operation_state.size))goto done;
+    /* Canonical coordinator state is pinned in full, not a caller's health
+     * boolean. The exact generationStop object is reconstructed below from
+     * independently verified terminal lineage and the seven live files. */
+    if(!strstr(operation_state.bytes,"\"operation\":\"system:platform-preflight\"")||
+       !strstr(operation_state.bytes,"\"running\":true")||!strstr(operation_state.bytes,"\"phase\":\"STOPPED\""))goto done;
+    snprintf(field,sizeof field,"\"expectedPlatformManifestSha256\":\"%s\"",argv[12]);if(!strstr(operation_state.bytes,field))goto done;
+    snprintf(field,sizeof field,"\"stopNonce\":\"%s\"",argv[11]);if(!strstr(operation_state.bytes,field))goto done;
+    parent=checked_directory(generations);if(parent<0)goto done;
+    lock=openat(parent,".generation-lifetime.lock",O_RDWR|O_NOFOLLOW|O_CLOEXEC);
+    if(lock<0||service_stop_generations(parent,generations,lock,argv[5]))goto done;
+    host=checked_directory(argv[2]);if(host<0)goto done;
+    uint64_t until=millis()+2000;
+    while(flock(host,LOCK_EX|LOCK_NB)){
+        if(errno!=EWOULDBLOCK||millis()>=until)goto done;
+        struct timespec pause={0,10000000L};nanosleep(&pause,NULL);
+    }
+    if(service_host_retired_proof(10,argv,host,NULL,host_receipt))goto done;
+    char *retire[]={argv[0],"control",argv[3],"RETIRE",argv[4],argv[5],argv[10],argv[11],NULL};
+    if(retired_reply(retire,0))goto done;
+    char *launch=strstr(snapshot,"\"platformLaunch\":{");if(!launch)goto done;
+    snprintf(field,sizeof field,"\"nativeSha256\":\"%s\"",argv[13]);if(!strstr(launch,field))goto done;
+    char *super=strstr(snapshot,"\"supervisor\":"),*up=strstr(snapshot,",\"updater\":"),*end=strstr(snapshot,",\"stopOperationId\":");
+    if(!super||!up||!end||up<=super||end<=up)goto done;super+=strlen("\"supervisor\":");
+    if(install){base=checked_directory(backup);if(base<0)goto done;}
+    FILE *mf=open_memstream(&inventory,&inventory_size);if(!mf)goto done;
+    int bad=0;static const int sorted[MIGRATION_FILES]={0,1,2,3,5,4,6};
+    for(int j=0;j<MIGRATION_FILES;j++){
+        int i=sorted[j];char name[32];snprintf(name,sizeof name,"before-%d",i);
+        if(migration_read(install?base:live,install?name:migration_paths[i],&before[i],0)||
+           before[i].mode!=(install?0600:0755)){bad=1;break;}before[i].mode=0755;
+        fprintf(mf,"%s  %s\n",before[i].sha,migration_paths[i]);
+    }
+    if(fclose(mf))bad=1;if(bad)goto done;digest_bytes(inventory,inventory_size,inventory_sha);if(strcmp(inventory_sha,argv[5]))goto done;
+    FILE *tf=open_memstream(&target,&target_size);if(!tf)goto done;
+    fprintf(tf,"\"generationStop\":{\"contract\":\"broray-platform-generation-stop/1\",\"generationId\":\"%s\",\"platformManifestSha256\":\"%s\",\"nativeSha256\":\"%s\",\"supervisor\":",argv[4],argv[5],argv[13]);
+    fwrite(super,1,(size_t)(up-super),tf);fwrite(up,1,(size_t)(end-up),tf);fputs(",\"platformFiles\":[",tf);
+    for(int j=0;j<MIGRATION_FILES;j++){int i=sorted[j];fprintf(tf,"%s{\"path\":\"%s\",\"value\":{\"sha256\":\"%s\",\"executable\":true}}",j?",":"",migration_paths[i]+4,before[i].sha);}
+    fputs("]}",tf);if(fclose(tf)||!strstr(operation_state.bytes,target))goto done;
+    int directory=bg_exists(op,"platform-replacement-backup"),bound=bg_exists(op,"platform-replacement-backup.record");
+    if(directory<0||bound<0||directory!=bound||(install&&!directory))goto done;replay=directory;
+    if(replay){
+        if(base<0)base=checked_directory(backup);if(base<0||pt_backup_names(base,before)||migration_read(base,"executor.record",&prior_executor,0)||prior_executor.mode!=0600)goto done;
+        execution=prior_executor.bytes;execution_size=prior_executor.size;prior_executor.bytes=NULL;
+    }else{
+        FILE *ef=open_memstream(&execution,&execution_size);if(!ef)goto done;
+        identity_json(ef,&executor);fputc('\n',ef);if(fclose(ef))goto done;
+    }
+    char execution_sha[65];digest_bytes(execution,execution_size,execution_sha);
+    FILE *f=open_memstream(&intent,&intent_size);if(!f)goto done;
+    fprintf(f,"{\"schemaVersion\":1,\"contract\":\"broray-platform-replacement-backup/1\",\"operationId\":\"%s\",\"stopNonce\":\"%s\",\"oldGenerationId\":\"%s\",\"oldPlatformManifestSha256\":\"%s\",\"oldNativeSha256\":\"%s\",\"oldServiceWasRunning\":true,\"expectedPlatformManifestSha256\":\"%s\",\"writerNativeSha256\":\"%s\",\"operationStateSha256\":\"%s\",\"hostRetirementSha256\":\"%s\",\"executorSha256\":\"%s\",\"before\":[",argv[10],argv[11],argv[4],argv[5],argv[13],argv[12],native,argv[14],host_receipt,execution_sha);
+    for(int i=0;i<MIGRATION_FILES;i++)fprintf(f,"%s{\"path\":\"%s\",\"present\":true,\"mode\":%u,\"sha256\":\"%s\"}",i?",":"",migration_paths[i],before[i].mode,before[i].sha);
+    fputs("]}\n",f);if(fclose(f))goto done;digest_bytes(intent,intent_size,intent_sha);
+    char binding[128];int bn=snprintf(binding,sizeof binding,"BROray-platform-replacement-backup-binding/1\n%s\n",intent_sha);
+    if(bn<0||bn>=(int)sizeof binding||(!install&&pt_inventory(live,before)))goto done;
+    if(!replay){
+        if(migration_record(op,"platform-replacement-backup.record",binding,(size_t)bn,1)||mkdirat(op,"platform-replacement-backup",0700)||fsync(op))goto done;
+        base=checked_directory(backup);if(base<0||bg_empty(base))goto done;
+    }
+    if(migration_record(op,"platform-replacement-backup.record",binding,(size_t)bn,0)||
+       migration_record(base,"intent.json",intent,intent_size,!replay)||migration_record(base,"executor.record",execution,execution_size,!replay))goto done;
+    for(int i=0;i<MIGRATION_FILES;i++){char name[32];snprintf(name,sizeof name,"before-%d",i);if(migration_record(base,name,before[i].bytes,before[i].size,!replay))goto done;}
+    int rn=snprintf(receipt,sizeof receipt,"BROray-platform-replacement-backup-ready/1\n%s\n%s\n",intent_sha,host_receipt);
+    if(rn<0||rn>=(int)sizeof receipt)goto done;digest_bytes(receipt,(size_t)rn,anchor_sha);
+    int an=snprintf(anchor,sizeof anchor,"BROray-platform-replacement-backup-anchor/1\n%s\n",anchor_sha);
+    if(an<0||an>=(int)sizeof anchor||pt_backup_copies(base,before)||(!install&&pt_inventory(live,before))||
+       bg_record_exact(op,"state.json",operation_state.bytes,operation_state.size)||
+       service_stop_generations(parent,generations,lock,argv[5])||service_host_retired_proof(10,argv,host,NULL,host_receipt)||
+       migration_record(base,"ready.anchor",anchor,(size_t)an,!replay)||migration_record(base,"ready.receipt",receipt,(size_t)rn,!replay)||
+       pt_backup_names(base,before)||migration_sync_directory(backup,base)||pt_backup_copies(base,before)||(!install&&pt_inventory(live,before))||
+       bg_record_exact(op,"state.json",operation_state.bytes,operation_state.size)||bg_record_exact(op,"platform-replacement-backup.record",binding,(size_t)bn)||
+       bg_record_exact(base,"intent.json",intent,intent_size)||bg_record_exact(base,"executor.record",execution,execution_size))goto done;
+    linked=readlink(fence,link,sizeof link);if(linked!=(ssize_t)strlen(want)||memcmp(link,want,(size_t)linked))goto done;
+    if(install){
+        if(service_replacement_install(argv,op,live,oppath,before,intent_sha,&replay)||
+           bg_record_exact(op,"state.json",operation_state.bytes,operation_state.size)||
+           service_stop_generations(parent,generations,lock,argv[5])||service_host_retired_proof(10,argv,host,NULL,host_receipt)||
+           pt_backup_copies(base,before)||bg_record_exact(base,"intent.json",intent,intent_size))goto done;
+        linked=readlink(fence,link,sizeof link);if(linked!=(ssize_t)strlen(want)||memcmp(link,want,(size_t)linked))goto done;
+        if(start){result=replacement_start_prepare(argv,op,oppath,native);goto done;}
+        if(rollback)printf("{\"ok\":true,\"phase\":\"NEEDS_RECOVERY\",\"operationId\":\"%s\",\"platformRestored\":true,\"serviceStateRestored\":false,\"replayed\":%s,\"platformReady\":false,\"activationAllowed\":false}\n",argv[10],replay?"true":"false");
+        else printf("{\"ok\":true,\"phase\":\"INSTALLED\",\"operationId\":\"%s\",\"manifestSha256\":\"%s\",\"replayed\":%s,\"platformReady\":false,\"activationAllowed\":false}\n",argv[10],argv[12],replay?"true":"false");
+        result=0;goto done;
+    }
+    printf("{\"ok\":true,\"phase\":\"BACKUP_READY\",\"operationId\":\"%s\",\"intentSha256\":\"%s\",\"replayed\":%s,\"platformReady\":false,\"activationAllowed\":false}\n",argv[10],intent_sha,replay?"true":"false");result=0;
+done:
+    for(int i=0;i<MIGRATION_FILES;i++)free(before[i].bytes);free(operation_state.bytes);free(prior_executor.bytes);
+    free(inventory);free(target);free(intent);free(execution);
+    if(base>=0)close(base);if(live>=0)close(live);if(op>=0)close(op);if(host>=0)close(host);if(lock>=0)close(lock);if(parent>=0)close(parent);if(guard>=0)close(guard);if(state>=0)close(state);
+    return result?service_replacement_error(start?"PLATFORM_REPLACEMENT_START_INTENT_UNCONFIRMED":rollback?"PLATFORM_REPLACEMENT_ROLLBACK_UNCONFIRMED":install?"PLATFORM_REPLACEMENT_INSTALL_UNCONFIRMED":"PLATFORM_REPLACEMENT_BACKUP_UNCONFIRMED"):0;
 }
