@@ -3166,7 +3166,7 @@ updater_idle_wait()
 
 daemon_run()
 {
-    local request candidate request_result request_operation
+    local request candidate request_result request_operation publication_waiting
     # A persistent writer may only enter through the authenticated native
     # launch above. Refuse legacy/direct entry before ensure_layout changes
     # any directory metadata belonging to an already live generation.
@@ -3205,12 +3205,21 @@ daemon_run()
             >/dev/null || return 75
     fi
 
+    publication_waiting=false
     while :
     do
-        request_lock_recover_abandoned || {
-            printf '%s  REQUEST_LOCK_RECOVERY_STOPPED\n' "$(now)" >>"$DAEMON_LOG"
-            return 1
-        }
+        if ! request_lock_recover_abandoned; then
+            # A publisher can be between mkdir, metadata writes and cleanup.
+            # Preserve its fence and process no queue until the observation
+            # is valid again. Waiting is not permission to retire any object.
+            if [ "$publication_waiting" != true ]; then
+                printf '%s  REQUEST_PUBLICATION_WAIT\n' "$(now)" >>"$DAEMON_LOG"
+            fi
+            publication_waiting=true
+            updater_idle_wait || return 75
+            continue
+        fi
+        publication_waiting=false
         request=""
         for candidate in "$QUEUE_ROOT"/*.json
         do

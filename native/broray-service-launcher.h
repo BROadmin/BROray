@@ -676,8 +676,21 @@ static int service_replacement_backup(int argc,char **argv){
         identity_json(ef,&executor);fputc('\n',ef);if(fclose(ef))goto done;
     }
     char execution_sha[65];digest_bytes(execution,execution_size,execution_sha);
+    char backup_writer[65];strcpy(backup_writer,native);
+    if(replay){
+        struct migration_file saved;memset(&saved,0,sizeof saved);
+        if(migration_read(base,"intent.json",&saved,0)||saved.mode!=0600){free(saved.bytes);goto done;}
+        const char *key="\"writerNativeSha256\":\"";
+        char *value=strstr(saved.bytes,key);
+        int valid=0;
+        if(value){value+=strlen(key);if(strlen(value)>=65&&value[64]=='"'){
+            memcpy(backup_writer,value,64);backup_writer[64]=0;
+            valid=hex64(backup_writer)&&(!strcmp(backup_writer,native)||!strcmp(backup_writer,argv[13]));
+        }}
+        free(saved.bytes);if(!valid)goto done;
+    }
     FILE *f=open_memstream(&intent,&intent_size);if(!f)goto done;
-    fprintf(f,"{\"schemaVersion\":1,\"contract\":\"broray-platform-replacement-backup/1\",\"operationId\":\"%s\",\"stopNonce\":\"%s\",\"oldGenerationId\":\"%s\",\"oldPlatformManifestSha256\":\"%s\",\"oldNativeSha256\":\"%s\",\"oldServiceWasRunning\":true,\"expectedPlatformManifestSha256\":\"%s\",\"writerNativeSha256\":\"%s\",\"operationStateSha256\":\"%s\",\"hostRetirementSha256\":\"%s\",\"executorSha256\":\"%s\",\"before\":[",argv[10],argv[11],argv[4],argv[5],argv[13],argv[12],native,argv[14],host_receipt,execution_sha);
+    fprintf(f,"{\"schemaVersion\":1,\"contract\":\"broray-platform-replacement-backup/1\",\"operationId\":\"%s\",\"stopNonce\":\"%s\",\"oldGenerationId\":\"%s\",\"oldPlatformManifestSha256\":\"%s\",\"oldNativeSha256\":\"%s\",\"oldServiceWasRunning\":true,\"expectedPlatformManifestSha256\":\"%s\",\"writerNativeSha256\":\"%s\",\"operationStateSha256\":\"%s\",\"hostRetirementSha256\":\"%s\",\"executorSha256\":\"%s\",\"before\":[",argv[10],argv[11],argv[4],argv[5],argv[13],argv[12],backup_writer,argv[14],host_receipt,execution_sha);
     for(int i=0;i<MIGRATION_FILES;i++)fprintf(f,"%s{\"path\":\"%s\",\"present\":true,\"mode\":%u,\"sha256\":\"%s\"}",i?",":"",migration_paths[i],before[i].mode,before[i].sha);
     fputs("]}\n",f);if(fclose(f))goto done;digest_bytes(intent,intent_size,intent_sha);
     char binding[128];int bn=snprintf(binding,sizeof binding,"BROray-platform-replacement-backup-binding/1\n%s\n",intent_sha);

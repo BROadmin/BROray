@@ -327,10 +327,17 @@ static int sc_namecmp(const void *a,const void *b){return strcmp(a,b);}
  * one retired-fence symlink. It follows no symlink and records no live PID. */
 static int sc_tree_walk(int fd,const char *relative,struct gen_sha *hash,unsigned *total,unsigned depth,const char *tree_root){
     if(depth>20)return -1;DIR *d=directory_stream(fd);if(!d)return -1;
-    char (*names)[NAME_MAX+1]=calloc(4096,sizeof *names);if(!names){closedir(d);return -1;}
+    size_t capacity=64;
+    char (*names)[NAME_MAX+1]=calloc(capacity,sizeof *names);if(!names){closedir(d);return -1;}
     unsigned count=0;struct dirent *e;int bad=0;errno=0;
     while((e=readdir(d))){if(!strcmp(e->d_name,".")||!strcmp(e->d_name,".."))continue;
-        if(count==4096||++*total>4096){bad=1;break;}strcpy(names[count++],e->d_name);errno=0;}
+        if(*total==UINT_MAX||count==UINT_MAX){bad=1;break;}
+        if(count==capacity){
+            if(capacity>SIZE_MAX/2/sizeof *names){bad=1;break;}
+            void *grown=realloc(names,capacity*2*sizeof *names);if(!grown){bad=1;break;}
+            names=grown;capacity*=2;
+        }
+        ++*total;strcpy(names[count++],e->d_name);errno=0;}
     if(!e&&errno)bad=1;closedir(d);if(bad){free(names);return -1;}
     qsort(names,count,sizeof *names,sc_namecmp);
     for(unsigned i=0;i<count;i++){
@@ -639,6 +646,17 @@ static int sc_cycle_names(unsigned cycles){
         int allowed=!strcmp(name,"origin.record")||!strcmp(name,"origin.anchor")||!strcmp(name,"transition.lock");char want[128];
         for(unsigned i=1;!allowed&&i<=cycles;i++){snprintf(want,sizeof want,"cycle-%020u.record",i);allowed=!strcmp(name,want);}
         for(unsigned i=0;!allowed&&i<sc.count;i++){snprintf(want,sizeof want,"ready-%s.record",sc.nodes[i].id);allowed=!strcmp(name,want);if(!allowed){snprintf(want,sizeof want,"stopped-%s.record",sc.nodes[i].id);allowed=!strcmp(name,want);}}
+        if(!allowed){
+            for(unsigned i=0;i<sc.count;i++){
+                snprintf(want,sizeof want,"boot-residue-%s.record",sc.nodes[i].id);
+                if(!strcmp(name,want)){
+                    struct gb_record ended;char proof[65];
+                    if(sc_boot_proof(&sc.nodes[i],&ended,proof)){bad=1;break;}
+                    allowed=1;break;
+                }
+            }
+            if(bad)break;
+        }
         if(!allowed&&!strncmp(name,"boot-residue-",13)){
             int index=-1;for(unsigned i=0;i<sc.count;i++)if(!strcmp(name+13,sc.nodes[i].id))index=(int)i;
             struct stat st;struct gb_record ended;char proof[65];
@@ -721,6 +739,8 @@ static int sc_boot_retire(struct sc_node *n){
  */
 static int sc_boot_markers(struct sc_node *n,int finish){
     struct gb_record b;char proof[65],name[128],path[PATH_MAX],expected[32];struct migration_file r;memset(&r,0,sizeof r);
+    struct migration_file saved;memset(&saved,0,sizeof saved);
+    char receipt_name[128],receipt[256];unsigned mask=7;
     int archive=-1,result=-1;if(sc_boot_proof(n,&b,proof))goto done;
     int k=snprintf(name,sizeof name,"ready-%s.record",n->id);if(k<0||k>=(int)sizeof name||sc_file(sc.cycles,name,&r))goto done;
     const char *u=strstr(r.bytes,",\"updater\":{\"pid\":");long pid;
@@ -732,8 +752,40 @@ static int sc_boot_markers(struct sc_node *n,int finish){
     while((e=readdir(d))){if(strcmp(e->d_name,".")&&strcmp(e->d_name,"..")&&strcmp(e->d_name,"daemon.pid")&&strcmp(e->d_name,"daemon.ready")&&strcmp(e->d_name,"daemon.lock")){bad=1;break;}errno=0;}
     if(!e&&errno)bad=1;closedir(d);if(bad)goto done;
     const char *files[]={"daemon.pid","daemon.ready","daemon.lock"};
+    int rn=snprintf(receipt_name,sizeof receipt_name,"boot-residue-%s.record",n->id);
+    if(rn<0||rn>=(int)sizeof receipt_name)goto done;
+    int has_receipt=sc_record_exists(sc.cycles,receipt_name);if(has_receipt<0)goto done;
+    if(has_receipt){
+        char pinned[65],extra;long saved_pid;
+        if(sc_service_file(sc.cycles,receipt_name,&saved,NULL)||
+           sscanf(saved.bytes,"BROray-boot-residue/1\n%64s\n%ld\n%u\n%c",pinned,&saved_pid,&mask,&extra)!=3||
+           strcmp(pinned,proof)||saved_pid!=pid||mask>7)goto done;
+    }else if(finish){
+        mask=0;
+        for(unsigned i=0;i<3;i++){
+            int a=bg_exists(sc.up,files[i]),z=bg_exists(archive,files[i]);
+            if(a<0||z<0||a+z>1)goto done;if(a+z)mask|=1U<<i;
+        }
+    }
+    /* With no new presence receipt, historical completed archives retain the
+     * original all-three contract. New archives durably distinguish absent
+     * projections from incomplete moves. The boot proof, never the PID
+     * projection, establishes that the old processes cannot survive. */
+    rn=snprintf(receipt,sizeof receipt,"BROray-boot-residue/1\n%s\n%ld\n%u\n",proof,pid,mask);
+    if(rn<0||rn>=(int)sizeof receipt||(has_receipt&&(saved.size!=(size_t)rn||memcmp(saved.bytes,receipt,(size_t)rn))))goto done;
     for(unsigned i=0;i<3;i++){
-        int a=finish?bg_exists(sc.up,files[i]):0,z=bg_exists(archive,files[i]);if(a<0||z<0||a+z!=1)goto done;
+        int a=finish?bg_exists(sc.up,files[i]):0,z=bg_exists(archive,files[i]);
+        if(a<0||z<0||a+z!=!!(mask&(1U<<i)))goto done;
+        if(!(mask&(1U<<i)))continue;int dir=a?sc.up:archive;
+        if(i<2){if(bg_record_exact(dir,files[i],expected,(size_t)k))goto done;}
+        else{int lock=openat(dir,files[i],O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);struct stat st;
+            int invalid=lock<0;if(!invalid)invalid=fstat(lock,&st)||st.st_uid!=geteuid()||(st.st_mode&07777)!=0700||bg_empty(lock);
+            if(lock>=0)close(lock);if(invalid)goto done;}
+    }
+    if((finish||has_receipt)&&sc_publish(sc.cycles,receipt_name,receipt,(size_t)rn,finish))goto done;
+    for(unsigned i=0;i<3;i++){
+        int a=finish?bg_exists(sc.up,files[i]):0,z=bg_exists(archive,files[i]);if(a<0||z<0||a+z!=!!(mask&(1U<<i)))goto done;
+        if(!(mask&(1U<<i)))continue;
         int dir=a?sc.up:archive;struct stat before,after;if(fstatat(dir,files[i],&before,AT_SYMLINK_NOFOLLOW)||before.st_uid!=geteuid())goto done;
         if(i<2){if(bg_record_exact(dir,files[i],expected,(size_t)k))goto done;}
         else{
@@ -746,7 +798,7 @@ static int sc_boot_markers(struct sc_node *n,int finish){
         }
     }
     result=0;
- done:if(archive>=0)close(archive);free(r.bytes);return result;
+ done:if(archive>=0)close(archive);free(r.bytes);free(saved.bytes);return result;
 }
 
 static int sc_intent_publish(struct sc_node *previous){
@@ -1107,11 +1159,18 @@ static int rs_fence(const char *state_sha){return rs_fence_check(state_sha,0);}
  * ordinary operation-tree verifier continues to reject all sockets. */
 static int rs_history_tree(int fd,const char *root,char sha[65]){
     DIR *d=directory_stream(fd);if(!d)return -1;
-    char (*names)[NAME_MAX+1]=calloc(4096,sizeof *names);if(!names){closedir(d);return -1;}
+    size_t capacity=64;
+    char (*names)[NAME_MAX+1]=calloc(capacity,sizeof *names);if(!names){closedir(d);return -1;}
     unsigned count=0;int bad=0;struct dirent *e;errno=0;
     while((e=readdir(d))){
         if(!strcmp(e->d_name,".")||!strcmp(e->d_name,".."))continue;
-        if(count==4096){bad=1;break;}strcpy(names[count++],e->d_name);errno=0;
+        if(count==UINT_MAX){bad=1;break;}
+        if(count==capacity){
+            if(capacity>SIZE_MAX/2/sizeof *names){bad=1;break;}
+            void *grown=realloc(names,capacity*2*sizeof *names);if(!grown){bad=1;break;}
+            names=grown;capacity*=2;
+        }
+        strcpy(names[count++],e->d_name);errno=0;
     }
     if(!e&&errno)bad=1;closedir(d);qsort(names,count,sizeof *names,sc_namecmp);
     struct gen_sha hash;gen_sha_init(&hash);
