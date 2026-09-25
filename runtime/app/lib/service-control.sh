@@ -8,6 +8,12 @@ shift
 broray_service_fd "$SVC_DIR/control.guard" >/dev/null || exit 73
 action="${1:-}"; shift
 rc=0; broray_service_record || rc=$?
+if [ "$action" = recover ]; then
+    [ "$#" = 0 ] && [ "$rc" = 0 ] || exit 75
+    broray_service_fd "$SVC_DIR/lifetime.guard" >/dev/null || exit 73
+    broray_service_recover_projection
+    exit $?
+fi
 [ "$rc" != 2 ] && broray_service_legacy_matches || exit 75
 
 case "$action" in

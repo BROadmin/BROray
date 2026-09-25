@@ -9,9 +9,22 @@ export PATH BRORAY_HOME_ROOT
 
 . "$BRORAY_HOME_ROOT/web-new/api/auth-common.sh"
 . "$BRORAY_HOME_ROOT/lib/home-snapshot.sh"
+BRORAY_RELEASE_MANIFEST="${BRORAY_RELEASE_MANIFEST:-$BRORAY_HOME_ROOT/share/release/manifest.json}"
+. "$BRORAY_HOME_ROOT/lib/release-manifest.sh"
 
 broray_api_require_method GET
 broray_api_require_session
+
+# Installed release identity is local metadata, not a worker snapshot. An
+# upgrade may preserve snapshots from the previous release while workers pause.
+# Read the active manifest without starting collectors or changing the cache.
+installed_release='null'
+if broray_release_manifest_valid; then
+    installed_release="$(broray_release_json | jq -ce '
+        select((.version | length) > 0 and .version != "unknown") |
+        {version, releaseId, candidateId, webUIBuild}
+    ')" || installed_release='null'
+fi
 
 errors='[]'
 xray='null'
@@ -84,6 +97,7 @@ home_json="$(
         --argjson keenetic "$keenetic" \
         --argjson routes "$routes" \
         --argjson broray "$broray" \
+        --argjson installedRelease "$installed_release" \
         --argjson errors "$errors" \
         --arg updatedAt "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" '
         def rank:
@@ -168,6 +182,7 @@ home_json="$(
         })) as $issues |
         {
             schemaVersion:3,
+            installedRelease:$installedRelease,
             xray:$xray,
             servers:$servers,
             subscriptions:$subscriptions,

@@ -48,11 +48,11 @@ broray_parse_vless() {
     BRORAY_MODE="$(broray_uri_query_value mode "$query")" || return 1
     BRORAY_HEADER_TYPE="$(broray_uri_query_value headerType "$query")" || return 1
     BRORAY_EXTRA="$(broray_uri_query_value extra "$query")" || return 1
-    BRORAY_NAME="$(broray_url_decode "$fragment")"
+    BRORAY_NAME="$(broray_uri_component_decode "$fragment")" || return 1
 
     alpn_value="$(broray_uri_query_value alpn "$query")" || return 1
     BRORAY_ALPN="$(jq -Rn --arg value "$alpn_value" '$value | split(",") | map(select(length > 0))')"
-    insecure_value="$(broray_uri_query_value allowInsecure "$query")" || return 1
+    insecure_value="$(broray_uri_query_value allowInsecure "$query" insecure)" || return 1
     case "$insecure_value" in
         1|true|TRUE|yes|YES) broray_die "неподдерживаемая настройка TLS allowInsecure" ;;
         ''|0|false|FALSE) BRORAY_ALLOW_INSECURE=false ;;
@@ -63,6 +63,7 @@ broray_parse_vless() {
         ''|tcp|raw) BRORAY_NETWORK=raw ;;
         ws|websocket) BRORAY_NETWORK=ws ;;
         grpc) BRORAY_NETWORK=grpc ;;
+        kcp) BRORAY_NETWORK=kcp ;;
         httpupgrade|httpUpgrade) BRORAY_NETWORK=httpupgrade ;;
         xhttp|splithttp) BRORAY_NETWORK=xhttp ;;
         *) broray_die "неподдерживаемый транспорт VLESS: $BRORAY_NETWORK" ;;
@@ -81,20 +82,27 @@ broray_parse_vless() {
         case "$BRORAY_NETWORK" in raw|grpc|xhttp) ;; *) broray_die "VLESS REALITY не поддерживает этот транспорт" ;; esac
     fi
     case "$BRORAY_FLOW" in
-        ''|xtls-rprx-vision) ;;
+        ''|xtls-rprx-vision|xtls-rprx-vision-udp443) ;;
         *) broray_die "неподдерживаемый режим VLESS flow: $BRORAY_FLOW" ;;
     esac
+    broray_vless_encryption_valid "${BRORAY_ENCRYPTION:-none}" || broray_die "неподдерживаемый или некорректный VLESS encryption"
     if [ -n "$BRORAY_FLOW" ] &&
-       { [ "$BRORAY_NETWORK" != raw ] || { [ "$BRORAY_SECURITY" != reality ] && [ "$BRORAY_SECURITY" != tls ]; }; }; then
-        broray_die "VLESS flow поддерживается только для TCP/RAW + TLS/REALITY"
+       { { [ "$BRORAY_NETWORK" != raw ] && [ "${BRORAY_ENCRYPTION:-none}" = none ]; } || { [ "$BRORAY_SECURITY" != reality ] && [ "$BRORAY_SECURITY" != tls ]; }; }; then
+        broray_die "VLESS Vision требует TLS/REALITY и TCP/RAW либо поддерживаемого VLESS encryption"
     fi
 
     [ -n "$BRORAY_FP" ] || BRORAY_FP=chrome
     [ -n "$BRORAY_PATH" ] || BRORAY_PATH=/
+    if [ "$BRORAY_NETWORK" = grpc ]; then
+        case "$BRORAY_MODE" in ''|gun|multi) ;; *) broray_die "неподдерживаемый gRPC mode" ;; esac
+    fi
+    # Preserve the existing stored default, including subscription continuity.
     [ -n "$BRORAY_MODE" ] || BRORAY_MODE=auto
     [ -n "$BRORAY_HEADER_TYPE" ] || BRORAY_HEADER_TYPE=none
     [ -n "$BRORAY_ENCRYPTION" ] || BRORAY_ENCRYPTION=none
     [ -n "$BRORAY_EXTRA" ] || BRORAY_EXTRA='{}'
     [ -n "$BRORAY_NAME" ] || BRORAY_NAME="$BRORAY_ADDRESS:$BRORAY_PORT"
     if [ "$BRORAY_SECURITY" = tls ] && [ -z "$BRORAY_SNI" ]; then BRORAY_SNI="$BRORAY_ADDRESS"; fi
+    broray_parse_stream_extensions "$query" || return 1
+
 }

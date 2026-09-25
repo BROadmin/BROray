@@ -2933,7 +2933,7 @@ broray_system_worker_uninstall() {
                [ -s "$uninstall_dot_status" ] &&
                BRORAY_DOT_LIB="$BRORAY_SYSTEM_DOT_LIB" \
                BRORAY_DOT_RESTORE_EXACT=true \
-                   "$BRORAY_BASE/bin/broray-routes-dot" apply "$uninstall_dot_request" \
+                   broray_lifecycle_component dot-restore "$uninstall_dot_request" \
                    >>"$BRORAY_LOG" 2>&1 &&
                BRORAY_DOT_LIB="$BRORAY_SYSTEM_DOT_LIB" \
                    "$BRORAY_BASE/bin/broray-routes-dot" status >"$uninstall_dot_verify" 2>>"$BRORAY_LOG" &&
@@ -2994,18 +2994,22 @@ broray_system_worker_uninstall() {
     broray_system_uninstall_abort() {
         abort_stage="$1"
         abort_message="$2"
+        rollback_complete=false
         if broray_system_uninstall_restore; then
+            rollback_complete=true
             rollback_message='Исходное состояние восстановлено.'
         else
-            rollback_message='Автоматический откат завершился не полностью; проверьте технический журнал.'
+            rollback_message="Автоматический откат завершился не полностью. Материалы восстановления сохранены: $uninstall_snapshot"
         fi
         broray_system_status_write "$operation_id" uninstall error "$abort_stage" 100 \
             "$abort_message" "$rollback_message" >/dev/null 2>&1 || true
-        rm -f "$uninstall_snapshot" "$uninstall_bundles" \
-            "$uninstall_dot_status" "$uninstall_dot_request" "$uninstall_dot_verify" \
-            "$uninstall_services" "$uninstall_registration_hashes" \
-            2>/dev/null || true
-        broray_system_uninstall_preserved_rollback >/dev/null 2>&1 || true
+        if [ "$rollback_complete" = true ]; then
+            rm -f "$uninstall_snapshot" "$uninstall_bundles" \
+                "$uninstall_dot_status" "$uninstall_dot_request" "$uninstall_dot_verify" \
+                "$uninstall_services" "$uninstall_registration_hashes" \
+                2>/dev/null || true
+            broray_system_uninstall_preserved_rollback >/dev/null 2>&1 || true
+        fi
         broray_system_uninstall_auth_retire >/dev/null 2>&1 || true
         uninstall_mutation_started=false
         return 1
@@ -3046,15 +3050,15 @@ broray_system_worker_uninstall() {
             }
         fi
 
-        rm -f "$uninstall_snapshot" "$uninstall_bundles" \
-            "$uninstall_dot_status" "$uninstall_dot_request" "$uninstall_dot_verify" \
-            "$uninstall_services" "$uninstall_registration_hashes" 2>/dev/null || true
-        uninstall_mutation_started=false
         if [ "$recovery_rollback_ok" = true ]; then
+            rm -f "$uninstall_snapshot" "$uninstall_bundles" \
+                "$uninstall_dot_status" "$uninstall_dot_request" "$uninstall_dot_verify" \
+                "$uninstall_services" "$uninstall_registration_hashes" 2>/dev/null || true
             recovery_message='Конфигурация и сервисы фактически восстановлены; повтор заблокирован до проверки OPKG.'
         else
-            recovery_message='Откат или публикация recovery-маркера завершились не полностью; требуется ручная проверка.'
+            recovery_message="Откат или публикация recovery-маркера завершились не полностью. Материалы восстановления сохранены: $uninstall_snapshot"
         fi
+        uninstall_mutation_started=false
         broray_system_status_write "$operation_id" uninstall error "$recovery_stage" 100 \
             'Состояние регистрации OPKG после удаления неоднозначно.' "$recovery_message" \
             >/dev/null 2>&1 || true

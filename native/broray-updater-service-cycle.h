@@ -24,6 +24,7 @@ static int rs_initial_boot_ready(char **argv,struct sc_node *n);
 static int rs_prior_history(void);
 static int rs_history_member(const char *family,const char *id);
 static int sc_stopped_seal(struct sc_node *n,int publish);
+static void terminal_compact_installation(const char *up,const char *current);
 struct gb_record;
 static int sc_boot_proof(struct sc_node *n,struct gb_record *b,char sha[65]);
 static int sc_boot_markers(struct sc_node *n,int finish);
@@ -895,6 +896,7 @@ static int sc_ready_wakeup(int domain,const struct sc_node *n){
 
 static int sc_start(struct sc_node *n){
     if(strcmp(n->born,boot)||sc_materialize(n)||sc_load_node(n))return -1;
+    terminal_compact_installation(sc.uppath,n->id);
     int start=checked_directory(pl.startdir),hosts=-1,host=-1,gens=-1,domain=-1,log=-1,result=-1;
     char path[PATH_MAX],hostsha[65];struct identity owner;
     if(start<0||sc_join(path,sc.uppath,"hosts"))goto done;hosts=checked_directory(path);if(hosts<0)goto done;
@@ -1157,13 +1159,14 @@ static int rs_fence(const char *state_sha){return rs_fence_check(state_sha,0);}
  * evidence. This inventory is used only after full retirement proof; it never
  * connects to that socket or interprets its presence as a live owner. The
  * ordinary operation-tree verifier continues to reject all sockets. */
-static int rs_history_tree(int fd,const char *root,char sha[65]){
+static int rs_history_tree_raw(int fd,const char *root,char sha[65],int omit_summary){
     DIR *d=directory_stream(fd);if(!d)return -1;
     size_t capacity=64;
     char (*names)[NAME_MAX+1]=calloc(capacity,sizeof *names);if(!names){closedir(d);return -1;}
     unsigned count=0;int bad=0;struct dirent *e;errno=0;
     while((e=readdir(d))){
         if(!strcmp(e->d_name,".")||!strcmp(e->d_name,".."))continue;
+        if(omit_summary&&(!strcmp(e->d_name,"retention.record")||!strcmp(e->d_name,"retention.anchor")))continue;
         if(count==UINT_MAX){bad=1;break;}
         if(count==capacity){
             if(capacity>SIZE_MAX/2/sizeof *names){bad=1;break;}
@@ -1185,7 +1188,13 @@ static int rs_history_tree(int fd,const char *root,char sha[65]){
             if(!bad)gen_sha_add(&hash,file.sha,64);free(file.bytes);
         }else if(S_ISDIR(before.st_mode)){
             if((before.st_mode&07777)!=0700||sc_join(path,root,names[i])){bad=1;break;}
-            int child=checked_directory(path);if(child<0){bad=1;break;}
+            /* fd may name a captured or not-yet-published tree. Following
+             * root/name here would hash the other side of an exchange. */
+            int child=openat(fd,names[i],O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+            struct stat opened;
+            if(child<0){bad=1;break;}
+            if(fstat(child,&opened)||opened.st_dev!=before.st_dev||opened.st_ino!=before.st_ino||
+               opened.st_mode!=before.st_mode||opened.st_uid!=before.st_uid){close(child);bad=1;break;}
             bad=sc_tree_hash_at(child,path,value);close(child);if(!bad)gen_sha_add(&hash,value,64);
         }else if(S_ISSOCK(before.st_mode)&&!strcmp(names[i],"control")&&(before.st_mode&07777)==0700&&before.st_nlink==1){
             n=snprintf(meta,sizeof meta,"terminal-control\n%llu\n%llu\n",(unsigned long long)before.st_dev,(unsigned long long)before.st_ino);
@@ -1195,6 +1204,238 @@ static int rs_history_tree(int fd,const char *root,char sha[65]){
            before.st_mode!=after.st_mode||before.st_uid!=after.st_uid||before.st_nlink!=after.st_nlink||before.st_size!=after.st_size)bad=1;
     }
     free(names);if(bad)return -1;gen_sha_end(&hash,sha);return 0;
+}
+/* A compact certificate explicitly supplies the previously validated logical
+ * tree identity. Its retained bytes are verified separately; their physical
+ * digest is never presented as equal to the old tree digest. */
+static int rs_history_tree(int fd,const char *root,char sha[65]){
+    char inventory[65];int compact=terminal_summary_read(fd,root,sha,inventory);
+    return compact<0?-1:compact?0:rs_history_tree_raw(fd,root,sha,0);
+}
+/* Only explicitly retired ledgers may use this representation. Two immutable
+ * records bind the old logical tree and the exact retained physical tree. A
+ * missing/corrupt half is an error, never an invitation to recreate it. */
+static int terminal_summary_read(int fd,const char *path,char old_tree[65],char inventory[65]){
+    int present=bg_exists(fd,"retention.record"),anchor=bg_exists(fd,"retention.anchor");
+    if(present<0||anchor<0||present!=anchor)return -1;if(!present)return 0;
+    struct migration_file record;memset(&record,0,sizeof record);int result=-1;
+    char scope[65]={0},retained[65]={0},extra,canonical[512],expected[128],actual[65];
+    if(sc_file(fd,"retention.record",&record))goto done;
+    int fields=sscanf(record.bytes,"BROray-terminal-summary/1\n%64s\n%64s\n%64s\n%64s\n%c",scope,old_tree,retained,inventory,&extra);
+    if(fields!=4)return free(record.bytes),-1;
+    int n=snprintf(canonical,sizeof canonical,"BROray-terminal-summary/1\n%s\n%s\n%s\n%s\n",scope,old_tree,retained,inventory);
+    if(fields!=4||!hex64(scope)||!hex64(old_tree)||!hex64(retained)||!hex64(inventory)||n<0||
+       (size_t)n!=record.size||memcmp(record.bytes,canonical,record.size))goto done;
+    scope_digest(path,actual);if(strcmp(actual,scope))goto done;
+    n=snprintf(expected,sizeof expected,"BROray-terminal-summary-anchor/1\n%s\n",record.sha);
+    if(n<0||n>=(int)sizeof expected||bg_record_exact(fd,"retention.anchor",expected,(size_t)n)||
+       rs_history_tree_raw(fd,path,actual,1)||strcmp(actual,retained))goto done;
+    result=1;
+done:free(record.bytes);return result;
+}
+static int terminal_copy(int from,int to,const char *name){
+    struct migration_file file;memset(&file,0,sizeof file);int result=-1;
+    if(sc_file(from,name,&file)||migration_record(to,name,file.bytes,file.size,1))goto done;
+    result=0;
+done:free(file.bytes);return result;
+}
+static int terminal_ready_pin(int source,int to,int directory,const char *id){
+    char name[128],record[64];if(snprintf(name,sizeof name,"ready-%s.record",id)>=(int)sizeof name)return -1;
+    int present=bg_exists(directory,name);if(present<=0)return present;
+    struct migration_file f;memset(&f,0,sizeof f);int result=-1;
+    if(sc_file(directory,name,&f))goto done;
+    const char *json=strchr(f.bytes,'{');unsigned long revision=0;char extra;
+    const char *field=json?strstr(json,",\"revision\":"):NULL;
+    if(!field||sscanf(field,",\"revision\":%lu%c",&revision,&extra)!=2||extra!=','||!revision||revision>1000000)goto done;
+    record_name(revision,record);
+    if(bg_record_exact(source,record,json,f.size-(size_t)(json-f.bytes))||terminal_copy(source,to,record))goto done;
+    result=0;
+done:free(f.bytes);return result;
+}
+static int terminal_ready_copies(int source,int to,const char *up,const char *id){
+    int parent=checked_directory(up);if(parent<0)return -1;DIR *dir=directory_stream(parent);
+    if(!dir){close(parent);return -1;}struct dirent *e;int bad=0;errno=0;
+    while((e=readdir(dir))){
+        if(strcmp(e->d_name,"cycles")&&strncmp(e->d_name,"cycles-op-",10))continue;
+        char path[PATH_MAX];if(sc_join(path,up,e->d_name)){bad=1;break;}
+        int fd=checked_directory(path);bad=fd<0||terminal_ready_pin(source,to,fd,id);
+        if(fd>=0)close(fd);if(bad)break;errno=0;
+    }
+    if(!e&&errno)bad=1;closedir(dir);close(parent);return bad?-1:0;
+}
+static int terminal_summary_publish(int fd,const char *path,const char *old_tree,const char *inventory){
+    char scope[65],retained[65],text[512],sha[65],anchor[128];scope_digest(path,scope);
+    if(rs_history_tree_raw(fd,path,retained,0))return -1;
+    int n=snprintf(text,sizeof text,"BROray-terminal-summary/1\n%s\n%s\n%s\n%s\n",scope,old_tree,retained,inventory);
+    if(n<0||n>=(int)sizeof text)return -1;digest_bytes(text,(size_t)n,sha);
+    int a=snprintf(anchor,sizeof anchor,"BROray-terminal-summary-anchor/1\n%s\n",sha);
+    if(a<0||a>=(int)sizeof anchor||migration_record(fd,"retention.record",text,(size_t)n,1)||
+       migration_record(fd,"retention.anchor",anchor,(size_t)a,1)||fsync(fd))return -1;
+    char checked[65],prior[65];return terminal_summary_read(fd,path,checked,prior)==1&&
+        !strcmp(checked,old_tree)&&!strcmp(prior,inventory)?0:-1;
+}
+/* Reclaim only a tree already captured in the private retention namespace and
+ * checked against its complete pre-exchange digest. No public pathname is
+ * passed to unlink. The installation lifetime flock excludes updater writers;
+ * retirement, not an elapsed timeout, proves that their generation ended. */
+static int terminal_reclaim_contents(int fd,unsigned depth){
+    if(depth>1)return -1;DIR *dir=directory_stream(fd);if(!dir)return -1;
+    struct dirent *e;int bad=0;errno=0;
+    while((e=readdir(dir))){
+        if(!strcmp(e->d_name,".")||!strcmp(e->d_name,".."))continue;
+        struct stat before,after;if(fstatat(fd,e->d_name,&before,AT_SYMLINK_NOFOLLOW)||before.st_uid!=geteuid()){bad=1;break;}
+        if(S_ISDIR(before.st_mode)){
+            if(depth||strcmp(e->d_name,"ledger-witnesses")||(before.st_mode&07777)!=0700){bad=1;break;}
+            int child=openat(fd,e->d_name,O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+            bad=child<0||fstat(child,&after)||before.st_ino!=after.st_ino||before.st_dev!=after.st_dev||terminal_reclaim_contents(child,depth+1);
+            if(child>=0)close(child);if(bad||unlinkat(fd,e->d_name,AT_REMOVEDIR)){bad=1;break;}
+        }else{
+            if(before.st_nlink!=1||(!S_ISREG(before.st_mode)&&!(S_ISSOCK(before.st_mode)&&!strcmp(e->d_name,"control")))||
+               fstatat(fd,e->d_name,&after,AT_SYMLINK_NOFOLLOW)||!sc_same_record(&before,&after)||unlinkat(fd,e->d_name,0)){bad=1;break;}
+        }
+        errno=0;
+    }
+    if(!e&&errno)bad=1;closedir(dir);return bad||fsync(fd)?-1:0;
+}
+static int terminal_start_compact(int generation_fd,int retained_fd,const char *domain,const char *up,struct retired_record *r){
+    char last_name[64],startpath[PATH_MAX],hostpath[PATH_MAX],parent[PATH_MAX],path[PATH_MAX],stagepath[PATH_MAX];
+    char born[65],wanted[65],tree[65],inventory[65],scope[65],expected[512];
+    int start=-1,host=-1,witness=-1,starts=-1,stage=-1,to=-1,to_witness=-1,result=-1;
+    struct migration_file last,launch,transaction,host_record;memset(&last,0,sizeof last);memset(&launch,0,sizeof launch);
+    memset(&transaction,0,sizeof transaction);memset(&host_record,0,sizeof host_record);char *copy=NULL;
+    record_name(r->total,last_name);if(sc_file(generation_fd,last_name,&last))goto done;
+    if(strstr(last.bytes,"\"platformLaunch\":null")){result=0;goto done;}
+    if(sc_join(parent,up,"starts")||sc_join(startpath,parent,r->gen)||sc_join(path,up,"hosts")||sc_join(hostpath,path,r->gen))goto done;
+    starts=checked_directory(parent);start=checked_directory(startpath);host=checked_directory(hostpath);
+    if(starts<0||start<0||host<0||flock(host,LOCK_EX|LOCK_NB)||sc_field(last.bytes,"bootId",born,sizeof born)||
+       sc_file(start,"launch.record",&launch)||sc_field(last.bytes,"startIntentSha256",wanted,sizeof wanted)||strcmp(launch.sha,wanted)||
+       sc_file(start,"transaction.record",&transaction)||sc_field(last.bytes,"transactionRecordSha256",wanted,sizeof wanted)||strcmp(transaction.sha,wanted)||
+       sc_file(host,"host.record",&host_record)||sc_field(last.bytes,"serviceHostRecordSha256",wanted,sizeof wanted)||strcmp(host_record.sha,wanted))goto done;
+    char *args[]={NULL,"service-host",hostpath,(char*)domain,r->gen,r->sha,NULL};
+    if(service_retirement_text_at(host,args,host_record.bytes,host_record.size,expected,born)||bg_record_exact(host,"retirement.receipt",expected,strlen(expected)))goto done;
+    copy=strdup(launch.bytes);if(!copy)goto done;char *cursor=copy,*rows[10];
+    for(unsigned i=0;i<10;i++){rows[i]=sc_line(&cursor);if(!rows[i])goto done;}
+    if(strcmp(rows[2],domain)||strcmp(rows[3],r->gen)||!migration_path(rows[1])||!token(rows[8],96))goto done;
+    int nn=snprintf(path,sizeof path,"%s/opt/var/lib/broray/operations/%s/platform-replacement-start",strcmp(rows[1],"/")?rows[1]:"",rows[8]);
+    if(nn<0||nn>=(int)sizeof path)goto done;
+    int origin=checked_directory(path);
+    if(origin>=0){int bad=terminal_ready_pin(generation_fd,retained_fd,origin,r->gen);close(origin);if(bad)goto done;}
+    else if(errno!=ENOENT)goto done;
+    int compact=terminal_summary_read(start,startpath,tree,inventory);if(compact<0)goto done;
+    if(compact){if(strcmp(inventory,r->inventory))goto done;result=0;goto done;}
+    if(sc_join(path,startpath,"ledger-witnesses"))goto done;witness=checked_directory(path);
+    if(witness<0||ledger_inventory(witness,r->total,inventory)||rs_history_tree_raw(start,startpath,tree,0))goto done;
+    for(unsigned long rev=1;rev<=r->total;rev++){
+        char name[64],digest[65],*body=NULL;size_t size;record_name(rev,name);
+        if(safe_bytes_at(generation_fd,name,&body,&size))goto done;digest_bytes(body,size,digest);free(body);
+        int n=snprintf(expected,sizeof expected,"BROray-platform-ledger-witness/1\n%s\n%s\n%s\n%lu\n%s\n",r->gen,r->sha,born,rev,digest);
+        if(n<0||n>=(int)sizeof expected||bg_record_exact(witness,name,expected,(size_t)n))goto done;
+    }
+    scope_digest(startpath,scope);
+    if(snprintf(stagepath,sizeof stagepath,"%s/.broray-retention-%s",up,scope)>=(int)sizeof stagepath||mkdir(stagepath,0700))goto done;
+    stage=checked_directory(stagepath);if(stage<0||migration_record(stage,"before.tree",tree,64,1)||mkdirat(stage,"replacement",0700)||fsync(stage))goto done;
+    to=openat(stage,"replacement",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+    if(to<0||mkdirat(to,"ledger-witnesses",0700))goto done;
+    to_witness=openat(to,"ledger-witnesses",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);if(to_witness<0)goto done;
+    DIR *dir=directory_stream(start);if(!dir)goto done;struct dirent *e;int bad=0;errno=0;
+    while((e=readdir(dir))){
+        const char *name=e->d_name;if(!strcmp(name,".")||!strcmp(name,"..")||!strcmp(name,"ledger-witnesses"))continue;
+        if((strcmp(name,"launch.record")&&strcmp(name,"transaction.record")&&strcmp(name,"supervisor.log")&&strcmp(name,"service-host.log"))||terminal_copy(start,to,name)){bad=1;break;}errno=0;
+    }
+    if(!e&&errno)bad=1;closedir(dir);if(bad)goto done;
+    dir=directory_stream(retained_fd);if(!dir)goto done;errno=0;
+    while((e=readdir(dir))){
+        if(strcmp(e->d_name,"state.json")&&strncmp(e->d_name,"revision-",9))continue;
+        if(terminal_copy(witness,to_witness,e->d_name)){bad=1;break;}errno=0;
+    }
+    if(!e&&errno)bad=1;closedir(dir);if(bad||fsync(to_witness)||terminal_summary_publish(to,startpath,tree,r->inventory))goto done;
+    char checked[65];if(rs_history_tree_raw(start,startpath,checked,0)||strcmp(tree,checked)||installation_lock_valid()||
+       syscall(SYS_renameat2,starts,r->gen,stage,"replacement",2)||fsync(starts)||fsync(stage))goto done;
+    int captured=openat(stage,"replacement",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+    bad=captured<0||rs_history_tree_raw(captured,startpath,checked,0)||strcmp(tree,checked)||terminal_reclaim_contents(captured,0);
+    if(captured>=0)close(captured);
+    if(bad||unlinkat(stage,"replacement",AT_REMOVEDIR)||migration_record(stage,"reclaimed.receipt",tree,64,1)||fsync(stage))goto done;
+    result=0;
+done:
+    if(start>=0)close(start);if(host>=0)close(host);if(witness>=0)close(witness);if(starts>=0)close(starts);
+    if(stage>=0)close(stage);if(to>=0)close(to);if(to_witness>=0)close(to_witness);
+    free(last.bytes);free(launch.bytes);free(transaction.bytes);free(host_record.bytes);free(copy);return result;
+}
+/* First implementation deliberately separates publication from reclamation.
+ * The original directory is captured by atomic exchange and checked AFTER
+ * capture. Unknown bytes are retained under the private staging name. */
+static int terminal_compact_impl(int argc,char **argv,int emit){
+    if((argc!=7&&argc!=8)||!token(argv[3],64)||!hex64(argv[4])||!token(argv[5],96)||!token(argv[6],64))return 64;
+    int source=-1,stage=-1,replacement=-1,result=75;struct retired_record r;
+    char tree[65],inventory[65],scope[65],stagepath[PATH_MAX],up[PATH_MAX],leaf[65],last[64];
+    source=checked_directory(argv[2]);if(source<0||installation_claim(argv[2])||
+       retirement_valid(source,argv[2],&r)||strcmp(r.gen,argv[3])||strcmp(r.sha,argv[4])||
+       strcmp(r.op,argv[5])||strcmp(r.nonce,argv[6]))goto done;
+    int compact=terminal_summary_read(source,argv[2],tree,inventory);if(compact<0)goto done;
+    if(!compact&&rs_history_tree_raw(source,argv[2],tree,0))goto done;
+    strcpy(up,installation_path);char *slash=strrchr(up,'/');if(!slash||slash==up)goto done;*slash=0;
+    const char *name=strrchr(argv[2],'/');if(!name||!token(name+1,64))goto done;strcpy(leaf,name+1);
+    scope_digest(argv[2],scope);
+    if(snprintf(stagepath,sizeof stagepath,"%s/.broray-retention-%s",up,scope)>=(int)sizeof stagepath)goto done;
+    if(compact){
+        /* The compact projection alone does not prove reclamation. In
+         * particular, an interrupted capture may retain unknown bytes. */
+        stage=checked_directory(stagepath);
+        if(stage<0||bg_record_exact(stage,"before.tree",tree,64)||bg_exists(stage,"replacement")!=0||
+           bg_record_exact(stage,"reclaimed.receipt",tree,64))goto done;
+        result=0;goto done;
+    }
+    /* A pre-existing unfinished stage is preserved for explicit recovery. */
+    if(mkdir(stagepath,0700))goto done;stage=checked_directory(stagepath);if(stage<0)goto done;
+    if(migration_record(stage,"before.tree",tree,64,1)||mkdirat(stage,"replacement",0700)||fsync(stage))goto done;
+    replacement=openat(stage,"replacement",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);if(replacement<0)goto done;
+    record_name(r.total,last);
+    char ready[64]={0};
+    if(argc==8){unsigned long number=0;char tail;
+        if(sscanf(argv[7],"%lu%c",&number,&tail)!=1||!number||number>r.total)goto done;
+        record_name(number,ready);
+        if(strcmp(ready,"state.json")&&strcmp(ready,last)&&terminal_copy(source,replacement,ready))goto done;
+    }
+    if(terminal_copy(source,replacement,"state.json")||
+       (strcmp(last,"state.json")&&terminal_copy(source,replacement,last))||
+       terminal_copy(source,replacement,"retirement.receipt")||terminal_copy(source,replacement,"lifetime.lock")||
+       (!strcmp(strrchr(installation_path,'/')+1,"generations")&&terminal_ready_copies(source,replacement,up,r.gen))||
+       terminal_start_compact(source,replacement,argv[2],up,&r)||
+       terminal_summary_publish(replacement,argv[2],tree,r.inventory)||retirement_valid(replacement,argv[2],NULL))goto done;
+    char rechecked[65];if(rs_history_tree_raw(source,argv[2],rechecked,0)||strcmp(tree,rechecked)||installation_lock_valid())goto done;
+    if(syscall(SYS_renameat2,installation_fd,leaf,stage,"replacement",2)||fsync(installation_fd)||fsync(stage))goto done;
+    int captured=openat(stage,"replacement",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+    int bad=captured<0||rs_history_tree_raw(captured,argv[2],rechecked,0)||strcmp(tree,rechecked);
+    if(captured>=0)close(captured);if(bad)goto done;
+    captured=openat(stage,"replacement",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+    bad=captured<0||rs_history_tree_raw(captured,argv[2],rechecked,0)||strcmp(tree,rechecked)||
+        terminal_reclaim_contents(captured,0);
+    if(captured>=0)close(captured);
+    if(bad||unlinkat(stage,"replacement",AT_REMOVEDIR)||migration_record(stage,"reclaimed.receipt",tree,64,1)||fsync(stage))goto done;
+    result=0;
+done:
+    if(source>=0)close(source);if(stage>=0)close(stage);if(replacement>=0)close(replacement);
+    if(installation_lock>=0){close(installation_lock);installation_lock=-1;}
+    if(installation_fd>=0){close(installation_fd);installation_fd=-1;}
+    if(!result&&emit)puts("{\"ok\":true,\"phase\":\"TERMINAL_HISTORY_COMPACTED\",\"storageReclaimed\":true}");
+    if(result)fputs("TERMINAL_COMPACTION_UNCONFIRMED\n",stderr);
+    return result;
+}
+static int terminal_compact_main(int argc,char **argv){return terminal_compact_impl(argc,argv,1);}
+static void terminal_compact_installation(const char *up,const char *current){
+    char parent[PATH_MAX];if(sc_join(parent,up,"generations"))return;
+    int fd=checked_directory(parent);if(fd<0)return;DIR *dir=directory_stream(fd);
+    if(!dir){close(fd);return;}struct dirent *e;
+    while((e=readdir(dir))){
+        if(!token(e->d_name,64)||!strcmp(e->d_name,current))continue;
+        char path[PATH_MAX];if(sc_join(path,parent,e->d_name))break;
+        int domain=checked_directory(path);if(domain<0)continue;
+        struct retired_record r;int valid=retirement_valid(domain,path,&r)==0;close(domain);
+        if(!valid)continue; /* Admission still verifies unresolved histories. */
+        char *args[]={NULL,"compact-retired",path,r.gen,r.sha,r.op,r.nonce,NULL};
+        if(terminal_compact_impl(7,args,0))fputs("TERMINAL_HISTORY_RETAINED\n",stderr);
+    }
+    closedir(dir);close(fd);
 }
 /* Bind all pre-existing updater history and the already validated transaction.
  * B's own lifecycle directories are excluded by its independently derived ID.

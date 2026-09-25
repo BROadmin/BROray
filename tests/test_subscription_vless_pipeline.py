@@ -80,6 +80,338 @@ jq -nc --argjson rc "$rc" --arg code "${BRORAY_SUB_ERROR_CODE:-}" \
         self.assertEqual(len(nodes),1)
         self.assertEqual(nodes[0]['source']['subscriptionId'],'fixture')
         return nodes[0],self.generate(nodes[0])
+    def audit_vmess(self, **kw):
+        data=dict(v="2",ps="audit",add="vpn.example.invalid",port="443",
+                  id="11111111-2222-4333-8444-555555555555",aid=0,scy="auto",net="tcp",tls="tls")
+        data.update(kw)
+        return ("vmess://"+base64.b64encode(json.dumps(data).encode()).decode()).encode()
+    def test_combinations_hy2_optional_auth(self):
+        for uri in [b"hy2://vpn.example.invalid",b"hysteria2://@vpn.example.invalid/",b"hy2://[2001:db8::1]"]:
+            n,c=self.one(uri)
+            self.assertEqual(n["auth"],"");self.assertEqual(n["port"],443)
+            self.assertEqual(c["streamSettings"]["hysteriaSettings"]["auth"],"")
+    def test_combinations_hy2_gecko_hopping(self):
+        n,c=self.one(b"hy2://secret@vpn.example.invalid:443,5000-5010/?obfs=gecko&obfs-password=mask")
+        self.assertEqual(n["port"],443)
+        self.assertEqual(c["streamSettings"]["finalmask"],{"udp":[
+            {"type":"salamander","settings":{"password":"mask","packetSize":"512-1200"}},
+            {"type":"udphop","settings":{"mode":"intervalremote","interval":30,"remotePorts":"443,5000-5010"}}]})
+        n,c=self.one(b"hy2://[2001:db8::1]:5000-5010/")
+        self.assertEqual(n["port"],5000)
+        self.assertEqual(c["streamSettings"]["finalmask"]["udp"][0]["settings"]["remotePorts"],"5000-5010")
+    def test_combinations_hy2_hopping_rejections(self):
+        for port in ["0,443","443,65536","443,","443,,444","500-400","-443","abc","443x"]:
+            self.reject_uri(("hy2://host.invalid:"+port).encode())
+        for obfs in ["gecko","gecko&obfs-password=","other&obfs-password=p"]:
+            self.reject_uri(("hy2://host.invalid?obfs="+obfs).encode())
+        for mask in [{"udp":[{"type":"salamander","settings":{"password":"foreign"}}]},
+                     {"udp":[{"type":"udphop","settings":{"mode":"intervalremote","interval":30,"remotePorts":"444"}}]}]:
+            self.reject_uri(("hy2://host.invalid:443,444?obfs=gecko&obfs-password=p&"+urlencode({"fm":json.dumps(mask)},quote_via=quote)).encode())
+    def test_combinations_hy2_mask_composition(self):
+        fm={"udp":[{"type":"header-custom","settings":{"clients":[[{"packet":[1,2,3]}]]}}]}
+        n,c=self.one(("hy2://secret@host.invalid:443,444?obfs=salamander&obfs-password=p&"+urlencode({"fm":json.dumps(fm)},quote_via=quote)).encode())
+        masks=c["streamSettings"]["finalmask"]["udp"]
+        self.assertEqual([m["type"] for m in masks],["salamander","header-custom","udphop"])
+        self.assertEqual(masks[1],fm["udp"][0])
+    def test_combinations_xhttp_download(self):
+        for security in ["tls","reality"]:
+            p=profile("xhttp",security);stream(p)["xhttpSettings"]["mode"]="stream-up"
+            download=stream(profile("xhttp",security))
+            download.update(address="download.invalid",port=8443)
+            extra={"downloadSettings":download,"noSSEHeader":True}
+            stream(p)["xhttpSettings"]["extra"]=extra
+            n,c=self.one(p)
+            self.assertEqual(c["streamSettings"]["xhttpSettings"]["extra"],extra)
+            n,c=self.one(self.trojan_uri("type=xhttp&mode=stream-up&"+urlencode({"extra":json.dumps(extra)},quote_via=quote)))
+            self.assertEqual(c["streamSettings"]["xhttpSettings"]["extra"],extra)
+    def test_combinations_xhttp_tuning(self):
+        extra={"xPaddingBytes":"100-200","xPaddingObfsMode":True,"xPaddingKey":"pad",
+               "xPaddingHeader":"X-Pad","xPaddingPlacement":"header","xPaddingMethod":"tokenish",
+               "uplinkHTTPMethod":"GET","sessionIDPlacement":"cookie","sessionIDKey":"session",
+               "sessionIDTable":"hex","sessionIDLength":"16-20","seqPlacement":"query","seqKey":"seq",
+               "uplinkDataPlacement":"header","uplinkDataKey":"X-Data","uplinkChunkSize":"100-200",
+               "serverMaxHeaderBytes":8192}
+        p=profile("xhttp");stream(p)["xhttpSettings"].update(mode="packet-up",extra=extra)
+        for payload in [p,self.vless_uri("type=xhttp&mode=packet-up&security=tls&"+urlencode({"extra":json.dumps(extra)},quote_via=quote)),
+                        self.audit_vmess(net="xhttp",type="packet-up",extra=extra)]:
+            n,c=self.one(payload);self.assertEqual(c["streamSettings"]["xhttpSettings"]["extra"],extra)
+    def test_combinations_xhttp_invalid(self):
+        for extra in [{"downloadSettings":{"network":"tcp"}},
+                      {"downloadSettings":{"network":"xhttp","sockopt":{"dialerProxy":"foreign"}}},
+                      {"downloadSettings":{"network":"xhttp","xhttpSettings":{"extra":{"downloadSettings":{"network":"xhttp"}}}}},
+                      {"sessionIDTable":"hex","sessionIDLength":1},{"sessionIDTable":"é","sessionIDLength":20},
+                      {"uplinkHTTPMethod":"GET"},{"uplinkDataPlacement":"cookie"},{"seqPlacement":"bad"},
+                      {"xPaddingMethod":"bad"},{"serverMaxHeaderBytes":-1}]:
+            self.reject_uri(self.vless_uri("type=xhttp&security=tls&"+urlencode({"extra":json.dumps(extra)},quote_via=quote)))
+        download=stream(profile("xhttp"))
+        self.reject_uri(self.vless_uri("type=xhttp&mode=stream-one&security=tls&"+urlencode({"extra":json.dumps({"downloadSettings":download})},quote_via=quote)))
+    def test_combinations_raw_full_header(self):
+        header={"type":"http","request":{"method":"POST","version":"1.1","path":["/a","/b"],
+                    "headers":{"Host":["front.invalid"],"User-Agent":["test-agent"],"X-Test":["a+b"]}},
+                "response":{"status":"200","reason":"OK","version":"1.1","headers":{"X-Reply":["yes"]}}}
+        p=profile("raw");stream(p)["rawSettings"]["header"]=header
+        n,c=self.one(p);self.assertEqual(c["streamSettings"]["rawSettings"]["header"],header)
+        self.assertEqual(n["transport"]["header"],header)
+        for q in ["type=ws", "type=raw&host=conflict", "type=raw&path=/conflict"]:
+            self.reject_uri(self.vless_uri(q+"&security=tls&"+urlencode({"header":json.dumps(header)},quote_via=quote)))
+        for bad in [{"type":"http","request":{"headers":{"Host":None}}},{"type":"http","request":{"unknown":1}},
+                    {"type":"none","request":{"method":"POST"}}]:
+            self.reject_uri(self.vless_uri("security=tls&"+urlencode({"header":json.dumps(bad)},quote_via=quote)))
+    def json_protocol(self,protocol,network="raw",security="tls",flat=False):
+        p=profile(network,security);o=outbound(p);o["protocol"]=protocol
+        endpoint={"address":"vpn.example.invalid","port":443}
+        if protocol=="vmess":
+            account={"id":"11111111-2222-4333-8444-555555555555","security":"chacha20-poly1305","alterId":0}
+            o["settings"]=(endpoint|account) if flat else {"vnext":[endpoint|{"users":[account]}]}
+        else:
+            endpoint["password"]="secret+/@:#%"
+            if protocol=="shadowsocks":endpoint["method"]="aes-128-gcm"
+            o["settings"]=endpoint if flat else {"servers":[endpoint]}
+        return p
+    def test_combinations_json_vmess(self):
+        for net,sec,flat in [("raw","tls",True),("ws","tls",False),("grpc","tls",False),("xhttp","reality",False),("kcp","none",False)]:
+            p=self.json_protocol("vmess",net,sec,flat)
+            if net=="kcp":stream(p)["kcpSettings"]={"mtu":1350,"tti":20}
+            n,c=self.one(p);self.assertEqual(n["protocol"],"vmess")
+            self.assertEqual(c["settings"]["vnext"][0]["users"][0]["security"],"chacha20-poly1305")
+    def test_combinations_json_trojan(self):
+        for net,sec,flat in [("raw","tls",True),("grpc","reality",False),("xhttp","tls",False),("httpupgrade","tls",False)]:
+            p=self.json_protocol("trojan",net,sec,flat)
+            if net=="xhttp":stream(p)["xhttpSettings"]["extra"]={"noSSEHeader":True}
+            n,c=self.one(p);self.assertEqual(n["password"],"secret+/@:#%")
+            self.assertEqual(c["settings"]["servers"][0]["password"],n["password"])
+    def test_combinations_json_shadowsocks(self):
+        for flat,method,password in [(False,"aes-128-gcm","secret+/@:#%"),(True,"2022-blake3-aes-128-gcm",base64.b64encode(b"a"*16).decode())]:
+            p=self.json_protocol("shadowsocks","raw","none",flat)
+            st=outbound(p)["settings"];endpoint=st if flat else st["servers"][0]
+            endpoint.update(method=method,password=password)
+            n,c=self.one(p);self.assertEqual(n["password"],password);self.assertEqual(n["method"],method)
+            self.assertEqual(c["protocol"],"shadowsocks")
+    def test_combinations_json_atomic_rejection(self):
+        p=self.json_protocol("vmess");users=outbound(p)["settings"]["vnext"][0]["users"]
+        users.append(dict(users[0],alterId=1))
+        r,n=self.extract(p);self.assertEqual(r["accepted"],0);self.assertEqual(n,[])
+        for protocol in ["vmess","trojan","shadowsocks"]:
+            p=self.json_protocol(protocol,"raw","none" if protocol=="shadowsocks" else "tls")
+            outbound(p)["proxySettings"]={"tag":"foreign"}
+            r,n=self.extract(p);self.assertEqual(r["accepted"],0)
+        p=self.json_protocol("shadowsocks","ws","tls")
+        r,n=self.extract(p);self.assertEqual(r["accepted"],0)
+    def test_combinations_json_mixed_profile(self):
+        p=profile();p["outbounds"] += [outbound(self.json_protocol("vmess")),outbound(self.json_protocol("trojan")),outbound(self.json_protocol("shadowsocks","raw","none"))]
+        p.update(dns={"servers":["foreign.invalid"]},routing={"domainStrategy":"AsIs"},inbounds=[{"port":9999}])
+        r,nodes=self.extract(p);self.assertEqual(r["accepted"],4,r)
+        self.assertEqual({n["protocol"] for n in nodes},{"vless","vmess","trojan","shadowsocks"})
+        for n in nodes:self.generate(n)
+    def test_combinations_legacy_vmess_has_no_prior_header(self):
+        header={"type":"http","request":{"headers":{"Host":["previous.invalid"]}}}
+        first=self.vless_uri("security=tls&"+urlencode({"header":json.dumps(header)},quote_via=quote)).decode()
+        second=self.audit_vmess().decode()
+        r=self.shell('. "$BRORAY_ROOT/lib/server-import.sh"; broray_server_import_dispatch "$1" subscription fixture 1; broray_server_import_dispatch "$2" subscription fixture 2',first,second)
+        self.assertEqual(r.returncode,0,r.stderr)
+        n=json.loads((self.app/"servers/subscription-fixture-0002.json").read_bytes())
+        self.assertNotIn("header",n["transport"])
+        c=self.generate(n);self.assertEqual(c["streamSettings"]["rawSettings"]["header"],{"type":"none"})
+    def test_combinations_new_fields_dedupe(self):
+        pairs=[]
+        for key in ["Host","User-Agent"]:
+            pairs.append([self.vless_uri("security=tls&"+urlencode({"header":json.dumps({"type":"http","request":{"headers":{key:[v]}}})},quote_via=quote)) for v in ["a.invalid","b.invalid"]])
+        pairs.append([("hy2://host.invalid:"+ports).encode() for ports in ["443,5000","443,5001"]])
+        pairs.append([("hy2://host.invalid?obfs="+obfs+"&obfs-password=p").encode() for obfs in ["salamander","gecko"]])
+        pairs.append([self.vless_uri("type=xhttp&security=tls&"+urlencode({"extra":json.dumps({"sessionIDKey":v})},quote_via=quote)) for v in ["a","b"]])
+        for pair in pairs:
+            r,nodes=self.extract(b"\n".join(pair));self.assertEqual(r["accepted"],2,r)
+            for n in nodes:self.generate(n)
+        r,nodes=self.extract(b"\n".join([pairs[0][0],pairs[0][0]]))
+        self.assertEqual(r["accepted"],1,r);self.assertEqual(r["rejected"],1,r)
+    def test_combinations_finalmask_tls_reality(self):
+        fm={"tcp":[{"type":"fragment","settings":{"packets":"tlshello","length":"100-200","delay":"10-20"}},
+                   {"type":"header-custom","settings":{"clients":[[{"packet":[1,2,3]}]]}}]}
+        for protocol in ["vless","vmess","trojan"]:
+            for security in ["tls","reality"]:
+                p=profile("raw",security) if protocol=="vless" else self.json_protocol(protocol,"raw",security)
+                stream(p)["finalmask"]=fm
+                n,c=self.one(p);self.assertEqual(c["streamSettings"]["finalmask"],fm)
+    def test_audit_tls_fields_preserved(self):
+        values=dict(ech="cloudflare-ech.com",pcs="ab"*32,vcn="cert.invalid")
+        q=urlencode(values)
+        for uri in [self.vless_uri("security=tls&"+q),self.trojan_uri(q),
+                    self.audit_vmess(**values), ("hy2://auth@vpn.example.invalid?"+q).encode()]:
+            with self.subTest(uri=uri.split(b":")[0]):
+                n,c=self.one(uri)
+                for key,value in [("echConfigList",values["ech"]),("pinnedPeerCertSha256",values["pcs"]),("verifyPeerCertByName",values["vcn"])]:
+                    self.assertEqual(n["tls"].get(key),value)
+                    self.assertEqual(c["streamSettings"]["tlsSettings"].get(key),value)
+    def test_audit_vless_reality_pqv(self):
+        pqv="A"*2603
+        n,c=self.one(self.vless_uri(urlencode(dict(security="reality",sni="front.invalid",pbk="A"*43,pqv=pqv))))
+        self.assertEqual(n["reality"].get("mldsa65Verify"),pqv)
+        self.assertEqual(c["streamSettings"]["realitySettings"].get("mldsa65Verify"),pqv)
+        self.reject_uri(self.vless_uri("security=reality&sni=front.invalid&pbk="+"A"*43+"&pqv=bad"))
+        self.reject_uri(self.vless_uri("security=tls&pqv="+pqv))
+    def test_audit_finalmask_preserved(self):
+        fm={"tcp":[{"type":"fragment","settings":{"packets":"tlshello","length":"100-200","delay":"10-20"}}]}
+        for uri in [self.vless_uri("security=tls&"+urlencode(dict(fm=json.dumps(fm)),quote_via=quote)),
+                    self.trojan_uri(urlencode(dict(fm=json.dumps(fm)),quote_via=quote)),self.audit_vmess(fm=fm)]:
+            n,c=self.one(uri)
+            self.assertEqual(c["streamSettings"].get("finalmask"),fm)
+        for fm in ["{broken","[]","null",'{"tcp":[{"type":"header-http"}]}']:
+            self.reject_uri(self.vless_uri("security=tls&"+urlencode(dict(fm=fm))))
+    def test_audit_trojan_root_and_ipv6(self):
+        for uri,address in [(b"trojan://secret@vpn.example.invalid:443/?security=tls","vpn.example.invalid"),
+                            (b"trojan://secret@[2001:db8::1]:443/?security=tls","2001:db8::1")]:
+            n,c=self.one(uri);self.assertEqual(n["address"],address);self.assertEqual(n["port"],443)
+        self.reject_uri(b"trojan://secret@vpn.example.invalid:443/non-root?security=tls")
+    def test_audit_trojan_ambiguous_query(self):
+        for q in ["sni=a&sni=b","type=grpc&authority=a&host=b","serviceName=a&service_name=b",
+                  "security=tls&security=reality","allowInsecure=false&allowInsecure=true","%73ni=a&sni=b"]:
+            self.reject_uri(self.trojan_uri(q))
+        n,c=self.one(self.trojan_uri("type=grpc&authority=front.invalid&host=front.invalid"))
+        self.assertEqual(c["streamSettings"]["grpcSettings"]["authority"],"front.invalid")
+    def test_audit_trojan_raw_header(self):
+        n,c=self.one(self.trojan_uri("headerType=http&host=front.invalid&path=%2Fapi"))
+        h=c["streamSettings"]["rawSettings"]["header"]
+        self.assertEqual(h["type"],"http");self.assertEqual(h["request"]["path"],["/api"])
+        self.assertEqual(h["request"]["headers"]["Host"],["front.invalid"])
+        self.reject_uri(self.trojan_uri("type=ws&headerType=http"))
+    def test_audit_vmess_unsafe_and_extra_rejected(self):
+        for kw in [dict(insecure="1"),dict(allowInsecure=True),dict(allow_insecure=True),
+                   dict(allowInsecure=False,insecure=1),dict(net="xhttp",extra="{broken"),
+                   dict(net="xhttp",extra=[]),dict(net="tcp",extra={"noSSEHeader":True})]:
+            self.reject_uri(self.audit_vmess(**kw))
+        n,c=self.one(self.audit_vmess(net="xhttp",extra={"noSSEHeader":True}))
+        self.assertEqual(c["streamSettings"]["xhttpSettings"]["extra"],{"noSSEHeader":True})
+    def test_audit_new_field_validation(self):
+        for q in ["pcs=bad","pcs="+"ab"*32+"&pcs="+"cd"*32,"ech=a&ech=b", "vcn=a&vcn=b"]:
+            self.reject_uri(self.vless_uri("security=tls&"+q))
+        self.reject_uri(self.vless_uri("security=none&pcs="+"ab"*32))
+        self.reject_uri(self.audit_vmess(pcs=["ab"*32]))
+    def test_audit_new_fields_exact_dedupe(self):
+        for field,a,b in [("pcs","ab"*32,"cd"*32),("vcn","a.invalid","b.invalid"),("ech","a.invalid","b.invalid")]:
+            uris=[self.vless_uri("security=tls&"+urlencode({field:v})) for v in [a,b]]
+            r,nodes=self.extract(b"\n".join(uris));self.assertEqual(r["accepted"],2,r)
+            for n in nodes:self.generate(n)
+    def test_audit_no_parameter_leak_between_imports(self):
+        first=self.vless_uri("security=tls&pcs="+"ab"*32).decode();second=self.trojan_uri().decode()
+        r=self.shell('. "$BRORAY_ROOT/lib/server-import.sh"; broray_server_import_dispatch "$1" subscription fixture 1; broray_server_import_dispatch "$2" subscription fixture 2',first,second)
+        self.assertEqual(r.returncode,0,r.stderr)
+        n=json.loads((self.app/"servers/subscription-fixture-0002.json").read_bytes())
+        self.assertNotIn("pinnedPeerCertSha256",n["tls"]);self.generate(n)
+    def test_audit_json_stream_fields(self):
+        p=profile("raw","tls");fm={"tcp":[{"type":"fragment","settings":{"packets":"tlshello","length":"100-200","delay":"10-20"}}]}
+        stream(p)["tlsSettings"].update(echConfigList="cloudflare-ech.com",pinnedPeerCertSha256="ab"*32,verifyPeerCertByName="cert.invalid")
+        stream(p)["finalmask"]=fm
+        n,c=self.one(p)
+        self.assertEqual(c["streamSettings"]["finalmask"],fm)
+        for key in ["echConfigList","pinnedPeerCertSha256","verifyPeerCertByName"]:
+            self.assertEqual(c["streamSettings"]["tlsSettings"][key],stream(p)["tlsSettings"][key])
+        p=profile("grpc","reality");stream(p)["realitySettings"]["mldsa65Verify"]="A"*2603
+        n,c=self.one(p);self.assertEqual(c["streamSettings"]["realitySettings"]["mldsa65Verify"],"A"*2603)
+    def test_audit_vmess_modes_preserved(self):
+        for mode in ["gun","multi"]:
+            n,c=self.one(self.audit_vmess(net="grpc",type=mode,path="api",host="front.invalid"))
+            self.assertEqual(c["streamSettings"]["grpcSettings"].get("multiMode"),mode=="multi")
+            self.assertEqual(c["streamSettings"]["grpcSettings"]["serviceName"],"api")
+        self.reject_uri(self.audit_vmess(net="grpc",type="multi",mode="gun"))
+    def test_audit_failed_parse_after_valid_not_saved(self):
+        first=self.trojan_uri("pcs="+"ab"*32).decode()
+        second=self.trojan_uri("pcs=a&pcs=b").decode()
+        r=self.shell('. "$BRORAY_ROOT/lib/server-import.sh"; broray_server_import_dispatch "$1" subscription fixture 1; broray_server_import_dispatch "$2" subscription fixture 2',first,second)
+        self.assertNotEqual(r.returncode,0)
+        self.assertEqual(len(list((self.app/"servers").glob("*.json"))),1)
+    def test_audit_vmess_xhttp_type_mode(self):
+        # v2rayN exports XhttpMode in the legacy JSON field "type".
+        n,c=self.one(self.audit_vmess(net="xhttp",type="stream-one",path="/api"))
+        self.assertEqual(n["transport"]["mode"],"stream-one")
+        self.assertEqual(c["streamSettings"]["xhttpSettings"]["mode"],"stream-one")
+        self.reject_uri(self.audit_vmess(net="xhttp",type="stream-one",mode="packet-up"))
+        self.reject_uri(self.audit_vmess(net="xhttp",type="invalid"))
+    def test_expansion_modern_vmess(self):
+        for network,security in [("raw","none"),("raw","tls"),("grpc","tls"),("ws","tls"),("httpupgrade","tls"),("xhttp","tls"),("raw","reality")]:
+            q=dict(type=network,security=security,encryption="auto",sni="front.invalid")
+            if security=="reality":q["pbk"]="A"*43
+            n,c=self.one(("vmess://11111111-2222-4333-8444-555555555555@vpn.example.invalid:443/?"+urlencode(q)).encode())
+            self.assertEqual(n["protocol"],"vmess");self.assertEqual(n["alterId"],0)
+            self.assertEqual(c["settings"]["vnext"][0]["users"][0]["security"],"auto")
+        for query in ["encryption=bad","encryption=auto&encryption=none","flow=xtls-rprx-vision","aid=1","allowInsecure=true"]:
+            self.reject_uri(("vmess://11111111-2222-4333-8444-555555555555@vpn.example.invalid:443?"+query).encode())
+    def test_expansion_vision_udp443(self):
+        for security in ["tls","reality"]:
+            p=profile("raw",security);user(p)["flow"]="xtls-rprx-vision-udp443"
+            q=dict(security=security,flow="xtls-rprx-vision-udp443",sni="front.invalid")
+            if security=="reality":q["pbk"]="A"*43
+            for payload in [p,self.vless_uri(urlencode(q))]:
+                n,c=self.one(payload);self.assertEqual(c["settings"]["vnext"][0]["users"][0]["flow"],q["flow"])
+        self.reject_uri(self.vless_uri("type=ws&security=tls&flow=xtls-rprx-vision-udp443"))
+    def test_expansion_mkcp(self):
+        for proto in ["vless","vmess"]:
+            q=dict(type="kcp",security="none",mtu="1350",tti="20",seed="secret+seed",headerType="srtp")
+            n,c=self.one((proto+"://11111111-2222-4333-8444-555555555555@vpn.example.invalid:443?"+urlencode(q)).encode())
+            st=c["streamSettings"];self.assertEqual(st["network"],"kcp")
+            self.assertEqual(st["kcpSettings"],{"mtu":1350,"tti":20})
+            # Xray FinalMask applies the first mask as the innermost layer.
+            self.assertEqual(st["finalmask"]["udp"],[{"type":"mkcp-legacy","settings":{"value":"secret+seed"}},{"type":"mkcp-legacy","settings":{"header":"srtp"}}])
+        for q in ["type=kcp&mtu=bad","type=kcp&mtu=20","type=kcp&tti=9","type=kcp&tti=1001","type=kcp&security=reality&pbk="+"A"*43,"type=kcp&headerType=bogus"]:
+            self.reject_uri(self.vless_uri(q))
+    def test_expansion_mkcp_legacy_vmess(self):
+        n,c=self.one(self.audit_vmess(net="kcp",tls="",type="wechat-video",path="legacy-seed"))
+        self.assertEqual(c["streamSettings"]["finalmask"]["udp"],[{"type":"mkcp-legacy","settings":{"value":"legacy-seed"}},{"type":"mkcp-legacy","settings":{"header":"wechat"}}])
+    def test_expansion_trojan_reality(self):
+        for network in ["raw","grpc","xhttp"]:
+            n,c=self.one(self.trojan_uri(urlencode(dict(type=network,security="reality",sni="front.invalid",pbk="A"*43))))
+            self.assertEqual(c["streamSettings"]["realitySettings"]["publicKey"],"A"*43)
+        self.reject_uri(self.trojan_uri("security=reality&type=ws&sni=front.invalid&pbk="+"A"*43))
+    def test_expansion_mkcp_json_and_masks(self):
+        p=profile("raw","none");stream(p).clear()
+        stream(p).update(network="kcp",security="none",kcpSettings={"mtu":1400,"seed":"seed","header":{"type":"srtp"}})
+        n,c=self.one(p)
+        self.assertEqual(c["streamSettings"]["kcpSettings"],{"mtu":1400})
+        self.assertEqual(c["streamSettings"]["finalmask"]["udp"],[{"type":"mkcp-legacy","settings":{"value":"seed"}},{"type":"mkcp-legacy","settings":{"header":"srtp"}}])
+        for header in ["none","utp","dtls","wireguard","dns"]:
+            q=dict(type="kcp",security="none",headerType=header)
+            if header=="dns":q["host"]="mask.invalid"
+            n,c=self.one(self.vless_uri(urlencode(q)))
+            masks=c["streamSettings"]["finalmask"]["udp"]
+            self.assertEqual(masks[0],{"type":"mkcp-legacy","settings":{}})
+            if header!="none":self.assertEqual(masks[1]["settings"]["header"],header)
+        n,c=self.one(self.trojan_uri("type=kcp&security=tls&seed=secret&headerType=none"))
+        self.assertEqual(c["streamSettings"]["network"],"kcp")
+        self.assertEqual(c["streamSettings"]["security"],"tls")
+    def test_expansion_mkcp_identity(self):
+        uris=[self.vless_uri("type=kcp&security=none&seed="+seed) for seed in ["one","two"]]
+        result,nodes=self.extract(b"\n".join(uris))
+        self.assertEqual(result["accepted"],2,result)
+        for n in nodes:self.generate(n)
+        self.reject_uri(self.audit_vmess(net="kcp",tls="",path="one",seed="two"))
+        for key in ["congestion","readBufferSize","writeBufferSize"]:
+            self.reject_uri(self.vless_uri("type=kcp&"+key+"=1"))
+            self.reject_uri(self.audit_vmess(net="kcp",tls="",**{key:1}))
+    def test_expansion_preserves_existing_grpc_default(self):
+        n,c=self.one(self.vless_uri("security=tls&type=grpc&serviceName=api"))
+        self.assertEqual(n["transport"]["mode"],"auto")
+        self.assertEqual(n["xhttp"]["mode"],"auto")
+        self.assertFalse(c["streamSettings"]["grpcSettings"]["multiMode"])
+    def test_expansion_modern_vmess_cipher_and_fragment(self):
+        prefix="vmess://11111111-2222-4333-8444-555555555555@vpn.example.invalid:443?"
+        for cipher in ["auto","aes-128-gcm","chacha20-poly1305","none"]:
+            n,c=self.one((prefix+"security=tls&encryption="+cipher).encode())
+            self.assertEqual(c["settings"]["vnext"][0]["users"][0]["security"],cipher)
+        self.one(self.audit_vmess()+b"#name@domain")
+    def test_expansion_parameter_loss_rejected(self):
+        for q in ["type=raw&seed=secret","type=ws&headerType=http","type=xhttp&mode=invalid",
+                  "type=grpc&mode=invalid","type=raw&extra=%7B%22noSSEHeader%22%3Atrue%7D",
+                  "security=tls&insecure=true"]:
+            self.reject_uri(self.vless_uri(q))
+            self.reject_uri(self.vless_uri(q).replace(b"vless://",b"vmess://",1))
+    def test_expansion_vless_encryption_padding(self):
+        for padding in ["100-100-200", "100-100-200.50-0-10.50-0-20"]:
+            encryption="mlkem768x25519plus.native.0rtt."+padding+"."+"A"*43
+            p=profile("raw","tls");user(p)["encryption"]=encryption
+            for payload in [p,self.vless_uri("security=tls&encryption="+encryption)]:
+                n,c=self.one(payload)
+                self.assertEqual(c["settings"]["vnext"][0]["users"][0]["encryption"],encryption)
+        for suffix in ["100-1-20."+"A"*43,"100-200-100."+"A"*43,"bad."+"A"*43,"A"*43+".100-100-200"]:
+            self.reject_uri(self.vless_uri("security=tls&encryption=mlkem768x25519plus.native.0rtt."+suffix))
     def test_tcp_tls(self):
         n,c=self.one(profile());self.assertEqual(c['streamSettings']['network'],'raw')
         self.assertEqual(c['streamSettings']['tlsSettings']['serverName'],'sni.example.invalid')
@@ -139,6 +471,26 @@ jq -nc --argjson rc "$rc" --arg code "${BRORAY_SUB_ERROR_CODE:-}" \
                 self.assertEqual(n['transport']['host'],'front.invalid')
                 self.assertEqual(c['streamSettings']['grpcSettings']['authority'],'front.invalid')
         self.reject_uri(self.vless_uri('security=tls&type=grpc&host=a.invalid&authority=b.invalid'))
+    def test_vless_encrypted_vision_xhttp_uri_and_json(self):
+        encryption='mlkem768x25519plus.random.0rtt.'+'A'*43
+        payload=profile('xhttp','reality')
+        user(payload).update(encryption=encryption,flow='xtls-rprx-vision')
+        query=urlencode(dict(type='xhttp',security='reality',sni='front.invalid',pbk='A'*43,
+                            encryption=encryption,flow='xtls-rprx-vision'))
+        for value in [payload,self.vless_uri(query)]:
+            n,c=self.one(value)
+            self.assertEqual(n['encryption'],encryption)
+            self.assertEqual(n['flow'],'xtls-rprx-vision')
+            self.assertEqual(c['settings']['vnext'][0]['users'][0]['encryption'],encryption)
+            self.assertEqual(c['settings']['vnext'][0]['users'][0]['flow'],'xtls-rprx-vision')
+    def test_vless_invalid_encryption_rejected_uri_and_json(self):
+        for encryption in ['garbage','mlkem768x25519plus.random.0rtt.bad',
+                           'mlkem768x25519plus.other.0rtt.'+'A'*43,
+                           'mlkem768x25519plus.random.9rtt.'+'A'*43]:
+            self.reject_uri(self.vless_uri(urlencode(dict(encryption=encryption))))
+            payload=profile('xhttp','reality');user(payload)['encryption']=encryption
+            result,nodes=self.extract(payload)
+            self.assertEqual(result['accepted'],0,result);self.assertEqual(nodes,[])
     def test_vless_security_matrix(self):
         for network,security,flow in [('raw','tls',''),('raw','reality',''),
               ('raw','tls','xtls-rprx-vision'),('raw','reality','xtls-rprx-vision'),

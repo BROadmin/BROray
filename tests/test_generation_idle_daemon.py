@@ -15,6 +15,9 @@ class IdleDaemon(Generation):
  def setUp(self):
   super().setUp();self.domain.rmdir()
   self.root=self.home/'r';self.root.mkdir(mode=0o700)
+  self.ram=self.root/'tmp';self.ram.mkdir(mode=0o700);self.ram_mounted=False
+  subprocess.run(['mount','-t','tmpfs','-o','mode=1777,size=16m','tmpfs',str(self.ram)],check=True,timeout=5)
+  self.ram_mounted=True;self.addCleanup(self.unmount_ram)
   self.updater=self.root/'opt/var/lib/broray-updater';self.updater.mkdir(parents=True,mode=0o700)
   (self.updater/'generations').mkdir(mode=0o700);(self.updater/'starts').mkdir(mode=0o700)
   self.gid='g1';self.domain=self.updater/'generations'/self.gid;self.domain.mkdir(mode=0o700)
@@ -42,6 +45,15 @@ class IdleDaemon(Generation):
    self.assertEqual(curl.read_bytes(),body);curl.unlink()
    if created:shim.rmdir()
   self.addCleanup(remove_tripwire)
+ def unmount_ram(self):
+  if self.ram_mounted:
+   subprocess.run(['umount',str(self.ram)],check=True,timeout=5);self.ram_mounted=False
+ def tearDown(self):
+  # Stop only our exact Popen fixtures before releasing their temporary mount.
+  for p in reversed(self.processes):
+   if p.poll() is None:p.kill()
+   p.wait(timeout=3)
+  self.unmount_ram();super().tearDown()
  def test_empty_queue_has_no_periodic_children_or_ledger_growth(self):
   data=UPDATER.read_bytes();self.assertTrue(data.endswith(b'main "$@"\n'))
   ready=self.updater/'daemon.ready';log=open(self.home/'native.log','wb');self.logs.append(log)
@@ -60,8 +72,13 @@ class IdleDaemon(Generation):
   self.assertFalse((self.home/'unexpected-curl').exists())
   self.assertEqual(after['revision'],before['revision'],'idle daemon created process-lifecycle evidence without a request')
   self.assertEqual(files_after,files_before)
-  self.assertEqual(len(after['children']),1)
+  self.assertEqual(len(self.live_state()['children']),1)
   self.assertEqual(self.call('STOP').returncode,0);self.stopped()
+  records=list(self.domain.glob('*.json'));witnesses=list((self.startdir/'ledger-witnesses').glob('*.json'))
+  self.assertEqual({p.name for p in records},{p.name for p in witnesses})
+  total=sum(p.stat().st_size for p in records+witnesses)
+  self.assertLessEqual(total,65536)
+  print('PLATFORM_CHECKPOINT_SIZE '+json.dumps(dict(records=len(records),witnesses=len(witnesses),bytes=total)),flush=True)
 
 if __name__=='__main__':
  names=[n for n in IdleDaemon.__dict__ if n.startswith('test_')]

@@ -43,6 +43,8 @@ broray_server_validate__shadowed_legacy_1_unused() {
 
     broray_json_validate "$validation_file"
 
+    broray_server_stream_fields_valid "$validation_file" ||
+        broray_die "сервер содержит неподдерживаемые параметры TLS/REALITY/FinalMask"
     jq -e '
         (.schemaVersion == 2) and
         (((.id | type) == "string") and ((.id | length) > 0)) and
@@ -231,6 +233,8 @@ broray_server_validate()
 
     broray_json_validate "$validation_file"
 
+    broray_server_stream_fields_valid "$validation_file" ||
+        broray_die "сервер содержит неподдерживаемые параметры TLS/REALITY/FinalMask"
     jq -e '
         (.schemaVersion == 2) and
         (((.id | type) == "string") and ((.id | length) > 0)) and
@@ -242,7 +246,7 @@ broray_server_validate()
             if .protocol == "trojan" then
                 (((.password | type) == "string") and ((.password | length) > 0))
             elif .protocol == "hysteria2" then
-                (((.auth | type) == "string") and ((.auth | length) > 0)) and
+                ((.auth | type) == "string") and
                 (.network == "hysteria") and
                 (.security == "tls") and
                 ((.hysteria | type) == "object") and
@@ -263,13 +267,31 @@ broray_server_validate()
                 (.network == "raw") and
                 (.security == "none")
             elif .protocol == "vless" then
+                ((.encryption // "none") | (. == "none" or (
+        split(".") as $p |
+        ($p | length) >= 4 and $p[0] == "mlkem768x25519plus" and
+        ($p[1] == "native" or $p[1] == "xorpub" or $p[1] == "random") and
+        ($p[2] == "0rtt" or $p[2] == "1rtt") and
+        (([range(3;($p|length)) | select(($p[.]|length) >= 20)][0]) as $key |
+         $key != null and
+         all($p[$key:][]; (length == 43 or length == 1579) and
+             all(explode[]; (. >= 48 and . <= 57) or (. >= 65 and . <= 90) or (. >= 97 and . <= 122) or . == 45 or . == 95)) and
+         ($p[3:$key] as $padding |
+          if ($padding|length) == 0 then true else
+            all($padding[]; length < 20 and (split("-") | length == 3 and
+              all(.[]; length > 0 and all(explode[]; . >= 48 and . <= 57)))) and
+            ($padding | map(split("-") | map(tonumber)) |
+              all(.[]; all(.[]; . >= 0 and . <= 2147483647) and .[1] <= .[2]) and
+              .[0][0] >= 100 and .[0][1] >= 35 and .[0][2] >= 35 and
+              ([to_entries[] | select(.key % 2 == 0) | .value[2]] | add) <= 65553)
+          end))))) and
                 (.security != "reality" or .network == "raw" or .network == "grpc" or .network == "xhttp") and
                 (((.uuid | type) == "string") and ((.uuid | length) > 0)) and
                 (
                     (.flow == null) or
                     (
-                        .flow == "xtls-rprx-vision" and
-                        .network == "raw" and
+                        (.flow == "xtls-rprx-vision" or .flow == "xtls-rprx-vision-udp443") and
+                        (.network == "raw" or (.encryption // "none") != "none") and
                         (.security == "reality" or .security == "tls")
                     )
                 )

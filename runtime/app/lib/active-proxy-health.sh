@@ -38,11 +38,34 @@ broray_active_proxy_measure()
         .status==(if $rc==0 then "healthy" elif $rc==1 then "unhealthy" else "unknown" end) and
         (.checkedAt|type)=="string" and (.checkedEpoch|type)=="number"
       ' "$active_dir/result.json" >/dev/null 2>&1; then
-        ACTIVE_PROXY_RESULT="$(cat "$active_dir/result.json")"
+        ACTIVE_PROXY_RESULT="$(jq -c --arg context "$active_before" '. + {context:$context}' "$active_dir/result.json")"
         ACTIVE_PROXY_CONTEXT="$active_before"
         case "$active_rc" in 0) ACTIVE_PROXY_HEALTH=true ;; 1) ACTIVE_PROXY_HEALTH=false ;; esac
     else
         ACTIVE_PROXY_RESULT='{"method":"current-socks-https","status":"unknown","errorCode":"ACTIVE_CONTEXT_CHANGED_OR_INCOMPLETE"}'
     fi
     rm -rf "$active_dir" || return 1
+}
+
+# Read-only presentation of a completed, context-bound SOCKS measurement.
+# ICMP and isolated candidate checks cannot authorize a connected badge.
+broray_active_proxy_cached() {
+    local id context file now rows
+(
+    id="$1"; shift
+    context="$(broray_active_proxy_context "$id" 2>/dev/null)" || context=""
+    now="$(date '+%s')"
+    rows="$({
+        for file in "$@"; do
+            [ -f "$file" ] && [ ! -L "$file" ] || continue
+            jq -c '.activeHealth // empty' "$file" 2>/dev/null || true
+        done
+    })"
+    printf '%s\n' "$rows" | jq -sc --arg id "$id" --arg context "$context" --argjson now "$now" '
+      [ .[] | select(type=="object" and .method=="current-socks-https" and
+        .serverId==$id and $context!="" and .context==$context and
+        (.checkedEpoch|type)=="number" and .checkedEpoch<=$now and
+        ($now-.checkedEpoch)<=120 and (.status=="healthy" or .status=="unhealthy")) ] |
+      (max_by(.checkedEpoch) // {method:"current-socks-https",status:"unknown",errorCode:"ACTIVE_HEALTH_NOT_CURRENT"})'
+)
 }

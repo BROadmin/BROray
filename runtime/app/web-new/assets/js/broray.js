@@ -11,6 +11,9 @@
         pollTimer: null,
         pollInFlight: false,
         pollFailures: 0,
+        operationId: null,
+        operationKind: null,
+        unconfirmedPolls: 0,
         busy: false,
         cleanupPlan: null
     };
@@ -476,6 +479,21 @@
     async function loadOperation() {
         var operation = await request("/api/broray/update-status.cgi", { method: "GET" });
 
+        // An accepted request can precede publication of its status. A stale
+        // idle/terminal response for another operation is not our completion.
+        if (state.operationId && operation.operationId !== state.operationId) {
+            state.unconfirmedPolls += 1;
+            if (state.unconfirmedPolls >= 15) {
+                stopPolling();
+                setBusy(false);
+                showPageError("Результат операции " + state.operationId + " не подтверждён. Обновите состояние; не запускайте удаление повторно до проверки.");
+                return { running: false, state: "unconfirmed" };
+            }
+            operation = { operationId: state.operationId, operation: state.operationKind,
+                state: "queued", running: true, message: "Запрос принят. Ожидается состояние операции." };
+        } else {
+            state.unconfirmedPolls = 0;
+        }
         renderOperation(operation);
         return operation;
     }
@@ -527,6 +545,9 @@
             hidePageError();
 
             if (!operation.running) {
+                if (operation.state === "unconfirmed") return;
+                state.operationId = null;
+                state.operationKind = null;
                 await loadInfo();
                 toast(
                     operation.message || "Операция завершена.",
@@ -537,7 +558,13 @@
         } catch (error) {
             state.pollFailures += 1;
             delay = Math.min(5000, 1000 + state.pollFailures * 500);
-            renderPollingInterruption();
+            if (state.pollFailures >= 6) {
+                stopPolling();
+                setBusy(false);
+                showPageError("Результат операции " + (state.operationId || "") + " не подтверждён: WebUI недоступен. При удалении интерфейс может исчезнуть до получения ответа. Проверьте состояние установки перед повторным действием.");
+            } else {
+                renderPollingInterruption();
+            }
         } finally {
             state.pollInFlight = false;
             if (state.busy || state.pollFailures > 0) {
@@ -579,9 +606,15 @@
         setButtonBusy(button, true, busyLabel);
 
         try {
-            await request(path, options);
+            var accepted = await request(path, options);
+            state.operationId = accepted.operationId || null;
+            state.operationKind = accepted.operation || (path.indexOf("uninstall") >= 0 ? "uninstall" : null);
+            state.unconfirmedPolls = 0;
+            state.pollFailures = 0;
             toast(successMessage, "success");
-            await loadOperation();
+            // Poll after acceptance, so losing the first status reply cannot
+            // turn a confirmed request into a failed submission.
+            startPolling();
         } catch (error) {
             setBusy(false);
             showPageError(errorMessage(error));

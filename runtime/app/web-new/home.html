@@ -96,7 +96,6 @@
                 </div>
                 <div class="workspace-header-actions">
                     <div id="theme-control-mount" class="theme-control-mount"></div>
-                    <button id="refresh-status" class="button button-secondary button-compact" data-icon="update" type="button" hidden aria-hidden="true" tabindex="-1">Обновить</button>
                 </div>
             </header>
 <main class="workspace-content home-page">
@@ -112,9 +111,12 @@
     Общее состояние Xray, серверов, подписок, DNS-over-TLS, управляемого интерфейса BROray, маршрутов и самой установки.
    </p>
   </div>
-  <span class="status-badge status-loading" id="home-health">
-   Загрузка…
-  </span>
+  <div class="home-heading-actions">
+   <button id="refresh-status" class="button button-secondary button-compact" data-icon="update" type="button" hidden aria-hidden="true" tabindex="-1">Обновить</button>
+   <span class="status-badge status-loading" id="home-health">
+    Загрузка…
+   </span>
+  </div>
  </section>
  <div class="home-warning" hidden="" id="home-warning" role="status">
  </div>

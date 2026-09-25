@@ -325,15 +325,23 @@
         setText("home-keenetic-state", data.state === "up" && data.connected === true ? "Подключено" : "Нет подключения");
     }
 
-    function renderBroray(data) {
+    function renderBroray(data, installedRelease) {
         var packageChanged;
         var updateAvailable;
         var updateLabel;
 
+        setText("home-broray-version", installedRelease &&
+            typeof installedRelease.version === "string" ? installedRelease.version : null);
         if (!data) {
             setStatus("home-broray-status", "Недоступно", "error");
             setText("home-broray-main", "Сведения BROray недоступны.");
-            setText("home-broray-version", null);
+            setText("home-broray-update", null);
+            return;
+        }
+
+        if (data._snapshot && data._snapshot.freshness !== "fresh") {
+            setStatus("home-broray-status", "Данные устарели", "warning");
+            setText("home-broray-main", "Состояние компонентов требует повторной проверки.");
             setText("home-broray-update", null);
             return;
         }
@@ -372,7 +380,6 @@
                 ? "Все обязательные компоненты установлены."
                 : "Часть компонентов отсутствует или повреждена."
         );
-        setText("home-broray-version", data.version);
         setText(
             "home-broray-update",
             updateAvailable
@@ -423,7 +430,7 @@
         renderDns(data.dns);
         renderRoutes(data.routes);
         renderKeenetic(data.keenetic);
-        renderBroray(data.broray);
+        renderBroray(data.broray, data.installedRelease);
         setText("home-updated-at", formatDate(data.updatedAt));
     }
 

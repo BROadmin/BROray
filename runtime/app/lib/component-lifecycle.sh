@@ -17,7 +17,7 @@ broray_lifecycle_uninstall_owner() {
 broray_lifecycle_component() {
     local component component_rc
     component="$1"; shift
-    case "$component" in route-delete|route-export|server-deactivate) ;; *) return 64 ;; esac
+    case "$component" in route-delete|route-export|server-deactivate|dot-delete|dot-restore) ;; *) return 64 ;; esac
     [ -z "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || return 1
     broray_lifecycle_uninstall_owner || return 1
     broray_tx_control_transition_begin || return 1
@@ -38,6 +38,22 @@ broray_lifecycle_component() {
                         broray_routes_export_build_run "$1") || exit $?
                     . "$BRORAY_LIFECYCLE_BASE/lib/routes-router-sync.sh" || exit 1
                     broray_routes_sync_apply "$1"
+                    ;;
+                dot-delete)
+                    # The uninstall confirmation grants deletion only of its
+                    # verified managed DoT set. Bind the fresh preview to the
+                    # mutation under the same native transition/owner fence.
+                    . "$BRORAY_LIFECYCLE_BASE/lib/routes-dot.sh" || exit 1
+                    dot_confirmation="$(mktemp "$BRORAY_LIFECYCLE_BASE/tmp/uninstall-dot.XXXXXX")" || exit 1
+                    trap 'rm -f "$dot_confirmation"' EXIT
+                    chmod 600 "$dot_confirmation" || exit 1
+                    broray_dot_delete_preview >"$dot_confirmation" || exit 1
+                    broray_dot_delete "$dot_confirmation"
+                    ;;
+                dot-restore)
+                    [ "$#" = 1 ] && [ "${BRORAY_DOT_RESTORE_EXACT:-}" = true ] || exit 64
+                    . "$BRORAY_LIFECYCLE_BASE/lib/routes-dot.sh" || exit 1
+                    broray_dot_apply "$1"
                     ;;
                 server-deactivate)
                     . "$BRORAY_LIFECYCLE_BASE/lib/server-service.sh" || exit 1
@@ -93,8 +109,9 @@ EOF_ROUTES_BUNDLES
     # DNS-over-TLS has an independent ownership receipt and transaction
     # engine.  Removing ordinary route bundles must not strand those owned
     # Keenetic entries when the package is uninstalled.
-    [ -x "$dot_cli" ] || return 1
-    "$dot_cli" delete >/dev/null || return 1
+    if [ "${uninstall_dot_owned:-false}" = true ]; then
+        broray_lifecycle_component dot-delete >/dev/null || return 1
+    fi
 
     return 0
 }

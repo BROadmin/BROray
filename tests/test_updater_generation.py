@@ -34,6 +34,13 @@ class Generation(unittest.TestCase):
   records=sorted(self.domain.glob('revision-*.json'))
   return records[-1] if records else self.domain/'state.json'
  def state(self):return json.loads(self.latest_record().read_text())
+ def live_state(self):
+  # Current child accounting is intentionally volatile; STATUS and state()
+  # continue to inspect the exact durable lifecycle checkpoint.
+  result=self.call('LIVE');self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+  row=json.loads(result.stdout);self.assertEqual(row['snapshotKind'],'volatile-live')
+  self.assertEqual(row['checkpointSha256'],hashlib.sha256(self.latest_record().read_bytes()).hexdigest())
+  return row
  def start(self,body='while :; do sleep 2; done\n',env=None):
   script=self.home/'daemon.sh';script.write_text('#!/bin/ash\n'+body)
   log=open(self.home/'native.log','wb');self.logs.append(log)
@@ -73,7 +80,7 @@ echo CORRUPT >>"$TEST_HOME/platform"
   return command+'while :; do sleep 2; done\n'
  def writer_pid(self):return self.wait(lambda:int((self.home/'writer.pid').read_text()))
  def test_preexisting_double_fork_writer_stop(self):
-  self.start(self.writer_body());pid=self.writer_pid();s=self.wait(lambda:self.state() if any(x['pid']==pid for x in self.state()['children']) else None)
+  self.start(self.writer_body());pid=self.writer_pid();s=self.live_state();self.assertTrue(any(x['pid']==pid for x in s['children']))
   self.assertTrue(self.live(pid));r=self.call('STOP');self.assertEqual(r.returncode,0,r.stderr+r.stdout)
   end=self.stopped();self.assertEqual(end['children'],[]);self.assertFalse(self.live(pid))
   (self.home/'release').touch();time.sleep(.1);self.assertEqual((self.home/'platform').read_text(),'original\n')
@@ -82,7 +89,7 @@ echo CORRUPT >>"$TEST_HOME/platform"
   self.start(self.writer_body(depth=4));pid=self.writer_pid();self.assertEqual(self.call('STOP').returncode,0);self.stopped();self.assertFalse(self.live(pid))
   (self.home/'release').touch();time.sleep(.1);self.assertEqual((self.home/'platform').read_text(),'original\n')
  def test_supervisor_sigkill_kills_detached_writer(self):
-  p=self.start(self.writer_body());pid=self.writer_pid();self.wait(lambda:any(x['pid']==pid for x in self.state()['children']))
+  p=self.start(self.writer_body());pid=self.writer_pid();self.assertTrue(any(x['pid']==pid for x in self.live_state()['children']))
   p.kill();p.wait(timeout=3);self.wait(lambda:not self.live(pid));(self.home/'release').touch();time.sleep(.1)
   self.assertEqual((self.home/'platform').read_text(),'original\n');self.assertNotEqual(self.state()['state'],'STOPPED')
  def test_root_exit_drains_live_writer(self):
@@ -100,7 +107,8 @@ echo CORRUPT >>"$TEST_HOME/platform"
  def test_ledger_missing_fails_closed(self):
   p=self.start(self.writer_body());pid=self.writer_pid();(self.domain/'state.json').unlink();self.assertNotEqual(p.wait(timeout=3),0);self.wait(lambda:not self.live(pid));self.assertFalse((self.domain/'state.json').exists())
  def test_ledger_revision_rollback_fails_closed(self):
-  p=self.start(self.writer_body());early=self.latest_record().read_bytes();pid=self.writer_pid();self.wait(lambda:self.latest_record().read_bytes()!=early)
+  p=self.start(self.writer_body());pid=self.writer_pid();self.running();early=(self.domain/'state.json').read_bytes()
+  self.assertNotEqual(self.latest_record().read_bytes(),early)
   current=self.latest_record();current.write_bytes(early);self.assertNotEqual(p.wait(timeout=3),0);self.wait(lambda:not self.live(pid));self.assertEqual(current.read_bytes(),early)
  def test_wrong_generation_manifest_nonce_no_mutation(self):
   self.start('while :; do :; done\n');self.running();before=(self.domain/'state.json').read_bytes()
@@ -140,9 +148,10 @@ echo CORRUPT >>"$TEST_HOME/platform"
   body='trap \'echo TERM >>"$TEST_HOME/events"; /bin/ash "$TEST_HOME/writer.sh" &\' TERM\necho ready >"$TEST_HOME/trap.ready"\nwhile :; do :; done\n'
   self.start(body);self.wait(lambda:(self.home/'trap.ready').exists());initial=self.running();root=initial['updater']['pid']
   self.assertFalse((self.home/'writer.pid').exists())
-  self.assertEqual(self.call('STOP').returncode,0);writer=self.writer_pid()
+  self.assertEqual(self.call('STOP').returncode,0);writer=self.writer_pid();tracked=self.live_state()
   end=self.stopped();records=self.assert_drained_generation(end,root)
-  self.assertTrue(any(r['revision']>initial['revision'] and any(c['pid']==writer for c in r['children']) for r in records))
+  self.assertGreater(tracked['revision'],initial['revision'])
+  self.assertTrue(any(c['pid']==writer for c in tracked['children']))
   self.assertFalse(self.live(writer));self.assertEqual((self.home/'events').read_text(),'TERM\n')
   (self.home/'release').touch();time.sleep(.1)
   self.assertEqual((self.home/'platform').read_text(),'original\n')

@@ -1323,7 +1323,7 @@ label,
     color: #f4f8fb;
     background: #141f29;
     box-shadow: 0 0 12px rgba(255, 255, 255, 0.10), 0 12px 32px rgba(0, 0, 0, 0.34);
-    font-size: 1.3rem;
+    font-size: 1.04rem;
     line-height: 1.45;
     pointer-events: auto;
     animation: broray-toast-enter 160ms ease-out both;
@@ -1334,9 +1334,9 @@ label,
 .toast-info { --toast-accent: #93aabe; }
 .toast-icon {
     display: block;
-    flex: 0 0 48px;
-    width: 48px;
-    height: 48px;
+    flex: 0 0 38.4px;
+    width: 38.4px;
+    height: 38.4px;
     color: var(--toast-accent);
     fill: none;
     stroke: currentColor;
@@ -1354,7 +1354,7 @@ label,
     overflow: hidden;
 }
 .toast-message-long { font-weight: 600; }
-.toast-note { display: block; margin-top: 8px; font-size: 0.8rem; color: #c7d1d8; }
+.toast-note { display: block; margin-top: 8px; font-size: 0.64rem; color: #c7d1d8; }
 .toast-note[hidden] { display: none; }
 .toast-kind {
     position: absolute;
@@ -1377,7 +1377,7 @@ label,
 @keyframes broray-toast-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 520px) {
     .toast { padding: 16px; gap: 12px; }
-    .toast-icon { flex-basis: 44px; width: 44px; height: 44px; }
+    .toast-icon { flex-basis: 35.2px; width: 35.2px; height: 35.2px; }
 }
 @media (prefers-reduced-motion: reduce) { .toast, .subscription-toast { animation: none; } }
 @media (forced-colors: active) {
@@ -1600,6 +1600,16 @@ pre {
 
 .page-home .home-heading > div {
     max-width: 780px;
+}
+
+.page-home .home-heading-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    align-self: stretch;
+    justify-content: space-between;
+    flex-shrink: 0;
+    gap: 16px;
 }
 
 .page-home .home-warning {
@@ -2138,6 +2148,12 @@ pre {
 }
 
 @media (max-width: 760px) {
+    .page-home .home-heading-actions {
+        flex-direction: row;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
     .page-home .home-heading,
     .page-xray .xray-page-heading,
     .page-xray .xray-section-heading {
@@ -2382,8 +2398,8 @@ pre {
     }
 
     .theme-select {
-        min-width: 78px;
-        max-width: 88px;
+        min-width: 104px;
+        max-width: 120px;
     }
 
     .button {
@@ -3346,6 +3362,7 @@ body.modal-open {
 
     .keenetic-web-access-summary > .keenetic-status-badge {
         grid-column: 1 / -1;
+        grid-row: 1;
         justify-self: start;
     }
 
@@ -5611,6 +5628,10 @@ body.modal-open {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 10px;
+}
+
+.page-broray .broray-protocols-card > .section-note {
+    margin-top: 16px;
 }
 
 .page-broray .broray-protocol-item {

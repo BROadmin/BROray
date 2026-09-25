@@ -57,6 +57,8 @@ broray_generate_server_config()
                     ),
                 alpn:
                     ($s.tls.alpn // []),
+                echConfigList: ($s.tls.echConfigList // ""),
+                verifyPeerCertByName: ($s.tls.verifyPeerCertByName // ""),
                 pinnedPeerCertSha256:
                     ($s.tls.pinnedPeerCertSha256 // "")
             }
@@ -73,7 +75,8 @@ broray_generate_server_config()
                 shortId:
                     ($s.reality.shortId // ""),
                 spiderX:
-                    ($s.reality.spiderX // "")
+                    ($s.reality.spiderX // ""),
+                mldsa65Verify: ($s.reality.mldsa65Verify // "")
             }
             | compact_object;
 
@@ -126,12 +129,15 @@ broray_generate_server_config()
             end;
 
         def raw_settings($s):
-            {
+            if $s.transport.header != null then {header:$s.transport.header} else {
                 header: {
-                    type:
-                        ($s.transport.headerType // "none")
-                }
-            };
+                    type: ($s.transport.headerType // "none")
+                } + (if ($s.transport.headerType // "none") == "http" then
+                    {request: {path: [($s.transport.path // "/")]} +
+                      (if ($s.transport.host // "") != "" then
+                        {headers: {Host: ($s.transport.host | split(","))}} else {} end)}
+                  else {} end)
+            } end;
 
         def websocket_settings($s):
             {
@@ -171,32 +177,26 @@ broray_generate_server_config()
             }
             | compact_object;
 
+        def kcp_finalmask($s):
+            if ($s.transport.kcpLegacy // false) then
+                {udp: ([{type:"mkcp-legacy",settings:(if ($s.transport.kcpSeed // "") == "" then {} else {value:$s.transport.kcpSeed} end)}] +
+                    (if ($s.transport.headerType // "none") != "none" then
+                        [{type:"mkcp-legacy",settings:({header:(if $s.transport.headerType=="wechat-video" then "wechat" else $s.transport.headerType end)} +
+                           (if $s.transport.headerType=="dns" and ($s.transport.host // "") != "" then {value:$s.transport.host} else {} end))}]
+                     else [] end))}
+            else ($s.transport.finalMask // {}) end;
+
         def hysteria_finalmask($s):
-            if
-                (
-                    ($s.hysteria.finalMask // {}) |
-                    type == "object" and length > 0
-                )
-            then
-                $s.hysteria.finalMask
-            elif
-                ($s.hysteria.obfs // "") == "salamander" and
-                (($s.hysteria.obfsPassword // "") | length) > 0
-            then
-                {
-                    udp: [
-                        {
-                            type: "salamander",
-                            settings: {
-                                password:
-                                    $s.hysteria.obfsPassword
-                            }
-                        }
-                    ]
-                }
-            else
-                {}
-            end;
+            ($s.hysteria.finalMask // {}) as $fm |
+            (if ($s.hysteria.obfs // "") != "" then
+                [{type:"salamander",settings:({password:$s.hysteria.obfsPassword} +
+                    (if $s.hysteria.obfs == "gecko" then {packetSize:"512-1200"} else {} end))}]
+             else [] end) as $obfs |
+            (if ($s.hysteria.ports // "") != "" then
+                [{type:"udphop",settings:{mode:"intervalremote",interval:30,remotePorts:$s.hysteria.ports}}]
+             else [] end) as $hop |
+            if ($obfs + $hop | length) == 0 then $fm
+            else $fm + {udp:($obfs + ($fm.udp // []) + $hop)} end;
 
         def stream_settings($s):
             {
@@ -230,6 +230,8 @@ broray_generate_server_config()
                     httpupgradeSettings:
                         httpupgrade_settings($s)
                 }
+                elif $s.network == "kcp"
+                then {kcpSettings: ($s.transport.kcp // {})}
                 elif $s.network == "hysteria"
                 then {
                     hysteriaSettings: {
@@ -274,6 +276,10 @@ broray_generate_server_config()
                     finalmask:
                         hysteria_finalmask($s)
                 }
+                elif $s.network == "kcp" and (kcp_finalmask($s) | length) > 0 then
+                    {finalmask: kcp_finalmask($s)}
+                elif (($s.transport.finalMask // {}) | length) > 0 then
+                    {finalmask: $s.transport.finalMask}
                 else {}
                 end
             );

@@ -46,6 +46,8 @@ static int service_cycle_main(int argc,char **argv,int action),service_cycle_ava
 static int replacement_start_prepare(char **argv,int op,const char *op_path,const char *native);
 static int replacement_start_main(int argc,char **argv);
 static int generation_boot_retirement_valid(int base,const char *domain,const char *manifest_sha,const char *current);
+static int terminal_summary_read(int fd,const char *path,char old_tree[65],char inventory[65]);
+static int terminal_compact_main(int argc,char **argv);
 static int service_transition_fd=-1;
 static int service_transition_prepare(int argc,char **argv),service_transition_enter(const char *domain);
 static void service_transition_release(void);
@@ -58,7 +60,12 @@ static int installation_fd=-1,installation_lock=-1;
 static int retire_ready;
 static struct stat installation_lock_identity;
 static char installation_path[PATH_MAX];
+/* Process lineage stays in the lifetime supervisor. Durable evidence records
+ * lifecycle/authorization transitions, never every fork/exec/reap. */
+#define CHECKPOINT_LIMIT 32U
+#define CHECKPOINT_BYTE_LIMIT (1024U*1024U)
 static unsigned long revision;
+static size_t checkpoint_bytes;
 static char generation[65],manifest[65],operation[97],stop_nonce[65],boot[64],state[32]="START_INTENT";
 static char snapshot[SNAPSHOT_LIMIT];static size_t snapshot_size;
 static char anchor[SNAPSHOT_LIMIT],latest_name[64],snapshot_hash[65];static size_t anchor_size;
@@ -90,11 +97,18 @@ static int watch_record(const char *name){int fd=openat(generation_dirfd,name,O_
     if(latest_watch>=0&&latest_watch!=anchor_watch){removed_watch=latest_watch;if(inotify_rm_watch(watchfd,removed_watch)||ledger_events(NULL))return -1;}latest_watch=wd;if(!revision)anchor_watch=wd;return 0;}
 static int record_matches(const char *name,const char *data,size_t size){int fd=openat(generation_dirfd,name,O_RDONLY|O_NOFOLLOW|O_CLOEXEC);struct stat st;if(fd<0)return -1;if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_nlink!=1||st.st_uid!=geteuid()||(st.st_mode&07777)!=0600||st.st_size!=(off_t)size){close(fd);return -1;}char b[4096];size_t at=0;while(at<size){size_t need=size-at;if(need>sizeof b)need=sizeof b;ssize_t n=read(fd,b,need);if(n<0&&errno==EINTR)continue;if(n<=0||memcmp(b,data+at,(size_t)n)){close(fd);return -1;}at+=(size_t)n;}close(fd);return 0;}
 static int disk_matches(void){if(!snapshot_size)return 0;return record_matches("state.json",anchor,anchor_size)||record_matches(latest_name,snapshot,snapshot_size)?-1:0;}
-static int persist(const char *next){if(ledger_events(NULL)||disk_matches()||revision==ULONG_MAX)return -1;
+static int render_snapshot(const char *next,unsigned long nr,const char *previous,int live,char **out,size_t *out_size){
+    FILE *f=open_memstream(out,out_size);if(!f)return -1;
+    fprintf(f,"{\"schemaVersion\":2,\"contract\":\"broray-updater-generation/2\",\"generationId\":\"%s\",\"platformManifestSha256\":\"%s\",\"bootId\":\"%s\",\"revision\":%lu,\"previousRecordSha256\":\"%s\",\"state\":\"%s\",\"supervisedFromBirth\":true,\"supervisor\":",generation,manifest,boot,nr,previous,next);identity_json(f,&supervisor);fputs(",\"updater\":",f);if(updater.pid)identity_json(f,&updater);else fputs("null",f);
+    fprintf(f,",\"stopOperationId\":\"%s\",\"stopNonce\":\"%s\",\"termSent\":%s,\"children\":[",operation,stop_nonce,term_sent?"true":"false");for(int i=0;i<count;i++){if(i)fputc(',',f);identity_json(f,&kids[i]);}fputs("],\"awaitingBirth\":[",f);int sep=0;for(int i=0;i<count;i++)if(awaiting_birth[i]){if(sep++)fputc(',',f);identity_json(f,&kids[i]);}fputs("],\"exitedUnreaped\":[",f);for(int i=0;i<exited_count;i++){if(i)fputc(',',f);identity_json(f,&exited[i]);}fputs("],\"ledgerPolicy\":\"lifecycle-checkpoints/1\"",f);platform_state_json(f,next);
+    if(live)fprintf(f,",\"snapshotKind\":\"volatile-live\",\"checkpointSha256\":\"%s\"",snapshot_hash);
+    fputs("}\n",f);if(fclose(f)||*out_size>=sizeof snapshot){free(*out);*out=NULL;return -1;}return 0;
+}
+static int persist_checkpoint(const char *next){if(ledger_events(NULL)||disk_matches()||revision>=CHECKPOINT_LIMIT)return -1;
     if(revision>=history_capacity){size_t capacity=history_capacity?history_capacity*2:64;if(capacity<=revision||capacity>SIZE_MAX/sizeof *history)return -1;void *expanded=realloc(history,capacity*sizeof *history);if(!expanded)return -1;history=expanded;history_capacity=capacity;}
-    char *data=NULL;size_t size=0;FILE *f=open_memstream(&data,&size);if(!f)return -1;
-    fprintf(f,"{\"schemaVersion\":2,\"contract\":\"broray-updater-generation/2\",\"generationId\":\"%s\",\"platformManifestSha256\":\"%s\",\"bootId\":\"%s\",\"revision\":%lu,\"previousRecordSha256\":\"%s\",\"state\":\"%s\",\"supervisedFromBirth\":true,\"supervisor\":",generation,manifest,boot,revision+1,snapshot_hash,next);identity_json(f,&supervisor);fputs(",\"updater\":",f);if(updater.pid)identity_json(f,&updater);else fputs("null",f);
-    fprintf(f,",\"stopOperationId\":\"%s\",\"stopNonce\":\"%s\",\"termSent\":%s,\"children\":[",operation,stop_nonce,term_sent?"true":"false");for(int i=0;i<count;i++){if(i)fputc(',',f);identity_json(f,&kids[i]);}fputs("],\"awaitingBirth\":[",f);int sep=0;for(int i=0;i<count;i++)if(awaiting_birth[i]){if(sep++)fputc(',',f);identity_json(f,&kids[i]);}fputs("],\"exitedUnreaped\":[",f);for(int i=0;i<exited_count;i++){if(i)fputc(',',f);identity_json(f,&exited[i]);}fputs("]",f);platform_state_json(f,next);fputs("}\n",f);if(fclose(f)||size>=sizeof snapshot){free(data);return -1;}
+    char *data=NULL;size_t size=0;
+    if(render_snapshot(next,revision+1,snapshot_hash,0,&data,&size))return -1;
+    if(size>CHECKPOINT_BYTE_LIMIT-checkpoint_bytes){free(data);return -1;}
     char name[64],pending[64];if(!revision)strcpy(name,"state.json");else snprintf(name,sizeof name,"revision-%020lu.json",revision+1);snprintf(pending,sizeof pending,"pending-%020lu",revision+1);
     int fd=openat(generation_dirfd,pending,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600);struct stat st;if(fd<0){free(data);return -1;}if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_nlink!=1||st.st_uid!=geteuid()||(st.st_mode&07777)!=0600){close(fd);free(data);return -1;}size_t at=0;while(at<size){ssize_t n=write(fd,data+at,size-at);if(n<0&&errno==EINTR)continue;if(n<=0){close(fd);free(data);return -1;}at+=(size_t)n;}int rc=fsync(fd);if(close(fd))rc=-1;
     /* linkat fails EEXIST, including for symlinks. No replace, no retry, no
@@ -102,7 +116,11 @@ static int persist(const char *next){if(ledger_events(NULL)||disk_matches()||rev
     if(rc||record_matches(pending,data,size)||ledger_events(NULL)||disk_matches()||linkat(generation_dirfd,pending,generation_dirfd,name,0)||unlinkat(generation_dirfd,pending,0)||fsync(generation_dirfd)||ledger_events(name)||watch_record(name)||record_matches(name,data,size)||disk_matches()||ledger_events(NULL)){free(data);return -1;}
     if(platform_ledger_witness(revision+1,data,size)){free(data);return -1;}
     if(!revision){memcpy(anchor,data,size);anchor_size=size;}
-    memcpy(snapshot,data,size);snapshot_size=size;strcpy(latest_name,name);struct gen_sha digest;gen_sha_init(&digest);gen_sha_add(&digest,data,size);gen_sha_end(&digest,snapshot_hash);strcpy(history[revision].sha,snapshot_hash);history[revision].size=size;free(data);strcpy(state,next);revision++;return 0;
+    memcpy(snapshot,data,size);snapshot_size=size;strcpy(latest_name,name);struct gen_sha digest;gen_sha_init(&digest);gen_sha_add(&digest,data,size);gen_sha_end(&digest,snapshot_hash);strcpy(history[revision].sha,snapshot_hash);history[revision].size=size;free(data);strcpy(state,next);revision++;checkpoint_bytes+=size;return 0;
+}
+static int persist(const char *next){
+    if(revision&&!strcmp(next,state))return ledger_events(NULL)||disk_matches()?-1:0;
+    return persist_checkpoint(next);
 }
 static int kid_index(pid_t pid){for(int i=0;i<count;i++)if(kids[i].pid==pid)return i;return -1;}
 static int register_kid(pid_t pid,int awaiting){int i=kid_index(pid);struct identity id;if(capture(pid,&id)){fprintf(stderr,"GENERATION_REGISTER_CAPTURE_FAILED pid=%d index=%d ticks=%llu errno=%d\n",pid,i,ticks(pid),errno);return -1;}if(i<0){if(count==LIMIT)return -1;i=count++;denied_errno[i]=0;}else if(kids[i].ticks!=id.ticks)return -1;kids[i]=id;awaiting_birth[i]=awaiting;if(pid==updater.pid)updater=id;int rc=persist(state);if(rc)fprintf(stderr,"GENERATION_REGISTER_PUBLISH_FAILED pid=%d errno=%d\n",pid,errno);return rc;}
@@ -184,7 +202,9 @@ static int retirement_valid(int base,const char *path,struct retired_record *res
     struct retired_record r;memset(&r,0,sizeof r);char extra,canonical[1024],actual[65],*last=NULL;size_t last_size;
     int fields=sscanf(text,"BROray-generation-retired/1\n%64s\n%64s\n%96s\n%64s\n%lu\n%64s\n%64s\n%64s\n%c",r.gen,r.sha,r.op,r.nonce,&r.total,r.inventory,r.last,r.scope,&extra);
     int written=retirement_text(&r,canonical,sizeof canonical);int bad=fields!=8||written<0||(size_t)written!=n||memcmp(text,canonical,n)||!token(r.gen,64)||!hex64(r.sha)||!token(r.op,96)||!token(r.nonce,64)||!hex64(r.inventory)||!hex64(r.last)||!hex64(r.scope);free(text);if(bad)return -1;
-    scope_digest(path,actual);if(strcmp(actual,r.scope)||ledger_inventory(base,r.total,actual)||strcmp(actual,r.inventory))return -1;
+    scope_digest(path,actual);if(strcmp(actual,r.scope))return -1;
+    char previous_tree[65];int compact=terminal_summary_read(base,path,previous_tree,actual);
+    if(compact<0||(!compact&&ledger_inventory(base,r.total,actual))||strcmp(actual,r.inventory))return -1;
     char name[64];record_name(r.total,name);if(safe_bytes_at(base,name,&last,&last_size))return -1;digest_bytes(last,last_size,actual);
     char gen_field[96],sha_field[112],op_field[132],nonce_field[96];snprintf(gen_field,sizeof gen_field,"\"generationId\":\"%s\"",r.gen);snprintf(sha_field,sizeof sha_field,"\"platformManifestSha256\":\"%s\"",r.sha);snprintf(op_field,sizeof op_field,"\"stopOperationId\":\"%s\"",r.op);snprintf(nonce_field,sizeof nonce_field,"\"stopNonce\":\"%s\"",r.nonce);
     bad=strcmp(actual,r.last)||!strstr(last,"\"state\":\"STOPPED\"")||!strstr(last,"\"children\":[]")||!strstr(last,"\"awaitingBirth\":[]")||!strstr(last,"\"exitedUnreaped\":[]")||!strstr(last,gen_field)||!strstr(last,sha_field)||!strstr(last,op_field)||!strstr(last,nonce_field);free(last);if(bad)return -1;if(result)*result=r;return 0;
@@ -221,12 +241,20 @@ static int request(int fd){struct ucred peer;socklen_t size=sizeof peer;if(getso
              * any recovery request exists. Bind that ALREADY verified terminal
              * proof once; do not re-signal or reinterpret an unfinished drain. */
             if(terminal&&!operation[0]&&!stop_nonce[0]&&!count&&!exited_count&&!root_live&&!strcmp(state,"STOPPED")){
-                strcpy(operation,op);strcpy(stop_nonce,nonce);if(persist("STOPPED"))return -2;
+                strcpy(operation,op);strcpy(stop_nonce,nonce);if(persist_checkpoint("STOPPED"))return -2;
             }else if(strcmp(op,operation)||strcmp(nonce,stop_nonce))return -1;
         }else{strcpy(operation,op);strcpy(stop_nonce,nonce);if(persist("STOP_INTENT"))return -2;stopping=1;stop_at=millis();}
     }
     else if(!strcmp(verb,"RETIRE")){if(!terminal||strcmp(op,operation)||strcmp(nonce,stop_nonce))return -1;if(retire_generation(domain_path))return -2;}
-    else if(!strcmp(verb,"AUTH")||!strcmp(verb,"READY")){int rc=platform_control(&peer,verb,op,nonce);if(rc<0)return rc;if(rc&&persist(state))return -2;}
+    else if(!strcmp(verb,"AUTH")||!strcmp(verb,"READY")){int rc=platform_control(&peer,verb,op,nonce);if(rc<0)return rc;if(rc&&persist_checkpoint(state))return -2;}
+    else if(!strcmp(verb,"LIVE")){
+        /* Explicitly volatile process detail. It is authenticated by the
+         * same exact peer and bound to the last durable checkpoint; callers
+         * must not pin it as READY or use it as a replayable terminal receipt. */
+        char *data=NULL;size_t length=0;
+        if(render_snapshot(state,revision,"",1,&data,&length)||ledger_events(NULL)||disk_matches()){free(data);return -2;}
+        int result=send(fd,data,length,MSG_NOSIGNAL)==(ssize_t)length?0:-1;free(data);return result;
+    }
     else if(strcmp(verb,"STATUS"))return -1;
     if(ledger_events(NULL)||disk_matches())return -2;
     if(send(fd,snapshot,snapshot_size,MSG_NOSIGNAL)!=(ssize_t)snapshot_size)return -1;return 0;
@@ -370,7 +398,7 @@ static int run_generation(int argc,char **argv){/* run PRIVATE_DIR GEN SHA -- ab
         if(WIFEXITED(status)||WIFSIGNALED(status)){
             int i=kid_index(pid);if(i<0){int dead=exited_index(pid);if(dead<0)return fail("UNREGISTERED_EXIT");exited[dead]=exited[--exited_count];}
             else{if(ticks(pid)==kids[i].ticks){if(exited_count==LIMIT)return fail("EXIT_LEDGER_FULL");exited[exited_count++]=kids[i];}forget_kid(pid);}
-            if(pid==root){root_live=0;if(!stopping){stopping=1;stop_at=millis();}}
+            if(pid==root){root_live=0;if(!stopping){stopping=1;stop_at=millis();if(persist("STOP_INTENT"))return fail("ROOT_EXIT_CHECKPOINT_FAILED");}}
             if(persist(state))return fail("EXIT_LEDGER_FAILED");continue;
         }
         if(!WIFSTOPPED(status))return fail("UNKNOWN_WAIT_EVENT");
@@ -380,7 +408,7 @@ static int run_generation(int argc,char **argv){/* run PRIVATE_DIR GEN SHA -- ab
          * early allowed a short-lived child to exit before later registration. */
         if(kid_index(pid)<0){if(event!=PTRACE_EVENT_STOP||register_kid(pid,1))return fail("BIRTH_REGISTRATION_FAILED");continue;}
         if(event==PTRACE_EVENT_FORK||event==PTRACE_EVENT_VFORK||event==PTRACE_EVENT_CLONE){unsigned long born=0;if(ptrace(PTRACE_GETEVENTMSG,pid,0,&born)||born>INT_MAX)return fail("DESCENDANT_ID_UNCONFIRMED");int idx=kid_index((pid_t)born),held=idx>=0&&awaiting_birth[idx];if(register_kid((pid_t)born,0))return fail("DESCENDANT_REGISTRATION_FAILED");if(held){if(killing&&terminate_stopped_kid((pid_t)born))return fail("BIRTH_TERMINATION_UNCONFIRMED");if(ptrace(PTRACE_SYSCALL,(pid_t)born,0,0)<0&&errno!=ESRCH)return fail("BIRTH_RELEASE_FAILED");}}
-        else if(event==PTRACE_EVENT_EXEC){unsigned long former=0;if(ptrace(PTRACE_GETEVENTMSG,pid,0,&former))return fail("EXEC_IDENTITY_FAILED");if(former&&(pid_t)former!=pid)forget_kid((pid_t)former);if(register_kid(pid,0))return fail("EXEC_LEDGER_FAILED");if(pid==root&&!stopping&&persist("RUNNING"))return fail("RUNNING_NOT_DURABLE");}
+        else if(event==PTRACE_EVENT_EXEC){unsigned long former=0;if(ptrace(PTRACE_GETEVENTMSG,pid,0,&former))return fail("EXEC_IDENTITY_FAILED");if(former&&(pid_t)former!=pid)forget_kid((pid_t)former);if(register_kid(pid,0))return fail("EXEC_LEDGER_FAILED");if(pid==root&&!stopping&&persist_checkpoint("RUNNING"))return fail("RUNNING_NOT_DURABLE");}
         else if(event==PTRACE_EVENT_STOP&&WSTOPSIG(status)!=SIGTRAP&&!killing){if(ptrace(PTRACE_LISTEN,pid,0,0)<0&&errno!=ESRCH)return fail("TRACE_LISTEN_FAILED");continue;}
         else if(event==0&&WSTOPSIG(status)==(SIGTRAP|0x80)){if(syscall_guard(pid))return fail("SYSCALL_CONTAINMENT_UNCONFIRMED");}
         else if(event==0)deliver=WSTOPSIG(status);
@@ -434,7 +462,17 @@ static int control_response(char **argv,const struct identity *peer,size_t n){
     fputs("\"supervisor\":",f);identity_json(f,peer);fputc(',',f);if(fclose(f)){free(identity);return -1;}
     int bad=!strstr(snapshot,identity);free(identity);if(bad)return -1;
     int saved=generation_dirfd;generation_dirfd=checked_directory(argv[2]);if(generation_dirfd<0){generation_dirfd=saved;return -1;}
-    record_name(nr,name);int rc=record_matches(name,snapshot,n);close(generation_dirfd);generation_dirfd=saved;return rc;
+    record_name(nr,name);int rc;
+    if(!strcmp(argv[3],"LIVE")){
+        char *bytes=NULL,sha[65],field[112];size_t size=0;
+        rc=safe_bytes_at(generation_dirfd,name,&bytes,&size);
+        if(!rc){
+            digest_bytes(bytes,size,sha);snprintf(field,sizeof field,"\"checkpointSha256\":\"%s\"",sha);
+            rc=!strstr(snapshot,"\"snapshotKind\":\"volatile-live\"")||!strstr(snapshot,field)?-1:0;
+        }
+        free(bytes);
+    }else rc=record_matches(name,snapshot,n);
+    close(generation_dirfd);generation_dirfd=saved;return rc;
 }
 static int control_exchange(int argc,char **argv,int emit){/* control DIR VERB GEN SHA OP NONCE */
     if(argc!=8||(!token(argv[3],15))||!token(argv[4],64)||!hex64(argv[5])||!token(argv[6],96)||!token(argv[7],64))return 64;
@@ -473,4 +511,4 @@ int main(int argc,char **argv){
         if(!strcmp(argv[1],"service-cycle-restart"))return service_cycle_main(argc,argv,SC_RESTART);
         if((!strcmp(argv[1],"recovery-status")||!strcmp(argv[1],"recovery-commit-check"))&&service_cycle_available(argv[2])!=0)return service_cycle_main(argc,argv,SC_STATUS);
     }
-if(argc==2&&!strcmp(argv[1],"--version")){puts("broray-updater-generation/2 supervised-from-birth syscall-containment");return 0;}if(argc==2&&!strcmp(argv[1],"--sha256")){char digest[65];if(hash_fd(STDIN_FILENO,digest))return 74;puts(digest);return 0;}if(argc>1&&!strcmp(argv[1],"recovery-resume"))return recovery_resume_main(argc,argv);if(argc>1&&!strcmp(argv[1],"platform-daemon"))return platform_daemon(argc,argv);if(argc>1&&!strcmp(argv[1],"run"))return run_generation(argc,argv);if(argc>1&&!strcmp(argv[1],"control"))return control(argc,argv);if(argc>1&&(!strcmp(argv[1],"migration-stage")||!strcmp(argv[1],"migration-boundary")||!strcmp(argv[1],"migration-check-staged")))return migration_main(argc,argv);if(argc>1&&!strcmp(argv[1],"guard-bind"))return bootguard_bind_main(argc,argv);if(argc>1&&(!strcmp(argv[1],"guard-stage")||!strcmp(argv[1],"guard-stage-bound")||!strcmp(argv[1],"guard-verify")||!strcmp(argv[1],"guard-verify-bound")||!strcmp(argv[1],"guard-evidence-bound")))return bootguard_main(argc,argv);if(argc>1&&(!strcmp(argv[1],"runtime-retain")||!strcmp(argv[1],"runtime-verify")))return runtime_retain_main(argc,argv);if(argc>1&&(!strcmp(argv[1],"legacy-control-stage")||!strcmp(argv[1],"legacy-control-verify")))return legacy_control_stage_main(argc,argv);if(argc>1&&(!strcmp(argv[1],"recovery-code-stage")||!strcmp(argv[1],"recovery-code-verify")))return recovery_code_main(argc,argv);if(argc>1&&(!strcmp(argv[1],"recovery-service-stop")||!strcmp(argv[1],"recovery-status")||!strcmp(argv[1],"recovery-inspect")||!strcmp(argv[1],"recovery-complete")||!strcmp(argv[1],"recovery-admit")||!strcmp(argv[1],"recovery-retire")||!strcmp(argv[1],"recovery-backup")||!strcmp(argv[1],"recovery-install")||!strcmp(argv[1],"recovery-rollback")||!strcmp(argv[1],"recovery-start-intent")||!strcmp(argv[1],"recovery-start")||!strcmp(argv[1],"recovery-commit")||!strcmp(argv[1],"recovery-stop-current")||!strcmp(argv[1],"recovery-preserve")||!strcmp(argv[1],"recovery-retry")||!strcmp(argv[1],"recovery-commit-check")))return recovery_inspect_main(argc,argv);if(argc>1&&!strcmp(argv[1],"service-host"))return service_host(argc,argv);if(argc>1&&!strcmp(argv[1],"service-status"))return service_host_status(argc,argv);if(argc>1&&!strcmp(argv[1],"service-retired"))return service_host_retired(argc,argv);if(argc>1&&(!strcmp(argv[1],"service-stop-guard")||!strcmp(argv[1],"service-stop-check")))return service_stop_guard(argc,argv);if(argc>1&&!strcmp(argv[1],"service"))return service_client(argc,argv);return 64;}
+if(argc==2&&!strcmp(argv[1],"--version")){puts("broray-updater-generation/2 supervised-from-birth syscall-containment");return 0;}if(argc==2&&!strcmp(argv[1],"--sha256")){char digest[65];if(hash_fd(STDIN_FILENO,digest))return 74;puts(digest);return 0;}if(argc>1&&!strcmp(argv[1],"compact-retired"))return terminal_compact_main(argc,argv);if(argc>1&&!strcmp(argv[1],"recovery-resume"))return recovery_resume_main(argc,argv);if(argc>1&&!strcmp(argv[1],"platform-daemon"))return platform_daemon(argc,argv);if(argc>1&&!strcmp(argv[1],"run"))return run_generation(argc,argv);if(argc>1&&!strcmp(argv[1],"control"))return control(argc,argv);if(argc>1&&(!strcmp(argv[1],"migration-stage")||!strcmp(argv[1],"migration-boundary")||!strcmp(argv[1],"migration-check-staged")))return migration_main(argc,argv);if(argc>1&&!strcmp(argv[1],"guard-bind"))return bootguard_bind_main(argc,argv);if(argc>1&&(!strcmp(argv[1],"guard-stage")||!strcmp(argv[1],"guard-stage-bound")||!strcmp(argv[1],"guard-verify")||!strcmp(argv[1],"guard-verify-bound")||!strcmp(argv[1],"guard-evidence-bound")))return bootguard_main(argc,argv);if(argc>1&&(!strcmp(argv[1],"runtime-retain")||!strcmp(argv[1],"runtime-verify")))return runtime_retain_main(argc,argv);if(argc>1&&(!strcmp(argv[1],"legacy-control-stage")||!strcmp(argv[1],"legacy-control-verify")))return legacy_control_stage_main(argc,argv);if(argc>1&&(!strcmp(argv[1],"recovery-code-stage")||!strcmp(argv[1],"recovery-code-verify")))return recovery_code_main(argc,argv);if(argc>1&&(!strcmp(argv[1],"recovery-service-stop")||!strcmp(argv[1],"recovery-status")||!strcmp(argv[1],"recovery-inspect")||!strcmp(argv[1],"recovery-complete")||!strcmp(argv[1],"recovery-admit")||!strcmp(argv[1],"recovery-retire")||!strcmp(argv[1],"recovery-backup")||!strcmp(argv[1],"recovery-install")||!strcmp(argv[1],"recovery-rollback")||!strcmp(argv[1],"recovery-start-intent")||!strcmp(argv[1],"recovery-start")||!strcmp(argv[1],"recovery-commit")||!strcmp(argv[1],"recovery-stop-current")||!strcmp(argv[1],"recovery-preserve")||!strcmp(argv[1],"recovery-retry")||!strcmp(argv[1],"recovery-commit-check")))return recovery_inspect_main(argc,argv);if(argc>1&&!strcmp(argv[1],"service-host"))return service_host(argc,argv);if(argc>1&&!strcmp(argv[1],"service-status"))return service_host_status(argc,argv);if(argc>1&&!strcmp(argv[1],"service-retired"))return service_host_retired(argc,argv);if(argc>1&&(!strcmp(argv[1],"service-stop-guard")||!strcmp(argv[1],"service-stop-check")))return service_stop_guard(argc,argv);if(argc>1&&!strcmp(argv[1],"service"))return service_client(argc,argv);return 64;}

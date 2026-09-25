@@ -31,8 +31,9 @@ class Ledger(Generation):
   self.assertNotEqual(self.call('STOP',nonce='wrong').returncode,0);self.assertEqual(self.evidence(),before)
   self.assertEqual(self.call('STOP').returncode,0);self.assertEqual(self.evidence(),before)
  def corrupt_old_record(self,kind):
-  p=self.start(self.writer_body());pid=self.writer_pid();self.wait(lambda:len(list(self.domain.glob('revision-*.json')))>3)
+  p=self.start(self.writer_body());pid=self.writer_pid();self.running()
   record=sorted(self.domain.glob('revision-*.json'))[0];foreign=self.home/'foreign';foreign.write_text('FOREIGN')
+  self.assertNotEqual(record,self.latest_record(),'fixture must corrupt a historical lifecycle checkpoint')
   if kind=='missing':record.unlink()
   elif kind=='corrupt':record.write_text('{old-broken')
   elif kind=='mode':record.chmod(0o644)
@@ -62,7 +63,9 @@ class Ledger(Generation):
   import mmap
   p=self.start('i=0; while [ "$i" -lt 12 ]; do /bin/true; i=$((i+1)); done\necho ready >"$TEST_HOME/history.ready"\nwhile :; do :; done\n')
   self.wait(lambda:(self.home/'history.ready').exists())
-  record=sorted(self.domain.glob('revision-*.json'))[8];original=record.read_bytes();corrupt=b'!'+original[1:]
+  record=sorted(self.domain.glob('revision-*.json'))[0]
+  self.assertNotEqual(record,self.latest_record(),'fixture must corrupt a historical lifecycle checkpoint')
+  original=record.read_bytes();corrupt=b'!'+original[1:]
   with record.open('r+b') as f:
    with mmap.mmap(f.fileno(),0) as mapping:mapping[0:1]=b'!';mapping.flush()
   self.assertNotEqual(self.call('STATUS').returncode,0);self.assertNotEqual(p.wait(timeout=3),0);self.assertEqual(record.read_bytes(),corrupt)

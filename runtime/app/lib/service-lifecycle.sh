@@ -80,6 +80,7 @@ broray_service_record()
     SVC_OWNER="$(printf '%s\n' "$SVC_RECORD" | jq -c '.owner')"
     printf '%s\n' "$SVC_OWNER" | broray_ops_owner_valid || return 2
     SVC_GENERATION="$(printf '%s\n' "$SVC_RECORD" | jq -r '.generation')"
+    SVC_RECOVERY_FILE="$SVC_DIR/recovery-$SVC_GENERATION.json"
 }
 
 broray_service_legacy_matches()
@@ -134,6 +135,10 @@ broray_service_status_json()
     complete=true; ready=false; running=false; state=stopped; reason=""; pid=null
     if [ "$rc" = 2 ] || ! broray_service_legacy_matches; then
         complete=false; running=null; state=ambiguous; reason=SERVICE_IDENTITY_UNCONFIRMED
+        if [ "$rc" = 0 ] && broray_service_recovery_valid &&
+          [ "$(printf '%s\n' "$SVC_RECOVERY" | jq -r '.bootId')" = "$(broray_ops_boot_id)" ]; then
+            reason=SERVICE_RECOVERY_REBOOT_REQUIRED
+        fi
     elif [ "$rc" = 0 ]; then
         broray_ops_classify_owner "$SVC_OWNER"
         case "$OPS_OWNER_STATUS" in
@@ -155,6 +160,80 @@ broray_service_status_json()
     jq -nc --arg service "$SVC_NAME" --arg state "$state" --arg reason "$reason" --argjson running "$running" \
       --argjson complete "$complete" --argjson ready "$ready" --argjson pid "$pid" \
       '{service:$service,state:$state,running:$running,ready:$ready,complete:$complete,pid:$pid,errorCode:(if $reason=="" then null else $reason end)}'
+}
+
+# A conflicting PID projection has no trustworthy process identity. Record its
+# exact bytes now; retire it only across a boot boundary while holding BOTH
+# service locks. Never infer ownership from PID absence, elapsed time or name.
+broray_service_recovery_valid()
+{
+    SVC_RECOVERY=''
+    broray_service_file_safe "$SVC_RECOVERY_FILE" 16384 || return 1
+    SVC_RECOVERY="$(jq -ce --arg service "$SVC_NAME" --arg gen "$SVC_GENERATION" '
+      def hash: type=="string" and length==64 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102));
+      select(.schemaVersion==1 and .service==$service and .generation==$gen and
+        (.bootId|type=="string" and length>0) and (.identitySha256|hash) and
+        (.stoppedSha256|hash) and (.identityBytes|type=="string") and
+        (.projections|type=="array" and length==2) and
+        all(.projections[]; (.present|type=="boolean") and
+          (if .present then (.sha256|hash) and (.bytes|type=="string") else .sha256==null and .bytes==null end)))
+    ' "$SVC_RECOVERY_FILE" 2>/dev/null)" || return 1
+}
+
+broray_service_recover_projection()
+{
+    local boot record before rows file bytes digest present index expected stopped now
+    broray_ops_classify_owner "$SVC_OWNER"
+    [ "$OPS_OWNER_STATUS" = STALE ] || return 75
+    [ -z "$SVC_OLD_LOCK" ] || { [ ! -e "$SVC_OLD_LOCK" ] && [ ! -L "$SVC_OLD_LOCK" ]; } || return 75
+    boot="$(broray_ops_boot_id)"; [ -n "$boot" ] || return 75
+    if [ ! -e "$SVC_RECOVERY_FILE" ] && [ ! -L "$SVC_RECOVERY_FILE" ]; then
+        broray_service_legacy_matches && return 0
+        rows='[]'
+        for file in "$SVC_PIDFILE" "$SVC_STARTTIME"; do
+            present=false; bytes=null; digest=''
+            if [ -n "$file" ] && { [ -e "$file" ] || [ -L "$file" ]; }; then
+                broray_service_file_safe "$file" 64 || return 75
+                case "$(cat "$file")" in ''|*[!0-9]*) return 75 ;; esac
+                present=true
+                bytes="$(base64 <"$file" | tr -d '\n')" || return 74
+                digest="$(sha256sum "$file" | awk '{print $1}')" || return 74
+            fi
+            rows="$(printf '%s\n' "$rows" | jq -c --argjson present "$present" --arg bytes "$bytes" --arg hash "$digest" \
+              '.+[{present:$present,bytes:(if $present then $bytes else null end),sha256:(if $present then $hash else null end)}]')" || return 74
+        done
+        before="$(sha256sum "$SVC_DIR/identity.json" | awk '{print $1}')" || return 74
+        bytes="$(base64 <"$SVC_DIR/identity.json" | tr -d '\n')" || return 74
+        stopped="$(printf '%s\n' "$SVC_RECORD" | jq -c '.state="stopped"')" || return 74
+        digest="$(printf '%s\n' "$stopped" | sha256sum | awk '{print $1}')" || return 74
+        record="$(jq -nc --arg service "$SVC_NAME" --arg gen "$SVC_GENERATION" --arg boot "$boot" \
+          --arg before "$before" --arg bytes "$bytes" --arg stopped "$digest" --argjson rows "$rows" \
+          '{schemaVersion:1,service:$service,generation:$gen,bootId:$boot,identitySha256:$before,identityBytes:$bytes,stoppedSha256:$stopped,projections:$rows}')" || return 74
+        broray_service_write "$SVC_RECOVERY_FILE" "$record" || return 74
+        return 75
+    fi
+    broray_service_recovery_valid || return 75
+    [ "$(printf '%s\n' "$SVC_RECOVERY" | jq -r '.bootId')" != "$boot" ] || return 75
+    before="$(printf '%s\n' "$SVC_RECOVERY" | jq -r '.identitySha256')"
+    stopped="$(printf '%s\n' "$SVC_RECOVERY" | jq -r '.stoppedSha256')"
+    now="$(sha256sum "$SVC_DIR/identity.json" | awk '{print $1}')" || return 74
+    [ "$now" = "$before" ] || [ "$now" = "$stopped" ] || return 75
+    record="$(printf '%s\n' "$SVC_RECORD" | jq -c '.state="stopped"')" || return 74
+    [ "$(printf '%s\n' "$record" | sha256sum | awk '{print $1}')" = "$stopped" ] || return 75
+    # Validate ALL files before unlinking the first. Missing files are the
+    # restartable result of this exact persisted retirement intent.
+    index=0
+    for file in "$SVC_PIDFILE" "$SVC_STARTTIME"; do
+        if [ -n "$file" ] && { [ -e "$file" ] || [ -L "$file" ]; }; then
+            broray_service_file_safe "$file" 64 || return 75
+            expected="$(printf '%s\n' "$SVC_RECOVERY" | jq -r --argjson i "$index" '.projections[$i].sha256')"
+            [ "$(sha256sum "$file" | awk '{print $1}')" = "$expected" ] || return 75
+        fi
+        index=$((index+1))
+    done
+    rm -f "$SVC_PIDFILE" || return 74
+    [ -z "$SVC_STARTTIME" ] || rm -f "$SVC_STARTTIME" || return 74
+    broray_service_write "$SVC_DIR/identity.json" "$record"
 }
 
 broray_service_daemon_enter()

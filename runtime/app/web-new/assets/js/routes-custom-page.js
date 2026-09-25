@@ -847,6 +847,12 @@
         actions = root.querySelector(".routes-upload-actions");
         root.querySelector(".routes-upload-backdrop").addEventListener("click", closeUpload);
         actions.querySelector('[data-upload-action="cancel"]').addEventListener("click", closeUpload);
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && modal && !modal.hidden && !uploadBusy) {
+                event.preventDefault();
+                closeUpload();
+            }
+        });
         actions.querySelector('[data-upload-action="commit"]').addEventListener("click", commitUpload);
         form.addEventListener("submit", previewUpload);
         root.querySelector("#routes-upload-files").addEventListener("change", function () { preview = null; showPreview(null); });

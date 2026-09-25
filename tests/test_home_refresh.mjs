@@ -126,6 +126,7 @@ test('first load authenticates before requesting summary with no-store, same-ori
 test('successful periodic refresh changes all seven modules', async () => {
     const h = await ready(), s = summary('Next', 8); s.xray.version='test-next'; s.subscriptions.enabled=2; s.subscriptions.total=2;
     s.routes.installedBundles=3; s.keenetic.connected=false; s.broray.version='candidate'; s.dns.managedPresentCount=2;
+    s.installedRelease={version:'candidate'};
     h.setSummary(s); await h.clock.advance(30000);
     for (const [id,value] of Object.entries({'home-xray-version':'test-next','home-servers-total':'8','home-subscriptions-enabled':'2 из 2','home-routes-count':'3','home-keenetic-state':'Нет подключения','home-broray-version':'candidate','home-routes-dns':'DNS-over-TLS: 2 из 3'})) assert.equal(h.text(id),value);
 });
@@ -202,3 +203,24 @@ test('retry intervals back off 30/60/120 seconds, cap at 120 and reset after suc
 test('without optional refresh button automatic refresh still works',async()=>{const h=await ready({noButton:true});await h.clock.advance(30000);assert.equal(h.summaryRequests().length,2);});
 test('without AbortController no uncontrolled request is launched',async()=>{const h=await ready({noAbort:true});assert.equal(h.requests.length,0);assert.match(h.text('home-refresh-feedback'),/браузер/);assert.equal(h.clock.timers.size,0);});
 test('summary cache timestamps and health are not rewritten to client now',async()=>{const h=await ready();assert.match(h.text('home-updated-at'),/17/);assert.match(h.nodes.get('home-updated-at').title,/модуля/);const before=h.text('home-updated-at');await h.clock.advance(30000);assert.equal(h.text('home-updated-at'),before);});
+
+test('installed release version is independent of an expired previous-release snapshot',async()=>{
+    const h=await ready(),s=summary();
+    s.installedRelease={version:'3.2.0',candidateId:'3.2.0-r01c12'};
+    s.broray._snapshot={freshness:'expired'};
+    h.setSummary(s);await h.click('refresh-status');
+    assert.equal(h.text('home-broray-version'),'3.2.0');
+    assert.equal(h.text('home-broray-status'),'Данные устарели');
+    assert.equal(h.text('home-broray-update'),'—');
+});
+test('missing current release metadata never falls back to a cached installed version',async()=>{
+    const h=await ready(),s=summary();s.installedRelease=null;
+    h.setSummary(s);await h.click('refresh-status');
+    assert.equal(h.text('home-broray-version'),'—');
+});
+test('current release version remains available without a component snapshot',async()=>{
+    const h=await ready(),s=summary();s.installedRelease={version:'3.2.1'};s.broray=null;
+    h.setSummary(s);await h.click('refresh-status');
+    assert.equal(h.text('home-broray-version'),'3.2.1');
+    assert.equal(h.text('home-broray-status'),'Недоступно');
+});

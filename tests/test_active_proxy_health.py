@@ -43,6 +43,26 @@ case "$*" in *'--write-out %{http_code} https:'*) printf '204' ;; *) printf '204
         self.assertEqual(self.auto_state()['consecutiveFailures'],0)
         self.assertTrue(self.calls.exists(),'No active SOCKS request was made')
         self.assert_drained()
+    def test_manual_check_publishes_current_proxy_health(self):
+        before=self.runtime.pid
+        self.shell('"$BRORAY_OPS_ASH" "$BRORAY_ROOT/bin/broray-servers" check '+self.server+' manual',timeout=90)
+        health=json.loads(self.quality.read_text())['activeHealth']
+        self.assertEqual(health['status'],'healthy')
+        self.assertEqual(len(health['context']),64)
+        self.assertEqual(health['serverId'],self.server)
+        view=self.shell('. "$BRORAY_ROOT/lib/server-service.sh"; broray_active_proxy_cached '+self.server+' "'+str(self.quality)+'"')
+        self.assertEqual(json.loads(view.stdout)['status'],'healthy')
+        self.current.write_text(self.current.read_text()+'\n')
+        view=self.shell('. "$BRORAY_ROOT/lib/server-service.sh"; broray_active_proxy_cached '+self.server+' "'+str(self.quality)+'"')
+        self.assertEqual(json.loads(view.stdout)['status'],'unknown')
+        self.assertEqual(self.runtime.pid,before);self.assertIsNone(self.runtime.poll());self.assert_drained()
+    def test_manual_check_keeps_real_proxy_failure_separate_from_candidate_quality(self):
+        self.env['TEST_ACTIVE_MODE']='timeout'
+        self.shell('"$BRORAY_OPS_ASH" "$BRORAY_ROOT/bin/broray-servers" check '+self.server+' manual',timeout=90)
+        quality=json.loads(self.quality.read_text())
+        self.assertEqual(quality['status'],'available')
+        self.assertEqual(quality['activeHealth']['status'],'unhealthy')
+        self.assertIsNone(self.runtime.poll());self.assert_drained()
     def test_proxy_failure_counts_despite_icmp_up(self):
         self.env['TEST_ACTIVE_MODE']='timeout'
         self.monitor.write_text('{"available":true,"up":true,"checked_at":1}')

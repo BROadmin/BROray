@@ -500,6 +500,7 @@ broray_routes_config_get_cache()
     # Old directory generations have no provable ownership. Preserve them.
     [ ! -e "$BRORAY_ROUTES_CONFIG_LOCK" ] && [ ! -L "$BRORAY_ROUTES_CONFIG_LOCK" ] || return 1
     guard="${BRORAY_OPS_GUARD:-$BRORAY_ROOT/bin/broray-ops-guard}"
+    BRORAY_ROOT="$BRORAY_ROOT" \
     BRORAY_ROUTES_CONFIG_CACHE="$BRORAY_ROUTES_CONFIG_CACHE" \
     BRORAY_ROUTES_CONFIG_LOCK="$BRORAY_ROUTES_CONFIG_LOCK" \
     BRORAY_ROUTES_CONFIG_NDMC="$BRORAY_ROUTES_CONFIG_NDMC" \

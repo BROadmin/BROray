@@ -79,10 +79,16 @@ broray_server_subscription_import_key()
             path: (.xhttp.path // .ws.path // .httpupgrade.path // .transport.path // ""),
             serviceName: (.grpc.serviceName // .transport.serviceName // ""),
             mode: (.xhttp.mode // .transport.mode // ""),
-            headerType: (.transport.headerType // "none"),
+            headerType: (.transport.headerType // "none"), header: (.transport.header // {}),
             extra: (.xhttp.extra // .transport.extra // {}),
+            ports: (.hysteria.ports // ""),
             obfs: (.hysteria.obfs // ""), obfsPassword: (.hysteria.obfsPassword // ""),
-            finalMask: (.hysteria.finalMask // {})
+            finalMask: (.hysteria.finalMask // .transport.finalMask // {}),
+            echConfigList: (.tls.echConfigList // ""),
+            verifyPeerCertByName: (.tls.verifyPeerCertByName // ""),
+            mldsa65Verify: (.reality.mldsa65Verify // ""),
+            kcp: (.transport.kcp // {}), kcpSeed: (.transport.kcpSeed // ""),
+            kcpLegacy: (.transport.kcpLegacy // false)
         }
     ' "$import_file" 2>/dev/null)" || return 1
     printf '%s\n' "$connection" | sha256sum | awk '{print $1}'

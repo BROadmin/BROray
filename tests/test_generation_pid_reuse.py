@@ -43,7 +43,9 @@ while True:time.sleep(.1)
   pid=self.wait(lambda:int((self.home/'writer.pid').read_text()))
   old=Path(f'/proc/{pid}/stat').read_text().rsplit(') ',1)[1].split()[19]
   (self.home/'release-writer').touch();self.wait(lambda:(self.home/'reaped').exists())
-  self.wait(lambda:all(x['pid']!=pid for x in self.state()['children']+self.state()['exitedUnreaped']))
+  def writer_reaped():
+   live=self.live_state();return all(x['pid']!=pid for x in live['children']+live['exitedUnreaped'])
+  self.wait(writer_reaped)
   replacement=self.replacement(pid)
   try:
    birth=Path(f'/proc/{pid}/stat').read_text().rsplit(') ',1)[1].split()[19];self.assertNotEqual(old,birth)

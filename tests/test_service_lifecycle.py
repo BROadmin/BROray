@@ -74,6 +74,69 @@ class Services(unittest.TestCase):
     def test_empty_status_is_read_only(self):
         p=self.call('status-json');self.assertFalse(json.loads(p.stdout)['running'])
         self.assertFalse(self.state.exists())
+    def stale_mismatch(self):
+        p=self.direct();record=self.wait_running(p)
+        self.call('stop');p.communicate(timeout=10)
+        record['owner']['bootId']='previous-boot';record['state']='running'
+        (self.svc/'identity.json').write_text(json.dumps(record))
+        (self.app/'run/subscription-scheduler.pid').write_text('99999999\n')
+        (self.app/'run/subscription-scheduler.starttime').write_text('42\n')
+        return {p:p.read_bytes() for p in [self.svc/'identity.json',self.app/'run/subscription-scheduler.pid',self.app/'run/subscription-scheduler.starttime']}
+    def test_ambiguous_projection_requires_boot_boundary(self):
+        before=self.stale_mismatch()
+        self.call('recover',expected=75)
+        receipt=self.svc/('recovery-'+self.record()['generation']+'.json');self.assertTrue(receipt.exists())
+        evidence=receipt.read_bytes();self.call('recover',expected=75)
+        self.assertEqual(receipt.read_bytes(),evidence)
+        self.assertTrue(all(p.read_bytes()==b for p,b in before.items()))
+        status=json.loads(self.call('status-json').stdout)
+        self.assertEqual(status['errorCode'],'SERVICE_RECOVERY_REBOOT_REQUIRED')
+    def test_recovery_rejects_changed_projection_after_boot(self):
+        before=self.stale_mismatch();self.call('recover',expected=75)
+        receipt=self.svc/('recovery-'+self.record()['generation']+'.json');record=json.loads(receipt.read_bytes())
+        record['bootId']='simulated-previous-boot';receipt.write_text(json.dumps(record))
+        pid=self.app/'run/subscription-scheduler.pid';pid.write_text('87654321\n')
+        self.call('recover',expected=75);self.assertEqual(pid.read_text(),'87654321\n')
+        self.assertEqual((self.svc/'identity.json').read_bytes(),before[self.svc/'identity.json'])
+    def test_recovery_after_boot_preserves_evidence_and_can_start(self):
+        before=self.stale_mismatch();self.call('recover',expected=75)
+        receipt=self.svc/('recovery-'+self.record()['generation']+'.json');record=json.loads(receipt.read_bytes())
+        record['bootId']='simulated-previous-boot';receipt.write_text(json.dumps(record))
+        self.call('recover');self.assertEqual(self.record()['state'],'stopped')
+        self.assertFalse((self.app/'run/subscription-scheduler.pid').exists())
+        self.assertFalse((self.app/'run/subscription-scheduler.starttime').exists())
+        evidence=receipt.read_bytes();self.call('recover');self.assertEqual(receipt.read_bytes(),evidence)
+        self.call('start');self.assertTrue(json.loads(self.call('status-json').stdout)['ready'])
+        self.assertTrue(receipt.exists(),'Recovery evidence must survive successful startup')
+    def test_recovery_refuses_live_generation_without_mutation(self):
+        p=self.direct();self.wait_running(p)
+        identity=self.svc/'identity.json';before=identity.read_bytes()
+        self.call('recover',expected=75,timeout=20)
+        self.assertIsNone(p.poll());self.assertEqual(identity.read_bytes(),before)
+        self.assertFalse(list(self.svc.glob('recovery-*.json')))
+    def test_recovery_keeps_corrupt_receipt(self):
+        before=self.stale_mismatch();self.call('recover',expected=75)
+        receipt=self.svc/('recovery-'+self.record()['generation']+'.json');receipt.write_bytes(b'{broken')
+        self.call('recover',expected=75)
+        self.assertEqual(receipt.read_bytes(),b'{broken')
+        self.assertTrue(all(p.read_bytes()==b for p,b in before.items()))
+    def test_recovery_valid_json_wrong_target_hash_preserves_all_files(self):
+        before=self.stale_mismatch();self.call('recover',expected=75)
+        receipt=self.svc/('recovery-'+self.record()['generation']+'.json');record=json.loads(receipt.read_bytes())
+        record['bootId']='simulated-previous-boot';record['stoppedSha256']='0'*64
+        receipt.write_text(json.dumps(record));evidence=receipt.read_bytes()
+        self.call('recover',expected=75)
+        self.assertEqual(receipt.read_bytes(),evidence)
+        self.assertTrue(all(p.exists() and p.read_bytes()==b for p,b in before.items()))
+    def test_recovery_resumes_after_one_projection_retired(self):
+        before=self.stale_mismatch();self.call('recover',expected=75)
+        receipt=self.svc/('recovery-'+self.record()['generation']+'.json');record=json.loads(receipt.read_bytes())
+        import base64
+        self.assertEqual(base64.b64decode(record['identityBytes']),before[self.svc/'identity.json'])
+        record['bootId']='simulated-previous-boot';receipt.write_text(json.dumps(record))
+        (self.app/'run/subscription-scheduler.pid').unlink()
+        self.call('recover');self.call('start')
+        self.assertTrue(json.loads(self.call('status-json').stdout)['ready'])
     def test_status_rejects_symlinked_service_directory(self):
         foreign=self.temp/'foreign';foreign.mkdir();(foreign/'identity.json').write_text('PRIVATE_CANARY')
         self.svc.parent.mkdir(parents=True);self.svc.symlink_to(foreign)

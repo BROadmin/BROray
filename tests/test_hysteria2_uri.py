@@ -57,7 +57,10 @@ class Hysteria2Pipeline(unittest.TestCase):
         n,c=self.one(self.uri('obfs=salamander&obfs-password=mask%2Bpassword'))
         self.assertEqual(n['hysteria']['obfsPassword'],'mask+password')
         self.assertEqual(c['streamSettings']['finalmask']['udp'][0]['settings']['password'],'mask+password')
-        for query in ['obfs=salamander','obfs-password=password','obfs=other','obfs=gecko&obfs-password=password']:
+        # Gecko is now an authorized native Xray mask; unknown obfuscators still fail.
+        n,c=self.one(self.uri('obfs=gecko&obfs-password=password'))
+        self.assertEqual(c['streamSettings']['finalmask']['udp'][0],{'type':'salamander','settings':{'password':'password','packetSize':'512-1200'}})
+        for query in ['obfs=salamander','obfs-password=password','obfs=other','obfs=unknown&obfs-password=password']:
             self.reject_uri(self.uri(query))
     def test_finalmask_contract(self):
         fm={'udp':[{'type':'salamander','settings':{'password':'mask'}}]}

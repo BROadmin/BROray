@@ -74,12 +74,13 @@ broray_server_save_parsed() {
     [ -n "$BRORAY_ADDRESS" ] || broray_die "парсер не вернул адрес"
     case "$BRORAY_PORT" in ''|*[!0-9]*) broray_die "порт должен быть числом" ;; esac
     [ "$BRORAY_PORT" -ge 1 ] 2>/dev/null && [ "$BRORAY_PORT" -le 65535 ] 2>/dev/null || broray_die "порт должен находиться в диапазоне 1–65535"
-    case "$BRORAY_NETWORK" in raw|ws|grpc|httpupgrade|xhttp) ;; *) broray_die "неподдерживаемый транспорт VLESS: $BRORAY_NETWORK" ;; esac
+    case "$BRORAY_NETWORK" in raw|ws|grpc|httpupgrade|xhttp|kcp) ;; *) broray_die "неподдерживаемый транспорт VLESS: $BRORAY_NETWORK" ;; esac
     case "$BRORAY_SECURITY" in none|tls|reality) ;; *) broray_die "неподдерживаемая защита VLESS: $BRORAY_SECURITY" ;; esac
-    case "${BRORAY_FLOW:-}" in ''|xtls-rprx-vision) ;; *) broray_die "неподдерживаемый режим VLESS flow: $BRORAY_FLOW" ;; esac
+    case "${BRORAY_FLOW:-}" in ''|xtls-rprx-vision|xtls-rprx-vision-udp443) ;; *) broray_die "неподдерживаемый режим VLESS flow: $BRORAY_FLOW" ;; esac
+    broray_vless_encryption_valid "${BRORAY_ENCRYPTION:-none}" || broray_die "неподдерживаемый или некорректный VLESS encryption"
     if [ -n "${BRORAY_FLOW:-}" ] &&
-       { [ "$BRORAY_NETWORK" != raw ] || { [ "$BRORAY_SECURITY" != reality ] && [ "$BRORAY_SECURITY" != tls ]; }; }; then
-        broray_die "VLESS flow поддерживается только для TCP/RAW + TLS/REALITY"
+       { { [ "$BRORAY_NETWORK" != raw ] && [ "${BRORAY_ENCRYPTION:-none}" = none ]; } || { [ "$BRORAY_SECURITY" != reality ] && [ "$BRORAY_SECURITY" != tls ]; }; }; then
+        broray_die "VLESS Vision требует TLS/REALITY и TCP/RAW либо поддерживаемого VLESS encryption"
     fi
     if [ "$BRORAY_SECURITY" = reality ]; then
         case "$BRORAY_NETWORK" in raw|grpc|xhttp) ;; *) broray_die "VLESS REALITY не поддерживает этот транспорт" ;; esac
@@ -114,6 +115,7 @@ broray_server_save_parsed() {
           transport:{host:$host,path:$path,serviceName:$serviceName,mode:$mode,headerType:$headerType,extra:$extra},
           xhttp:{path:$path,mode:$mode,extra:$extra}
         }' > "$temporary_file" || broray_die "не удалось создать файл сервера"
+    broray_server_save_stream_extensions "$temporary_file"
     broray_server_validate "$temporary_file"
     mv "$temporary_file" "$server_file" || broray_die "не удалось сохранить сервер"
     chmod 600 "$server_file"
@@ -138,7 +140,7 @@ broray_server_import_vless() {
             ;;
     esac
 
-    broray_parse_vless "$original_uri"
+    broray_parse_vless "$original_uri" || return 1
 
     server_id="$(
         broray_server_generate_id \
@@ -289,7 +291,7 @@ broray_server_save_vmess() {
             "порт VMess должен находиться в диапазоне 1–65535"
 
     case "$BRORAY_NETWORK" in
-        raw|ws|grpc|httpupgrade|xhttp)
+        raw|ws|grpc|httpupgrade|xhttp|kcp)
             ;;
         *)
             broray_die \
@@ -422,6 +424,7 @@ broray_server_save_vmess() {
         broray_die \
             "не удалось создать файл VMess-сервера"
 
+    broray_server_save_stream_extensions "$temporary_file"
     broray_server_validate "$temporary_file"
 
     mv "$temporary_file" "$server_file" ||
@@ -439,7 +442,7 @@ broray_server_import_vmess() {
 
     . "$BRORAY_BASE/lib/parser-vmess.sh"
 
-    broray_parse_vmess "$original_uri"
+    broray_parse_vmess "$original_uri" || return 1
 
     server_id="$(
         broray_server_generate_id \
@@ -499,7 +502,7 @@ broray_server_save_trojan()
             "порт Trojan должен находиться в диапазоне 1–65535"
 
     case "$BRORAY_NETWORK" in
-        raw|ws|grpc|httpupgrade|xhttp)
+        raw|ws|grpc|httpupgrade|xhttp|kcp)
             ;;
         *)
             broray_die \
@@ -507,9 +510,13 @@ broray_server_save_trojan()
             ;;
     esac
 
-    [ "$BRORAY_SECURITY" = "tls" ] ||
-        broray_die \
-            "пока Trojan поддерживается только с TLS"
+    case "$BRORAY_SECURITY" in
+        tls) ;;
+        reality)
+            case "$BRORAY_NETWORK" in raw|grpc|xhttp) ;; *) broray_die "Trojan REALITY не поддерживает этот транспорт" ;; esac
+            [ -n "$BRORAY_PBK" ] || broray_die "Trojan REALITY требует public key" ;;
+        *) broray_die "неподдерживаемая защита Trojan" ;;
+    esac
 
     [ -n "$BRORAY_SNI" ] ||
         broray_die "для Trojan TLS не указан SNI"
@@ -549,6 +556,7 @@ broray_server_save_trojan()
         --arg path "$BRORAY_PATH" \
         --arg serviceName "$BRORAY_SERVICE_NAME" \
         --arg mode "$BRORAY_MODE" \
+        --arg headerType "$BRORAY_HEADER_TYPE" \
         --argjson extra "$BRORAY_EXTRA" \
         '{
             schemaVersion: 2,
@@ -584,12 +592,14 @@ broray_server_save_trojan()
                 path: $path,
                 serviceName: $serviceName,
                 mode: $mode,
+                headerType: $headerType,
                 extra: $extra
             }
         }' > "$temporary_file" ||
         broray_die \
             "не удалось создать файл Trojan-сервера"
 
+    broray_server_save_stream_extensions "$temporary_file"
     broray_server_validate "$temporary_file"
 
     mv "$temporary_file" "$server_file" ||
@@ -610,7 +620,7 @@ broray_server_import_trojan()
 
     . "$BRORAY_BASE/lib/parser-trojan.sh"
 
-    broray_parse_trojan "$original_uri"
+    broray_parse_trojan "$original_uri" || return 1
 
     server_id="$(
         broray_server_generate_id \
@@ -650,9 +660,6 @@ broray_server_save_hysteria2()
 
     broray_server_validate_id "$server_id"
 
-    [ -n "$BRORAY_AUTH" ] ||
-        broray_die \
-            "парсер Hysteria2 не вернул auth"
 
     [ -n "$BRORAY_ADDRESS" ] ||
         broray_die \
@@ -714,6 +721,7 @@ broray_server_save_hysteria2()
         --argjson alpn "$BRORAY_ALPN" \
         --argjson allowInsecure "$BRORAY_ALLOW_INSECURE" \
         --arg pinnedPeerCertSha256 "$BRORAY_PIN_SHA256" \
+        --arg ports "${BRORAY_HY2_PORTS:-}" \
         --arg obfs "$BRORAY_OBFS" \
         --arg obfsPassword "$BRORAY_OBFS_PASSWORD" \
         --arg upMbps "$BRORAY_UP_MBPS" \
@@ -750,6 +758,7 @@ broray_server_save_hysteria2()
             } + (if $pinnedPeerCertSha256 != "" then {pinnedPeerCertSha256:$pinnedPeerCertSha256} else {} end)),
             hysteria: {
                 version: 2,
+                ports: $ports,
                 obfs: $obfs,
                 obfsPassword: $obfsPassword,
                 upMbps: $upMbps,
@@ -760,6 +769,7 @@ broray_server_save_hysteria2()
         broray_die \
             "не удалось создать файл Hysteria2-сервера"
 
+    broray_server_save_stream_extensions "$temporary_file"
     broray_server_validate "$temporary_file"
 
     mv "$temporary_file" "$server_file" ||
@@ -780,7 +790,7 @@ broray_server_import_hysteria2()
 
     . "$BRORAY_BASE/lib/parser-hysteria2.sh"
 
-    broray_parse_hysteria2 "$original_uri"
+    broray_parse_hysteria2 "$original_uri" || return 1
 
     server_id="$(
         broray_server_generate_id \
@@ -1155,4 +1165,28 @@ broray_server_import()
                 "обновление активного сервера отменено: сохранена прежняя рабочая версия"
         fi
     fi
+}
+
+broray_server_save_stream_extensions() {
+    local target="$1" pins
+    pins="$(printf '%s' "${BRORAY_PCS:-}" | tr -d ':' | tr 'A-F' 'a-f')"
+    jq --arg header "${BRORAY_RAW_HEADER:-}" --arg ech "${BRORAY_ECH:-}" --arg pcs "$pins" --arg vcn "${BRORAY_VCN:-}" \
+       --arg pqv "${BRORAY_PQV:-}" --arg mask "${BRORAY_STREAM_MASK:-}" \
+       --arg kcp "${BRORAY_KCP:-}" --arg seed "${BRORAY_KCP_SEED:-}" --arg legacy "${BRORAY_KCP_LEGACY:-false}" \
+       --arg sni "${BRORAY_SNI:-}" --arg fp "${BRORAY_FP:-chrome}" --arg pbk "${BRORAY_PBK:-}" --arg sid "${BRORAY_SID:-}" --arg spx "${BRORAY_SPX:-}" '
+      (if $header != "" then .transport.header=($header|fromjson) else . end) |
+      (if .protocol == "trojan" and .security == "reality" then
+         .reality={serverName:$sni,fingerprint:$fp,publicKey:$pbk,shortId:$sid,spiderX:$spx} else . end) |
+      (if .network == "kcp" then .transport.kcp=($kcp|fromjson) | .transport.kcpSeed=$seed | .transport.kcpLegacy=($legacy=="true") else . end) |
+      (if $ech != "" then .tls.echConfigList=$ech else . end) |
+      (if $vcn != "" then .tls.verifyPeerCertByName=$vcn else . end) |
+      (if $pcs != "" then
+         if (.tls.pinnedPeerCertSha256 // $pcs) != $pcs then error("conflicting certificate pins")
+         else .tls.pinnedPeerCertSha256=$pcs end
+       else . end) |
+      (if $pqv != "" then .reality.mldsa65Verify=$pqv else . end) |
+      (if $mask != "" and $mask != "{}" then .transport.finalMask=($mask|fromjson) else . end)
+    ' "$target" > "$target.stream" || broray_die "неправильные параметры TLS/REALITY/FinalMask"
+    broray_server_stream_fields_valid "$target.stream" || broray_die "неподдерживаемые параметры TLS/REALITY/FinalMask"
+    mv "$target.stream" "$target" || broray_die "не удалось сохранить параметры соединения"
 }

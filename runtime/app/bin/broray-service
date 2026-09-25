@@ -12,7 +12,13 @@ case "$action" in
     printf '%s\n' "$view" | jq -e '.complete and .running==true' >/dev/null ;;
   start)
     view="$(broray_service_status_json)" || exit 74
-    printf '%s\n' "$view" | jq -e '.complete' >/dev/null || { printf '%s\n' "$view"; exit 75; }
+    if ! printf '%s\n' "$view" | jq -e '.complete' >/dev/null; then
+        "$SVC_ASH" "$SVC_APP/bin/broray-service" "$SVC_NAME" recover || {
+            broray_service_status_json; exit 75;
+        }
+        view="$(broray_service_status_json)" || exit 74
+        printf '%s\n' "$view" | jq -e '.complete' >/dev/null || { printf '%s\n' "$view"; exit 75; }
+    fi
     if ! printf '%s\n' "$view" | jq -e '.running==true' >/dev/null; then
         [ -f "$SVC_DAEMON" ] && [ ! -L "$SVC_DAEMON" ] || exit 74
         mkdir -p "$SVC_APP/logs" || exit 74
@@ -40,6 +46,12 @@ case "$action" in
   retire-dead)
     broray_service_fd "$SVC_DIR/lifetime.guard" >/dev/null || exit 73
     broray_service_control retire-dead ;;
+  recover)
+    broray_service_dirs || exit $?
+    exec "$SVC_GUARD" "$SVC_DIR/lifetime.guard" "$SVC_ASH" "$SVC_APP/bin/broray-service" "$SVC_NAME" recover-held ;;
+  recover-held)
+    broray_service_fd "$SVC_DIR/lifetime.guard" >/dev/null || exit 73
+    broray_service_control recover ;;
   restart)
     "$SVC_ASH" "$SVC_APP/bin/broray-service" "$SVC_NAME" stop || exit $?
     exec "$SVC_ASH" "$SVC_APP/bin/broray-service" "$SVC_NAME" start ;;

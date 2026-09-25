@@ -62,7 +62,9 @@
             running: "Выполняется",
             success: "Завершена",
             partial: "Завершена с ошибками",
-            paused: "Ожидает",
+            paused: "На паузе",
+            unavailable: "Состояние не подтверждено",
+            stopped: "Служба остановлена",
             error: "Ошибка"
         };
         return titles[status] || "Ожидание";
@@ -107,6 +109,11 @@
         var state = payload.state || {};
         var service = payload.service || {};
         var enabled = config.enabled === true;
+        var paused = payload.automation && payload.automation.paused === true;
+        var serviceKnown = service.complete === true && typeof service.running === "boolean";
+        var operational = serviceKnown && service.running === true && service.ready === true;
+        var effectiveStatus = !enabled ? "disabled" : paused ? "paused"
+            : !serviceKnown ? "unavailable" : !operational ? "stopped" : state.status || "scheduled";
 
         element("quality-refresh-enabled").checked = enabled;
         element("quality-refresh-interval").value = String(
@@ -114,10 +121,9 @@
         );
         syncIntervalState();
 
-        element("quality-refresh-badge").textContent = enabled
-            ? "Включена"
-            : "Выключена";
-        element("quality-refresh-badge").className = enabled
+        element("quality-refresh-badge").textContent = enabled && !paused && operational
+            ? "Включена" : statusTitle(effectiveStatus);
+        element("quality-refresh-badge").className = enabled && !paused && operational
             ? "status-badge quality-refresh-badge-enabled"
             : "status-badge status-badge-neutral";
         element("quality-refresh-service").textContent =
@@ -129,19 +135,26 @@
                         ? "Запускается"
                         : service.running ? "Работает" : "Остановлена";
         element("quality-refresh-status").textContent = statusTitle(
-            state.status || (enabled ? "scheduled" : "disabled")
+            effectiveStatus
         );
         element("quality-refresh-last").textContent = formatDate(
             state.lastCompletedAt
         );
-        element("quality-refresh-next").textContent = enabled
+        element("quality-refresh-next").textContent = enabled && !paused && operational
             ? formatEpoch(state.nextCheckEpoch)
             : "Не запланирована";
-        element("quality-refresh-result").textContent = resultText(state);
+        element("quality-refresh-result").textContent = paused
+            ? "Автоматика BROray на паузе. Возобновите её на странице BROray; расписание сохранено."
+            : enabled && !operational
+                ? "Проверки не запускаются: служба автоматического выбора не готова. Откройте диагностику на странице BROray."
+                : resultText(state);
 
-        if (state.lastError) {
+        var recoveryError = service.errorCode === "SERVICE_RECOVERY_REBOOT_REQUIRED"
+            ? "Для восстановления службы требуется штатная перезагрузка роутера. Исходные записи сохранены; после перезагрузки BROray проверит их и повторит запуск."
+            : "";
+        if (state.lastError || recoveryError) {
             element("quality-refresh-error").hidden = false;
-            element("quality-refresh-error").textContent = state.lastError;
+            element("quality-refresh-error").textContent = state.lastError || recoveryError;
         } else {
             element("quality-refresh-error").hidden = true;
             element("quality-refresh-error").textContent = "";
@@ -180,7 +193,7 @@
         request(SAVE_URL, { method: "POST", body: payload }).then(function () {
             BROrayUI.toast(
                 payload.enabled
-                    ? "Автоматическая проверка качества включена."
+                    ? "Расписание автоматической проверки сохранено."
                     : "Автоматическая проверка качества выключена.",
                 "success"
             );

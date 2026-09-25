@@ -43,6 +43,16 @@ broray_server_check()
           type=="number" and .>=0 and floor==.)' "$job_dir/result.json" >/dev/null; then
         rm -rf "$job_dir"; return 1
     fi
+    if [ "$(cat "$BRORAY_ACTIVE_SERVER_FILE" 2>/dev/null)" = "$job_server" ]; then
+        . "$BRORAY_BASE/lib/active-proxy-health.sh" || return 1
+        broray_active_proxy_measure "$job_server" || return $?
+        jq --argjson activeHealth "$ACTIVE_PROXY_RESULT" '. + {activeHealth:$activeHealth}' \
+            "$job_quality" >"$job_dir/active-quality.json" || return 1
+        mv "$job_dir/active-quality.json" "$job_quality" || return 1
+        jq --slurpfile quality "$job_quality" '.quality=$quality[0]' \
+            "$job_dir/result.json" >"$job_dir/active-result.json" || return 1
+        mv "$job_dir/active-result.json" "$job_dir/result.json" || return 1
+    fi
     chmod 600 "$job_quality" || return 1
     job_publish_rc=0
     broray_job_publish_json server-quality "$job_server" "$job_quality" || job_publish_rc=$?

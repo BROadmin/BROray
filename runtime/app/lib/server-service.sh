@@ -11,6 +11,7 @@ export BRORAY_ROOT
 . "$BRORAY_BASE/lib/xray.sh"
 . "$BRORAY_BASE/lib/status-contract.sh"
 . "$BRORAY_BASE/lib/server-check-job.sh"
+. "$BRORAY_BASE/lib/active-proxy-health.sh"
 
 BRORAY_SERVERS="$BRORAY_BASE/servers"
 BRORAY_QUALITY_DIR="$BRORAY_BASE/run/server-quality"
@@ -372,24 +373,13 @@ broray_server_summary()
     connection_up=false
     connection_freshness=unknown
     connection_age=null
-    if [ -s "$BRORAY_CONNECTION_STATUS" ] && connection_row="$(jq -er '
-        select(type == "object") |
-        [(.available // false),(.up // .connected // .healthy // false),(.checked_at // 0)] |
-        map(tostring) | @tsv
-    ' "$BRORAY_CONNECTION_STATUS" 2>/dev/null)"; then
-        saved_ifs="$IFS"
-        IFS="$(printf '\t')"
-        set -- $connection_row
-        IFS="$saved_ifs"
-        connection_available="${1:-false}"
-        connection_up="${2:-false}"
-        connection_epoch="${3:-0}"
-        case "$connection_epoch" in ''|*[!0-9]*) connection_epoch=0 ;; esac
-        if [ "$connection_epoch" -gt 0 ]; then
-            connection_age="$(broray_status_age_seconds "$connection_epoch" "$now_epoch" 2>/dev/null || printf '0')"
-            connection_freshness="$(broray_status_freshness_from_age "$connection_age" "$BRORAY_CONNECTION_STALE_SECONDS" "$BRORAY_CONNECTION_EXPIRED_SECONDS")"
-        fi
-    fi
+    connection_probe="$(broray_active_proxy_cached "$active_server_id" \
+        "$BRORAY_QUALITY_DIR/$active_server_id.json" "$BRORAY_BASE/run/server-auto-switch-state.json")" || connection_probe='{}'
+    connection_probe_status="$(printf '%s' "$connection_probe" | jq -r '.status // "unknown"')"
+    case "$connection_probe_status" in
+        healthy) connection_available=true; connection_up=true; connection_freshness=fresh ;;
+        unhealthy) connection_available=true; connection_up=false; connection_freshness=fresh ;;
+    esac
 
     keenetic_exists=false
     keenetic_healthy=false
@@ -450,7 +440,7 @@ broray_server_summary()
     health_reasons="$({
         [ "$active_present" = true ] || broray_status_reason ACTIVE_SERVER_MISSING 'Активный сервер не выбран.'
         [ "$xray_operational" = true ] || broray_status_reason XRAY_NOT_OPERATIONAL 'Xray или его локальный SOCKS-интерфейс не готовы.'
-        [ "$connection_available" = true ] || broray_status_reason CONNECTION_MONITOR_UNAVAILABLE 'Монитор соединения не вернул состояние.'
+        [ "$connection_available" = true ] || broray_status_reason ACTIVE_PROXY_HEALTH_UNAVAILABLE 'Текущий VPN ещё не проверен HTTPS-запросом. Нажмите «Проверить» у активного сервера.'
         [ "$connection_up" = true ] || broray_status_reason CONNECTION_DOWN 'Соединение через активный сервер не подтверждено.'
         [ "$connection_current" = true ] || broray_status_reason CONNECTION_STATUS_STALE 'Состояние соединения устарело.'
         [ "$keenetic_exists" = true ] || broray_status_reason PROXY0_MISSING 'Управляемый интерфейс ProxyN не создан.'
@@ -525,7 +515,7 @@ broray_server_summary()
             connectionState:$connectionState,
             xrayRunning:$xrayRunning,
             socksActive:$socksActive,
-            connectionMonitor:{available:$connectionAvailable,up:$connectionUp,freshness:$connectionFreshness},
+            activeConnection:{method:"current-socks-https",available:$connectionAvailable,up:$connectionUp,freshness:$connectionFreshness},
             keenetic:{healthy:$keeneticHealthy,consistent:$keeneticConsistent,freshness:$keeneticFreshness},
             activeServer:$activeServer,
             servers:$servers,

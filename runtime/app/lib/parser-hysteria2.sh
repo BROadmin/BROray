@@ -69,8 +69,8 @@ broray_parse_hysteria2()
             host_port="${authority##*@}"
             ;;
         *)
-            broray_die \
-                "в ссылке Hysteria2 отсутствует auth"
+            encoded_auth=""
+            host_port="$authority"
             ;;
     esac
 
@@ -78,9 +78,6 @@ broray_parse_hysteria2()
         broray_uri_component_decode "$encoded_auth"
     )" || broray_die "неправильное кодирование URI Hysteria2"
 
-    [ -n "$BRORAY_AUTH" ] ||
-        broray_die \
-            "Hysteria2 auth не может быть пустым"
 
     case "$host_port" in
         \[*\]:*)
@@ -107,17 +104,21 @@ broray_parse_hysteria2()
         broray_die \
             "в ссылке Hysteria2 отсутствует адрес"
 
-    case "$BRORAY_PORT" in
-        ''|*[!0-9]*)
-            broray_die \
-                "порт Hysteria2 должен быть числом"
-            ;;
-    esac
-
-    [ "$BRORAY_PORT" -ge 1 ] 2>/dev/null &&
-    [ "$BRORAY_PORT" -le 65535 ] 2>/dev/null ||
-        broray_die \
-            "порт Hysteria2 должен находиться в диапазоне 1–65535"
+    # URI port lists map to the native UDP hop mask, not to a fake scalar port.
+    BRORAY_HY2_PORTS="$(printf '%s' "$BRORAY_PORT" | jq -Rer '
+      def decimal: length > 0 and length <= 5 and all(explode[]; . >= 48 and . <= 57);
+      split(",") | select(length > 0 and length <= 128) |
+      map(split("-") | select((length == 1 or length == 2) and all(.[]; decimal)) |
+          map(tonumber) | select(all(.[]; . >= 1 and . <= 65535)) |
+          select(length == 1 or .[0] <= .[1]) | map(tostring) | join("-")) |
+      select(length > 0) | join(",")
+    ')" || broray_die "неправильный порт или диапазон портов Hysteria2"
+    # map(select(...)) must not silently drop an invalid member.
+    [ "$(printf '%s' "$BRORAY_PORT" | tr -cd ',' | wc -c)" = "$(printf '%s' "$BRORAY_HY2_PORTS" | tr -cd ',' | wc -c)" ] ||
+        broray_die "неправильный список портов Hysteria2"
+    BRORAY_PORT="${BRORAY_HY2_PORTS%%,*}"
+    BRORAY_PORT="${BRORAY_PORT%%-*}"
+    case "$BRORAY_HY2_PORTS" in *','*|*'-'*) ;; *) BRORAY_HY2_PORTS='' ;; esac
 
     if [ -n "$encoded_name" ]; then
         BRORAY_NAME="$(
@@ -168,8 +169,8 @@ broray_parse_hysteria2()
     BRORAY_DOWN_MBPS="$(broray_hy2_query_value "$query_string" "downmbps")" || broray_die "неправильный параметр URI Hysteria2"
 
     case "$BRORAY_OBFS" in
-        '') [ -z "$BRORAY_OBFS_PASSWORD" ] || broray_die "Hysteria2 obfs-password требует obfs=salamander" ;;
-        salamander) [ -n "$BRORAY_OBFS_PASSWORD" ] || broray_die "Hysteria2 salamander требует obfs-password" ;;
+        '') [ -z "$BRORAY_OBFS_PASSWORD" ] || broray_die "Hysteria2 obfs-password требует obfs=salamander/gecko" ;;
+        salamander|gecko) [ -n "$BRORAY_OBFS_PASSWORD" ] || broray_die "Hysteria2 salamander требует obfs-password" ;;
         *) broray_die "неподдерживаемый Hysteria2 obfs: $BRORAY_OBFS" ;;
     esac
     [ -z "$BRORAY_UP_MBPS" ] && [ -z "$BRORAY_DOWN_MBPS" ] ||
@@ -205,4 +206,6 @@ broray_parse_hysteria2()
     fi
 
     BRORAY_NETWORK="hysteria"
+    broray_parse_stream_extensions "$query_string" || return 1
+
 }
