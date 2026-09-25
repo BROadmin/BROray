@@ -738,6 +738,19 @@ schedule()
     }
     worker_running && return 0
     existing_phase="$(sed -n '1p' "$PHASE_FILE" 2>/dev/null || true)"
+    # A completed protected preflight can supersede an old legacy preparation.
+    # No platform write is possible in preparing; installing/restarting still
+    # require the original recovery binding. Preserve old request/backup bytes.
+    # Exact native readiness is mandatory: file equality or init exit alone is
+    # not authority to retire a pending handoff.
+    if [ "$existing_phase" = preparing ] &&
+       [ ! -e "$LOCK_DIR" ] && [ ! -L "$LOCK_DIR" ] && platform_current &&
+       preflight_installed && [ "$pf_old_manifest" = "$(payload_manifest_sha)" ]; then
+        candidate_id="$(current_candidate)" || return 1
+        status_write success false LEGACY_PREPARATION_SUPERSEDED 'Подготовка прежнего перехода завершена: подтверждён текущий updater.' false false '' "$candidate_id" || return 1
+        phase_write complete || return 1
+        return 0
+    fi
     case "$existing_phase" in
         preparing|installing|restarting)
             request_valid || return 1

@@ -247,6 +247,30 @@ updater_stat()
     done
 )
 
+# Downloads and validation trees must remain on the actual RAM filesystem.
+# Test prefixes may emulate /tmp, but no prefix permits a workspace under /opt
+# or a symlink crossing from the declared temporary root.
+workspace_ram_valid()
+{
+    local temporary parent relative
+    temporary="$(root_path /tmp)" || return 1
+    [ -d "$temporary" ] && [ ! -L "$temporary" ] || return 1
+    [ "$(readlink -f "$temporary")" = "$temporary" ] || return 1
+    case "$WORK_ROOT" in "$temporary"/*) ;; *) return 1 ;; esac
+    relative="${WORK_ROOT#"$temporary"/}"
+    case "/$relative/" in *'/../'*|*'/./'*|*'//'*) return 1 ;; esac
+    parent="$WORK_ROOT"
+    while [ "$parent" != "$temporary" ]; do
+        [ ! -L "$parent" ] || return 1
+        if [ -e "$parent" ]; then [ -d "$parent" ] || return 1; fi
+        parent="${parent%/*}"
+        [ -n "$parent" ] || return 1
+    done
+    if [ "$TEST_MODE" != 1 ]; then
+        awk -v path="$temporary" '$2==path && $3=="tmpfs" {n++} END {exit n!=1}' /proc/mounts || return 1
+    fi
+}
+
 ensure_layout()
 {
     local command_name directory layout_modes expected_owner mode managed_layout
@@ -255,6 +279,7 @@ ensure_layout()
         command -v "$command_name" >/dev/null 2>&1 || return 1
     done
 
+    workspace_ram_valid || return 1
     managed_layout=false
     if [ -e "$STATE_ROOT/generations" ] || [ -L "$STATE_ROOT/generations" ]; then
         managed_layout=true
@@ -1319,8 +1344,12 @@ slot_metrics_match()
 
 slot_tree_valid()
 {
-    local slot_root unsafe required marker_slot line_count release_json
+    local slot_root unsafe required marker_slot line_count release_json scratch
     slot_root="$1"
+    workspace_ram_valid && valid_id "$CURRENT_OPERATION_ID" || return 1
+    scratch="$WORK_ROOT/$CURRENT_OPERATION_ID"
+    [ ! -L "$scratch" ] || return 1
+    mkdir -p "$scratch" || return 1
     [ -d "$slot_root" ] && [ ! -L "$slot_root" ] || return 1
     [ -s "$slot_root/SHA256SUMS" ] && [ ! -L "$slot_root/SHA256SUMS" ] || return 1
     [ -s "$slot_root/.broray-slot" ] && [ ! -L "$slot_root/.broray-slot" ] || return 1
@@ -1340,9 +1369,9 @@ slot_tree_valid()
     find "$slot_root" -xdev -type f \
         ! -path "$slot_root/SHA256SUMS" \
         ! -path "$slot_root/.broray-slot" \
-        -printf '%P\n' | sort >"$CURRENT_OPERATION_DIR/tree.files" || return 1
-    awk 'NF == 2 {print $2; next} {bad=1} END {exit bad ? 1 : 0}' "$slot_root/SHA256SUMS" | sort >"$CURRENT_OPERATION_DIR/manifest.files" || return 1
-    cmp -s "$CURRENT_OPERATION_DIR/tree.files" "$CURRENT_OPERATION_DIR/manifest.files" || return 1
+        -printf '%P\n' | sort >"$scratch/tree.files" || return 1
+    awk 'NF == 2 {print $2; next} {bad=1} END {exit bad ? 1 : 0}' "$slot_root/SHA256SUMS" | sort >"$scratch/manifest.files" || return 1
+    cmp -s "$scratch/tree.files" "$scratch/manifest.files" || return 1
 
     for required in \
         release.json \
@@ -1427,7 +1456,10 @@ shell_tree_valid()
     find "$slot_root/app" "$slot_root/init" -xdev -type f -print | sort |
         while IFS= read -r script
         do
-            first_line="$(sed -n '1p' "$script" 2>/dev/null || true)"
+            first_line=''
+            # Shell builtin: no sed/subshell and corresponding traced child
+            # ledger records for each ordinary data file in the release.
+            IFS= read -r first_line <"$script" || true
             case "$first_line" in
                 '#!'*ash*) "$ASH_BIN" -n "$script" || exit 1 ;;
             esac
@@ -2524,7 +2556,9 @@ stage_release()
     valid_id "$candidate_id" || return 1
     slot="$candidate_id--$CURRENT_OPERATION_ID"
     valid_id "$slot" || return 1
-    staging="$RELEASES_ROOT/.staging-$CURRENT_OPERATION_ID"
+    workspace_ram_valid || return 1
+    [ "$work_dir" = "$WORK_ROOT/$CURRENT_OPERATION_ID" ] && [ ! -L "$work_dir" ] || return 1
+    staging="$work_dir/app-tree"
     final="$RELEASES_ROOT/$slot"
 
     printf '%s\n' "$slot" >"$CURRENT_OPERATION_DIR/target" || return 1
@@ -2558,7 +2592,14 @@ stage_release()
     [ "$release_id" = "$(printf '%s\n' "$target_json" | jq -r '.releaseId')" ] || return 1
     [ "$app_version" = "$(printf '%s\n' "$target_json" | jq -r '.appVersion')" ] || return 1
 
-    mv "$staging" "$final" || return 1
+    # Install only an already fully validated tree. This is the immutable
+    # inactive application slot, not an archive/validation scratch directory.
+    # Publish its ownership marker first so existing crash recovery can remove
+    # a partial copy without touching the active slot or foreign directories.
+    mkdir "$final" || return 1
+    printf '%s\n' "$slot" >"$final/.broray-slot" || return 1
+    chmod 600 "$final/.broray-slot" || return 1
+    cp -pR "$staging/." "$final/" || return 1
     sync
     slot_tree_valid "$final" || return 1
     slot_metrics_match "$final" "$target_json" || return 1
@@ -2681,8 +2722,12 @@ request_process()
     mkdir -p "$work_dir" || return 1
     bundle="$work_dir/release.tar.gz"
 
-    filesystem_has_bytes "$WORK_ROOT" "$bundle_size" || {
-        status_write "$operation" error space 100 'В /tmp недостаточно места для компактного app-архива; активная версия не изменялась.' TEMP_SPACE_INSUFFICIENT false false || true
+    # Archive + extracted tree allocation reserve, not archive bytes alone.
+    required_ram_bytes="$(printf '%s\n' "$target_json" | jq -er '.appSlot | [.logicalBytes,.fileCount,.directoryCount] | select(all(.[]; type=="number" and .>0 and floor==.)) | .[0] + ((.[1]+.[2])*4096) + 4194304')" || return 1
+    valid_positive_integer "$required_ram_bytes" || return 1
+    required_ram_bytes=$((required_ram_bytes + bundle_size))
+    filesystem_has_bytes "$WORK_ROOT" "$required_ram_bytes" || {
+        status_write "$operation" error space 100 'В RAM недостаточно места для архива и проверочной распаковки; активная версия не изменялась.' TEMP_SPACE_INSUFFICIENT false false || true
         operation_cleanup_terminal
         return 1
     }
