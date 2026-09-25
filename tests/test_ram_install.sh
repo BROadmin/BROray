@@ -70,7 +70,8 @@ case "$case_name" in
    [ ! -e "$here/unexpected-sed" ]
    if [ "$case_name" = shell-valid ]; then [ "$rc" = 0 ]; else [ "$rc" != 0 ]; fi
    ;;
- obsolete-ready|obsolete-unready|installing-unready|live-worker)
+ obsolete-ready|obsolete-unready|installing-unready|live-worker|ambiguous-worker|preflight-replay|failed-preflight)
+   rm -f "$here/host-busy"
    export BRORAY_HANDOFF_ROOT_PREFIX="$here/handoff-root" BRORAY_HANDOFF_TEST_MODE=1 BRORAY_HANDOFF_ASH=/opt/bin/ash
    . "$here/handoff-library.sh"
    mkdir -p "$STATE_ROOT"
@@ -78,20 +79,52 @@ case "$case_name" in
    [ "$case_name" != installing-unready ] || printf 'installing\n' >"$PHASE_FILE"
    printf '{"candidateId":"old"}\n' >"$REQUEST_FILE"
    original="$(sha256sum "$REQUEST_FILE")"
+   legacy_root="$STATE_ROOT"
+   mkdir -p "$BACKUP_ROOT" "$here/code/lib"
+   printf 'retained backup\n' >"$BACKUP_ROOT/evidence"
+   backup_original="$(sha256sum "$BACKUP_ROOT/evidence")"
+   : >"$here/code/lib/operation-client.sh"
    # The physical stale request is invalid for the new slot. Only a proven
    # current platform can supersede the pre-install preparing branch.
    payload_valid() { return 0; }
    payload_manifest_sha() { printf '%064d\n' 1; }
    platform_current() { return 0; }
-   preflight_installed() { pf_old_manifest="$(payload_manifest_sha)"; [ "$case_name" = obsolete-ready ]; }
+   preflight_installed() {
+     # Readiness requires both arguments and a responsive independent host.
+     # The host is occupied while it executes S25, so schedule cannot call it.
+     [ "$#" = 2 ] && [ "$1" = "$(payload_manifest_sha)" ] && [ "$2" = "$here/code" ] || return 75
+     [ ! -e "$here/host-busy" ] || return 75
+     pf_old_manifest="$(payload_manifest_sha)"
+     [ "$case_name" = obsolete-ready ] || [ "$case_name" = preflight-replay ]
+   }
    worker_running() { [ "$case_name" = live-worker ]; }
    request_valid() { return 1; }
    current_candidate() { echo new; }
-   rc=0; schedule || rc=$?
+   process_starttime() { echo 12345; }
+   preflight_paths_safe() { return 0; }
+   preflight_resume() { [ "$case_name" != failed-preflight ] || return 75; return 0; }
+   export BRORAY_OPS_CODE_ROOT="$here/code"
+   PLATFORM_TARGET_FILES='lib/operation-client.sh'
+   PAYLOAD_ROOT="$here/code"
+   chmod 700 "$here/code/lib/operation-client.sh"
+   [ "$case_name" != ambiguous-worker ] || mkdir "$LOCK_DIR"
+   # The real preflight uses a different namespace. It must settle legacy
+   # bookkeeping before the service host launches the new application's S25.
+   STATE_ROOT="$ROOT_PREFIX/opt/var/lib/broray-updater-preflight"
+   rc=0; preflight "$(payload_manifest_sha)" || rc=$?
+   STATE_ROOT="$legacy_root"
+   if [ "$case_name" = obsolete-ready ] || [ "$case_name" = preflight-replay ]; then
+     [ "$rc" = 0 ] && [ "$(cat "$PHASE_FILE")" = complete ] || exit 92
+     touch "$here/host-busy"
+     schedule || exit 93
+     if [ "$case_name" = preflight-replay ]; then
+       preflight "$(payload_manifest_sha)" || exit 94
+     fi
+   fi
    [ "$(sha256sum "$REQUEST_FILE")" = "$original" ]
+   [ "$(sha256sum "$BACKUP_ROOT/evidence")" = "$backup_original" ]
    case "$case_name" in
-     obsolete-ready) [ "$rc" = 0 ] && [ "$(cat "$PHASE_FILE")" = complete ] || exit 92 ;;
-     live-worker) [ "$rc" = 0 ] && [ "$(cat "$PHASE_FILE")" = preparing ] || exit 92 ;;
+     obsolete-ready|preflight-replay) [ "$rc" = 0 ] && [ "$(cat "$PHASE_FILE")" = complete ] || exit 92 ;;
      *) [ "$rc" != 0 ] && [ "$(cat "$PHASE_FILE")" != complete ] || exit 92 ;;
    esac
    ;;

@@ -738,19 +738,9 @@ schedule()
     }
     worker_running && return 0
     existing_phase="$(sed -n '1p' "$PHASE_FILE" 2>/dev/null || true)"
-    # A completed protected preflight can supersede an old legacy preparation.
-    # No platform write is possible in preparing; installing/restarting still
-    # require the original recovery binding. Preserve old request/backup bytes.
-    # Exact native readiness is mandatory: file equality or init exit alone is
-    # not authority to retire a pending handoff.
-    if [ "$existing_phase" = preparing ] &&
-       [ ! -e "$LOCK_DIR" ] && [ ! -L "$LOCK_DIR" ] && platform_current &&
-       preflight_installed && [ "$pf_old_manifest" = "$(payload_manifest_sha)" ]; then
-        candidate_id="$(current_candidate)" || return 1
-        status_write success false LEGACY_PREPARATION_SUPERSEDED 'Подготовка прежнего перехода завершена: подтверждён текущий updater.' false false '' "$candidate_id" || return 1
-        phase_write complete || return 1
-        return 0
-    fi
+    # Protected preflight settles obsolete preparation BEFORE app services run.
+    # Never call native readiness here: the independent service host can be
+    # waiting for this S25 child and cannot answer its own STATUS request.
     case "$existing_phase" in
         preparing|installing|restarting)
             request_valid || return 1
@@ -1053,7 +1043,7 @@ preflight_resume()
     printf '%s\n' "$pf_reply"
 }
 
-preflight()
+preflight_run()
 {
     local pf_expected pf_code pf_rc pf_old_generation pf_old_manifest pf_old_native pf_old_origin pf_old_nonce
     local pf_replace
@@ -1116,6 +1106,50 @@ preflight()
        operationId:$id,expectedPlatformManifestSha256:$sha,platformReady:false,
        serviceStopped:false,activationAllowed:false,signalsAuthorized:false}' || return 74
     return 75
+}
+
+# A legacy preparing phase has not changed platform files. Supersede it only
+# after the protected transaction has proved the exact new generation ready.
+# Keep the old request and backup as evidence. This runs before enqueue/service
+# launch, outside the independent app-service host. Other unfinished phases
+# require their original recovery; an existing worker fence is never removed.
+preflight_settle_legacy()
+(
+    STATE_ROOT="$(root_path /opt/var/lib/broray-platform-handoff)"
+    [ -e "$STATE_ROOT" ] || [ -L "$STATE_ROOT" ] || return 0
+    safe_directory "$STATE_ROOT" || return 75
+    STATUS_FILE="$STATE_ROOT/status.json"
+    PHASE_FILE="$STATE_ROOT/phase"
+    PID_FILE="$STATE_ROOT/worker.pid"
+    LOCK_DIR="$STATE_ROOT/worker.lock"
+    regular_file "$PHASE_FILE" || return 75
+    existing_phase="$(sed -n '1p' "$PHASE_FILE")"
+    case "$existing_phase" in
+        complete|rolled-back|rollback-failed) return 0 ;;
+        preparing) ;;
+        *) return 75 ;;
+    esac
+    worker_running && return 75
+    # mkdir is exclusion, not permission to clean an unproven old lock.
+    mkdir "$LOCK_DIR" 2>/dev/null || return 75
+    self_start="$(process_starttime "$$")" || return 75
+    [ -n "$self_start" ] || return 75
+    printf '%s\n' "$$" >"$LOCK_DIR/pid" || return 75
+    printf '%s\n' "$self_start" >"$LOCK_DIR/starttime" || return 75
+    trap 'lock_release >/dev/null 2>&1 || true' EXIT
+    worker_running && return 75
+    [ "$(sed -n '1p' "$PHASE_FILE")" = preparing ] || return 75
+    platform_current && preflight_installed "$1" "$2" >/dev/null || return 75
+    [ "$pf_old_manifest" = "$1" ] || return 75
+    candidate_id="$(current_candidate)" || return 75
+    status_write success false LEGACY_PREPARATION_SUPERSEDED 'Подготовка прежнего перехода завершена: подтверждён текущий updater.' false false '' "$candidate_id" || return 75
+    phase_write complete && sync || return 75
+)
+
+preflight()
+{
+    preflight_run "$@" || return $?
+    preflight_settle_legacy "$1" "${BRORAY_OPS_CODE_ROOT:-$APP_ROOT}"
 }
 
 status_json()
