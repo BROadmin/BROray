@@ -47,10 +47,13 @@ static int service_actor(int fd,char **argv,struct identity *actor){
     struct ucred peer;socklen_t size=sizeof peer;struct identity again;char self_sha[65],actor_sha[65];
     if(getsockopt(fd,SOL_SOCKET,SO_PEERCRED,&peer,&size)||size!=sizeof peer||peer.uid!=geteuid()||peer.pid<=1||capture(peer.pid,actor)){service_error("ACTOR_IDENTITY_UNCONFIRMED");return -1;}
     if(peer_executable_hash(getpid(),self_sha)||peer_executable_hash(peer.pid,actor_sha)||strcmp(self_sha,actor_sha)){service_error("ACTOR_NATIVE_BYTES_UNCONFIRMED");return -1;}
-    char *request[]={argv[0],"control",argv[3],"STATUS",argv[4],argv[5],"service-auth","service-auth"};
+    /* Transient service clients are tracked in memory. Authenticate against
+     * LIVE, which verifies the same supervisor and durable checkpoint binding,
+     * instead of treating a lifecycle checkpoint as the current child list. */
+    char *request[]={argv[0],"control",argv[3],"LIVE",argv[4],argv[5],"service-auth","service-auth"};
     if(control_exchange(8,request,0)||!strstr(snapshot,"\"state\":\"RUNNING\",\"supervisedFromBirth\":true,")){service_error("ACTOR_GENERATION_NOT_RUNNING");return -1;}
     /* Bind the receiving host at the existing authenticated authorization
-     * boundary, before any journal write or init action. A second STATUS
+     * boundary, before any journal write or init action. A second LIVE
      * round trip in the traced client adds no authority and delays replies. */
     if(!strstr(snapshot,"\"platformLaunch\":null")){
         char sha[65],field[128];
