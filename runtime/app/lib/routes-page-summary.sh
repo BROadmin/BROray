@@ -2,7 +2,7 @@
 
 # BROray routes page summaries.
 # One summary request reads Keenetic running-config at most once and builds all
-# cards from that shared snapshot. Idle overview does not read Keenetic.
+# cards and overview from that shared, cached router snapshot.
 
 BRORAY_ROOT="${BRORAY_ROOT:-/opt/broray}"
 BRORAY_ROUTES_ROOT="${BRORAY_ROUTES_ROOT:-$BRORAY_ROOT/routes}"
@@ -561,104 +561,47 @@ broray_routes_page_summary()
 
 broray_routes_page_overview()
 {
-    local output ids states global operation custom registry config managed_interface managed_interface_display rc
+    local output detail registry rc
     output="$1"
-    ids="$BRORAY_ROUTES_PAGE_TMP/routes-overview-ids.$$.txt"
-    states="$BRORAY_ROUTES_PAGE_TMP/routes-overview-states.$$.json"
-    global="$BRORAY_ROUTES_PAGE_TMP/routes-overview-global.$$.json"
-    operation="$BRORAY_ROUTES_PAGE_TMP/routes-overview-operation.$$.json"
-    custom="$BRORAY_ROUTES_ROOT/custom.json"
+    detail="$BRORAY_ROUTES_PAGE_TMP/routes-overview-detail.$$.json"
     registry="$BRORAY_ROUTES_ROOT/installed/routes.json"
-    config="$BRORAY_ROUTES_ROOT/config.json"
-
     mkdir -p "$BRORAY_ROUTES_PAGE_TMP" || return 1
-    broray_routes_page_scope_ids all >"$ids" || return 1
-    broray_routes_page_collect_states "$ids" "$states" || return 1
-    broray_routes_page_global_operation "$global" || return 1
-    broray_routes_page_operation_status "$operation" || return 1
-
-    [ -r "$custom" ] || jq -nc '{schemaVersion:1,bundles:[]}' >"$BRORAY_ROUTES_PAGE_TMP/routes-overview-empty-custom.$$.json"
-    [ -r "$custom" ] || custom="$BRORAY_ROUTES_PAGE_TMP/routes-overview-empty-custom.$$.json"
-    [ -r "$registry" ] || jq -nc '{schemaVersion:1,routes:[]}' >"$BRORAY_ROUTES_PAGE_TMP/routes-overview-empty-registry.$$.json"
-    [ -r "$registry" ] || registry="$BRORAY_ROUTES_PAGE_TMP/routes-overview-empty-registry.$$.json"
-
-    managed_interface="$(jq -r '.managedInterface // empty' "$config" 2>/dev/null || true)"
-    managed_interface_display="$(broray_routes_page_interface_display)"
-
-    jq -n \
-        --slurpfile states "$states" \
-        --slurpfile custom "$custom" \
-        --slurpfile registry "$registry" \
-        --slurpfile global "$global" \
-        --slurpfile operation "$operation" \
-        --arg generatedAt "$(broray_routes_page_now)" \
-        --arg managedInterface "$managed_interface" \
-        --arg managedInterfaceDisplay "$managed_interface_display" \
-        --argjson catalogTotal 10 '
-        ($states[0] // []) as $stateList |
-        ($custom[0].bundles // []) as $customBundles |
+    # Use the same verified snapshot as bundle cards, never installedVersion alone.
+    if ! broray_routes_page_summary all "$detail"; then
+        rm -f "$detail"
+        return 1
+    fi
+    if [ ! -r "$registry" ]; then
+        registry="$BRORAY_ROUTES_PAGE_TMP/routes-overview-empty-registry.$$.json"
+        jq -nc '{schemaVersion:1,routes:[]}' >"$registry" || return 1
+    fi
+    jq -n --slurpfile detail "$detail" --slurpfile registry "$registry" '
+        $detail[0] as $summary |
+        ($summary.bundles // []) as $bundles |
         ($registry[0].routes // []) as $routes |
-        def is_custom: (.bundleId | startswith("user-"));
-        def version_equal($a; $b):
-            if ($a == null or $b == null) then false
-            elif (($a.contentSha256 // "") != "" and ($b.contentSha256 // "") != "") then
-                $a.contentSha256 == $b.contentSha256
-            elif (($a.sourceSetSha256 // "") != "" and ($b.sourceSetSha256 // "") != "") then
-                $a.sourceSetSha256 == $b.sourceSetSha256
-            else
-                (($a.sourceCommit // "") == ($b.sourceCommit // "")) and
-                (($a.sourceDate // "") == ($b.sourceDate // ""))
-            end;
-        def state_attention:
-            (.lastError != null) or
-            ((.availableVersion != null) and (version_equal(.availableVersion; .downloadedVersion) | not)) or
-            ((.downloadedVersion != null) and (.installedVersion == null or (version_equal(.downloadedVersion; .installedVersion) | not))) or
-            ((.installedVersion != null) and ((.verifyResult // null) == null or (.verifyResult.success // false) != true));
+        def is_custom: (.id | startswith("user-"));
+        def totals($items): {
+            total:($items|length),
+            installed:([$items[] | select(.verifiedInstalled == true)]|length),
+            attention:([$items[] | select(.attention == true)]|length),
+            routeCount:([$items[] | .routeCount // 0]|add // 0)
+        };
         {
             schemaVersion:1,
-            generatedAt:$generatedAt,
-            managedInterface:(if $managedInterface=="" then null else $managedInterface end),
-            managedInterfaceDisplay:$managedInterfaceDisplay,
-            globalOperation:($global[0] // {}),
-            operation:($operation[0] // {}),
+            generatedAt:$summary.generatedAt,
+            managedInterface:$summary.managedInterface,
+            managedInterfaceDisplay:$summary.managedInterfaceDisplay,
+            globalOperation:$summary.globalOperation,
+            operation:$summary.operation,
             totalManagedRoutes:($routes|length),
-            sharedRoutes:([$routes[] | select((((.owners // []) | length) > 1))]|length),
-            custom:{
-                total:($customBundles|length),
-                installed:([$stateList[] | select(is_custom and .installedVersion != null)]|length),
-                attention:([$stateList[] | select(is_custom and state_attention)]|length),
-                routeCount:([$stateList[] | select(is_custom) | .routeCount // 0]|add // 0)
-            },
-            catalog:{
-                total:$catalogTotal,
-                installed:([$stateList[] | select((is_custom|not) and .installedVersion != null)]|length),
-                attention:([$stateList[] | select((is_custom|not) and state_attention)]|length),
-                routeCount:([$stateList[] | select(is_custom|not) | .routeCount // 0]|add // 0)
-            },
-            lastUpdatedAt:([$stateList[].updatedAt // empty] | sort | last // null),
-            health:(
-                ([$stateList[] | select(state_attention)] | length) as $attentionCount |
-                ([$stateList[] | select(.lastError != null)] | length) as $errorCount |
-                (($global[0].running // false) == true) as $busy |
-                {
-                    schemaVersion:1,
-                    module:"routes",
-                    availability:"available",
-                    severity:(if $errorCount > 0 then "error" elif $busy then "busy" elif $attentionCount > 0 then "warning" else "ok" end),
-                    operational:($errorCount == 0),
-                    consistent:($attentionCount == 0),
-                    actionRequired:($attentionCount > 0),
-                    freshness:{state:"unknown",checkedAt:([$stateList[].updatedAt // empty]|sort|last // null)},
-                    reasons:([$stateList[] | select(state_attention) | {code:(if .lastError != null then (.lastError.code // "ROUTES_ERROR") else "ROUTES_ATTENTION" end),message:(if .lastError != null then (.lastError.message // "Ошибка набора маршрутов.") else ("Набор «" + (.bundleId // "") + "» требует действия.") end),details:(.bundleId // null)}]),
-                    facts:{attentionCount:$attentionCount,totalManagedRoutes:($routes|length)},
-                    lastOperation:($operation[0] // null)
-                }
-            )
+            sharedRoutes:([$routes[] | select(((.owners // [])|length)>1)]|length),
+            custom:totals([$bundles[] | select(is_custom)]),
+            catalog:totals([$bundles[] | select(is_custom|not)]),
+            lastUpdatedAt:([$bundles[].updatedAt // empty]|sort|last // null),
+            health:$summary.health
         }
     ' >"$output"
     rc=$?
-    rm -f "$ids" "$states" "$global" "$operation" \
-        "$BRORAY_ROUTES_PAGE_TMP/routes-overview-empty-custom.$$.json" \
-        "$BRORAY_ROUTES_PAGE_TMP/routes-overview-empty-registry.$$.json"
+    rm -f "$detail" "$BRORAY_ROUTES_PAGE_TMP/routes-overview-empty-registry.$$.json"
     return "$rc"
 }

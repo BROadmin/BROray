@@ -1108,6 +1108,7 @@
             setButtonVariant(keeneticButton, false);
         }
 
+        setButtonLabel(deleteButton, busyBundles[bundleId] === "delete" ? "Удаление…" : "Удалить из Keenetic", "delete");
         deleteButton.disabled = busy || progressResumable || !state.installedVersion;
         if (stopButton) {
             stopButton.hidden = true;

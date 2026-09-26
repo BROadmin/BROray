@@ -90,7 +90,7 @@ if [ "$auth_result" -eq 0 ]; then
     printf 'Content-Type: application/json; charset=utf-8\r\n'
     printf 'Cache-Control: no-store, no-cache, must-revalidate\r\n'
     printf 'Pragma: no-cache\r\n'
-    printf 'Set-Cookie: BRORAY_SESSION=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=1800\r\n' "$token"
+    printf 'Set-Cookie: BRORAY_SESSION=%s; Path=/; HttpOnly; SameSite=Strict\r\n' "$token"
     printf 'X-Content-Type-Options: nosniff\r\n'
     printf 'X-Frame-Options: DENY\r\n'
     printf 'Referrer-Policy: no-referrer\r\n'

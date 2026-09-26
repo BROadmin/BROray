@@ -24,11 +24,13 @@ ops_report()
     services="$(ops_report_services)" || services='[]'
     xray="$(ops_report_xray)" || xray='{"state":"unknown","identity":null,"complete":false,"errorCode":"XRAY_IDENTITY_UNCONFIRMED"}'
     updater="$(ops_report_updater)" || updater='{"lastOperation":null,"complete":false,"errorCode":"UPDATER_STATUS_UNAVAILABLE"}'
-    report="$(jq -nc --arg now "$(ops_now)" --arg arch "$arch" --argjson uptime "$uptime" \
-      --argjson build "$build" --argjson snapshot "$snapshot" --argjson journal "$journal" \
-      --arg kernel "$kernel" --argjson automation "$automation" --argjson services "$services" \
-      --argjson xray "$xray" --argjson updater "$updater" \
-      --arg request "$request" --arg pending "$pending" '
+    # Snapshot/journal can exceed Linux's per-argument limit. Stream the same
+    # JSON values; never truncate evidence merely to fit execve arguments.
+    report="$(printf '%s\n' "$build" "$snapshot" "$journal" "$automation" "$services" "$xray" "$updater" |
+      jq -nc --arg now "$(ops_now)" --arg arch "$arch" --argjson uptime "$uptime" \
+      --arg kernel "$kernel" --arg request "$request" --arg pending "$pending" '
+      input as $build | input as $snapshot | input as $journal |
+      input as $automation | input as $services | input as $xray | input as $updater |
       {schemaVersion:1,reportKind:"broray-diagnostics",capturedAt:$now,redactionPolicy:"allowlist-v1",
        complete:false,snapshotConsistent:false,consistency:{operations:"serialized",runtime:"sampled"},
        summary:(([$snapshot.operations[]|select(.running!=false)]|length|tostring)+" активных операций; "+

@@ -846,7 +846,7 @@ broray_subscription_strip_bom()
 {
     local input output prefix
     input="$1"; output="$2"
-    prefix="$(head -c 3 "$input" | od -An -tx1 | tr -d ' \n')"
+    prefix="$(head -c 3 "$input" | hexdump -v -e '1/1 "%02x"')" || return 1
     if [ "$prefix" = efbbbf ]; then
         tail -c +4 "$input" > "$output"
     else

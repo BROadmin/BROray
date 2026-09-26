@@ -464,17 +464,9 @@
                 return item;
             }
 
-            try {
-                var parsed = parseUri(line);
-
-                Object.keys(parsed).forEach(function (key) {
-                    item[key] = parsed[key];
-                });
-            } catch (error) {
-                item.error =
-                    error && error.message
-                        ? error.message
-                        : "Не удалось разобрать конфигурацию.";
+            // Only frame lines here. The installed backend owns URI semantics.
+            if (!/^(vless|vmess|trojan|hysteria2|hy2|ss):\/\//i.test(line)) {
+                item.error = "Неподдерживаемая схема URI.";
             }
 
             return item;
@@ -775,69 +767,29 @@
         return true;
     }
 
-    function existingServersMap(summary) {
-        summary = unwrap(summary) || {};
-
-        var map = Object.create(null);
-        var servers = summary.servers || [];
-
-        servers.forEach(function (server) {
-            if (
-                !server ||
-                !server.protocol ||
-                !(server.address || server.host) ||
-                !server.port
-            ) {
-                return;
-            }
-
-            var key = canonical(
-                server.protocol,
-                server.address || server.host,
-                server.port
-            );
-
-            map[key] = server;
-        });
-
-        return map;
-    }
-
-    function applyDuplicates(items, summary) {
-        var existing =
-            existingServersMap(summary);
-
-        var inserted =
-            Object.create(null);
-
-        items.forEach(function (item) {
-            if (item.error || !item.canonical) {
-                return;
-            }
-
-            if (existing[item.canonical]) {
-                item.duplicate =
-                    "Такой сервер уже сохранён: " +
-                    (
-                        existing[item.canonical].name ||
-                        existing[item.canonical].id ||
-                        item.host
-                    ) +
-                    ".";
-
-                return;
-            }
-
-            if (inserted[item.canonical]) {
-                item.duplicate =
-                    "Эта конфигурация повторяется " +
-                    "во вставленном списке.";
-
-                return;
-            }
-
-            inserted[item.canonical] = true;
-        });
+    function previewItems(items) {
+        var inserted = Object.create(null);
+        return items.reduce(function (previous, item) {
+            return previous.then(function () {
+                return request(IMPORT_URL, {
+                    method:"POST", body:{uri:item.raw, preview:true}
+                }).then(function (data) {
+                    data = unwrap(data);
+                    if (!data || typeof data.canonical !== "string" ||
+                        !/^[0-9a-f]{64}$/.test(data.canonical)) {
+                        throw new Error("Роутер не подтвердил разбор конфигурации.");
+                    }
+                    Object.keys(data).forEach(function (key) { item[key] = data[key]; });
+                    if (inserted[item.canonical]) {
+                        item.duplicate = "Эта конфигурация повторяется во вставленном списке.";
+                    }
+                    inserted[item.canonical] = true;
+                }).catch(function (error) {
+                    if (error.status === 401) throw error;
+                    item.error = errorMessage(error);
+                });
+            });
+        }, Promise.resolve());
     }
 
     function statusFor(item) {
@@ -1200,13 +1152,7 @@
             return;
         }
 
-        request(
-            SUMMARY_URL,
-            {
-                method: "GET"
-            }
-        ).then(function (summary) {
-            applyDuplicates(items, summary);
+        previewItems(items).then(function () {
 
             var blocked =
                 items.some(function (item) {

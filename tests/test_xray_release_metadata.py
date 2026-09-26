@@ -26,4 +26,21 @@ class ReleaseMetadata(unittest.TestCase):
   for value in [b'{broken',b'{"version":12}',json.dumps({'version':'3.2.0\r\nInjected: yes'}).encode()]:
    with self.subTest(value=value):self.assertEqual(self.request(value),['User-Agent: BROray-Xray/unknown'])
 
+class CandidateCompatibility(unittest.TestCase):
+ def resolve(self,candidate='3.2.0-r01c15',architecture='arm64',digest='3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c',tag='v26.9.9'):
+  registry=json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())
+  release=dict(tag_name=tag,assets=[dict(digest='sha256:'+digest)])
+  context=dict(candidateId=candidate,architecture=architecture)
+  r=subprocess.run(['jq','-nc','-L',str(ROOT/'runtime/app/lib'),'--argjson','records',json.dumps(registry['records']),'--argjson','context',json.dumps(context),'--argjson','release',json.dumps(release),'include "xray-releases"; $release|compatibility($records;$context)'],capture_output=True,text=True,timeout=5)
+  self.assertEqual(r.returncode,0,r.stderr);return json.loads(r.stdout)
+ def test_current_candidate_exposes_proven_xray_result(self):
+  record=self.resolve();self.assertEqual(record['status'],'compatible',record)
+  self.assertEqual(record['candidateId'],'3.2.0-r01c15')
+  self.assertIn('CP06-XRAY-CURRENT-PROFILE',record['evidence'])
+ def test_other_candidate_architecture_or_archive_remains_untested(self):
+  for changed in [dict(candidate='3.2.0-r01c16'),dict(architecture='amd64'),dict(digest='0'*64),dict(tag='v26.9.8')]:
+   with self.subTest(changed=changed):self.assertEqual(self.resolve(**changed)['status'],'untested')
+ def test_historical_evidence_remains_available(self):
+  self.assertEqual(self.resolve(candidate='3.1.1-r12c01')['status'],'compatible')
+
 if __name__=='__main__':unittest.main(verbosity=2,failfast=True)

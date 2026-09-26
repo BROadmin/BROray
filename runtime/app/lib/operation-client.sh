@@ -3,7 +3,7 @@
 
 broray_ops_call()
 {
-    local app code state guard ash controller rc response attempt
+    local app code state guard ash controller rc response attempt attempt_limit
     app="${BRORAY_ROOT:-${BRORAY_BASE:-/opt/broray}}"
     state="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}"
     code="${BRORAY_OPS_CODE_ROOT:-$app}"
@@ -20,6 +20,9 @@ broray_ops_call()
         mkdir -p "$state" || return 1
         chmod 700 "$state" 2>/dev/null || true ;;
     esac
+    # Concurrent status readers can hold the guard beyond six seconds on ARM.
+    # An empty rc75 proves no command executed, so bounded admission may wait.
+    attempt_limit=15
     attempt=0
     while :; do
         attempt=$((attempt+1)); rc=0
@@ -29,12 +32,19 @@ broray_ops_call()
             response="$("$guard" "$state/operations.guard" "$ash" "$controller" "$@")" || rc=$?
         fi
         # Guard exit 75 with no response means its two-second lock wait ended
-        # before exec: no coordinator work has run. Bound total wait to three
-        # attempts. Structured publication errors and all other failures remain
+        # before exec: no coordinator work has run. Bound total wait to 30 seconds.
+        # Structured publication errors and all other failures remain
         # final, including errors returned after a durable mutation.
-        [ "$rc" = 75 ] && [ -z "$response" ] && [ "$attempt" -lt 3 ] || break
+        [ "$rc" = 75 ] && [ -z "$response" ] && [ "$attempt" -lt "$attempt_limit" ] || break
     done
     [ -z "$response" ] || printf '%s\n' "$response"
+    if [ "$rc" != 0 ] && [ -z "$response" ]; then
+        # Expected structured refusals (paused/busy) are handled by the caller.
+        # Only absence of a response needs this transport diagnostic.
+        code=UNCONFIRMED_RESPONSE
+        [ "$rc" != 75 ] || code=GUARD_WAIT_EXHAUSTED
+        printf 'BRORAY_COORDINATOR_ERROR command=%s rc=%s code=%s attempts=%s\n' "${1:-unknown}" "$rc" "$code" "$attempt" >&2
+    fi
     return "$rc"
 }
 

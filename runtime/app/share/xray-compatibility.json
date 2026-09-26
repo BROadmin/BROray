@@ -189,6 +189,20 @@
       "testedAt": "2026-09-16T12:43:41Z",
       "status": "incompatible",
       "evidence": "Physical ARM64 live-xray-matrix-r10-20260916: config/start pass, external HTTPS 0/2; restart not reached. Incompatible with tested profile, not every Xray configuration. VLESS/XHTTP/REALITY. Installed r10; tested Xray generation/runtime components unchanged in r11 (early-ack coordinator fix and registry only). Isolated RAM cores; installation transaction not covered because /opt reserve was insufficient. r12 only changes shared Lighttpd uninstall classification; Xray configuration/runtime code is identical to r11."
+    },
+    {
+      "candidateId": "3.2.0-r01c15",
+      "architecture": "arm64",
+      "xrayTag": "v26.9.9",
+      "archiveSha256": "3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c",
+      "testedAt": "2026-09-26T05:30:45Z",
+      "status": "compatible",
+      "evidence": "BROray-3.2.0-r01c15-integration-20260926/CP06-XRAY-CURRENT-PROFILE: installed ARM64 26.9.9 binary c1defe42b6db958a97c5e049a02a00a4baaedaca7b51c1c229f0830e288acef5; current VLESS/XHTTP/REALITY/Vision profile passes config validation and proxy HTTPS 3/3, persistent PID/startTicks/config unchanged. Generator/runtime/parser bytes match this source. Prior physical VLESS/XHTTP/REALITY without flow also passed 3/3. Scope: tested profiles, not every protocol combination or Xray installation lifecycle. Candidate install and final exact-byte retest are separate required gates.",
+      "testedSourceSha256": {
+        "lib/server-config-generator.sh": "03c658938cba435d6f0c1364d6aacdd5774a3a2ea280a8d2e2a94d2aec0227c4",
+        "lib/xray.sh": "238b58cab5b31dd31f4d14b27c3435ca201ea8765bb4a2dcef20f3bc96d7f233",
+        "lib/parser-vless.sh": "c6fb5571723ee644255e134f96a5e8500b90d74d6c7bb19578125f22590fcce1"
+      }
     }
   ]
 }

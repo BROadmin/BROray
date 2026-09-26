@@ -105,7 +105,13 @@ def xhttp_extra_keys:
    "seqPlacement","seqKey","uplinkDataPlacement","uplinkDataKey","uplinkChunkSize",
    "serverMaxHeaderBytes","downloadSettings"];
 def xhttp_extra($mode;$depth):
-  require(keys_only(xhttp_extra_keys)) |
+  # Older imports retain a redundant mode inside extra. Xray uses the outer
+  # mode; accept this spelling only when its effective value is identical.
+  require(keys_only(xhttp_extra_keys + ["mode"])) |
+  require((has("mode")|not) or
+    ((.mode|type)=="string" and
+     (if .mode=="" then "auto" else .mode end)==
+     (if $mode=="" then "auto" else $mode end))) |
   require((tojson|length)<=4096) | . as $e |
   object_field($e;"headers") as $headers |
   require($headers|all(to_entries[]; (.key|text_value and length>0 and (ascii_downcase!="host")) and (.value|text_value))) |

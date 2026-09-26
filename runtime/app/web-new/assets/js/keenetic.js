@@ -320,17 +320,17 @@
         var expected = data.expected || {};
         var exists = data.exists === true;
         var ready = data.expectedReady === true;
-        var ownershipReceiptPresent = data.ownershipReceiptPresent === true;
         var descriptionMismatch =
             exists &&
             ready &&
             normalizeDescription(actual.description) !==
                 normalizeDescription(expected.description);
 
-        element("create").hidden = exists || !ready || ownershipReceiptPresent;
+        // A retained receipt is history, not an existing interface. The backend
+        // still checks ownership/availability before any create operation.
+        element("create").hidden = exists || !ready;
         element("repair").hidden =
-            (!exists && (!ready || !ownershipReceiptPresent)) ||
-            (exists && data.healthy && effectiveMatchesExpected(data));
+            !exists || (data.healthy && effectiveMatchesExpected(data));
         element("syncDescription").hidden = !descriptionMismatch;
         element("deleteInterface").hidden = !exists;
     }

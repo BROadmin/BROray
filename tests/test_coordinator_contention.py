@@ -14,7 +14,8 @@ class Contention(unittest.TestCase):
         self.processes.append(p);self.assertEqual(p.stdout.readline(),b'READY\n');return p
     def client(self,command,expected=0):
         start=time.monotonic()
-        p=subprocess.run(['/bin/ash','-c','. "$BRORAY_ROOT/lib/operation-client.sh"; broray_ops_call '+command],env=self.env,capture_output=True,timeout=12)
+        # The audited ARM contention fix permits 15 native waits of 2 seconds.
+        p=subprocess.run(['/bin/ash','-c','. "$BRORAY_ROOT/lib/operation-client.sh"; broray_ops_call '+command],env=self.env,capture_output=True,timeout=40)
         self.assertEqual(p.returncode,expected,(p.stdout,p.stderr))
         return p,time.monotonic()-start
     def test_cancel_waits_for_short_contention_and_preserves_fence(self):
@@ -29,11 +30,19 @@ class Contention(unittest.TestCase):
         self.assertTrue(d['automationPaused']);self.assertTrue(d['operations'][0]['cancelRequested'])
         holder.communicate(timeout=2);self.finish('aborted','CANCELLED')
     def test_permanent_contention_is_bounded_without_unlink_or_mutation(self):
-        self.call('initialize');guard=self.state/'operations.guard';before=guard.stat().st_ino;holder=self.hold(10)
+        self.call('initialize');guard=self.state/'operations.guard';before=guard.stat().st_ino;holder=self.hold(40)
         p,elapsed=self.client('pause',75)
-        self.assertEqual(p.stdout,b'');self.assertGreater(elapsed,5.5);self.assertLess(elapsed,9)
+        self.assertEqual(p.stdout,b'');self.assertGreater(elapsed,29);self.assertLess(elapsed,35)
         self.assertEqual(guard.stat().st_ino,before);self.assertFalse((self.state/'background-automation.json').exists())
-        holder.communicate(timeout=5)
+        holder.communicate(timeout=12)
+    def test_finish_survives_eight_second_contention_without_stale_fence(self):
+        self.begin();self.call('tick',self.id,self.token,'committing');holder=self.hold(8)
+        p,elapsed=self.client('finish '+self.id+' '+self.token+' failed OPERATION_FAILED')
+        self.assertTrue(json.loads(p.stdout)['ok']);self.assertGreater(elapsed,7)
+        holder.communicate(timeout=2)
+        self.assertFalse((self.temp/'global.lock').exists())
+        state=json.loads((self.op/'state.json').read_text())
+        self.assertEqual(state['state'],'failed');self.assertFalse(state['running'])
     def test_structured_publication_failure_is_not_replayed(self):
         fake=self.temp/'structured-guard';count=self.temp/'calls'
         fake.write_text('#!/bin/ash\necho call >>"'+str(count)+'"\nprintf \'{"ok":false,"errorCode":"PUBLICATION_UNCONFIRMED"}\\n\'\nexit 75\n');fake.chmod(0o700)

@@ -914,7 +914,7 @@ ops_emergency_recover()
 ops_status()
 {
     local file dir id owner status rows errors count item paused fence cancelled
-    rows='[]'; errors='[]'; count=0
+    rows=''; errors='[]'; count=0
     for file in "$OPS_ROOT"/*/state.json; do
         [ -e "$file" ] || [ -L "$file" ] || continue
         count=$((count+1)); [ "$count" -le 128 ] || { errors='["HISTORY_LIMIT"]'; break; }
@@ -932,7 +932,8 @@ ops_status()
               .running==false and .phase=="finished" and (.resourceLocks|type)=="array" and
               (.revision|type)=="number" and (.state=="completed" or .state=="failed" or .state=="aborted" or .state=="recovered")) |
             .ownerStatus="FINISHED" | .ownerReason="operation_finished" | .cancelRequested=$cancelled | operation_public' "$file" 2>/dev/null)"; then
-            rows="$(jq -nc --argjson rows "$rows" --argjson item "$item" '$rows+[$item]')" || return 1
+            rows="$rows$item
+"
             continue
         fi
         # Legacy updater history has its own public API; do not invent owners.
@@ -946,7 +947,8 @@ ops_status()
         if [ -f "$OPS_CURRENT/cancel.json" ] && [ ! -L "$OPS_CURRENT/cancel.json" ]; then
             item="$(printf '%s\n' "$item" | jq -c '.cancelRequested=true')"
         fi
-        rows="$(jq -nc --argjson rows "$rows" --argjson item "$item" '$rows+[$item]')" || return 1
+        rows="$rows$item
+"
     done
     paused=false
     if [ -e "$OPS_AUTOMATION" ]; then
@@ -964,8 +966,8 @@ ops_status()
         fi
         [ "$fence" != ambiguous ] || errors='["OWNER_UNCONFIRMED"]'
     fi
-    jq -nc --argjson rows "$rows" --argjson errors "$errors" --argjson paused "$paused" --arg fence "$fence" --arg now "$(ops_now)" \
-      '{ok:($errors|length==0),complete:($errors|length==0),capturedAt:$now,operations:($rows|sort_by(.startedAt)|reverse),errors:$errors,automationPaused:$paused,globalFence:$fence}'
+    printf '%s' "$rows" | jq -sc --argjson errors "$errors" --argjson paused "$paused" --arg fence "$fence" --arg now "$(ops_now)" \
+      '. as $rows | {ok:($errors|length==0),complete:($errors|length==0),capturedAt:$now,operations:($rows|sort_by(.startedAt)|reverse),errors:$errors,automationPaused:$paused,globalFence:$fence}'
 }
 
 for directory in "$OPS_STATE" "$OPS_ROOT"; do
