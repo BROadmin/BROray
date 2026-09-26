@@ -366,13 +366,26 @@ static int sc_tree_walk(int fd,const char *relative,struct gen_sha *hash,unsigne
 }
 static int sc_tree_hash_at(int fd,const char *root,char sha[65]){struct gen_sha h;unsigned count=0;gen_sha_init(&h);if(sc_tree_walk(fd,"",&h,&count,0,root))return -1;gen_sha_end(&h,sha);return 0;}
 static int sc_tree_hash(int fd,char sha[65]){return sc_tree_hash_at(fd,sc.oppath,sha);}
-static int sc_lock_exact(int parent,const char *name,int create){
+static int sc_lock_exact_wait(int parent,const char *name,int create,unsigned wait_ms){
     int fd=openat(parent,name,O_RDWR|O_NOFOLLOW|O_CLOEXEC|(create?O_CREAT:0),0600);struct stat held,named;
     if(fd<0)return -1;
+    unsigned long long until=millis()+wait_ms;
+    for(;;){
+    if(fstat(fd,&held)||!S_ISREG(held.st_mode)||held.st_uid!=geteuid()||held.st_nlink!=1||(held.st_mode&07777)!=0600||held.st_size||
+       fstatat(parent,name,&named,AT_SYMLINK_NOFOLLOW)||held.st_dev!=named.st_dev||held.st_ino!=named.st_ino||held.st_mode!=named.st_mode||named.st_nlink!=1||named.st_uid!=held.st_uid||named.st_size){close(fd);errno=EINVAL;return -1;}
+    if(!flock(fd,LOCK_EX|LOCK_NB))break;
+    int error=errno;
+    if(!wait_ms||(error!=EWOULDBLOCK&&error!=EINTR)){close(fd);errno=error;return -1;}
+    if(millis()>=until){close(fd);errno=ETIMEDOUT;return -1;}
+    struct timespec pause={0,10000000L};nanosleep(&pause,NULL);
+    }
+    /* The pathname must still name this same private empty inode after waiting.
+     * Waiting proves only admission; the complete generation proof follows. */
     if(fstat(fd,&held)||!S_ISREG(held.st_mode)||held.st_uid!=geteuid()||held.st_nlink!=1||(held.st_mode&07777)!=0600||held.st_size||
        fstatat(parent,name,&named,AT_SYMLINK_NOFOLLOW)||held.st_dev!=named.st_dev||held.st_ino!=named.st_ino||held.st_mode!=named.st_mode||named.st_nlink!=1||named.st_uid!=held.st_uid||named.st_size||
-       flock(fd,LOCK_EX|LOCK_NB)||(create&&(fsync(fd)||fsync(parent)))){close(fd);return -1;}return fd;
+       (create&&(fsync(fd)||fsync(parent)))){close(fd);errno=EINVAL;return -1;}return fd;
 }
+static int sc_lock_exact(int parent,const char *name,int create){return sc_lock_exact_wait(parent,name,create,0);}
 static int sc_call(char **argv,const char *verb,char *reply,size_t capacity){
     if(sc.replacement){
         if(!strcmp(verb,"recovery-commit-check"))verb="replacement-origin-proof";
@@ -2005,7 +2018,12 @@ static int replacement_service_entry(int argc,char **argv){
     int base=-1,held=-1,result=75,context=0;
     if(snprintf(state,sizeof state,"%s/opt/var/lib/broray",prefix)>=(int)sizeof state)goto done;
     base=checked_directory(state);if(base<0)goto done;
-    held=recovery_inherited_guard(base);if(held<0)held=sc_lock_exact(base,"operations.guard",0);if(held<0)goto done;
+    held=recovery_inherited_guard(base);
+    if(held<0)held=sc_lock_exact_wait(base,"operations.guard",0,action==SC_STATUS?30000:0);
+    if(held<0){
+        if(action==SC_STATUS&&errno==ETIMEDOUT){close(base);return service_replacement_error("UPDATER_SERVICE_OPERATION_BUSY");}
+        goto done;
+    }
     context=1;if(rs_context(argv[2],argv[3],argv[5]))goto done;strcpy(sc.migration,argv[4]);if(rs_service_read())goto done;
     char cycle_name[128];int cn=snprintf(cycle_name,sizeof cycle_name,"cycles-%s",sc.origin);
     if(cn<0||cn>=(int)sizeof cycle_name)goto done;int exists=bg_exists(sc.up,cycle_name);if(exists<0)goto done;

@@ -86,6 +86,65 @@ def verify_boot_ended_origin(updater, generation):
  print('BOOT_ORIGIN_NEGATIVES_PASS duplicate_preserved=true corrupt_preserved=true',flush=True)
 
 class ReplacementLifecycle(ReplacementCommit):
+ def test_public_status_waits_for_coordinator_without_changing_evidence(self):
+  import fcntl
+  self.test_commit_and_completion_require_exact_readiness_and_preserve_evidence()
+  f=self.parent_fixture;op=self.replacement_operation;generation=self.replacement_ready['generationId']
+  binding=json.loads((op/'platform-replacement-service.json').read_bytes())
+  native=f.updater/'runtimes'/binding['nativeSha256']/'runtime'
+  args=[str(native),'replacement-service-status',str(self.root),op.name,binding['startIntentSha256'],binding['stopNonce']]
+  state=(op/'state.json').read_bytes();platform=self.snapshot()
+  guard=op.parent.parent/'operations.guard';original=guard.stat()
+  with guard.open('r+b') as held:
+   fcntl.flock(held,fcntl.LOCK_EX)
+   child=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+   try:
+    time.sleep(.3)
+    waiting=child.poll() is None
+    fcntl.flock(held,fcntl.LOCK_UN)
+    out,err=child.communicate(timeout=45)
+    self.assertTrue(waiting,'status refused an occupied coordinator instead of waiting: '+out+err)
+    self.assertEqual(child.returncode,0,out+err)
+    reply=json.loads(out);self.assertTrue(reply['platformReady']);self.assertEqual(reply['generationId'],generation)
+   finally:
+    fcntl.flock(held,fcntl.LOCK_UN)
+    if child.poll() is None:child.terminate();child.wait(timeout=5)
+  self.assertEqual(guard.stat().st_ino,original.st_ino)
+  self.assertEqual((op/'state.json').read_bytes(),state);self.assertEqual(self.snapshot(),platform)
+  # Invalid coordinator evidence still fails immediately and is preserved.
+  guard.write_bytes(b'corrupt guard evidence')
+  try:
+   r=subprocess.run(args,capture_output=True,text=True,timeout=5)
+   self.assertEqual(r.returncode,75,r.stdout+r.stderr)
+   self.assertEqual(guard.read_bytes(),b'corrupt guard evidence')
+  finally:guard.write_bytes(b'')
+  # Mutating commands keep immediate exclusion; no signals while another writer owns the guard.
+  with guard.open('r+b') as held:
+   fcntl.flock(held,fcntl.LOCK_EX)
+   for verb in ['start','stop','restart']:
+    changed=args.copy();changed[1]='replacement-service-'+verb
+    r=subprocess.run(changed,capture_output=True,text=True,timeout=5)
+    self.assertEqual(r.returncode,75,r.stdout+r.stderr)
+   # A busy status must terminate at its deadline, without altering the lock.
+   r=subprocess.run(args,capture_output=True,text=True,timeout=40)
+   self.assertEqual(r.returncode,75,r.stdout+r.stderr)
+   self.assertEqual(json.loads(r.stdout)['errorCode'],'UPDATER_SERVICE_OPERATION_BUSY')
+   self.assertEqual(guard.stat().st_ino,original.st_ino)
+  # Replacing the pathname during admission must never admit against a new inode.
+  parked=guard.with_name('fixture-original-guard');self.assertFalse(parked.exists())
+  with guard.open('r+b') as held:
+   fcntl.flock(held,fcntl.LOCK_EX)
+   child=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+   try:
+    time.sleep(.3);self.assertIsNone(child.poll())
+    guard.rename(parked);guard.write_bytes(b'');guard.chmod(0o600)
+    out,err=child.communicate(timeout=5)
+    self.assertEqual(child.returncode,75,out+err)
+    self.assertEqual(guard.read_bytes(),b'')
+   finally:
+    if child.poll() is None:child.terminate();child.wait(timeout=5)
+    if parked.exists():guard.unlink();parked.rename(guard)
+  self.assertEqual((op/'state.json').read_bytes(),state);self.assertEqual(self.snapshot(),platform)
  def test_public_status_during_other_operation_preserves_both_fences(self):
   self.test_commit_and_completion_require_exact_readiness_and_preserve_evidence()
   f=self.parent_fixture;op=self.replacement_operation;generation=self.replacement_ready['generationId']
