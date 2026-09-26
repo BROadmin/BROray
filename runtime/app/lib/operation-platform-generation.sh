@@ -352,18 +352,28 @@ ops_platform_service_stop()
 # readiness is authorized by BACKUP_READY alone.
 ops_platform_replacement_transaction()
 {
-    local step nonce target expected old_native native old_hash proof host host_sha shell shell_sha live state_sha response payload
+    local step nonce target expected old_native native old_hash proof host host_sha shell shell_sha live state_sha response payload status_only
     local PG_ID PG_MANIFEST PG_NATIVE PG_FILES PG_NONCE
-    step="$1"; shift; case "$step" in backup|install|rollback|start-intent|start|commit|commit-check|origin-check) ;; *) ops_error INVALID_REQUEST 1 ;; esac
+    step="$1"; shift; case "$step" in backup|install|rollback|start-intent|start|commit|commit-check|origin-check|status-check) ;; *) ops_error INVALID_REQUEST 1 ;; esac
     [ "$#" = 2 ] || ops_error INVALID_REQUEST 1
     ops_load "$1" || ops_error STATE_UNAVAILABLE 1
     nonce="$2"; ops_nonce_valid "$nonce" || ops_error INVALID_REQUEST 1
-    ops_platform_completion_fence STOPPED || ops_error PLATFORM_COMPLETION_UNCONFIRMED 75
+    status_only=false
+    if [ "$step" = status-check ]; then
+        # Readiness is an observation of a completed origin, not admission for
+        # a mutation. Another operation may own the current global fence.
+        ops_platform_completion_fence STOPPED retired-origin || ops_error PLATFORM_COMPLETION_UNCONFIRMED 75
+        status_only=true; step=commit-check
+    else
+        ops_platform_completion_fence STOPPED || ops_error PLATFORM_COMPLETION_UNCONFIRMED 75
+    fi
     jq -e --arg nonce "$nonce" --arg step "$step" '(.running==true or (($step=="commit-check" or $step=="origin-check") and .running==false and .state=="completed")) and .platformPreflight.stopNonce==$nonce and
       (.platformPreflight.generationStop|type)=="object" and (has("serviceStop")|not)' "$OPS_CURRENT/state.json" >/dev/null || ops_error PLATFORM_PHASE_INVALID
     ops_publication_ready || ops_error PUBLICATION_UNCONFIRMED 75
-    ops_pending_domain && ops_error DOMAIN_OPERATION_BUSY
-    ops_platform_queue_clear || ops_error DOMAIN_OPERATION_BUSY
+    if [ "$status_only" = false ]; then
+        ops_pending_domain && ops_error DOMAIN_OPERATION_BUSY
+        ops_platform_queue_clear || ops_error DOMAIN_OPERATION_BUSY
+    fi
     for target in "$OPS_LEGACY" "$OPS_UPDATER/request.lock" "$OPS_CURRENT/platform-service.json" "$OPS_CURRENT/platform-stop-supervision.json"; do
         [ ! -e "$target" ] && [ ! -L "$target" ] || ops_error UPDATER_GENERATION_UNCONFIRMED 75
     done
@@ -444,9 +454,13 @@ ops_platform_replacement_public_status()
       .schemaVersion==1 and .contract=="broray-replacement-service/1" and .operationId==$op and
       .startIntentSha256==$start and .stopNonce==$nonce' "$OPS_CURRENT/platform-replacement-service.json" >/dev/null || ops_error PLATFORM_COMPLETION_UNCONFIRMED 75
     jq -e '.state=="completed" and .running==false and (has("serviceStop")|not)' "$OPS_CURRENT/state.json" >/dev/null || ops_error PLATFORM_COMPLETION_UNCONFIRMED 75
-    ops_platform_completion_fence STOPPED || ops_error PLATFORM_COMPLETION_UNCONFIRMED 75
-    if [ "$mode" = origin ]; then ops_platform_replacement_transaction origin-check "$origin" "$nonce"
-    else ops_platform_replacement_transaction commit-check "$origin" "$nonce"; fi
+    if [ "$mode" = origin ]; then
+        ops_platform_completion_fence STOPPED || ops_error PLATFORM_COMPLETION_UNCONFIRMED 75
+        ops_platform_replacement_transaction origin-check "$origin" "$nonce"
+    else
+        ops_platform_completion_fence STOPPED retired-origin || ops_error PLATFORM_COMPLETION_UNCONFIRMED 75
+        ops_platform_replacement_transaction status-check "$origin" "$nonce"
+    fi
 }
 
 # READY alone never completes a protected replacement. Both proof calls run

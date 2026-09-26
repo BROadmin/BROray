@@ -1,6 +1,6 @@
 """Capture actual Xray release HTTP arguments; no network or router access."""
 from pathlib import Path
-import json,os,subprocess,tempfile,unittest
+import hashlib,json,os,shutil,subprocess,tempfile,unittest
 
 ROOT=Path(os.environ.get('BRORAY_TEST_ROOT',Path(__file__).resolve().parents[1]))
 
@@ -27,7 +27,23 @@ class ReleaseMetadata(unittest.TestCase):
    with self.subTest(value=value):self.assertEqual(self.request(value),['User-Agent: BROray-Xray/unknown'])
 
 class CandidateCompatibility(unittest.TestCase):
- def resolve(self,candidate='3.2.0-r01c15',architecture='arm64',digest='3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c',tag='v26.9.9'):
+ def test_registry_requires_exact_installed_manifest(self):
+  with tempfile.TemporaryDirectory(prefix='xray-registry-') as tmp:
+   home=Path(tmp);(home/'share').mkdir();(home/'current').mkdir();(home/'lib').mkdir()
+   shutil.copyfile(ROOT/'runtime/app/lib/xray-releases.jq',home/'lib/xray-releases.jq')
+   body=(ROOT/'runtime/app/share/xray-compatibility.json').read_bytes()
+   registry=home/'share/xray-compatibility.json';registry.write_bytes(body)
+   manifest=home/'current/SHA256SUMS'
+   manifest.write_text(hashlib.sha256(body).hexdigest()+'  app/share/xray-compatibility.json\n')
+   def load():
+    r=subprocess.run(['/bin/ash','-c','. "$1"; broray_xray_registry','test',str(ROOT/'runtime/app/lib/xray-releases.sh')],env={**os.environ,'BRORAY_BASE':str(home)},capture_output=True,text=True,timeout=5)
+    self.assertEqual(r.returncode,0,r.stderr);return json.loads(r.stdout)
+   self.assertTrue(any(r['candidateId']=='3.2.0-r01c16' and r['status']=='compatible' for r in load()))
+   registry.write_bytes(body+b'\n');self.assertEqual(load(),[],'unverified live registry must not supply compatibility')
+   registry.write_bytes(body);manifest.unlink();self.assertEqual(load(),[])
+   manifest.write_text(hashlib.sha256(body).hexdigest()+'  app/share/xray-compatibility.json\n')
+   self.assertTrue(load())
+ def resolve(self,candidate='3.2.0-r01c16',architecture='arm64',digest='3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c',tag='v26.9.9'):
   registry=json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())
   release=dict(tag_name=tag,assets=[dict(digest='sha256:'+digest)])
   context=dict(candidateId=candidate,architecture=architecture)
@@ -35,12 +51,22 @@ class CandidateCompatibility(unittest.TestCase):
   self.assertEqual(r.returncode,0,r.stderr);return json.loads(r.stdout)
  def test_current_candidate_exposes_proven_xray_result(self):
   record=self.resolve();self.assertEqual(record['status'],'compatible',record)
-  self.assertEqual(record['candidateId'],'3.2.0-r01c15')
+  self.assertEqual(record['candidateId'],'3.2.0-r01c16')
   self.assertIn('CP06-XRAY-CURRENT-PROFILE',record['evidence'])
  def test_other_candidate_architecture_or_archive_remains_untested(self):
-  for changed in [dict(candidate='3.2.0-r01c16'),dict(architecture='amd64'),dict(digest='0'*64),dict(tag='v26.9.8')]:
+  for changed in [dict(candidate='3.2.0-r01c17'),dict(architecture='amd64'),dict(digest='0'*64),dict(tag='v26.9.7')]:
    with self.subTest(changed=changed):self.assertEqual(self.resolve(**changed)['status'],'untested')
  def test_historical_evidence_remains_available(self):
   self.assertEqual(self.resolve(candidate='3.1.1-r12c01')['status'],'compatible')
+ def test_older_cores_expose_proven_configuration_failures(self):
+  records=json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())['records']
+  expected={'v26.9.8':2,'v26.7.28':2,'v26.7.11':2,'v26.6.27':2,'v26.3.27':4,'v26.2.6':10}
+  for tag,failed in expected.items():
+   with self.subTest(tag=tag):
+    record=next(r for r in records if r['candidateId']=='3.2.0-r01c16' and r['xrayTag']==tag)
+    result=self.resolve(tag=tag,digest=record['archiveSha256'])
+    self.assertEqual(result['status'],'incompatible');self.assertEqual(result['configurationGate']['failed'],failed)
+    self.assertEqual(len(result['configurationGate']['rejectedConfigurationSha256']),failed)
+    self.assertEqual(self.resolve(tag=tag,digest='1'*64)['status'],'untested')
 
 if __name__=='__main__':unittest.main(verbosity=2,failfast=True)

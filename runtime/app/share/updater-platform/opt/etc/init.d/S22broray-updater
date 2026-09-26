@@ -126,9 +126,25 @@ if [ -L "$lock" ]; then
         "$state/operations/"op-*/fence) operation="${target%/fence}"; operation="${operation##*/}" ;;
         *) fail UPDATER_SERVICE_FENCE_UNCONFIRMED ;;
     esac
+    case "$operation" in op-?*) ;; *) fail UPDATER_SERVICE_FENCE_UNCONFIRMED ;; esac
+    case "$operation" in *[!A-Za-z0-9_-]*) fail UPDATER_SERVICE_FENCE_UNCONFIRMED ;; esac
+    current="$state/operations/$operation/state.json"
+    [ -f "$current" ] && [ ! -L "$current" ] || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+    metadata="$(updater_stat -c '%u:%a:%h' "$current")" || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+    [ "$metadata" = "$(id -u):600:1" ] || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+    action="$(jq -er --arg id "$operation" 'select(.operationId==$id and (.running|type)=="boolean") |
+      .operation | select(type=="string" and length>0)' "$current")" || fail UPDATER_SERVICE_EVIDENCE_UNCONFIRMED
+    if [ "$action" != system:platform-preflight ]; then
+        # An unrelated owner is not the updater's launch origin. Read-only
+        # status discovers the installed origin below and still requires its
+        # retained native proof. Mutating verbs preserve the competing fence.
+        [ "$1" = status ] || fail UPDATER_SERVICE_OPERATION_BUSY
+        operation=''
+    fi
 elif [ -e "$lock" ]; then
     fail UPDATER_SERVICE_FENCE_UNCONFIRMED
-else
+fi
+if [ -z "$operation" ]; then
     installed_manifest="$(installed_platform_manifest)" || fail UPDATER_SERVICE_PLATFORM_UNCONFIRMED
     for file in "$state/operations"/op-*/state.json; do
         [ -e "$file" ] || [ -L "$file" ] || continue

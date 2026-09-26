@@ -11,6 +11,16 @@ from test_native_platform_install import FILES
 class InstalledInit(PlatformCompletion):
  def setUp(self):
   super().setUp();self.original_state=(self.op/'state.json').read_bytes()
+  # The real daemon requires its declared /tmp to be an actual tmpfs mount.
+  # This offline Entware root must satisfy that contract without TEST_MODE or
+  # replacing workspace_ram_valid. Keep RAM mounted through service cleanup.
+  temporary=self.root/'router/tmp';self.assertFalse(temporary.exists())
+  temporary.mkdir(mode=0o700)
+  subprocess.run(['mount','-t','tmpfs','-o','mode=700','tmpfs',str(temporary)],check=True,capture_output=True)
+  def remove_ram():
+   subprocess.run(['umount',str(temporary)],check=True,capture_output=True)
+   temporary.rmdir()
+  self.addCleanup(remove_ram)
   self.fixture_cycles=self.updater/'cycles'
   self.assertFalse(self.fixture_cycles.exists() or self.fixture_cycles.is_symlink(),'unknown preexisting fixture cycles')
   self.addCleanup(self.stop_and_clear_fixture_cycles)

@@ -108,4 +108,30 @@ broray_api_error(){ jq -nc --arg code "$2" --arg message "$3" '{success:false,er
         result=self.preview('vless://bad%ZZ@example.invalid:443?security=tls')
         self.assertFalse(result['success']);self.assertEqual(result['error']['code'],'SERVER_PREVIEW_FAILED')
 
+    def test_log_maintenance_preserves_platform_background_and_unknown_evidence(self):
+        ops=self.app/'operation-state/operations';ops.mkdir(parents=True)
+        keep=[]
+        for name,row in [
+            ('op-001-platform',dict(kind='background',operation='system:platform-preflight',running=False,state='completed',platformPreflight={'phase':'STOPPED'})),
+            ('op-002-background',dict(kind='background',operation='auto-switch:tick',running=False,state='completed')),
+            ('op-003-corrupt',None),('op-004-missing',None),
+            ('op-005-live',dict(running=True)),
+            ('op-006-platform-legacy',dict(operation='system:platform-preflight',running=False)),
+            ('op-007-platform-evidence',dict(running=False)),
+            ('op-008-owned',dict(running=False))]:
+            d=ops/name;d.mkdir()
+            if name!='op-004-missing':(d/'state.json').write_text(json.dumps(row) if row is not None else '{broken')
+            if name=='op-007-platform-evidence':(d/'platform-start.record').write_text('PRESERVE')
+            if name=='op-008-owned':(d/'owner.json').write_text('PRESERVE')
+            keep.append(d)
+        old=ops/'op-009-legacy';old.mkdir();(old/'state.json').write_text('{"running":false,"state":"success"}')
+        latest=ops/'op-999-new';latest.mkdir();(latest/'state.json').write_text('{"running":false,"state":"success"}')
+        before={str(p):p.read_bytes() for d in keep for p in d.rglob('*') if p.is_file()}
+        r=subprocess.run(['/bin/ash',str(ROOT/'runtime/app/bin/broray-log-maintenance')],env=self.env|{
+            'BRORAY_STATE_ROOT':str(ops.parent),'BRORAY_OPERATION_KEEP':'1'},capture_output=True,timeout=15)
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertTrue(all(d.is_dir() for d in keep),'maintenance removed protected or unproven operation evidence')
+        self.assertEqual(before,{str(p):p.read_bytes() for d in keep for p in d.rglob('*') if p.is_file()})
+        self.assertFalse(old.exists());self.assertTrue(latest.is_dir())
+
 if __name__=='__main__':unittest.main(verbosity=2)

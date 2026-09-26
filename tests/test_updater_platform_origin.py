@@ -37,9 +37,47 @@ class InstalledOrigin(unittest.TestCase):
   binding.update(contract='broray-recovery-code/1',bootGuardBindingSha256=sha(op/'platform-bootguard.json'))
   (op/'platform-recovery-code.json').write_text(json.dumps(binding))
   return op
- def run_init(self):
-  return subprocess.run(['/bin/ash',str(self.root/INIT),'status'],env=self.env,
+ def run_init(self,verb='status'):
+  return subprocess.run(['/bin/ash',str(self.root/INIT),verb],env=self.env,
                         capture_output=True,text=True,timeout=15)
+ def background_owner(self):
+  op=self.operations/'op-background';op.mkdir(mode=0o700)
+  state=op/'state.json'
+  state.write_text(json.dumps(dict(operationId=op.name,operation='auto-switch:tick',
+      kind='background',type='auto_switch',state='running',running=True)))
+  state.chmod(0o600);(op/'fence').mkdir(mode=0o700)
+  lock=self.root/'opt/var/lock/broray/global-operation.lock'
+  lock.parent.mkdir(parents=True);lock.symlink_to(op/'fence')
+  return state,lock
+ def test_status_discovers_updater_during_unrelated_background_operation(self):
+  self.origin('op-current',self.manifest);state,lock=self.background_owner()
+  before=state.read_bytes();target=lock.readlink()
+  r=self.run_init();self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+  self.assertEqual(r.stdout,'SELECTED=op-current\n')
+  self.assertEqual(state.read_bytes(),before);self.assertEqual(lock.readlink(),target)
+ def test_background_owner_blocks_mutating_init_without_becoming_updater_origin(self):
+  self.origin('op-current',self.manifest);state,lock=self.background_owner()
+  before=state.read_bytes();target=lock.readlink()
+  for verb in ['start','stop','restart']:
+   with self.subTest(verb=verb):
+    r=self.run_init(verb);self.assertEqual(r.returncode,75,r.stdout+r.stderr)
+    self.assertIn('UPDATER_SERVICE_OPERATION_BUSY',r.stdout);self.assertNotIn('SELECTED=',r.stdout)
+    self.assertEqual(state.read_bytes(),before);self.assertEqual(lock.readlink(),target)
+ def test_corrupt_background_state_is_preserved_and_refused(self):
+  self.origin('op-current',self.manifest);state,lock=self.background_owner()
+  state.write_text('{broken');target=lock.readlink()
+  r=self.run_init();self.assertEqual(r.returncode,75,r.stdout+r.stderr)
+  self.assertNotIn('SELECTED=',r.stdout);self.assertEqual(state.read_text(),'{broken')
+  self.assertEqual(lock.readlink(),target)
+ def test_active_platform_fence_remains_the_selected_origin(self):
+  op=self.origin('op-current',self.manifest)
+  row=json.loads((op/'state.json').read_bytes());row.update(operationId=op.name,state='running',running=True)
+  (op/'state.json').write_text(json.dumps(row));(op/'state.json').chmod(0o600)
+  (op/'fence').mkdir(mode=0o700)
+  lock=self.root/'opt/var/lock/broray/global-operation.lock'
+  lock.parent.mkdir(parents=True);lock.symlink_to(op/'fence')
+  r=self.run_init();self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+  self.assertEqual(r.stdout,'SELECTED=op-current\n');self.assertEqual(lock.readlink(),op/'fence')
  def test_historical_origin_does_not_hide_installed_origin(self):
   old=self.origin('op-old','0'*64);self.origin('op-current',self.manifest)
   before={str(p):p.read_bytes() for p in old.rglob('*') if p.is_file()}

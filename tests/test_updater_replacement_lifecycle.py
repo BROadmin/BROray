@@ -86,6 +86,32 @@ def verify_boot_ended_origin(updater, generation):
  print('BOOT_ORIGIN_NEGATIVES_PASS duplicate_preserved=true corrupt_preserved=true',flush=True)
 
 class ReplacementLifecycle(ReplacementCommit):
+ def test_public_status_during_other_operation_preserves_both_fences(self):
+  self.test_commit_and_completion_require_exact_readiness_and_preserve_evidence()
+  f=self.parent_fixture;op=self.replacement_operation;generation=self.replacement_ready['generationId']
+  self.assertFalse((f.updater/('cycles-'+op.name)).exists(),'exercise original committed generation before lifecycle seal')
+  state=op/'state.json';original=state.read_bytes();platform=self.snapshot()
+  other=op.parent/'op-background-status-fixture';other.mkdir(mode=0o700)
+  data=json.loads(original);data.update(operationId=other.name,operation='auto-switch:tick',running=True,state='running')
+  (other/'state.json').write_text(json.dumps(data));(other/'state.json').chmod(0o600)
+  (other/'fence').mkdir(mode=0o700)
+  fence=self.root/'opt/var/lock/broray/global-operation.lock';self.assertFalse(fence.exists())
+  fence.symlink_to(other/'fence');before=(other/'state.json').read_bytes()
+  pointer=op.parent.parent/'last-operation';saved_pointer=pointer.read_bytes() if pointer.exists() else None
+  pointer.write_text(other.name+'\n');pointer.chmod(0o600)
+  try:
+   r=f.init('status');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+   reply=json.loads(r.stdout);self.assertEqual(reply['generationId'],generation);self.assertTrue(reply['platformReady'])
+   self.assertEqual(fence.readlink(),other/'fence');self.assertEqual((other/'state.json').read_bytes(),before)
+   self.assertEqual(state.read_bytes(),original);self.assertEqual(self.snapshot(),platform)
+   for verb in ['start','stop','restart']:
+    r=f.init(verb);self.assertEqual(r.returncode,75,r.stdout+r.stderr)
+    self.assertIn('UPDATER_SERVICE_OPERATION_BUSY',r.stdout)
+    self.assertEqual(fence.readlink(),other/'fence');self.assertEqual(state.read_bytes(),original)
+  finally:
+   self.assertEqual(fence.readlink(),other/'fence');fence.unlink();shutil.rmtree(other)
+   if saved_pointer is None:pointer.unlink()
+   else:pointer.write_bytes(saved_pointer)
  def test_public_status_uses_retained_replacement_code(self):
   self.test_commit_and_completion_require_exact_readiness_and_preserve_evidence()
   f=self.parent_fixture;op=self.replacement_operation;first=self.replacement_ready['generationId']

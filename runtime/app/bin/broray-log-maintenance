@@ -79,9 +79,18 @@ find "$OPERATION_ROOT" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null |
     awk -v keep="$KEEP_OPERATIONS" 'NR > keep {print}' |
     while IFS= read -r old_dir; do
         [ "${old_dir##*/}" = "$current" ] && continue
-        if [ -s "$old_dir/state.json" ] && jq -e '.running == true' "$old_dir/state.json" >/dev/null 2>&1; then
-            continue
-        fi
+        # This unguarded legacy log job owns no coordinator/generation state.
+        # Only the serialized coordinator may retire background operations.
+        # Missing/corrupt state and platform evidence are never disposable logs.
+        [ -d "$old_dir" ] && [ ! -L "$old_dir" ] || continue
+        [ -f "$old_dir/state.json" ] && [ ! -L "$old_dir/state.json" ] || continue
+        [ ! -e "$old_dir/owner.json" ] && [ ! -L "$old_dir/owner.json" ] || continue
+        jq -e 'type=="object" and .kind!="background" and .running==false and
+          .operation!="system:platform-preflight" and (has("platformPreflight")|not)' \
+          "$old_dir/state.json" >/dev/null 2>&1 || continue
+        for evidence in "$old_dir"/platform-* "$old_dir/fence" "$old_dir/retired-lock"; do
+            [ ! -e "$evidence" ] && [ ! -L "$evidence" ] || continue 2
+        done
         rm -rf "$old_dir"
     done
 
