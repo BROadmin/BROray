@@ -598,6 +598,12 @@ ops_recover_global()
     fi
     id="$(jq -er '.operationId' "$OPS_GLOBAL/owner.json" 2>/dev/null)" || { OPS_RECOVERY_RESULT=invalid_owner; return 2; }
     ops_load "$id" && ops_global_matches || { OPS_RECOVERY_RESULT=owner_changed; return 2; }
+    if jq -e 'has("serviceStop") and (.platformPreflight|has("generationStop")|not)' "$OPS_CURRENT/state.json" >/dev/null; then
+        ops_platform_recover_unissued_service_stop || { OPS_RECOVERY_RESULT=protected_recovery; return 2; }
+        ops_platform_resume_unissued_service_stop || { OPS_RECOVERY_RESULT=updater_start_unconfirmed; return 2; }
+        OPS_RECOVERY_RESULT=unissued_stop_aborted_after_boot
+        return 0
+    fi
     if jq -e '.running==false' "$OPS_CURRENT/state.json" >/dev/null 2>&1; then
         ops_publication_ready || { OPS_RECOVERY_RESULT=publication_unconfirmed; return 2; }
         ops_children_absent || { OPS_RECOVERY_RESULT=children_unconfirmed; return 2; }
@@ -827,6 +833,7 @@ ops_initialize_previous_boot()
     [ ! -e "$OPS_LEGACY" ] && [ ! -L "$OPS_LEGACY" ] || return 0
     if [ ! -e "$OPS_GLOBAL" ] && [ ! -L "$OPS_GLOBAL" ]; then
         ops_platform_resume_completed_service_stop || return 1
+        ops_platform_resume_unissued_service_stop || return 1
         return 0
     fi
     [ -L "$OPS_GLOBAL" ] || return 0
@@ -837,6 +844,11 @@ ops_initialize_previous_boot()
     owner="$(jq -c .owner "$OPS_EXECUTOR")"; broray_ops_classify_owner "$owner"
     [ "$OPS_OWNER_STATUS:$OPS_OWNER_REASON" = STALE:previous_boot ] || return 0
     if ops_platform_is_preflight && jq -e 'has("serviceStop")' "$OPS_CURRENT/state.json" >/dev/null; then
+        if jq -e '.platformPreflight|has("generationStop")|not' "$OPS_CURRENT/state.json" >/dev/null; then
+            ops_platform_recover_unissued_service_stop || return 1
+            ops_platform_resume_unissued_service_stop
+            return $?
+        fi
         ops_platform_recover_stopped_service || return 1
         ops_platform_resume_completed_service_stop
         return $?

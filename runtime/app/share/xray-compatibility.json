@@ -667,6 +667,156 @@
           "d9ab5fc42a964e9f9d614432baf54d298f1bd7337c8b378abdb6542d323c49de"
         ]
       }
+    },
+    {
+      "candidateId": "3.2.0-r01c19",
+      "architecture": "arm64",
+      "xrayTag": "v26.9.9",
+      "archiveSha256": "3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c",
+      "testedAt": "2026-09-26T05:30:45Z",
+      "status": "compatible",
+      "evidence": "BROray-3.2.0-r01c15-integration-20260926/CP06-XRAY-CURRENT-PROFILE: installed ARM64 26.9.9 binary c1defe42b6db958a97c5e049a02a00a4baaedaca7b51c1c229f0830e288acef5; current VLESS/XHTTP/REALITY/Vision profile passes config validation and proxy HTTPS 3/3, persistent PID/startTicks/config unchanged. Generator/runtime/parser bytes match this source. Prior physical VLESS/XHTTP/REALITY without flow also passed 3/3. Scope: tested profiles, not every protocol combination or Xray installation lifecycle. Candidate install and final exact-byte retest are separate required gates. Evidence was captured on the installed r01c14 audit build. Xray configuration/runtime/parser SHA-256 values are identical in 3.2.0-r01c16. Updater-only repairs do not expand this compatibility scope. Carried to c17 after exact testedSourceSha256 verification; the only functional change is updater status admission. No new Xray test is claimed. Carried to c18 after exact testedSourceSha256 verification. No new Xray compatibility test is claimed. Carried to c19 after exact testedSourceSha256 verification; updater-only fix. No new Xray compatibility run claimed.",
+      "testedSourceSha256": {
+        "lib/server-config-generator.sh": "03c658938cba435d6f0c1364d6aacdd5774a3a2ea280a8d2e2a94d2aec0227c4",
+        "lib/xray.sh": "238b58cab5b31dd31f4d14b27c3435ca201ea8765bb4a2dcef20f3bc96d7f233",
+        "lib/parser-vless.sh": "c6fb5571723ee644255e134f96a5e8500b90d74d6c7bb19578125f22590fcce1"
+      }
+    },
+    {
+      "candidateId": "3.2.0-r01c19",
+      "architecture": "arm64",
+      "xrayTag": "v26.9.8",
+      "archiveSha256": "6721edb5b80e046536abc8235bd0977a2c69ade88ad42c01c0df368beba070dc",
+      "testedAt": "2026-09-25T12:23:00Z",
+      "status": "incompatible",
+      "evidence": "BROray-3.2.0-remaining-fixes-20260925/xray-arm64-matrix-02: physical KN-2710 ARM64 run -test rejects 2/41 generated configurations (udphop). Exact generator source SHA-256 is unchanged in this candidate. Incompatible with the full configuration set supported by BROray 3.2.0; this does not imply all connections fail. No new connectivity or Xray-installation test is claimed. Carried to c17 after exact testedSourceSha256 verification; the only functional change is updater status admission. No new Xray test is claimed. Carried to c18 after exact testedSourceSha256 verification. No new Xray compatibility test is claimed. Carried to c19 after exact testedSourceSha256 verification; updater-only fix. No new Xray compatibility run claimed.",
+      "testedSourceSha256": {
+        "lib/server-config-generator.sh": "03c658938cba435d6f0c1364d6aacdd5774a3a2ea280a8d2e2a94d2aec0227c4"
+      },
+      "configurationGate": {
+        "passed": 39,
+        "failed": 2,
+        "evidenceSha256": "8fa3c87bef7295be6e305f3193940b7fa968ecaee6db917e26ab241ccb859548",
+        "rejectedConfigurationSha256": [
+          "96b37c25de642909c74349910c4fb5cfb444445911aa82bb4f0aed48184fde02",
+          "9e86fc6c1b8c91c0bf7bd1c0c087f0fa29ef745920d9b1a04fc074c2182c41c7"
+        ]
+      }
+    },
+    {
+      "candidateId": "3.2.0-r01c19",
+      "architecture": "arm64",
+      "xrayTag": "v26.7.28",
+      "archiveSha256": "f5698bb218ada3b4022db26fafc39601c5f53b46b19eb76c9616325985807501",
+      "testedAt": "2026-09-25T12:23:00Z",
+      "status": "incompatible",
+      "evidence": "BROray-3.2.0-remaining-fixes-20260925/xray-arm64-matrix-02: physical KN-2710 ARM64 run -test rejects 2/41 generated configurations (udphop). Exact generator source SHA-256 is unchanged in this candidate. Incompatible with the full configuration set supported by BROray 3.2.0; this does not imply all connections fail. No new connectivity or Xray-installation test is claimed. Carried to c17 after exact testedSourceSha256 verification; the only functional change is updater status admission. No new Xray test is claimed. Carried to c18 after exact testedSourceSha256 verification. No new Xray compatibility test is claimed. Carried to c19 after exact testedSourceSha256 verification; updater-only fix. No new Xray compatibility run claimed.",
+      "testedSourceSha256": {
+        "lib/server-config-generator.sh": "03c658938cba435d6f0c1364d6aacdd5774a3a2ea280a8d2e2a94d2aec0227c4"
+      },
+      "configurationGate": {
+        "passed": 39,
+        "failed": 2,
+        "evidenceSha256": "8fa3c87bef7295be6e305f3193940b7fa968ecaee6db917e26ab241ccb859548",
+        "rejectedConfigurationSha256": [
+          "96b37c25de642909c74349910c4fb5cfb444445911aa82bb4f0aed48184fde02",
+          "9e86fc6c1b8c91c0bf7bd1c0c087f0fa29ef745920d9b1a04fc074c2182c41c7"
+        ]
+      }
+    },
+    {
+      "candidateId": "3.2.0-r01c19",
+      "architecture": "arm64",
+      "xrayTag": "v26.7.11",
+      "archiveSha256": "89cfe01674d7c9f6847b7dd9389537be9acb3b9dc3c6cb9fdeba87a3e4e57fc1",
+      "testedAt": "2026-09-25T12:23:00Z",
+      "status": "incompatible",
+      "evidence": "BROray-3.2.0-remaining-fixes-20260925/xray-arm64-matrix-02: physical KN-2710 ARM64 run -test rejects 2/41 generated configurations (udphop). Exact generator source SHA-256 is unchanged in this candidate. Incompatible with the full configuration set supported by BROray 3.2.0; this does not imply all connections fail. No new connectivity or Xray-installation test is claimed. Carried to c17 after exact testedSourceSha256 verification; the only functional change is updater status admission. No new Xray test is claimed. Carried to c18 after exact testedSourceSha256 verification. No new Xray compatibility test is claimed. Carried to c19 after exact testedSourceSha256 verification; updater-only fix. No new Xray compatibility run claimed.",
+      "testedSourceSha256": {
+        "lib/server-config-generator.sh": "03c658938cba435d6f0c1364d6aacdd5774a3a2ea280a8d2e2a94d2aec0227c4"
+      },
+      "configurationGate": {
+        "passed": 39,
+        "failed": 2,
+        "evidenceSha256": "8fa3c87bef7295be6e305f3193940b7fa968ecaee6db917e26ab241ccb859548",
+        "rejectedConfigurationSha256": [
+          "96b37c25de642909c74349910c4fb5cfb444445911aa82bb4f0aed48184fde02",
+          "9e86fc6c1b8c91c0bf7bd1c0c087f0fa29ef745920d9b1a04fc074c2182c41c7"
+        ]
+      }
+    },
+    {
+      "candidateId": "3.2.0-r01c19",
+      "architecture": "arm64",
+      "xrayTag": "v26.6.27",
+      "archiveSha256": "13a251379bea366c2cf10363ad71e75734193d401f26f518bf0c25e5c8f8c931",
+      "testedAt": "2026-09-25T12:23:00Z",
+      "status": "incompatible",
+      "evidence": "BROray-3.2.0-remaining-fixes-20260925/xray-arm64-matrix-02: physical KN-2710 ARM64 run -test rejects 2/41 generated configurations (udphop). Exact generator source SHA-256 is unchanged in this candidate. Incompatible with the full configuration set supported by BROray 3.2.0; this does not imply all connections fail. No new connectivity or Xray-installation test is claimed. Carried to c17 after exact testedSourceSha256 verification; the only functional change is updater status admission. No new Xray test is claimed. Carried to c18 after exact testedSourceSha256 verification. No new Xray compatibility test is claimed. Carried to c19 after exact testedSourceSha256 verification; updater-only fix. No new Xray compatibility run claimed.",
+      "testedSourceSha256": {
+        "lib/server-config-generator.sh": "03c658938cba435d6f0c1364d6aacdd5774a3a2ea280a8d2e2a94d2aec0227c4"
+      },
+      "configurationGate": {
+        "passed": 39,
+        "failed": 2,
+        "evidenceSha256": "8fa3c87bef7295be6e305f3193940b7fa968ecaee6db917e26ab241ccb859548",
+        "rejectedConfigurationSha256": [
+          "96b37c25de642909c74349910c4fb5cfb444445911aa82bb4f0aed48184fde02",
+          "9e86fc6c1b8c91c0bf7bd1c0c087f0fa29ef745920d9b1a04fc074c2182c41c7"
+        ]
+      }
+    },
+    {
+      "candidateId": "3.2.0-r01c19",
+      "architecture": "arm64",
+      "xrayTag": "v26.3.27",
+      "archiveSha256": "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c",
+      "testedAt": "2026-09-25T12:23:00Z",
+      "status": "incompatible",
+      "evidence": "BROray-3.2.0-remaining-fixes-20260925/xray-arm64-matrix-02: physical KN-2710 ARM64 run -test rejects 4/41 generated configurations (udphop, mkcp-legacy). Exact generator source SHA-256 is unchanged in this candidate. Incompatible with the full configuration set supported by BROray 3.2.0; this does not imply all connections fail. No new connectivity or Xray-installation test is claimed. Carried to c17 after exact testedSourceSha256 verification; the only functional change is updater status admission. No new Xray test is claimed. Carried to c18 after exact testedSourceSha256 verification. No new Xray compatibility test is claimed. Carried to c19 after exact testedSourceSha256 verification; updater-only fix. No new Xray compatibility run claimed.",
+      "testedSourceSha256": {
+        "lib/server-config-generator.sh": "03c658938cba435d6f0c1364d6aacdd5774a3a2ea280a8d2e2a94d2aec0227c4"
+      },
+      "configurationGate": {
+        "passed": 37,
+        "failed": 4,
+        "evidenceSha256": "8fa3c87bef7295be6e305f3193940b7fa968ecaee6db917e26ab241ccb859548",
+        "rejectedConfigurationSha256": [
+          "96b37c25de642909c74349910c4fb5cfb444445911aa82bb4f0aed48184fde02",
+          "97dd04f6b0ccee9fb62a0aa76f305ee384344e7de75a9b7dfcca7bf4529db60d",
+          "9bf081acce7e2142615c5a804c7aaa7547ef57d8d636f95f13438bd79e1b90e5",
+          "9e86fc6c1b8c91c0bf7bd1c0c087f0fa29ef745920d9b1a04fc074c2182c41c7"
+        ]
+      }
+    },
+    {
+      "candidateId": "3.2.0-r01c19",
+      "architecture": "arm64",
+      "xrayTag": "v26.2.6",
+      "archiveSha256": "b52d8263453fbd6f4747fd6a1ecf70cd43a664243615dc892ea4674c01b2b5ee",
+      "testedAt": "2026-09-25T12:23:00Z",
+      "status": "incompatible",
+      "evidence": "BROray-3.2.0-remaining-fixes-20260925/xray-arm64-matrix-02: physical KN-2710 ARM64 run -test rejects 10/41 generated configurations (udphop, mkcp-legacy, tested fragment settings). Exact generator source SHA-256 is unchanged in this candidate. Incompatible with the full configuration set supported by BROray 3.2.0; this does not imply all connections fail. No new connectivity or Xray-installation test is claimed. Carried to c17 after exact testedSourceSha256 verification; the only functional change is updater status admission. No new Xray test is claimed. Carried to c18 after exact testedSourceSha256 verification. No new Xray compatibility test is claimed. Carried to c19 after exact testedSourceSha256 verification; updater-only fix. No new Xray compatibility run claimed.",
+      "testedSourceSha256": {
+        "lib/server-config-generator.sh": "03c658938cba435d6f0c1364d6aacdd5774a3a2ea280a8d2e2a94d2aec0227c4"
+      },
+      "configurationGate": {
+        "passed": 31,
+        "failed": 10,
+        "evidenceSha256": "8fa3c87bef7295be6e305f3193940b7fa968ecaee6db917e26ab241ccb859548",
+        "rejectedConfigurationSha256": [
+          "02dd2e5912bc9725d1d9c352e75daeea2770b5b80c50fb339f44fb9275c13553",
+          "21508e8f619dfd8cef499123ca5dbcaf3fe861130171a16e225a10eb036834b5",
+          "37b154d16a307aee0b39a8409131fd16a7d159205798bf2cf2f031b6173ae588",
+          "5e0a842612c599ee3c7833303698ce22f344b6238e3375c6f4556ae422d74181",
+          "96b37c25de642909c74349910c4fb5cfb444445911aa82bb4f0aed48184fde02",
+          "97dd04f6b0ccee9fb62a0aa76f305ee384344e7de75a9b7dfcca7bf4529db60d",
+          "9bf081acce7e2142615c5a804c7aaa7547ef57d8d636f95f13438bd79e1b90e5",
+          "9e86fc6c1b8c91c0bf7bd1c0c087f0fa29ef745920d9b1a04fc074c2182c41c7",
+          "c102a1447ac5373a63e80d6d956765eca322580e85beed4954d585c561b48203",
+          "d9ab5fc42a964e9f9d614432baf54d298f1bd7337c8b378abdb6542d323c49de"
+        ]
+      }
     }
   ]
 }

@@ -2071,6 +2071,7 @@ static int stopped_boot_retirement_main(int argc,char **argv){
     if(argc!=10||!migration_path(argv[2])||!token(argv[3],96)||!hex64(argv[4])||
        !token(argv[5],32)||strlen(argv[5])!=32||!token(argv[6],64)||!token(argv[7],96)||
        !token(argv[8],32)||strlen(argv[8])!=32||!hex64(argv[9])||!strcmp(argv[3],argv[7]))return 64;
+    int unissued=!strcmp(argv[1],"verify-unissued-stop-boot");
     int result=75,context=0,stop=-1,domain=-1,host=-1,gens=-1,whole=-1,life=-1;
     const char *why="context";char path[PATH_MAX],stop_path[PATH_MAX],fence[PATH_MAX],link[PATH_MAX],field[192],name[128];
     char text[2048],host_text[512],value[128],canonical[PATH_MAX],shell[PATH_MAX],shell_sha[65];
@@ -2109,7 +2110,9 @@ static int stopped_boot_retirement_main(int argc,char **argv){
     stop=checked_directory(stop_path);if(stop<0||sc_file(stop,"state.json",&state_file)||strcmp(state_file.sha,argv[9]))goto done;
     if(sc_field(state_file.bytes,"operationId",value,sizeof value)||strcmp(value,argv[7])||
        sc_field(state_file.bytes,"operation",value,sizeof value)||strcmp(value,"system:platform-preflight")||
-       !strstr(state_file.bytes,"\"running\":true")||!strstr(state_file.bytes,"\"cancelability\":\"protected\""))goto done;
+       (!strstr(state_file.bytes,"\"running\":true")&&
+        !(unissued&&strstr(state_file.bytes,"\"state\":\"aborted\"")&&strstr(state_file.bytes,"\"errorCode\":\"STOP_INTERRUPTED_BY_REBOOT\"")))||
+       !strstr(state_file.bytes,"\"cancelability\":\"protected\""))goto done;
     const char *purpose=strstr(state_file.bytes,"\"serviceStop\":{");if(!purpose)goto done;
     const char *keys[]={"contract","originOperationId","originKind","originStopNonce","originProofSha256","generationId","nativeSha256","platformManifestSha256"};
     const char *values[]={"broray-service-stop/2",argv[3],"supervised-replacement",argv[5],argv[4],argv[6],sc.native,sc.input.manifest};
@@ -2123,9 +2126,27 @@ static int stopped_boot_retirement_main(int argc,char **argv){
     strcpy(b.seal,sc.seal);strcpy(b.host,n->host);strcpy(b.launch,n->launch);strcpy(b.transaction,n->transaction);scope_digest(pl.domain,b.scope);
     k=snprintf(name,sizeof name,"ready-%s.record",n->id);
     if(k<0||k>=(int)sizeof name||sc_file(sc.cycles,name,&ready))goto done;strcpy(b.ready,ready.sha);
-    why="witnessed-terminal-ledger";gb_stopped_retirement=1;
+    why="witnessed-terminal-ledger";gb_stopped_retirement=!unissued;
     if(gb_measure(domain,pl.domain,&b))goto done;
     record_name(b.total,name);if(sc_file(domain,name,&last)||strcmp(last.sha,b.last))goto done;
+    if(unissued){
+        /* STOP authorization is durably pinned before any signal. This branch
+         * accepts only the earlier boundary: no target binding, no sent STOP,
+         * and a fully witnessed RUNNING ledger from a different kernel boot.
+         * It grants bookkeeping authority only, never STOPPED or readiness. */
+        why="unissued-stop-boundary";
+        if(strstr(state_file.bytes,"\"generationStop\":")||
+           sc_field(state_file.bytes,"phase",value,sizeof value)||
+           (strcmp(value,"working")&&strcmp(value,"finished"))||
+           !strstr(state_file.bytes,"\"phase\":\"STOP_INTENT\"")||
+           sc_field(state_file.bytes,"stopNonce",value,sizeof value)||strcmp(value,argv[8])||
+           !strstr(last.bytes,"\"state\":\"RUNNING\"")||
+           !strstr(last.bytes,"\"stopOperationId\":\"\",\"stopNonce\":\"\",\"termSent\":false,"))goto done;
+        snprintf(field,sizeof field,"\"nativeSha256\":\"%s\"",sc.native);
+        if(!strstr(last.bytes,field)||sc_file(stop,"state.json",&again)||strcmp(again.sha,argv[9])||pl_exact())goto done;
+        printf("{\"ok\":true,\"phase\":\"UNISSUED_STOP_BOOT_ENDED_VERIFIED\",\"generationId\":\"%s\",\"oldBootId\":\"%s\",\"currentBootId\":\"%s\",\"ledgerSha256\":\"%s\",\"ledgerRevision\":%lu,\"serviceStopped\":false,\"platformReady\":false,\"signalsAuthorized\":false,\"mutationAuthorized\":false}\n",b.id,b.from,boot,b.last,b.total);
+        result=0;goto done;
+    }
     if(!strstr(last.bytes,"\"state\":\"STOPPED\"")||!strstr(last.bytes,"\"children\":[]")||
        !strstr(last.bytes,"\"awaitingBirth\":[]")||!strstr(last.bytes,"\"exitedUnreaped\":[]")||
        sc_field(last.bytes,"stopOperationId",value,sizeof value)||strcmp(value,argv[7])||
