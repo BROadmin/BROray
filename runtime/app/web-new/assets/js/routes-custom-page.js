@@ -120,7 +120,7 @@
         if (value && value.available === true && value.registered === true) {
             return value.actualInstalled === true;
         }
-        return Boolean(state && state.installedVersion);
+        return false;
     }
 
     function hasDrift(state) {
@@ -255,6 +255,9 @@
         }
         if (!state) return {text: "Загрузка…", className: "status-loading", icon: "status"};
         if (state.lastError) return {text: "Ошибка", className: "status-badge-danger", icon: "status"};
+        if (state && state.installedVersion && (!presence(state) || presence(state).available !== true || presence(state).registered !== true)) {
+            return {text: "Не подтверждено", className: "status-badge-warning", icon: "warning"};
+        }
         if (hasDrift(state)) return {text: "Требуется восстановление", className: "status-badge-warning", icon: "restore"};
         if (needsExport(state)) {
             return {text: state.installedVersion ? "Готово обновление" : "Готово к установке", className: "status-badge-warning", icon: "update"};
@@ -264,6 +267,9 @@
     }
 
     function primaryPresentation(state) {
+        if (state && state.installedVersion && (!presence(state) || presence(state).available !== true || presence(state).registered !== true)) {
+            return {text: "Установить в Keenetic", icon: "routes", hidden: true};
+        }
         if (hasDrift(state)) return {text: "Восстановить в Keenetic", icon: "restore"};
         if (needsExport(state)) {
             return {text: state.installedVersion ? "Обновить в Keenetic" : "Установить в Keenetic", icon: state.installedVersion ? "update" : "routes"};
@@ -277,6 +283,9 @@
         if (progress && progress.resumable) return progress.message || "Операция приостановлена. Нажмите «Продолжить».";
         if (state && state.lastError) {
             return typeof state.lastError === "string" ? state.lastError : (state.lastError.message || "Последняя операция завершилась ошибкой.");
+        }
+        if (state && state.installedVersion && (!presence(state) || presence(state).available !== true || presence(state).registered !== true)) {
+            return "Установка записана в BROray, но фактическое наличие маршрутов в Keenetic не подтверждено. Нажмите «Проверить», чтобы обновить состояние.";
         }
         if (hasDrift(state)) {
             var currentPresence = presence(state) || {};
@@ -371,7 +380,7 @@
         var grid = create("div", "route-details-grid");
         var files = create("ul", "route-source-list");
         var fileItems = report.sourceFiles || [];
-        var presentCount = p.registered ? Number(p.presentRouteCount || 0) + "/" + Number(p.expectedRouteCount || 0) : "—";
+        var presentCount = p.available === true && p.registered && p.presentRouteCount !== null ? Number(p.presentRouteCount || 0) + "/" + Number(p.expectedRouteCount || 0) : "—";
         var validateButton;
         var exportButton;
         var replaceButton;

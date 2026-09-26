@@ -9,6 +9,9 @@ struct platform_launch {
 };
 static struct platform_launch pl;
 static int pl_loaded;
+/* Set only by the historical STOPPED bookkeeping verifier. Never grants
+ * launch/control authority or watches on behalf of the historical binary. */
+static int pl_historical_verification;
 struct platform_watch {int wd;char child[NAME_MAX+1];};
 static struct platform_watch pl_watches[256];static unsigned pl_watch_count;
 static int pl_watch_one(const char *path,const char *child){
@@ -45,6 +48,7 @@ static int pl_exact(void){
 }
 static int platform_request_check(void){return pl.enabled&&(platform_run_check()||pl_exact())?-1:0;}
 static int pl_load(const char *directory,const char *expected,const char *transaction,int watch){
+    if(pl_historical_verification&&watch)return -1;
     if(pl_loaded){
         free(pl.record.bytes);free(pl.transaction.bytes);for(int i=0;i<MIGRATION_FILES;i++)free(pl.files[i].bytes);
         int fds[]={pl.rootfd,pl.startfd,pl.shellfd,pl.nativefd,pl.watch};
@@ -97,8 +101,17 @@ static int pl_load(const char *directory,const char *expected,const char *transa
         if(seen!=((1U<<MIGRATION_FILES)-1))return -1;
     }
     if(strcmp(sha,pl.manifest))return -1;
-    pl.nativefd=open("/proc/self/exe",O_RDONLY|O_CLOEXEC);if(pl.nativefd<0||hash_fd(pl.nativefd,sha)||strcmp(sha,pl.native))return -1;
-    ssize_t named=readlink("/proc/self/exe",pl.nativepath,sizeof pl.nativepath-1);if(named<=0||named>=(ssize_t)sizeof pl.nativepath-1)return -1;pl.nativepath[named]=0;
+    if(pl_historical_verification){
+        int n=snprintf(pl.nativepath,sizeof pl.nativepath,"%s/opt/var/lib/broray-updater/runtimes/%s/runtime",prefix,pl.native);
+        if(n<0||n>=(int)sizeof pl.nativepath)return -1;
+        int parent=migration_directory("/");if(parent<0)return -1;
+        pl.nativefd=migration_relative(parent,pl.nativepath+1);close(parent);struct stat st;
+        if(pl.nativefd<0||fstat(pl.nativefd,&st)||!S_ISREG(st.st_mode)||st.st_uid!=geteuid()||st.st_nlink!=1||
+           (st.st_mode&07777)!=0700||hash_fd(pl.nativefd,sha)||strcmp(sha,pl.native))return -1;
+    }else{
+        pl.nativefd=open("/proc/self/exe",O_RDONLY|O_CLOEXEC);if(pl.nativefd<0||hash_fd(pl.nativefd,sha)||strcmp(sha,pl.native))return -1;
+        ssize_t named=readlink("/proc/self/exe",pl.nativepath,sizeof pl.nativepath-1);if(named<=0||named>=(ssize_t)sizeof pl.nativepath-1)return -1;pl.nativepath[named]=0;
+    }
     int fs=migration_directory("/");if(fs<0)return -1;pl.shellfd=migration_relative(fs,pl.shell+1);close(fs);
     if(pl.shellfd<0||pl_exact())return -1;
     /* Verification fsyncs the existing immutable intent; it never reconstructs

@@ -116,6 +116,9 @@ struct gb_record {
     char host[65],journal[65],launch[65],transaction[65],inventory[65],last[65];
     unsigned long total;
 };
+/* Only the typed historical STOPPED repair may resume its own immutable
+ * retirement publication. Expected bytes are derived again before publish. */
+static int gb_stopped_retirement;
 static int gb_text(const struct gb_record *b,char out[2048]){
     return snprintf(out,2048,"BROray-generation-boot-ended/1\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%lu\n%s\n%s\n",b->id,b->manifest,b->from,b->through,b->scope,b->seal,b->ready,b->host,b->journal,b->launch,b->transaction,b->total,b->inventory,b->last);
 }
@@ -197,6 +200,11 @@ static int gb_measure_ledger(int base,const char *domain,struct gb_record *b,con
     dir=directory_stream(base);if(!dir)goto done;struct dirent *e;int bad=0;errno=0;
     while((e=readdir(dir))){const char *s=e->d_name;
         if(!strcmp(s,".")||!strcmp(s,".."))continue;
+        if(gb_stopped_retirement&&(!strcmp(s,"retirement.receipt")||!strcmp(s,"retirement.receipt.pending"))){
+            char pending[128];struct sc_record_pair pair;
+            if(sc_record_names(base,"retirement.receipt",pending,&pair)||!pair.names){bad=1;break;}
+            errno=0;continue;
+        }
         if(!strcmp(s,"control")||!strcmp(s,"lifetime.lock")){
             struct stat st;if(fstatat(base,s,&st,AT_SYMLINK_NOFOLLOW)||st.st_uid!=geteuid()||st.st_nlink!=1){bad=1;break;}
             if(!strcmp(s,"control")){if(!S_ISSOCK(st.st_mode)||(st.st_mode&07777)!=0700){bad=1;break;}}
@@ -698,10 +706,14 @@ static int sc_collect(void){
         }
         if(!bad){for(unsigned i=0;i<sc.count;i++)if(!strcmp(next.id,sc.nodes[i].id))bad=1;}
         if(!bad){sc.current=sc.count;sc.nodes[sc.count++]=next;bad=sc_ready_host(&sc.nodes[sc.current]);}
-        free(f.bytes);free(copy);free(record);free(launch);free(transaction);if(bad)return -1;
+        free(f.bytes);free(copy);free(record);free(launch);free(transaction);if(bad){fprintf(stderr,"SERVICE_HISTORY_ERROR=cycle-%u\n",index);return -1;}
     }
-    if(sc.count>=SC_LIMIT||(sc.replacement&&rs_prior_history())||sc_cycle_names(index-1)||sc_namespace("starts",1)||sc_namespace("generations",1)||sc_namespace("hosts",1))return -1;
-    for(unsigned i=0;i<sc.count;i++)if(i!=sc.current){char a[65],b[65];struct gb_record ended;if(sc_terminal(&sc.nodes[i],a,b)&&(sc_boot_proof(&sc.nodes[i],&ended,a)||sc_boot_markers(&sc.nodes[i],0)))return -1;}
+    if(sc.count>=SC_LIMIT)return -1;
+    if(sc.replacement&&rs_prior_history()){fprintf(stderr,"SERVICE_HISTORY_ERROR=prior-history\n");return -1;}
+    if(sc_cycle_names(index-1)){fprintf(stderr,"SERVICE_HISTORY_ERROR=cycle-names\n");return -1;}
+    const char *families[]={"starts","generations","hosts"};
+    for(unsigned i=0;i<3;i++)if(sc_namespace(families[i],1)){fprintf(stderr,"SERVICE_HISTORY_ERROR=namespace-%s\n",families[i]);return -1;}
+    for(unsigned i=0;i<sc.count;i++)if(i!=sc.current){char a[65],b[65];struct gb_record ended;if(sc_terminal(&sc.nodes[i],a,b)&&(sc_boot_proof(&sc.nodes[i],&ended,a)||sc_boot_markers(&sc.nodes[i],0))){fprintf(stderr,"SERVICE_HISTORY_ERROR=predecessor-%u\n",i);return -1;}}
     return 0;
 }
 static int sc_directory(int parent,const char *name,const char *path,int create){
@@ -2047,4 +2059,111 @@ static int replacement_service_entry(int argc,char **argv){
 done:
     if(context)sc_close();if(held>=0)close(held);if(base>=0)close(base);
     return result?service_replacement_error("REPLACEMENT_SERVICE_ENTRY_UNCONFIRMED"):0;
+}
+
+/* Recover bookkeeping ONLY for a witnessed terminal STOPPED from an ended
+ * boot. This verifier may differ from the historical runtime: that runtime's
+ * private retained bytes, launch closure, READY pin and every ledger witness
+ * remain independently authenticated. It never signals, creates a generation,
+ * changes an operation/fence, or turns RUNNING/ERROR into STOPPED. */
+static int stopped_boot_retirement_main(int argc,char **argv){
+    /* ROOT ORIGIN PROOF ORIGIN_NONCE GENERATION STOP_OP STOP_NONCE STATE_SHA */
+    if(argc!=10||!migration_path(argv[2])||!token(argv[3],96)||!hex64(argv[4])||
+       !token(argv[5],32)||strlen(argv[5])!=32||!token(argv[6],64)||!token(argv[7],96)||
+       !token(argv[8],32)||strlen(argv[8])!=32||!hex64(argv[9])||!strcmp(argv[3],argv[7]))return 64;
+    int result=75,context=0,stop=-1,domain=-1,host=-1,gens=-1,whole=-1,life=-1;
+    const char *why="context";char path[PATH_MAX],stop_path[PATH_MAX],fence[PATH_MAX],link[PATH_MAX],field[192],name[128];
+    char text[2048],host_text[512],value[128],canonical[PATH_MAX],shell[PATH_MAX],shell_sha[65];
+    struct migration_file intent={0},state_file={0},ready={0},last={0},host_record={0},again={0};
+    char *copy=NULL;struct gb_record b;memset(&b,0,sizeof b);
+    const char *prefix=!strcmp(argv[2],"/")?"":argv[2];
+    if(!realpath(argv[2],canonical)||strcmp(canonical,argv[2]))goto done;
+    context=1;if(rs_context(argv[2],argv[3],argv[5]))goto done;sc.may_publish=0;sc.replacement=1;strcpy(sc.migration,argv[4]);
+    why="historical-runtime";
+    if(sc_file(sc.op,"platform-replacement-start/intent.record",&intent)||strcmp(intent.sha,argv[4]))goto done;
+    copy=strdup(intent.bytes);if(!copy)goto done;char *cursor=copy,*row=NULL;
+    for(int i=0;i<7;i++){row=sc_line(&cursor);if(!row)goto done;}
+    if(!hex64(row))goto done;strcpy(sc.native,row);free(copy);copy=NULL;
+    /* rs_service_read validates this SHA against retained runtime, complete
+     * source closure and independently bound replacement intent/manifest. */
+    pl_historical_verification=1;
+    if(rs_service_read())goto done;
+    why="lifecycle-history";
+    int k=snprintf(name,sizeof name,"cycles-%s",sc.origin);
+    if(k<0||k>=(int)sizeof name||sc_join(sc.cyclepath,sc.uppath,name))goto done;
+    sc.cycles=checked_directory(sc.cyclepath);
+    why="lifecycle-directory";if(sc.cycles<0)goto done;
+    why="lifecycle-lock";if((sc.transition=sc_lock_exact(sc.cycles,"transition.lock",0))<0)goto done;
+    why="lifecycle-seal";if(sc_seal_read())goto done;
+    why="lifecycle-chain";if(sc_collect())goto done;
+    struct sc_node *n=&sc.nodes[sc.current];
+    why="generation-or-boot";if(strcmp(n->id,argv[6])||!strcmp(n->born,boot))goto done;
+    why="generation-launch";if(sc_load_node(n))goto done;
+    why="generation-host";if(sc_host_record(n))goto done;
+    why="platform-bytes";if(pl_exact())goto done;
+    why="stop-binding";
+    if(snprintf(stop_path,sizeof stop_path,"%s/opt/var/lib/broray/operations/%s",prefix,argv[7])>=(int)sizeof stop_path||
+       snprintf(path,sizeof path,"%s/opt/var/lock/broray/global-operation.lock",prefix)>=(int)sizeof path||
+       sc_join(fence,stop_path,"fence"))goto done;
+    ssize_t ln=readlink(path,link,sizeof link);if(ln!=(ssize_t)strlen(fence)||memcmp(link,fence,(size_t)ln))goto done;
+    stop=checked_directory(stop_path);if(stop<0||sc_file(stop,"state.json",&state_file)||strcmp(state_file.sha,argv[9]))goto done;
+    if(sc_field(state_file.bytes,"operationId",value,sizeof value)||strcmp(value,argv[7])||
+       sc_field(state_file.bytes,"operation",value,sizeof value)||strcmp(value,"system:platform-preflight")||
+       !strstr(state_file.bytes,"\"running\":true")||!strstr(state_file.bytes,"\"cancelability\":\"protected\""))goto done;
+    const char *purpose=strstr(state_file.bytes,"\"serviceStop\":{");if(!purpose)goto done;
+    const char *keys[]={"contract","originOperationId","originKind","originStopNonce","originProofSha256","generationId","nativeSha256","platformManifestSha256"};
+    const char *values[]={"broray-service-stop/2",argv[3],"supervised-replacement",argv[5],argv[4],argv[6],sc.native,sc.input.manifest};
+    for(unsigned i=0;i<sizeof keys/sizeof keys[0];i++)if(sc_field(purpose,keys[i],value,sizeof value)||strcmp(value,values[i]))goto done;
+    why="exclusion";
+    if(sc_join(path,sc.uppath,"generations"))goto done;gens=checked_directory(path);
+    domain=checked_directory(pl.domain);host=checked_directory(pl.host);
+    if(gens<0||domain<0||host<0||(whole=sc_lock_exact(gens,".generation-lifetime.lock",0))<0||
+       (life=sc_lock_exact(domain,"lifetime.lock",0))<0||flock(host,LOCK_EX|LOCK_NB)||sc_namespace("generations",1))goto done;
+    strcpy(b.id,n->id);strcpy(b.manifest,sc.input.manifest);strcpy(b.from,n->born);strcpy(b.through,boot);
+    strcpy(b.seal,sc.seal);strcpy(b.host,n->host);strcpy(b.launch,n->launch);strcpy(b.transaction,n->transaction);scope_digest(pl.domain,b.scope);
+    k=snprintf(name,sizeof name,"ready-%s.record",n->id);
+    if(k<0||k>=(int)sizeof name||sc_file(sc.cycles,name,&ready))goto done;strcpy(b.ready,ready.sha);
+    why="witnessed-terminal-ledger";gb_stopped_retirement=1;
+    if(gb_measure(domain,pl.domain,&b))goto done;
+    record_name(b.total,name);if(sc_file(domain,name,&last)||strcmp(last.sha,b.last))goto done;
+    if(!strstr(last.bytes,"\"state\":\"STOPPED\"")||!strstr(last.bytes,"\"children\":[]")||
+       !strstr(last.bytes,"\"awaitingBirth\":[]")||!strstr(last.bytes,"\"exitedUnreaped\":[]")||
+       sc_field(last.bytes,"stopOperationId",value,sizeof value)||strcmp(value,argv[7])||
+       sc_field(last.bytes,"stopNonce",value,sizeof value)||strcmp(value,argv[8]))goto done;
+    snprintf(field,sizeof field,"\"nativeSha256\":\"%s\"",sc.native);if(!strstr(last.bytes,field))goto done;
+    if(!strcmp(argv[1],"verify-stopped-boot")){
+        printf("{\"ok\":true,\"phase\":\"STOPPED_RETIREMENT_VERIFIED\",\"generationId\":\"%s\",\"serviceStopped\":true,\"platformReady\":false,\"signalsAuthorized\":false,\"mutationAuthorized\":false}\n",b.id);
+        result=0;goto done;
+    }
+    why="generation-retirement-publication";
+    /* The complete historical proof and all exclusion locks precede these
+     * two write-once receipts. No other missing evidence may be recreated. */
+    sc.may_publish=1;
+    struct retired_record r;memset(&r,0,sizeof r);strcpy(r.gen,b.id);strcpy(r.sha,b.manifest);strcpy(r.op,argv[7]);strcpy(r.nonce,argv[8]);
+    r.total=b.total;strcpy(r.inventory,b.inventory);strcpy(r.last,b.last);strcpy(r.scope,b.scope);
+    k=retirement_text(&r,text,sizeof text);
+    if(k<0||k>=(int)sizeof text||sc_publish(domain,"retirement.receipt",text,(size_t)k,1)||retirement_valid(domain,pl.domain,NULL))goto done;
+    /* Host verifier independently acquires this lock. Installation exclusion
+     * and coordinator guard remain held across the handoff. */
+    close(life);life=-1;why="host-retirement-publication";
+    if(sc_file(host,"host.record",&host_record)||strcmp(host_record.sha,b.host))goto done;
+    copy=strdup(host_record.bytes);if(!copy)goto done;cursor=copy;
+    for(int i=0;i<9;i++){
+        row=sc_line(&cursor);if(!row)goto done;
+        if(i==6){if(!migration_path(row)||strlen(row)>=sizeof shell)goto done;strcpy(shell,row);}
+        if(i==7){if(!hex64(row))goto done;strcpy(shell_sha,row);}
+    }
+    free(copy);copy=NULL;
+    char *host_args[]={argv[0],"service-retired",pl.host,pl.domain,b.id,b.manifest,argv[2],shell,shell_sha,b.host,NULL};
+    if(service_retirement_text_at(host,host_args,host_record.bytes,host_record.size,host_text,b.from)||
+       sc_publish(host,"retirement.receipt",host_text,strlen(host_text),1))goto done;
+    char host_receipt[65];
+    if(service_host_retired_proof(10,host_args,host,NULL,host_receipt)||sc_file(stop,"state.json",&again)||
+       strcmp(again.sha,argv[9])||pl_exact())goto done;
+    printf("{\"ok\":true,\"phase\":\"STOPPED_RETIREMENT_RECOVERED\",\"generationId\":\"%s\",\"oldBootId\":\"%s\",\"hostReceiptSha256\":\"%s\",\"serviceStopped\":true,\"platformReady\":false,\"signalsAuthorized\":false}\n",b.id,b.from,host_receipt);
+    result=0;
+done:
+    gb_stopped_retirement=0;pl_historical_verification=0;free(copy);free(intent.bytes);free(state_file.bytes);free(ready.bytes);free(last.bytes);free(host_record.bytes);free(again.bytes);
+    if(life>=0)close(life);if(whole>=0)close(whole);if(gens>=0)close(gens);if(host>=0)close(host);if(domain>=0)close(domain);if(stop>=0)close(stop);
+    if(context)sc_close();if(result)fprintf(stderr,"STOPPED_BOOT_RECOVERY_FIRST_ERROR=%s\n",why);return result;
 }

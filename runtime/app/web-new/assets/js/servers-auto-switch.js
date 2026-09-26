@@ -14,6 +14,14 @@
     var lastSummary = null;
     var pollTimer = null;
     var pollInFlight = false;
+    var formDirty = false;
+    var formRevision = 0;
+    var loadSequence = 0;
+
+    function markFormDirty() {
+        formDirty = true;
+        formRevision += 1;
+    }
 
     function element(id) {
         return document.getElementById(id);
@@ -174,6 +182,8 @@
         if (section.getAttribute("data-auto-switch-bound") !== "true") {
             section.setAttribute("data-auto-switch-bound", "true");
             element("auto-switch-form").addEventListener("submit", saveSettings);
+            element("auto-switch-form").addEventListener("input", markFormDirty);
+            element("auto-switch-form").addEventListener("change", markFormDirty);
             element("auto-switch-rule").addEventListener("change", syncPreferredState);
         }
         if (window.BROrayIcons) {
@@ -219,23 +229,25 @@
         var state = payload.state || {};
         var service = payload.service || {};
 
-        element("auto-switch-enabled").checked =
-            config.enabled === true;
+        if (!formDirty) {
+            element("auto-switch-enabled").checked =
+                config.enabled === true;
 
-        element("auto-switch-threshold").value =
-            config.failureThreshold || 3;
+            element("auto-switch-threshold").value =
+                config.failureThreshold || 3;
 
-        element("auto-switch-cooldown").value =
-            config.cooldownMinutes || 10;
+            element("auto-switch-cooldown").value =
+                config.cooldownMinutes || 10;
 
-        element("auto-switch-minimum").value =
-            config.minimumRating || "acceptable";
+            element("auto-switch-minimum").value =
+                config.minimumRating || "acceptable";
 
-        element("auto-switch-rule").value =
-            config.selectionRule || "best-quality";
+            element("auto-switch-rule").value =
+                config.selectionRule || "best-quality";
 
-        fillServers(summary, config.preferredServerId || "");
-        syncPreferredState();
+            fillServers(summary, config.preferredServerId || "");
+            syncPreferredState();
+        }
 
         element("auto-switch-badge").textContent =
             config.enabled ? "Включён" : "Выключен";
@@ -297,7 +309,8 @@
         }
     }
 
-    function loadStatus(showError, refreshSummary) {
+    function loadStatus(showError, refreshSummary, savedRevision) {
+        var sequence = ++loadSequence;
         var summaryRequest =
             refreshSummary || !lastSummary
                 ? request(SUMMARY_URL, { method: "GET" })
@@ -307,6 +320,8 @@
             request(STATUS_URL, { method: "GET" }),
             summaryRequest
         ]).then(function (values) {
+            if (sequence !== loadSequence) return;
+            if (savedRevision === formRevision) formDirty = false;
             lastSummary = values[1];
             render(values[0], values[1]);
         }).catch(function (error) {
@@ -337,6 +352,7 @@
 
     function saveSettings(event) {
         var payload;
+        var savedRevision = formRevision;
 
         event.preventDefault();
 
@@ -367,7 +383,7 @@
                 element("refresh-servers").click();
             }
 
-            return loadStatus(false, true);
+            return loadStatus(false, true, savedRevision);
         }).catch(function (error) {
             BROrayUI.toast(errorMessage(error), "error");
         }).then(function () {

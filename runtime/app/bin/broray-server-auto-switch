@@ -539,7 +539,12 @@ build_candidates()
     MIN_RANK="$(rating_rank "$CFG_MINIMUM")"
 
     CANDIDATE_IDS="$ROOT/tmp/auto-switch-ids.$$.txt"
-    jq -r '.servers[]?.id // empty' "$SUMMARY_FILE" >"$CANDIDATE_IDS" || return 1
+    jq -r --arg rule "$CFG_RULE" --arg preferred "$CFG_PREFERRED" '
+        [.servers[]?.id // empty] |
+        (if $rule == "preferred" and $preferred != "" then
+            map(select(. == $preferred)) + map(select(. != $preferred))
+         else . end) | .[]
+    ' "$SUMMARY_FILE" >"$CANDIDATE_IDS" || return 1
     while IFS= read -r SERVER_ID
     do
         [ -n "$SERVER_ID" ] || continue
@@ -603,6 +608,11 @@ build_candidates()
         ' >> "$OUT_JSONL"
 
         rm -f "$RESULT_FILE" "$ERROR_FILE"
+        # This rule does not need a comparison once its preferred server has
+        # passed the real proxy check and the configured quality threshold.
+        if [ "$CFG_RULE" = preferred ] && [ "$SERVER_ID" = "$CFG_PREFERRED" ]; then
+            break
+        fi
     done <"$CANDIDATE_IDS"
     rm -f "$CANDIDATE_IDS"
 

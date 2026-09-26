@@ -107,6 +107,9 @@
         try {
             data = JSON.parse(text);
         } catch (error) {
+            if (response.status === 502 || response.status === 503 || response.status === 504) {
+                throw new Error("Шлюз не получил ответ от роутера (HTTP " + response.status + "). Результат операции не подтверждён. Обновите состояние перед повтором.");
+            }
             throw new Error("Backend вернул некорректный JSON (HTTP " + response.status + ").");
         }
 

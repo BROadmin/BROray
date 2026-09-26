@@ -8,4 +8,6 @@ broray_api_require_session
 # status action owns active router refresh. Never probe the router while merely
 # opening or refreshing the saved-server list.
 
+BRORAY_SERVER_SKIP_KEENETIC_REFRESH=true
+export BRORAY_SERVER_SKIP_KEENETIC_REFRESH
 broray_servers_api_run broray_server_summary

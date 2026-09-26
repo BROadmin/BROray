@@ -73,7 +73,12 @@ broray_operations_read_web_publication()
     {
         [ "$#" = 1 ] || return 126
         case "$1" in 'show ndns'|'show running-config') ;; *) return 126 ;; esac
-        timeout -k 1 3 ndmc -c "$1"
+        # A large running-config takes longer while supervised workers run.
+        # Keep the small identity read bounded separately; trust checks stay exact.
+        case "$1" in
+            'show ndns') timeout -k 1 3 ndmc -c "$1" ;;
+            'show running-config') timeout -k 1 10 ndmc -c "$1" ;;
+        esac
     }
     # Duplicate identity fields cannot establish a unique public origin.
     broray_web_publish_ndns_field()
@@ -128,14 +133,29 @@ broray_operations_keendns_origin()
 
 broray_operations_origin_allowed()
 {
-    local origin host_http host_https published
+    local origin host_http host_https published page_origin proxy_origin
     [ -n "${HTTP_HOST:-}" ] || return 1
-    origin="$(broray_operations_normalize_origin "${HTTP_ORIGIN:-}")" || return 1
+    proxy_origin=false
+    if [ -n "${HTTP_ORIGIN:-}" ]; then
+        origin="$(broray_operations_normalize_origin "$HTTP_ORIGIN")" || return 1
+        if [ -n "${HTTP_X_BRORAY_ORIGIN:-}" ]; then
+            page_origin="$(broray_operations_normalize_origin "$HTTP_X_BRORAY_ORIGIN")" || return 1
+            [ "$origin" = "$page_origin" ] || return 1
+        fi
+    else
+        # KeenDNS can remove Origin. The authenticated UI sends its page origin
+        # in a non-simple header; cross-origin browsers require a denied CORS
+        # preflight. Accept this fallback only with exact live KeenDNS proof.
+        [ "${HTTP_X_BRORAY_REQUEST:-}" = operations ] || return 1
+        origin="$(broray_operations_normalize_origin "${HTTP_X_BRORAY_ORIGIN:-}")" || return 1
+        proxy_origin=true
+    fi
     host_http="$(broray_operations_normalize_origin "http://$HTTP_HOST")" || return 1
     host_https="$(broray_operations_normalize_origin "https://$HTTP_HOST")" || return 1
     # Keep the existing same-host HTTP/HTTPS contract. Local recovery does not
     # depend on ndmc, an external name, or the availability of KeenDNS.
-    if [ "$origin" = "$host_http" ] || [ "$origin" = "$host_https" ]; then
+    if [ "$proxy_origin" = false ] &&
+       { [ "$origin" = "$host_http" ] || [ "$origin" = "$host_https" ]; }; then
         return 0
     fi
     case "$origin" in https://broray.*) ;; *) return 1 ;; esac

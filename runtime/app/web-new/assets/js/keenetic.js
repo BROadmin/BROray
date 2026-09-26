@@ -546,7 +546,7 @@
                     label ? label.textContent : button.textContent.trim()
                 );
             }
-            button.disabled = busy;
+            button.disabled = busy || state.busy;
             button.classList.toggle(
                 "is-loading",
                 busy && button === activeButton
@@ -561,6 +561,9 @@
                         ? busyLabel
                         : button.getAttribute("data-default-label");
             }
+        });
+        actionButtons().forEach(function (button) {
+            if (button) button.disabled = state.busy || state.webAccessBusy;
         });
     }
 
@@ -590,7 +593,7 @@
                     label ? label.textContent : button.textContent.trim()
                 );
             }
-            button.disabled = busy;
+            button.disabled = busy || state.webAccessBusy;
             button.classList.toggle(
                 "is-loading",
                 busy && button === activeButton
@@ -605,6 +608,9 @@
                         ? busyLabel
                         : button.getAttribute("data-default-label");
             }
+        });
+        webAccessButtons().forEach(function (button) {
+            if (button) button.disabled = state.busy || state.webAccessBusy;
         });
     }
 

@@ -652,7 +652,7 @@
         var enabled = byId("dns-auto-check").checked;
         autoSaving = true; renderAutoCheck();
         request("/api/routes/dot-auto-settings.cgi", {method:"POST", credentials:"same-origin",
-            headers:{"Accept":"application/json", "Content-Type":"application/json", "X-BROray-Request":"operations"}, body:JSON.stringify({enabled:enabled})
+            headers:{"Accept":"application/json", "Content-Type":"application/json", "X-BROray-Request":"operations", "X-BROray-Origin":window.location.origin}, body:JSON.stringify({enabled:enabled})
         }).then(function (data) { if (status) status.autoCheck = data; })
         .catch(handleError).then(function () { autoSaving = false; render(); });
     }

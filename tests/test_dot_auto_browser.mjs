@@ -23,7 +23,7 @@ async function setup(options={}){
   if(u.pathname==='/api/session.cgi')return route.fulfill({json:{user:'fixture-admin'}});
   if(u.pathname==='/api/routes/dot-auto-settings.cgi'){
    assert.equal(req.headers()['x-broray-request'],'operations');
-   posts.push({url:u.pathname,method:req.method(),body:req.postData()});
+   posts.push({url:u.pathname,method:req.method(),body:req.postData(),pageOrigin:req.headers()['x-broray-origin']});
    if(options.saveFailure)return route.fulfill({status:409,json:{success:false,error:{code:'ROUTES_OPERATION_BUSY',message:'Busy fixture'}}});
    state.autoCheck.enabled=JSON.parse(req.postData()).enabled;return route.fulfill({json:{success:true,data:state.autoCheck}});
   }
@@ -50,6 +50,7 @@ async function setup(options={}){
 async function check(name,fn,options={}){const h=await setup(options);try{await fn(h);assert.deepEqual(h.errors,[]);results.push({name,status:'PASS'});}catch(e){results.push({name,status:'FAIL',error:e.message});await h.page.screenshot({path:path.join(evidence,'browser-failure-'+results.length+'.png'),fullPage:true});throw e;}finally{await h.context.close();fs.writeFileSync(path.join(evidence,'browser-results.json'),JSON.stringify({tests:results,browser:browser.version(),routerAccessed:false,http:'intercepted synthetic fixtures'},null,2));}}
 try {
  await check('off by default, page issues no modifying requests',async({page:p,posts})=>{assert.equal(await p.locator('#dns-auto-check').isChecked(),false);assert.equal(posts.length,0);assert.match(await p.locator('#dns-auto-hint').innerText(),/выключена/);});
+ await check('settings carries page origin when KeenDNS strips Origin',async({page:p,posts})=>{await p.locator('#dns-auto-check').check();await p.waitForFunction(()=>!document.querySelector('#dns-auto-check').disabled);assert.equal(posts.length,1);assert.equal(posts[0].pageOrigin,'http://broray-qa.invalid');assert.deepEqual(JSON.parse(posts[0].body),{enabled:true});await p.reload();await p.waitForFunction(()=>document.querySelector('#dns-auto-check')?.checked&&!document.querySelector('#dns-auto-check').disabled);});
  await check('keyboard enable saves setting only',async({page:p,posts})=>{await p.locator('#dns-auto-check').focus();await p.keyboard.press('Space');await p.waitForFunction(()=>document.querySelector('#dns-auto-check').checked&&!document.querySelector('#dns-auto-check').disabled);assert.equal(posts.length,1);assert.deepEqual(JSON.parse(posts[0].body),{enabled:true});assert.match(posts[0].url,/dot-auto-settings/);assert.equal(await p.getByRole('checkbox',{name:'Выбрать google-primary',exact:true}).isChecked(),true);});
  await check('disable sends no DNS writes',async({page:p,posts})=>{await p.locator('#dns-auto-check').uncheck();await p.waitForFunction(()=>!document.querySelector('#dns-auto-check').disabled);assert.deepEqual(JSON.parse(posts[0].body),{enabled:false});assert.equal(posts.length,1);},{auto:true});
  await check('failed save restores previous toggle',async({page:p,posts})=>{await p.locator('#dns-auto-check').check();await p.waitForFunction(()=>!document.querySelector('#dns-auto-check').disabled);assert.equal(await p.locator('#dns-auto-check').isChecked(),false);assert.equal(posts.length,1);},{saveFailure:true});

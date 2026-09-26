@@ -11,10 +11,11 @@
     function date(value, timeOnly) { var d = new Date(value); return !value || isNaN(d.getTime()) ? "—" : timeOnly ? d.toLocaleTimeString("ru-RU") : d.toLocaleString("ru-RU"); }
     function badge(id, label, kind) { var el = byId(id); el.textContent = label; el.className = "status-badge status-" + kind; }
     async function request(endpoint, payload) {
-        var controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 15000);
+        // Coordinator admission alone may wait 30 seconds; allow the reply to finish.
+        var controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 60000);
         try {
             var options = {method:payload === undefined ? "GET" : "POST",credentials:"same-origin",cache:"no-store",signal:controller.signal,headers:{Accept:"application/json"}};
-            if (payload !== undefined) { options.headers["Content-Type"] = "application/json"; options.headers["X-BROray-Request"] = "operations"; options.body = JSON.stringify(payload); }
+            if (payload !== undefined) { options.headers["Content-Type"] = "application/json"; options.headers["X-BROray-Request"] = "operations"; options.headers["X-BROray-Origin"] = window.location.origin; options.body = JSON.stringify(payload); }
             var response = await fetch("/api/operations/" + endpoint + ".cgi", options), data = await response.json();
             if (!response.ok || data.ok === false || data.success === false) { var error = new Error("Состояние временно недоступно."); error.data = data; error.status = response.status; throw error; }
             return data;
@@ -86,7 +87,7 @@
         } catch (error) {
             var reasons={ACTIVE:"Операция ещё выполняется. Дождитесь её завершения и повторите проверку.",children_unconfirmed:"Завершение дочерних задач ещё не подтверждено. Повторите проверку после их завершения.",protected_recovery:"Осталось незавершённое изменение. Для маршрутов используйте существующие «Продолжить» или «Восстановить в Keenetic» после проверки блокировки.",legacy_owner_ambiguous:"У старой блокировки недостаточно сведений о владельце. Требуется восстановление совместимости с прежней версией.",updater_pending:"Есть незавершённое обновление BROray. Проверьте его состояние на странице обновления.",legacy_domain_pending:"Сохранилась блокировка прежнего механизма операций. Требуется проверка совместимости.",domain_pending:"Есть незавершённая операция. Проверьте состояние на соответствующей странице.",AMBIGUOUS:"Не удалось подтвердить владельца операции.",publication_unconfirmed:"Завершение сохранения данных не подтверждено.",orphan_unconfirmed:"Завершение одной из задач не подтверждено."};
             var detail=error.data && reasons[error.data.result];
-            text("bg-feedback",endpoint === "recover" ? (error.data && error.data.automationPaused === true ? "Автоматика на паузе. " : "")+"Блокировка сохранена. "+(detail || "Восстановление не подтверждено.")+" Скачайте диагностический отчёт." : error.status === 409 ? "Операция перешла на защищённый этап или занята другой задачей. Обновите состояние." : "Запрос не подтверждён. Обновите состояние перед повторным действием.");
+            text("bg-feedback",endpoint === "recover" ? (!error.data || (!detail && error.data.errorCode !== "RECOVERY_BLOCKED") ? "Ответ на запрос восстановления не получен. Обновите состояние, чтобы проверить результат." : (error.data && error.data.automationPaused === true ? "Автоматика на паузе. " : "")+"Блокировка сохранена. "+(detail || "Восстановление не подтверждено.")+" Скачайте диагностический отчёт.") : error.status === 409 ? "Операция перешла на защищённый этап или занята другой задачей. Обновите состояние." : "Запрос не подтверждён. Обновите состояние перед повторным действием.");
         } finally { busy=false; await refresh(); await journal(); }
     }
     async function report(copy) {

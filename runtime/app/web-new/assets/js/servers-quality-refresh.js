@@ -6,6 +6,14 @@
     var REFRESH_INTERVAL_MS = 15000;
     var pollTimer = null;
     var pollInFlight = false;
+    var formDirty = false;
+    var formRevision = 0;
+    var loadSequence = 0;
+
+    function markFormDirty() {
+        formDirty = true;
+        formRevision += 1;
+    }
     var lastCompletedAt = null;
 
     function element(id) {
@@ -115,11 +123,13 @@
         var effectiveStatus = !enabled ? "disabled" : paused ? "paused"
             : !serviceKnown ? "unavailable" : !operational ? "stopped" : state.status || "scheduled";
 
-        element("quality-refresh-enabled").checked = enabled;
-        element("quality-refresh-interval").value = String(
-            config.intervalMinutes || 60
-        );
-        syncIntervalState();
+        if (!formDirty) {
+            element("quality-refresh-enabled").checked = enabled;
+            element("quality-refresh-interval").value = String(
+                config.intervalMinutes || 60
+            );
+            syncIntervalState();
+        }
 
         element("quality-refresh-badge").textContent = enabled && !paused && operational
             ? "Включена" : statusTitle(effectiveStatus);
@@ -163,8 +173,13 @@
         refreshServerListAfterCompletion(state);
     }
 
-    function loadStatus(showError) {
-        return request(STATUS_URL, { method: "GET" }).then(render).catch(function (error) {
+    function loadStatus(showError, savedRevision) {
+        var sequence = ++loadSequence;
+        return request(STATUS_URL, { method: "GET" }).then(function (payload) {
+            if (sequence !== loadSequence) return;
+            if (savedRevision === formRevision) formDirty = false;
+            render(payload);
+        }).catch(function (error) {
             if (error.status === 401) {
                 BROrayUI.redirectToLogin();
                 return;
@@ -184,6 +199,7 @@
 
     function saveSettings(event) {
         var payload;
+        var savedRevision = formRevision;
         event.preventDefault();
         payload = {
             enabled: element("quality-refresh-enabled").checked,
@@ -197,7 +213,7 @@
                     : "Автоматическая проверка качества выключена.",
                 "success"
             );
-            return loadStatus(false);
+            return loadStatus(false, savedRevision);
         }).catch(function (error) {
             BROrayUI.toast(errorMessage(error), "error");
         }).then(function () {
@@ -245,6 +261,8 @@
         var form = element("server-quality-refresh-form");
         if (!form) return;
         form.addEventListener("submit", saveSettings);
+        form.addEventListener("input", markFormDirty);
+        form.addEventListener("change", markFormDirty);
         element("quality-refresh-enabled").addEventListener(
             "change",
             syncIntervalState

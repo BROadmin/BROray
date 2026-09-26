@@ -481,7 +481,9 @@
             return "Маршруты были установлены ранее, но сейчас в Keenetic отсутствуют " +
                 Number(presence.missingRouteCount || 0) + " из " +
                 Number(presence.expectedRouteCount || 0) +
-                ". Нажмите «Восстановить в Keenetic».";
+                (verificationRequired(state)
+                    ? ". Нажмите «Подготовить к установке», затем «Восстановить в Keenetic»."
+                    : ". Нажмите «Восстановить в Keenetic».");
         }
 
         if (downloadActionRequired(state)) {

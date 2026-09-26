@@ -174,6 +174,40 @@ class OperationsOrigin(unittest.TestCase):
         self.assertEqual(self.calls(), ['resume'])
         self.assertEqual(self.calls('ndmc-calls'), ['-c show ndns', '-c show running-config'])
 
+    def test_proxy_stripped_origin_uses_explicit_page_origin_and_live_proof(self):
+        self.request(env={'HTTP_ORIGIN': '', 'HTTP_X_BRORAY_ORIGIN': ORIGIN})
+        self.assertEqual(self.calls(), ['resume'])
+        self.assertEqual(self.calls('ndmc-calls'), ['-c show ndns', '-c show running-config'])
+
+    def test_proxy_stripped_origin_without_page_origin_is_rejected(self):
+        self.request(env={'HTTP_ORIGIN': '', 'HTTP_X_BRORAY_ORIGIN': ''}, expected=403)
+
+    def test_proxy_page_origin_cannot_replace_present_invalid_origin(self):
+        for value in ['null', 'broken', 'https://evil.invalid']:
+            with self.subTest(value=value):
+                self.request(env={'HTTP_ORIGIN': value, 'HTTP_X_BRORAY_ORIGIN': ORIGIN}, expected=403)
+
+    def test_proxy_page_origin_requires_exact_publication(self):
+        for value in ['http://192.168.1.1:8080', ORIGIN+':8443', ORIGIN+'/dns.html',
+                      'https://broray.other.keenetic.link', ORIGIN+',https://evil.invalid']:
+            with self.subTest(value=value):
+                self.request(env={'HTTP_ORIGIN': '', 'HTTP_X_BRORAY_ORIGIN': value}, expected=403)
+
+    def test_proxy_page_origin_requires_live_ownership(self):
+        state=copy.deepcopy(PUBLICATION)
+        state['ownership']['liveBlockOwnedExact']=False
+        self.save_publication(state)
+        self.request(env={'HTTP_ORIGIN': '', 'HTTP_X_BRORAY_ORIGIN': ORIGIN}, expected=403)
+
+    def test_proxy_page_origin_still_requires_session_and_request_header(self):
+        for headers in [{'HTTP_COOKIE': ''}, {'HTTP_X_BRORAY_REQUEST': ''}]:
+            with self.subTest(headers=headers):
+                self.request(env={'HTTP_ORIGIN': '', 'HTTP_X_BRORAY_ORIGIN': ORIGIN, **headers},
+                             expected=401 if 'HTTP_COOKIE' in headers else 403)
+
+    def test_origin_and_page_origin_disagreement_is_rejected(self):
+        self.request(env={'HTTP_X_BRORAY_ORIGIN': 'https://broray.other.keenetic.link'}, expected=403)
+
     def test_proxy_pause_stop_cancel_and_recovery_dispatch(self):
         self.request(body={'paused': True})
         self.request('stop-background', {'pauseAutomation': True}, expected=202)

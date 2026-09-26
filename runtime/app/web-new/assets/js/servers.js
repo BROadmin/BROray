@@ -4,6 +4,7 @@
     var state = {
         summary: null,
         details: {},
+        detailsPending: {},
         busy: false
     };
 
@@ -382,6 +383,14 @@
     }
     function renderServers(servers) {
         var list = element("servers-list");
+        var expanded = {};
+        Array.prototype.forEach.call(list.querySelectorAll(".server-card"), function (card) {
+            var toggle = card.querySelector(".server-details-toggle");
+            if (toggle && (toggle.getAttribute("aria-expanded") === "true" ||
+                toggle.getAttribute("aria-busy") === "true")) {
+                expanded[card.getAttribute("data-server-id")] = true;
+            }
+        });
         list.innerHTML = "";
 
         if (!servers.length) {
@@ -401,7 +410,11 @@
         }
 
         servers.forEach(function (server) {
-            list.appendChild(renderServerCard(server));
+            var card = renderServerCard(server);
+            list.appendChild(card);
+            if (expanded[server.id]) {
+                toggleDetails(server, card, card.querySelector(".server-details-toggle"));
+            }
         });
     }
 
@@ -547,11 +560,21 @@
         }
 
         setBusy(button, true, "Загрузка…");
-        request(
-            "/api/servers/details.cgi?id=" + encodeURIComponent(server.id),
-            { method: "GET" }
-        ).then(function (details) {
+        if (!state.detailsPending[server.id]) {
+            state.detailsPending[server.id] = request(
+                "/api/servers/details.cgi?id=" + encodeURIComponent(server.id),
+                { method: "GET" }
+            );
+        }
+        var pending = state.detailsPending[server.id];
+        pending.then(function (details) {
+            if (state.detailsPending[server.id] === pending) {
+                delete state.detailsPending[server.id];
+            }
             state.details[server.id] = details;
+            if (!document.documentElement.contains(card)) {
+                return;
+            }
             renderDetails(detailsRoot, details, server);
             detailsRoot.hidden = false;
             card.classList.add("is-expanded");
@@ -562,6 +585,12 @@
                 window.BROrayIcons.scan(button);
             }
         }).catch(function (error) {
+            if (state.detailsPending[server.id] === pending) {
+                delete state.detailsPending[server.id];
+            }
+            if (!document.documentElement.contains(card)) {
+                return;
+            }
             setBusy(button, false);
             handleError(error);
         });

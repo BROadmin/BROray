@@ -479,7 +479,7 @@
     async function cancelUpdate(item, button) {
         setButtonBusy(button, true, "Остановка…");
         try {
-            await api(paths.cancel, {method: "POST", headers: {"Accept": "application/json", "X-BROray-Request": "operations"}, body: {operationId: item.updateOperation.id}});
+            await api(paths.cancel, {method: "POST", headers: {"Accept": "application/json", "X-BROray-Request": "operations", "X-BROray-Origin": window.location.origin}, body: {operationId: item.updateOperation.id}});
             toast("Остановка запрошена. Дождитесь завершения операции.");
         } catch (error) {
             toast(error.message, "error");

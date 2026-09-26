@@ -617,6 +617,12 @@ ops_recover_global()
     # be discarded. Route/updater/Xray state stays under its original owner.
     cancelability="$(jq -r -L "${OPS_CODE:-$OPS_APP}/lib" 'include "operation-public"; if route_protected then "protected" else .cancelability end' "$OPS_CURRENT/state.json")"
     if ops_platform_is_preflight; then
+        if jq -e 'has("serviceStop")' "$OPS_CURRENT/state.json" >/dev/null; then
+            ops_platform_recover_stopped_service || { OPS_RECOVERY_RESULT=protected_recovery; return 2; }
+            ops_platform_resume_completed_service_stop || { OPS_RECOVERY_RESULT=updater_start_unconfirmed; return 2; }
+            OPS_RECOVERY_RESULT=service_stop_recovered
+            return 0
+        fi
         ops_platform_recover_prepared || { OPS_RECOVERY_RESULT=protected_recovery; return 2; }
     elif ! ops_executor_pending && ! jq -e '.state=="starting" and .acknowledged==false' "$OPS_CURRENT/state.json" >/dev/null; then
         if [ "$cancelability" != cooperative ]; then
@@ -819,6 +825,10 @@ ops_initialize_previous_boot()
     # Keep pause policy and every same-boot/live/ambiguous record unchanged.
     [ ! -e "$OPS_UPDATER/request.lock" ] && [ ! -L "$OPS_UPDATER/request.lock" ] || return 0
     [ ! -e "$OPS_LEGACY" ] && [ ! -L "$OPS_LEGACY" ] || return 0
+    if [ ! -e "$OPS_GLOBAL" ] && [ ! -L "$OPS_GLOBAL" ]; then
+        ops_platform_resume_completed_service_stop || return 1
+        return 0
+    fi
     [ -L "$OPS_GLOBAL" ] || return 0
     target="$(readlink "$OPS_GLOBAL")"
     case "$target" in "$OPS_ROOT/"*/fence) ;; *) return 0 ;; esac
@@ -826,6 +836,11 @@ ops_initialize_previous_boot()
     ops_load "$id" && ops_global_matches || return 0
     owner="$(jq -c .owner "$OPS_EXECUTOR")"; broray_ops_classify_owner "$owner"
     [ "$OPS_OWNER_STATUS:$OPS_OWNER_REASON" = STALE:previous_boot ] || return 0
+    if ops_platform_is_preflight && jq -e 'has("serviceStop")' "$OPS_CURRENT/state.json" >/dev/null; then
+        ops_platform_recover_stopped_service || return 1
+        ops_platform_resume_completed_service_stop
+        return $?
+    fi
     # Protected domain commits still require their explicit consistency path.
     # This is the same safe cooperative recovery used by the next begin call.
     jq -e -L "${OPS_CODE:-$OPS_APP}/lib" 'include "operation-public";
@@ -981,7 +996,7 @@ case "$verb" in
         # Preserve existing policy and current-boot work. A prior-boot
         # cooperative owner cannot survive and follows the normal recovery.
         [ "$#" = 0 ] || ops_error INVALID_REQUEST 1
-        ops_initialize_previous_boot
+        ops_initialize_previous_boot || ops_error PLATFORM_RECOVERY_UNCONFIRMED 75
         printf '%s\n' '{"ok":true}' ;;
     platform-preflight-begin) ops_platform_admission_request "$@" ;;
     platform-service-stop) ops_platform_service_stop "$@" ;;

@@ -3,6 +3,34 @@
 # Execute updaterctl completely before emitting CGI headers.  A successful
 # enqueue therefore always returns a non-empty JSON body with HTTP 202.
 
+# Read-only release checks may use the existing local Xray transport. Never
+# start Xray, modify its configuration or pass this environment to queued work.
+broray_updater_api_check_proxy() (
+    local root config endpoint host port addresses
+    root="${BRORAY_ROOT:-/opt/broray}"
+    [ -r "$root/lib/xray.sh" ] || exit 1
+    . "$root/lib/xray.sh" || exit 1
+    broray_xray_pid >/dev/null 2>&1 || exit 1
+    config="$(broray_xray_config_path)" || exit 1
+    [ -f "$config" ] && [ ! -L "$config" ] || exit 1
+    endpoint="$(jq -ec '
+      [.inbounds[]? | select(.protocol=="socks")] | select(length==1) | .[0] |
+      select((.settings.auth // "noauth")=="noauth") |
+      select((.port|type)=="number" and .port>=1 and .port<=65535 and .port==(.port|floor)) |
+      {host:(.listen // "0.0.0.0"),port} | select((.host|type)=="string")
+    ' "$config" 2>/dev/null)" || exit 1
+    host="$(printf '%s' "$endpoint" | jq -r .host)"
+    port="$(printf '%s' "$endpoint" | jq -r .port)"
+    case "$host" in 0.0.0.0) host=127.0.0.1 ;; ::) host=::1 ;; esac
+    case "$host" in ''|*[!0-9a-fA-F:.]*) exit 1 ;; esac
+    addresses="$(ip addr show 2>/dev/null)" || exit 1
+    printf '%s\n' "$addresses" | awk -v host="$host" '
+      $1=="inet" || $1=="inet6" {v=$2;sub(/\/.*/,"",v);if(v==host)n++}
+      END {exit n==1?0:1}' || exit 1
+    case "$host" in *:*) host="[$host]" ;; esac
+    printf 'socks5h://%s:%s\n' "$host" "$port"
+)
+
 broray_updater_api_call()
 {
     success_status="$1"
@@ -61,7 +89,16 @@ broray_updater_api_call()
     fi
 
     updater_rc=0
-    "$updater_ctl" "$@" >"$api_output" 2>"$api_error" || updater_rc=$?
+    api_check_proxy=''
+    if [ "$api_command" = check ]; then
+        api_check_proxy="$(broray_updater_api_check_proxy 2>/dev/null)" || api_check_proxy=''
+    fi
+    if [ -n "$api_check_proxy" ]; then
+        HTTPS_PROXY="$api_check_proxy" https_proxy="$api_check_proxy" NO_PROXY= no_proxy= \
+            "$updater_ctl" "$@" >"$api_output" 2>"$api_error" || updater_rc=$?
+    else
+        "$updater_ctl" "$@" >"$api_output" 2>"$api_error" || updater_rc=$?
+    fi
 
     # The source updater may already report app-slot success while the
     # transactionally scheduled platform continuation is still running.  Keep
