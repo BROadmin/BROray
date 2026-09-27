@@ -22,6 +22,25 @@ function summary(name = 'Alpha', total = 7) {
         keenetic: {health: health(), interfaceDisplayName: 'BROray test', link: true, connected: true, state: 'up'},
         broray: {installationHealthy: true, version: '3.1.1', updateAvailable: false}};
 }
+test('Home DoT counts selected installed records even when BROray owns none', async()=>{
+    const h=await ready(),s=summary();
+    s.dns={health:health(),selectedCount:3,selectedPresentCount:3,effectiveCount:0,managedPresentCount:0,maxServers:8,observationState:'determinate',runningConfigAvailable:true};
+    h.setSummary(s);await h.click('refresh-status');
+    assert.equal(h.text('home-dns-selected'),'3 из 8');
+    assert.equal(h.text('home-dns-installed'),'3 из 3');
+    s.dns.selectedPresentCount=2;h.setSummary(s);await h.click('refresh-status');
+    assert.equal(h.text('home-dns-installed'),'2 из 3');
+    s.dns.observationState='unknown';h.setSummary(s);await h.click('refresh-status');
+    assert.equal(h.text('home-dns-installed'),'—');
+});
+test('Home permits a queued read beyond 15 seconds but enforces the 60 second deadline',async()=>{
+    const h=await ready();h.plans.push({hold:true});await h.click('refresh-status');
+    const pending=h.requests.at(-1);await h.clock.advance(15000);
+    assert.notEqual(pending.aborted,true);assert.equal(h.button().disabled,true);
+    await h.clock.advance(44999);assert.notEqual(pending.aborted,true);
+    await h.clock.advance(1);assert.equal(pending.aborted,true);
+    assert.equal(h.button().disabled,false);assert.equal(h.text('home-health'),'Данные не обновлены');
+});
 class Target {
     listeners = new Map();
     addEventListener(type, fn) { const a = this.listeners.get(type) || []; a.push(fn); this.listeners.set(type, a); }
@@ -143,12 +162,12 @@ test('body parsing remains part of the single-flight request', async () => {
     h.requests.at(-1).finishBody(); await flush(); assert.equal(h.button().disabled,false);
 });
 test('timeout covers response body and enables retry', async () => {
-    const h = await ready(); h.plans.push({holdBody:true}); await h.click('refresh-status'); await h.clock.advance(15000);
+    const h = await ready(); h.plans.push({holdBody:true}); await h.click('refresh-status'); await h.clock.advance(60000);
     assert.equal(h.button().disabled,false); assert.equal(h.text('home-health'),'Данные не обновлены'); assert.equal(h.text('home-server-name'),'Alpha');
 });
 test('fetch timeout aborts and stale late response cannot overwrite the next response', async () => {
     const h = await ready(); h.plans.push({hold:true,ignoreAbort:true,data:{success:true,data:summary('Late')}}); await h.click('refresh-status'); const old=h.requests.at(-1);
-    await h.clock.advance(15000); assert.equal(old.aborted,true); h.setSummary(summary('New')); await h.click('refresh-status'); old.finish(); await flush(); assert.equal(h.text('home-server-name'),'New');
+    await h.clock.advance(60000); assert.equal(old.aborted,true); h.setSummary(summary('New')); await h.click('refresh-status'); old.finish(); await flush(); assert.equal(h.text('home-server-name'),'New');
 });
 test('late unauthorized response from cancelled request does not redirect current page', async () => {
     const h=await ready(); h.plans.push({hold:true,ignoreAbort:true,status:401}); await h.click('refresh-status'); const old=h.requests.at(-1);
@@ -194,7 +213,7 @@ test('initial session error exposes retry instead of leaving endless loader',asy
     const h=harness({hidden:true});h.plans.push({status:503,data:{success:false}});await h.visible(true);assert.equal(h.nodes.get('page-loader').hidden,true);assert.equal(h.button().disabled,false);assert.equal(h.text('home-health'),'Сводка недоступна');assert.equal(h.summaryRequests().length,0);await h.click('refresh-status');assert.equal(h.text('home-server-name'),'Alpha');
 });
 test('session with no verified user cannot start summary',async()=>{const h=harness({hidden:true});h.plans.push({data:{ok:true,authenticated:false}});await h.visible(true);assert.equal(h.summaryRequests().length,0);assert.equal(h.text('home-health'),'Сводка недоступна');});
-test('initial authentication timeout is bounded and retryable',async()=>{const h=harness({hidden:true});h.plans.push({hold:true});await h.visible(true);await h.clock.advance(15000);assert.equal(h.text('home-health'),'Сводка недоступна');assert.equal(h.button().disabled,false);await h.click('refresh-status');assert.equal(h.text('home-server-name'),'Alpha');});
+test('initial authentication timeout is bounded and retryable',async()=>{const h=harness({hidden:true});h.plans.push({hold:true});await h.visible(true);await h.clock.advance(60000);assert.equal(h.text('home-health'),'Сводка недоступна');assert.equal(h.button().disabled,false);await h.click('refresh-status');assert.equal(h.text('home-server-name'),'Alpha');});
 test('retry intervals back off 30/60/120 seconds, cap at 120 and reset after success',async()=>{
     const h=await ready();h.plans.push(...Array.from({length:4},()=>({error:'offline'})));await h.click('refresh-status');
     await h.clock.advance(30000);await h.clock.advance(60000);await h.clock.advance(120000);assert.deepEqual(h.summaryRequests().map(r=>r.at),[0,0,30000,90000,210000]);

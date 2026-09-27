@@ -1,4 +1,11 @@
 .bg-card { padding:24px; min-width:0; }
+.page-broray .bg-card { margin-bottom:18px; }
+#bg-journal > summary { cursor:pointer; list-style:none; margin-bottom:0; }
+#bg-journal > summary::-webkit-details-marker { display:none; }
+#bg-journal[open] > summary { margin-bottom:16px; }
+#bg-journal > summary:focus-visible { outline:2px solid currentColor; outline-offset:3px; }
+.bg-journal-chevron { display:inline-block; }
+#bg-journal[open] .bg-journal-chevron { transform:rotate(90deg); }
 .bg-card h2 { margin:6px 0 0; font-size:22px; }
 .bg-card .section-heading { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
 .bg-card .status-badge { white-space:normal; max-width:100%; }
@@ -6,6 +13,10 @@
 .bg-actions .button { white-space:normal; max-width:100%; min-width:0; text-align:center; }
 .bg-card p, .bg-card dd, .bg-card li { overflow-wrap:anywhere; }
 .bg-operation { padding:16px 0; border-top:1px solid var(--ui-border); }
+.bg-history { margin-top:18px; border-top:1px solid var(--ui-border); }
+.bg-history > summary { padding:16px 0; cursor:pointer; font-weight:600; overflow-wrap:anywhere; }
+.bg-history > summary:focus-visible { outline:2px solid currentColor; outline-offset:3px; }
+#bg-history-more { margin-top:10px; max-width:100%; white-space:normal; }
 .bg-facts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin:12px 0; }
 .bg-facts dt { color:var(--ui-text-muted); font-size:13px; margin-bottom:5px; }
 .bg-facts dd { margin:0; text-align:left; }

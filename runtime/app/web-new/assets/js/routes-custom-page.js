@@ -731,6 +731,7 @@
         }), LONG_OPERATION_TIMEOUT_MS);
         return operationPromise.then(function (newState) {
             var progress = operationProgress(newState);
+            states[bundle.id] = newState;
             if (progress && progress.resumable) toast(progress.message || "Операция приостановлена. Её можно продолжить.", "warning");
             else toast(action === "delete" ? "Маршруты удалены из Keenetic." : "Операция с маршрутами завершена.", "success");
             return !(progress && progress.resumable);
@@ -739,10 +740,13 @@
             else toast(globalMessage(error), "error");
             return false;
         }).then(function (completed) {
-            delete longRequests[bundle.id];
-            delete busyActions[bundle.id];
             if (window.BROrayRoutesOperationUI) window.BROrayRoutesOperationUI.clearPending(true);
-            return load().catch(function () { return null; }).then(function () { return completed; });
+            return load().catch(function () { return null; }).then(function () {
+                delete longRequests[bundle.id];
+                delete busyActions[bundle.id];
+                render();
+                return completed;
+            });
         });
     }
 

@@ -7,7 +7,8 @@
     var app = document.getElementById("app");
     var loader = document.getElementById("page-loader");
     var REFRESH_INTERVAL_MS = 30000;
-    var REQUEST_TIMEOUT_MS = 15000;
+    // Ten concurrent pages can queue a read in the browser before it reaches CGI.
+    var REQUEST_TIMEOUT_MS = 60000;
     var MAX_RETRY_MS = 120000;
     var refreshTimer = null;
     var activeRequest = null;
@@ -184,7 +185,7 @@
     }
 
     function renderDns(data) {
-        var severity, requested, effective, max, observed;
+        var severity, requested, effective, present, max, observed;
         if (!data) {
             renderUnavailable("home-dns", "Сводка DNS-over-TLS недоступна.");
             setText("home-dns-selected", null);
@@ -193,16 +194,18 @@
         }
         severity = severityOf(data);
         requested = Number(data.selectedCount != null ? data.selectedCount : (data.selectedIds || []).length);
-        effective = Number(data.effectiveCount != null ? data.effectiveCount : (data.managed || []).length);
+        effective = data.selectedPresentCount != null ? requested :
+            Number(data.effectiveCount != null ? data.effectiveCount : (data.managed || []).length);
+        present = data.selectedPresentCount != null ? data.selectedPresentCount : data.managedPresentCount;
         max = Number(data.maxServers || 8);
         observed = data.runningConfigAvailable !== false && data.observationState !== "unknown" &&
-            data.managedPresentCount != null;
+            present != null;
         setStatus("home-dns-status", labelOf(severity), toneOf(severity));
         setText("home-dns-main", firstReason(data, severity === "ok"
             ? "DNS-over-TLS настроен в Keenetic."
             : "Проверьте состояние DNS-over-TLS."));
         setText("home-dns-selected", requested + " из " + max);
-        setText("home-dns-installed", observed ? Number(data.managedPresentCount) + " из " + effective : null);
+        setText("home-dns-installed", observed ? Number(present) + " из " + effective : null);
     }
 
     function renderRoutes(data) {

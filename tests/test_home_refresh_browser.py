@@ -123,7 +123,7 @@ class HomeBrowser(unittest.TestCase):
         self.mode = 'hold'
         self.sync()
         self.page.locator('#refresh-status').click()
-        self.page.clock.run_for(15000)
+        self.page.clock.run_for(60000)
         expect(self.page.locator('#home-health')).to_have_text('Данные не обновлены')
         expect(self.page.locator('#refresh-status')).to_be_enabled()
         self.mode = 'ok'

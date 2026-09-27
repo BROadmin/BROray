@@ -1,6 +1,6 @@
 (function () {
     "use strict";
-    var snapshot = null, busy = false, timer = null, refreshing = false, fingerprint = "";
+    var snapshot = null, busy = false, timer = null, refreshing = false, fingerprint = "", historyLimit = 10, renderStale = false;
     var types = {subscription_update:"Обновление подписок",server_operation:"Работа с серверами",auto_switch:"Автовыбор сервера",xray_maintenance:"Обслуживание Xray",dns_operation:"DNS-over-TLS",router_operation:"Настройка роутера",route_operation:"Маршруты"};
     var sources = {USER:"Вручную",SCHEDULER:"По расписанию",SUBSCRIPTION_AUTO:"Автообновление подписок",SERVER_CHECK_AUTO:"Автопроверка серверов",AUTO_SWITCH:"Автовыбор",UPDATER:"Обновление BROray",SYSTEM_RECOVERY:"Восстановление"};
     var phases = {starting:"Подготовка",working:"Выполняется",checking:"Проверка",fetching:"Загрузка",parsing:"Обработка",committing:"Сохранение изменений",switching:"Переключение",waiting:"Ожидание",recovering:"Восстановление",finished:"Завершено"};
@@ -10,6 +10,28 @@
     function text(id, value) { byId(id).textContent = value; }
     function date(value, timeOnly) { var d = new Date(value); return !value || isNaN(d.getTime()) ? "—" : timeOnly ? d.toLocaleTimeString("ru-RU") : d.toLocaleString("ru-RU"); }
     function badge(id, label, kind) { var el = byId(id); el.textContent = label; el.className = "status-badge status-" + kind; }
+    function historyRows(data, queue) {
+        var latest = new Map(), result = [], seen = new Set();
+        var operations = data && Array.isArray(data.operations) ? data.operations : [];
+        function stamp(op) { return Date.parse(op.finishedAt || op.updatedAt || op.startedAt) || 0; }
+        operations.filter(function (op) { return op.running === false; }).forEach(function (op) {
+            var key = op.requestId || op.operationId;
+            if (key && (!latest.has(key) || stamp(op) > stamp(latest.get(key)))) latest.set(key,op);
+        });
+        queue.forEach(function (item) {
+            if (item.requestId) seen.add(item.requestId);
+            if (!["completed","cancelled","failed"].includes(item.state)) return;
+            var op = latest.get(item.requestId) || {};
+            result.push(Object.assign({},op,item,{
+                type:types[item.type] ? item.type : op.type,
+                source:sources[item.source] ? item.source : op.source
+            }));
+        });
+        latest.forEach(function (op,key) {
+            if (!seen.has(key)) result.push(Object.assign({},op,{state:op.state === "aborted" ? "cancelled" : op.state === "recovered" ? "failed" : op.state}));
+        });
+        return result.sort(function (a,b) { return stamp(b)-stamp(a); });
+    }
     async function request(endpoint, payload) {
         // Coordinator admission alone may wait 30 seconds; allow the reply to finish.
         var controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 60000);
@@ -25,15 +47,21 @@
         var active = data && Array.isArray(data.operations) ? data.operations.filter(function (op) { return op.running !== false; }) : [];
         var queue = data && Array.isArray(data.queue) ? data.queue : [];
         var waiting = queue.filter(function (item) { return item.state === "queued"; });
-        var queuedRows = waiting.concat(queue.filter(function (item) { return ["completed","cancelled","failed"].includes(item.state); }).slice(-20));
+        var history = historyRows(data,queue);
+        renderStale = !!stale;
         var unknown = stale || !data || data.complete !== true || data.globalFence === "ambiguous";
         badge("bg-badge", unknown ? "Нужно проверить состояние" : active.length ? "Выполняется: " + active.length : waiting.length ? "В очереди: " + waiting.length : "Нет операций", unknown ? "warning" : active.length || waiting.length ? "loading" : "success");
         text("bg-summary", unknown ? (snapshot ? "Не удалось обновить состояние. Ниже — последние полученные данные; они могут быть устаревшими." : "Не удалось получить состояние операций.") : active.length || waiting.length ? "Текущие задания BROray. В очереди: " + waiting.length + "." : "Активных фоновых операций нет.");
         byId("bg-recover").hidden = !unknown && !active.some(function (op) { return op.ownerStatus !== "ACTIVE"; });
-        var nextFingerprint = JSON.stringify([active,queuedRows,unknown,busy]);
+        byId("bg-history").hidden = !history.length;
+        if (!history.length) { byId("bg-history").open=false; historyLimit=10; }
+        text("bg-history-summary","Завершённые — " + history.length + " · С ошибками — " + history.filter(function (item) { return item.state === "failed"; }).length);
+        byId("bg-history-more").hidden = history.length <= historyLimit;
+        var nextFingerprint = JSON.stringify([active,waiting,history,historyLimit,unknown,busy]);
         if (nextFingerprint !== fingerprint) {
             var focused = document.activeElement && document.activeElement.dataset.operation;
             byId("bg-list").replaceChildren();
+            byId("bg-history-list").replaceChildren();
             active.forEach(function (op) {
                 var row = node("article",undefined,"bg-operation"), facts = node("dl",undefined,"bg-facts");
                 row.appendChild(node("strong",types[op.type] || "Фоновая операция"));
@@ -46,8 +74,9 @@
                 } else row.appendChild(node("p",op.type === "route_operation" ? "Остановка операций с маршрутами недоступна. Дождитесь завершения операции." : "Выполняется защищённый этап. Остановка недоступна до его завершения.","section-note"));
                 byId("bg-list").appendChild(row);
             });
-            queuedRows.forEach(function (item) {
+            function renderQueueRow(item, container) {
                 var row=node("article",undefined,"bg-operation"), facts=node("dl",undefined,"bg-facts");
+                if (item.requestId) row.dataset.requestId=item.requestId;
                 var label=item.state === "completed" ? "Завершено" : item.state === "cancelled" ? "Отменено" : item.state === "failed" ? "Ошибка" :
                     item.reason === "automation_paused" ? "На паузе" : item.reason === "active_connection" ? "Отложено ради активного подключения" : "В очереди";
                 row.appendChild(node("strong",types[item.type] || "Задание BROray"));
@@ -55,6 +84,9 @@
                  ["Приоритет",["Активное подключение","Переключение сервера","Ручное задание","Проверка серверов","Обновление подписок","Проверка DoT"][item.priority] || "Неизвестен"]].forEach(function (fact) {
                     var div=node("div");div.append(node("dt",fact[0]),node("dd",fact[1]));facts.append(div);
                 });
+                if (container === byId("bg-history-list")) {
+                    var ended=node("div");ended.append(node("dt","Завершение"),node("dd",date(item.finishedAt)));facts.append(ended);
+                }
                 row.appendChild(facts);
                 if (item.state === "queued" && /^q-[0-9a-f]{32}$/.test(item.requestId)) {
                     var button=node("button","Отменить задание","button button-secondary");
@@ -62,8 +94,10 @@
                     button.addEventListener("click",function () { mutate("cancel",{requestId:item.requestId}); });
                     row.appendChild(button);
                 }
-                byId("bg-list").appendChild(row);
-            });
+                container.appendChild(row);
+            }
+            waiting.forEach(function (item) { renderQueueRow(item,byId("bg-list")); });
+            history.slice(0,historyLimit).forEach(function (item) { renderQueueRow(item,byId("bg-history-list")); });
             if (focused) { var restored=Array.from(byId("bg-list").querySelectorAll("button")).find(function (el) { return el.dataset.operation===focused; }); if (restored) restored.focus({preventScroll:true}); }
             fingerprint=nextFingerprint;
         }
@@ -129,6 +163,10 @@
     function init() {
         if (!byId("bg-title")) return;
         byId("bg-refresh").addEventListener("click",refresh);
+        byId("bg-history-more").addEventListener("click",function () {
+            historyLimit+=10; render(snapshot,renderStale);
+            if (byId("bg-history-more").hidden) byId("bg-history-summary").focus();
+        });
         byId("bg-journal-refresh").addEventListener("click",journal);
         byId("bg-stop-all").addEventListener("click",function () { mutate("stop-background",{pauseAutomation:true}); });
         byId("bg-resume").addEventListener("click",function () { mutate("automation",{paused:false}); });

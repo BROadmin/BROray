@@ -60,6 +60,7 @@ function snapshot(){
  scenario='protected';await page.click('#bg-refresh');await page.waitForFunction(()=>document.querySelector('#bg-list').textContent.includes('защищённый'));assert.equal(await page.locator('#bg-list button').count(),0);checks++;
  scenario='ambiguous';await page.click('#bg-refresh');await page.locator('#bg-recover').waitFor({state:'visible'});await page.click('#bg-recover');await page.waitForFunction(()=>document.querySelector('#bg-feedback').textContent.includes('Блокировка сохранена'));checks++;
  assert(!(await page.textContent('#bg-events')).includes('SECRET_RAW_MESSAGE'));checks++;
+ await page.locator('#bg-journal > summary').click();
  const promise=page.waitForEvent('download');await page.click('#bg-download');const download=await promise;await download.saveAs(path.join(out,'report.json'));assert.equal(JSON.parse(fs.readFileSync(path.join(out,'report.json'))).reportKind,'broray-diagnostics');checks++;
  assert.deepEqual(errors,[]);
  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({status:'PASS',checks,environment:'Full production page + mocked HTTP responses; no router',errors,mutations},null,2)+'\n');

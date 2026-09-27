@@ -213,7 +213,7 @@ function snapshot(){
   async function refresh(){
    const done=page.waitForResponse(r=>r.url().endsWith('/operations/status.cgi'));
    await page.click('#bg-refresh');await done;
-   await page.waitForFunction(expected=>document.querySelector('#bg-list').textContent.includes(expected),
+   await page.waitForFunction(expected=>document.querySelector(expected==='Отменено'?'#bg-history-list':'#bg-list').textContent.includes(expected),
     state==='cancelled'?'Отменено':state==='running'?'Проверка':reason==='automation_paused'?'На паузе':
     reason==='active_connection'?'Отложено ради активного подключения':'В очереди');
   }
@@ -227,7 +227,7 @@ function snapshot(){
   assert((await page.textContent('#bg-list')).includes('Подтверждён'));checks++;
   state='queued';await refresh();
   await page.locator('#bg-list button').evaluate(el=>{el.click();el.click();});
-  await page.waitForFunction(()=>document.querySelector('#bg-list').textContent.includes('Отменено'));
+  await page.waitForFunction(()=>document.querySelector('#bg-history-list').textContent.includes('Отменено'));
   assert.equal(cancelCalls,1);checks++;
   assert.deepEqual(errors,[]);
   await page.locator('#bg-title').scrollIntoViewIfNeeded();
