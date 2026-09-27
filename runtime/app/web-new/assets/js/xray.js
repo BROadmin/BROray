@@ -20,8 +20,8 @@
     var catalogLoading = false;
     var compatibilityLabels = {
         compatible: "Совместима с BROray",
-        untested: "Не проверялась на совместимость с BROray",
-        incompatible: "Несовместима с BROray"
+        untested: "Совместимость не проверялась",
+        incompatible: "Частично совместима с BROray"
     };
     var latestUpdate = {
         checked: false,
@@ -257,7 +257,7 @@
             warnings.push("Официальный архив этой версии не подтверждён. Установка недоступна.");
         }
         if (compatibilityStatus(row) === "incompatible") {
-            warnings.push("Установка заблокирована: выявлена несовместимость с BROray.");
+            warnings.push("Установка недоступна: часть конфигураций BROray не поддерживается этой версией Xray.");
         } else if (compatibilityStatus(row) === "untested") {
             warnings.push("Мы не подтверждали совместимость этой версии с вашей сборкой BROray.");
         }

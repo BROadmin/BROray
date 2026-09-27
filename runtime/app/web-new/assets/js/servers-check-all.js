@@ -361,120 +361,21 @@
     }
 
     function runCheckAll(button) {
-        var state = {
-            success: 0,
-            failed: 0,
-            errors: []
-        };
-
-        setButton(
-            button,
-            true,
-            "Подготовка…"
-        );
-
-        setNote(
-            "Получение списка сохранённых серверов…"
-        );
-
-        request(
-            SUMMARY_URL,
-            {
-                method: "GET"
+        setButton(button,true,"Подготовка…");
+        BROrayUI.followQueued(CHECK_URL,"all",function (result) {
+            var pending=["queued","running"].includes(result.state);
+            setButton(button,false,pending ? BROrayUI.queueLabel(result) : "Проверить все серверы");
+            button.disabled=pending;
+            setNote(pending ? BROrayUI.queueLabel(result)+". Серверы проверяются по одному, уступая активному подключению." : IDLE_NOTE);
+            if (!pending) {
+                refreshSummary();
+                BROrayUI.toast(result.state === "completed" ? "Проверка всех серверов завершена." :
+                    result.message || BROrayUI.queueLabel(result),result.state === "completed" ? "success" : "warning");
             }
-        ).then(function (summary) {
-            var ids = extractServerIds(summary);
-
-            if (!ids.length) {
-                throw new Error(
-                    "Сохранённые серверы не найдены."
-                );
-            }
-
-            return checkNext(
-                ids,
-                0,
-                state,
-                button
-            ).then(function () {
-                setButton(
-                    button,
-                    true,
-                    "Публикация результата…"
-                );
-                setNote(
-                    "Формируется итоговое состояние после проверки всех серверов."
-                );
-                return request(
-                    BATCH_COMPLETE_URL,
-                    {
-                        method: "POST",
-                        body: {}
-                    }
-                ).then(function () {
-                    return {
-                        ids: ids,
-                        state: state
-                    };
-                });
-            });
-        }).then(function (result) {
-            var message;
-            var type;
-
-            setButton(
-                button,
-                true,
-                "Обновление списка…"
-            );
-
-            refreshSummary();
-
-            if (result.state.failed === 0) {
-                message =
-                    "Проверены все серверы: " +
-                    result.state.success +
-                    ".";
-
-                type = "success";
-            } else {
-                message =
-                    "Проверка завершена. Успешно: " +
-                    result.state.success +
-                    ", с ошибкой: " +
-                    result.state.failed +
-                    ".";
-
-                type = "warning";
-            }
-
-            window.setTimeout(function () {
-                BROrayUI.toast(
-                    message,
-                    type
-                );
-
-                setNote(IDLE_NOTE);
-
-                setButton(
-                    button,
-                    false,
-                    "Проверить все серверы"
-                );
-            }, 900);
         }).catch(function (error) {
-            BROrayUI.toast(
-                errorMessage(error),
-                "error"
-            );
-
-            setNote(IDLE_NOTE);
-
-            setButton(
-                button,
-                false,
-                "Проверить все серверы"
-            );
+            setButton(button,false,"Проверить все серверы");
+            setNote(error.message || "Результат запроса не подтверждён.");
+            BROrayUI.toast(error.message || "Результат запроса не подтверждён.","error");
         });
     }
 
@@ -508,6 +409,7 @@
                     runCheckAll(button);
                 }
             );
+            if (BROrayUI.hasQueuedRequest(CHECK_URL,"all")) runCheckAll(button);
         }
     }
 

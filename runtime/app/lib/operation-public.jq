@@ -8,11 +8,15 @@ def timestamp:
     .[13:14]==":" and .[16:17]==":" and .[19:20]=="Z" and
     ([.[0:4],.[5:7],.[8:10],.[11:13],.[14:16],.[17:19]] | all(.[]; ascii_digits)) then . else null end;
 def operation_id:
-  if type!="string" then null else . as $value | split("-") |
+  if type!="string" then null
+  elif startswith("op-q-") and length==37 and (.[5:]|ascii_hex) then .
+  else . as $value | split("-") |
     if length==4 and .[0]=="op" and (.[1]|length)==14 and (.[1]|ascii_digits) and
       (.[2]|length)>0 and (.[2]|length)<=10 and (.[2]|ascii_digits) and
       (.[2]|tonumber)>1 and (.[2]|tonumber)<=2147483647 and
       (.[3]|length)==12 and (.[3]|ascii_hex) then $value else null end end;
+def request_id:
+  if type=="string" and startswith("q-") and length==34 and (.[2:]|ascii_hex) then . else null end;
 def route_action:
   if type!="string" then false
   else startswith("custom:") or startswith("preflight:") or
@@ -43,7 +47,17 @@ def operation_public:
    startedAt:(.startedAt|timestamp),updatedAt:(.updatedAt|timestamp),finishedAt:(.finishedAt|timestamp),
    errorCode:(.errorCode|error_code),
    ownerStatus:(.ownerStatus|enum(["ACTIVE","STALE","AMBIGUOUS","FINISHED"];"AMBIGUOUS")),
-   ownerReason:(.ownerReason|enum(["identity_matches","absent","pid_reused","previous_boot","process_unreadable","identity_changed","invalid_identity","operation_finished"];"invalid_identity"))};
+   ownerReason:(.ownerReason|enum(["identity_matches","absent","pid_reused","previous_boot","process_unreadable","identity_changed","invalid_identity","operation_finished"];"invalid_identity")),
+   requestId:(.queueStep.requestId|request_id),
+   resourceLocks:([.resourceLocks[]? | enum(["global","active-observer","background-prepare"];null) | select(.!=null)])};
+
+def queue_public:
+  {requestId:(.requestId|request_id),priority:(.priority|if type=="number" and .>=0 and .<=5 and floor==. then . else null end),
+   type:(.action|operation_type),source:(.source|source),
+   stage:(.stage|enum(["checking","verify","probe","fetch","parse","apply","activate","finished"];"unknown")),
+   state:(.state|enum(["queued","running","completed","cancelled","failed"];"unknown")),
+   operationId:(if .state=="running" then (.operationId|operation_id) else null end),
+   reason:(.reason|enum(["awaiting_resource","active_connection","automation_paused"];null))};
 def event_name: enum(["started","lock_acquired","lock_conflict","phase_changed","owner_transferred","cancel_requested","completed","failed","aborted","recovered","ambiguous_owner","heartbeat_problem","term","kill"];"unknown");
 def event_message:
   if .=="started" then "Операция запущена"

@@ -17,7 +17,7 @@ function summary(name = 'Alpha', total = 7) {
         xray: {health: health(), version: '26.9.9', configValid: true, socksActive: true},
         servers: {health: health(), connectionState: 'connected', total, activeServer: {name, quality: {ping: 20, freshness: 'fresh'}}},
         subscriptions: {health: health(), total: 1, enabled: 1, serversReceived: total, lastUpdateStatus: 'success'},
-        dns: {health: health(), effectiveCount: 3, managedPresentCount: 3},
+        dns: {health: health(), selectedCount: 3, maxServers: 8, effectiveCount: 3, managedPresentCount: 3},
         routes: {health: health(), installedBundles: 2, availableBundles: 10, updatesAvailableCount: 0},
         keenetic: {health: health(), interfaceDisplayName: 'BROray test', link: true, connected: true, state: 'up'},
         broray: {installationHealthy: true, version: '3.1.1', updateAvailable: false}};
@@ -57,7 +57,7 @@ class Clock {
 function harness(options = {}) {
     const clock = new Clock(), document = new Target(), window = new Target(), nodes = new Map();
     const ids = ['app','page-loader','current-user','refresh-status','logout-button','home-health','home-warning','home-updated-at','home-server-name','home-server-quality'];
-    for (const p of ['servers','subscriptions','dns','routes','keenetic','xray','broray']) for (const s of ['status','main','total','version','config','enabled','servers','dns','count','update','link','state']) ids.push(`home-${p}-${s}`);
+    for (const p of ['servers','subscriptions','dns','routes','keenetic','xray','broray']) for (const s of ['status','main','total','version','config','enabled','servers','selected','installed','count','update','link','state']) ids.push(`home-${p}-${s}`);
     for (const id of ids) nodes.set(id, new Element(id));
     document.hidden = !!options.hidden;
     document.getElementById = id => nodes.get(id) || null;
@@ -128,7 +128,7 @@ test('successful periodic refresh changes all seven modules', async () => {
     s.routes.installedBundles=3; s.keenetic.connected=false; s.broray.version='candidate'; s.dns.managedPresentCount=2;
     s.installedRelease={version:'candidate'};
     h.setSummary(s); await h.clock.advance(30000);
-    for (const [id,value] of Object.entries({'home-xray-version':'test-next','home-servers-total':'8','home-subscriptions-enabled':'2 из 2','home-routes-count':'3','home-keenetic-state':'Нет подключения','home-broray-version':'candidate','home-routes-dns':'DNS-over-TLS: 2 из 3'})) assert.equal(h.text(id),value);
+    for (const [id,value] of Object.entries({'home-xray-version':'test-next','home-servers-total':'8','home-subscriptions-enabled':'2 из 2','home-routes-count':'3','home-keenetic-state':'Нет подключения','home-broray-version':'candidate','home-dns-selected':'3 из 8','home-dns-installed':'2 из 3'})) assert.equal(h.text(id),value);
 });
 test('duplicate home.js execution does not duplicate requests, handlers or timers', async () => {
     const h = await ready(); vm.runInContext(source,h.ctx); await h.clock.advance(30000); assert.equal(h.summaryRequests().length,2); assert.equal(h.button().listeners.get('click').length,1); assert.equal(h.clock.timers.size,1);
@@ -168,7 +168,7 @@ for (const [name,data] of Object.entries({null:null,array:[],string:'bad',empty:
 }
 test('missing module snapshots clear old metrics rather than display zeros or previous values',async()=>{
     const h=await ready(), s=summary();for(const m of ['xray','servers','subscriptions','dns','routes','keenetic','broray'])s[m]=null;s.health={severity:'error',reasons:[{message:'Snapshots unavailable'}]};h.setSummary(s);await h.click('refresh-status');
-    for(const id of ['home-xray-version','home-xray-config','home-servers-total','home-server-quality','home-subscriptions-enabled','home-subscriptions-servers','home-routes-count','home-routes-update','home-keenetic-link','home-keenetic-state','home-broray-version','home-broray-update'])assert.equal(h.text(id),'—',id);
+    for(const id of ['home-xray-version','home-xray-config','home-servers-total','home-server-quality','home-subscriptions-enabled','home-subscriptions-servers','home-dns-selected','home-dns-installed','home-routes-count','home-routes-update','home-keenetic-link','home-keenetic-state','home-broray-version','home-broray-update'])assert.equal(h.text(id),'—',id);
     assert.equal(h.text('home-health'),'Требуется исправление');
 });
 test('successful HTTP does not hide backend stale snapshot warning',async()=>{

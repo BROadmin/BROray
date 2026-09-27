@@ -112,6 +112,9 @@ ops_event_append()
 
 ops_event()
 {
+    # Finite read/prepare steps keep their evidence in RAM. They are not
+    # durable domain transactions and must not journal every scheduled probe.
+    case "${OPS_CURRENT:-}" in "$OPS_RAM/steps/"*) return 0 ;; esac
     if ops_event_append "$@"; then return 0; fi
     # Sticky evidence: failure of a diagnostic write cannot prevent retirement.
     # RAM is the fallback when the persistent filesystem cannot accept writes.

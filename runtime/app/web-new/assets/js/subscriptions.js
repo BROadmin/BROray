@@ -23,6 +23,7 @@
         editingId: null,
         openServersId: null,
         serverCache: new Map(),
+        queued: {},
         polling: null
     };
 
@@ -271,10 +272,13 @@
         }
 
         listElement.innerHTML = state.subscriptions.map(function (item) {
-            var running = item.lastUpdateStatus === "running";
+            var queued=state.queued[item.id];
+            var pending=queued && ["queued","running"].includes(queued.state);
+            var running = item.lastUpdateStatus === "running" || pending;
             var operation = item.updateOperation || {};
             var phase = ({fetching: "Загрузка подписки…", parsing: "Разбор серверов…", committing: "Сохранение серверов…", waiting: "Ожидание запуска…"})[operation.phase] || "Обновление подписки…";
             var progress = item.parseProgress || {};
+            if (pending) phase=BROrayUI.queueLabel(queued);
             if (operation.phase === "parsing" && Number.isInteger(progress.processed) && Number.isInteger(progress.total)) {
                 phase += " Обработано " + progress.processed + " из " + progress.total + ".";
             }
@@ -311,8 +315,9 @@
                 (window.BRORAYSubscriptionProvider ? window.BRORAYSubscriptionProvider.render(item) : "") +
                 (item.lastError ? '<div class="subscription-error"><strong>Ошибка обновления</strong><span>' + escapeHtml(item.lastError) + '</span></div>' : '') +
                 '<div class="subscription-card-actions">' +
-                    actionButton('button-primary', 'refresh', 'update', running ? 'Обновляется' : 'Обновить сейчас', running, running) +
-                    (running && operation.id ? actionButton('button-danger-outline', 'cancel-update', 'stop', operation.cancelRequested ? 'Останавливается…' : (operation.canCancel ? 'Остановить обновление' : 'Применяются изменения'), !operation.canCancel, false) : '') +
+                    actionButton('button-primary', 'refresh', 'update', pending ? BROrayUI.queueLabel(queued) : running ? 'Обновляется' : 'Обновить сейчас', running, running && !pending) +
+                    (pending && queued.state === "queued" ? actionButton('button-danger-outline', 'cancel-update', 'stop', 'Отменить ожидание', false, false) :
+                        running && operation.id ? actionButton('button-danger-outline', 'cancel-update', 'stop', operation.cancelRequested ? 'Останавливается…' : (operation.canCancel ? 'Остановить обновление' : 'Применяются изменения'), !operation.canCancel, false) : '') +
                     actionButton('button-secondary', 'servers', 'servers', serversOpen ? 'Скрыть серверы' : 'Показать серверы', false, false) +
                     actionButton('button-secondary', 'edit', 'edit', 'Изменить', running, false) +
                     actionButton('button-secondary', 'toggle-enabled', 'settings', item.enabled ? 'Отключить' : 'Включить', running, false) +
@@ -344,6 +349,11 @@
             state.subscriptions = Array.isArray(result[0]) ? result[0] : [];
             renderSummary(result[1] || {});
             renderSubscriptions();
+            state.subscriptions.forEach(function (item) {
+                if (state.queued[item.id] || !BROrayUI.hasQueuedRequest(paths.refresh,item.id)) return;
+                var card=Array.from(listElement.querySelectorAll("[data-id]")).find(function (element) { return element.dataset.id === item.id; });
+                if (card) refreshSubscription(item.id,card.querySelector('[data-action="refresh"]'));
+            });
             hasRunning = state.subscriptions.some(function (item) {
                 return item.lastUpdateStatus === "running";
             });
@@ -464,23 +474,30 @@
     async function refreshSubscription(id, button) {
         setButtonBusy(button, true, "Обновление…");
         try {
-            await api(paths.refresh + "?id=" + encodeURIComponent(id), {
-                method: "POST",
-                body: {}
+            await BROrayUI.followQueued(paths.refresh,id,function (result) {
+                if (["queued","running"].includes(result.state)) {
+                    state.queued[id]=result;renderSubscriptions();
+                } else {
+                    delete state.queued[id];renderSubscriptions();
+                    toast(result.state === "completed" ? "Обновление подписки завершено." :
+                        result.message || BROrayUI.queueLabel(result),result.state === "completed" ? "success" : "warning");
+                    loadAll(true);
+                }
             });
-            toast("Обновление подписки запущено.");
         } catch (error) {
             toast(error.message, "error");
-        } finally {
-            await loadAll(true);
+            setButtonBusy(button,false);
         }
     }
 
     async function cancelUpdate(item, button) {
+        var queued = state.queued[item.id];
+        var waiting = queued && queued.state === "queued";
+        var target = waiting ? {requestId: queued.requestId} : {operationId: (item.updateOperation || {}).id};
         setButtonBusy(button, true, "Остановка…");
         try {
-            await api(paths.cancel, {method: "POST", headers: {"Accept": "application/json", "X-BROray-Request": "operations", "X-BROray-Origin": window.location.origin}, body: {operationId: item.updateOperation.id}});
-            toast("Остановка запрошена. Дождитесь завершения операции.");
+            await api(paths.cancel, {method: "POST", headers: {"Accept": "application/json", "X-BROray-Request": "operations", "X-BROray-Origin": window.location.origin}, body: target});
+            toast(waiting ? "Ожидание отменено." : "Остановка запрошена. Дождитесь завершения операции.");
         } catch (error) {
             toast(error.message, "error");
         } finally {

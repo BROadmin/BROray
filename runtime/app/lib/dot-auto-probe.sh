@@ -4,7 +4,15 @@ set -u
 umask 077
 [ "${BRORAY_OPS_SUPERVISED:-}" = ptrace/1 ] && [ "$#" = 1 ] || exit 73
 work="$1"
-case "$work" in "${BRORAY_ROOT:-/opt/broray}/tmp/dot-auto-"*) ;; *) exit 73 ;; esac
+if [ -n "${BRORAY_DOT_QUEUE_REQUEST:-}" ]; then
+ case "$BRORAY_DOT_QUEUE_REQUEST" in q-*) ;; *) exit 73 ;; esac
+ suffix="${BRORAY_DOT_QUEUE_REQUEST#q-}"
+ case "$suffix" in *[!0-9a-f]*) exit 73 ;; esac
+ [ "${#suffix}" = 32 ] || exit 73
+ [ "$work" = "${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}/requests/$BRORAY_DOT_QUEUE_REQUEST/dot-probe-$BRORAY_BACKGROUND_OPERATION_ID" ] || exit 73
+else
+ case "$work" in "${BRORAY_ROOT:-/opt/broray}/tmp/dot-auto-"*) ;; *) exit 73 ;; esac
+fi
 [ -d "$work" ] && [ ! -L "$work" ] || exit 74
 [ "$(cat "$work/operation-id")" = "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || exit 73
 . "$BRORAY_ROOT/lib/routes-dot.sh" || exit 74
@@ -12,7 +20,10 @@ broray_dot_presets >"$work/catalog.json" || exit 74
 broray_dot_validate_catalog_file "$work/catalog.json" || exit 74
 jq -e --slurpfile catalog "$work/catalog.json" '
  .serverIds as $ids | ($ids|type)=="array" and ($ids|length)>0 and ($ids|length)<=8 and
- ($ids|unique|length)==($ids|length) and all($ids[];. as $id|any($catalog[0][];.id==$id))' "$work/request.json" >/dev/null || exit 74
+  ($ids|unique|length)==($ids|length) and all($ids[];. as $id|any($catalog[0][];.id==$id))' "$work/request.json" >/dev/null || exit 74
+if [ -n "${BRORAY_DOT_QUEUE_REQUEST:-}" ]; then
+ jq -e '.serverIds|length==1' "$work/request.json" >/dev/null || exit 74
+fi
 jq -n --slurpfile req "$work/request.json" --slurpfile catalog "$work/catalog.json" \
  '[$req[0].serverIds[] as $id | $catalog[0][] | select(.id==$id)]' >"$work/expected.json" || exit 74
 [ "$(jq -cS . "$work/entries.json")" = "$(jq -cS . "$work/expected.json")" ] || exit 74

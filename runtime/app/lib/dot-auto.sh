@@ -143,3 +143,120 @@ broray_dot_auto_exit() {
  broray_dot_auto_cleanup || true
  broray_job_exit "$rc"
 }
+
+# Bind the selected endpoints and enable setting, not the changing test cache.
+broray_dot_auto_context() {
+ local config settings catalog
+ broray_dot_auto_paths_safe && broray_dot_auto_ids >/dev/null || return 76
+ broray_dot_auto_safe_file "$DOT_AUTO_SETTINGS" || return 76
+ [ "$(broray_dot_auto_enabled)" = true ] || return 76
+ [ ! -e "$DOT_AUTO_ROOT/transaction-recovery-required.json" ] &&
+ [ ! -L "$DOT_AUTO_ROOT/transaction-recovery-required.json" ] || return 76
+ config="$(sha256sum "$DOT_AUTO_CONFIG" | cut -d ' ' -f 1)" || return 76
+ settings="$(sha256sum "$DOT_AUTO_SETTINGS" | cut -d ' ' -f 1)" || return 76
+ catalog="$(sha256sum "${BRORAY_OPS_CODE_ROOT:-${BRORAY_ROOT:-/opt/broray}}/lib/routes-dot.sh" | cut -d ' ' -f 1)" || return 76
+ [ -n "$config" ] && [ -n "$settings" ] && [ -n "$catalog" ] || return 76
+ printf '%s\n' "$config" "$settings" "$catalog" | sha256sum | cut -d ' ' -f 1
+}
+
+broray_dot_auto_step() {
+ local dq_request dq_owner dq_context dq_directory dq_result dq_digest dq_state dq_ids dq_cursor
+ local dq_total dq_id dq_work dq_rc dq_started dq_finished dq_at dq_tests dq_status dq_payload dq_tmp
+ dq_request="$1"
+ broray_job_require_owner || return $?
+ dq_owner="$(broray_ops_operation_directory)" || return 74
+ dq_context="$(jq -er .queueStep.context "$dq_owner/state.json")" || return 74
+ [ "$(broray_dot_auto_context)" = "$dq_context" ] || return 76
+ dq_ids="$(broray_dot_auto_ids)" || return 76
+ [ "$dq_ids" != '[]' ] || return 76
+ dq_directory="${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}/requests/$dq_request"
+ [ -d "$dq_directory" ] && [ ! -L "$dq_directory" ] &&
+ [ "$(stat -c '%u:%a' "$dq_directory")" = "$(id -u):700" ] || return 74
+ dq_result="$dq_directory/result.json"
+ dq_digest="$(jq -r '.queueStep.resultSha256 // empty' "$dq_owner/state.json")" || return 74
+ if [ -n "$dq_digest" ]; then
+  [ -f "$dq_result" ] && [ ! -L "$dq_result" ] &&
+  [ "$(stat -c '%u:%a:%h' "$dq_result")" = "$(id -u):600:1" ] &&
+  [ "$(sha256sum "$dq_result" | cut -d ' ' -f 1)" = "$dq_digest" ] || return 76
+  dq_state="$(jq -ce --arg request "$dq_request" --arg context "$dq_context" --argjson ids "$dq_ids" '
+   def count: type=="number" and .>=0 and floor==.;
+   select(.schemaVersion==1 and .kind=="dot" and .requestId==$request and .context==$context and
+    .selectedIds==$ids and .totalCount==($ids|length) and (.checkedCount|count) and
+    .checkedCount<.totalCount and (.failedCount|count) and .failedCount<=.checkedCount and
+    (.startedEpoch|count))' "$dq_result")" || return 76
+ else
+  [ ! -e "$dq_result" ] && [ ! -L "$dq_result" ] || return 76
+  dq_state="$(jq -nc --arg request "$dq_request" --arg context "$dq_context" --argjson ids "$dq_ids" \
+   --argjson now "$(date '+%s')" '{schemaVersion:1,kind:"dot",requestId:$request,context:$context,
+   selectedIds:$ids,totalCount:($ids|length),checkedCount:0,failedCount:0,startedEpoch:$now}')" || return 74
+ fi
+ dq_cursor="$(printf '%s\n' "$dq_state" | jq -r .checkedCount)"
+ dq_total="$(printf '%s\n' "$dq_state" | jq -r .totalCount)"
+ dq_id="$(printf '%s\n' "$dq_ids" | jq -er --argjson cursor "$dq_cursor" '.[$cursor]')" || return 76
+ dq_work="$dq_directory/dot-probe-$BRORAY_BACKGROUND_OPERATION_ID"
+ [ ! -e "$dq_work" ] && [ ! -L "$dq_work" ] || return 74
+ mkdir -m 700 "$dq_work" || return 74
+ printf '%s\n' "$BRORAY_BACKGROUND_OPERATION_ID" >"$dq_work/operation-id" || return 74
+ jq -nc --arg id "$dq_id" '{serverIds:[$id],allowUntested:false}' >"$dq_work/request.json" || return 74
+ . "${BRORAY_OPS_CODE_ROOT:-${BRORAY_ROOT:-/opt/broray}}/lib/routes-dot.sh" || return 74
+ broray_dot_entries_for_request "$dq_work/request.json" "$dq_work/entries.json" || return 74
+ dq_started="$(date '+%s')"
+ broray_job_checkpoint checking || return $?
+ dq_rc=0
+ BRORAY_DOT_QUEUE_REQUEST="$dq_request" broray_ops_run_helper 150 -- \
+  "${BRORAY_OPS_ASH:-/opt/bin/ash}" "${BRORAY_OPS_CODE_ROOT:-$BRORAY_ROOT}/lib/dot-auto-probe.sh" "$dq_work" || dq_rc=$?
+ case "$dq_rc" in
+  0) ;;
+  75) BRORAY_JOB_UNRESOLVED=true; return 75 ;;
+  *) return "$dq_rc" ;;
+ esac
+ dq_finished="$(date '+%s')"; dq_at="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+ broray_job_checkpoint checking || return $?
+ [ "$(broray_dot_auto_context)" = "$dq_context" ] || return 76
+ broray_dot_auto_safe_file "$dq_work/results.json" &&
+ jq -e --arg id "$dq_id" --argjson start "$dq_started" --argjson end "$dq_finished" \
+ --slurpfile entries "$dq_work/entries.json" '
+  type=="array" and length==1 and .[0].id==$id and
+  all(.[]; (.ok|type)=="boolean" and (.status|IN("ok","failed","unavailable")) and
+   (.ok==(.status=="ok")) and (.testedEpoch|type)=="number" and
+   .testedEpoch>=$start and .testedEpoch<=$end and
+   .address==$entries[0][0].address and .effectivePort==$entries[0][0].effectivePort and
+   .sni==$entries[0][0].sni and .spki==$entries[0][0].spki and
+   .interface==$entries[0][0].interface and .domain==$entries[0][0].domain)' \
+ "$dq_work/results.json" >/dev/null || return 74
+ dq_tests="$(jq -c . "$dq_work/results.json")" || return 74
+ dq_state="$(printf '%s\n' "$dq_state" | jq -c --argjson tests "$dq_tests" '
+  .checkedCount+=1 | .failedCount+=(if $tests[0].ok then 0 else 1 end)')" || return 74
+ dq_cursor=$((dq_cursor+1)); dq_status=running
+ if [ "$dq_cursor" -eq "$dq_total" ]; then
+  dq_status=success
+  [ "$(printf '%s\n' "$dq_state" | jq -r .failedCount)" = 0 ] || dq_status=failed
+ fi
+ dq_payload="$dq_directory/publication-$BRORAY_BACKGROUND_OPERATION_ID.json"
+ [ ! -e "$dq_payload" ] && [ ! -L "$dq_payload" ] || return 74
+ # Dot global writers are excluded while this preparation resource is held.
+ # Reread current state after the probe; retain every unrelated/newer entry.
+ broray_dot_auto_safe_file "$DOT_AUTO_STATE" &&
+ jq -e '.schemaVersion==1 and (.tests|type)=="array"' "$DOT_AUTO_STATE" >/dev/null || return 74
+ (set -C; jq --argjson result "$dq_tests" --argjson continuation "$dq_state" --arg id "$dq_id" \
+  --arg status "$dq_status" --arg at "$dq_at" --argjson end "$dq_finished" \
+  --arg operation "$BRORAY_BACKGROUND_OPERATION_ID" '
+  .tests as $old | {
+   tests:(if any($old[]?; .id==$id and .testedEpoch>$result[0].testedEpoch) then $old
+     else [$old[]? | select(.id!=$id)] + $result end),
+   lastTestedAt:$at,lastTestedEpoch:$end,updatedAt:$at,
+   autoCheck:($continuation|{requestId,context,selectedIds,totalCount,checkedCount,failedCount,
+    lastAttemptEpoch:.startedEpoch,status:$status,operationId:$operation,errorCode:null,
+    finishedEpoch:(if $status=="running" then null else $end end)})}' \
+  "$DOT_AUTO_STATE" >"$dq_payload") || return 74
+ chmod 600 "$dq_payload" || return 74
+ broray_job_publish_json dot-tests '' "$dq_payload" || return $?
+ dq_tmp="$dq_directory/result-$BRORAY_BACKGROUND_OPERATION_ID.tmp"
+ [ ! -e "$dq_tmp" ] && [ ! -L "$dq_tmp" ] && [ ! -L "$dq_result" ] || return 74
+ (set -C; printf '%s\n' "$dq_state" >"$dq_tmp") || return 74
+ chmod 600 "$dq_tmp" && mv "$dq_tmp" "$dq_result" || return 74
+ if [ "$dq_cursor" -lt "$dq_total" ]; then
+  dq_digest="$(sha256sum "$dq_result" | cut -d ' ' -f 1)" || return 74
+  broray_job_yield probe "$dq_digest" || return $?
+ fi
+}

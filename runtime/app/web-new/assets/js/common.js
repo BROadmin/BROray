@@ -57,6 +57,129 @@
         return payload;
     }
 
+    // One request nonce survives a lost response and navigation in this tab.
+    // Retrying observation never resubmits a mutation.
+    var queueInFlight = new Map();
+    async function queuePost(url, body, admission) {
+        var controller=new AbortController(), timer=setTimeout(function () { controller.abort(); },30000);
+        try {
+            var result=await apiRequest(url,{method:"POST",signal:controller.signal,
+                headers:{"X-BROray-Request":"operations","X-BROray-Origin":window.location.origin,
+                    "X-BROray-Queue":admission ? "1" : "0"},body:body});
+            if (!result || result.ok !== true || !/^q-[0-9a-f]{32}$/.test(result.requestId) ||
+                !["queued","running","completed","failed","cancelled"].includes(result.state)) {
+                throw new Error("Ответ на запрос задания не подтверждён.");
+            }
+            return result;
+        } finally { clearTimeout(timer); }
+    }
+    function queueLabel(result) {
+        if (result && result.state === "queued") {
+            if (result.reason === "automation_paused") return "На паузе";
+            if (result.reason === "active_connection") return "Отложено ради активного подключения";
+        }
+        return {queued:"В очереди",running:"Выполняется",completed:"Завершено",failed:"Ошибка",cancelled:"Отменено"}[result && result.state] ||
+            "Результат запроса не подтверждён";
+    }
+    function submitQueued(url, id) {
+        if (!["/api/servers/check.cgi","/api/subscriptions/refresh.cgi"].includes(url) ||
+            typeof id !== "string" || !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,95}$/.test(id)) {
+            return Promise.reject(new Error("Некорректное задание."));
+        }
+        var key="broray.queue.v1:"+url+":"+id;
+        if (queueInFlight.has(key)) return queueInFlight.get(key);
+        var promise=Promise.resolve().then(async function () {
+            var saved=sessionStorage.getItem(key),nonce;
+            if (saved) {
+                nonce=saved;
+                if (!/^[0-9a-f]{32}$/.test(nonce)) throw new Error("Сохранённый запрос повреждён. Обновите состояние операций.");
+            } else {
+                var bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+                nonce=Array.from(bytes,function (n) { return n.toString(16).padStart(2,"0"); }).join("");
+                // Persist before sending. Without this receipt do not admit work.
+                sessionStorage.setItem(key,nonce);
+            }
+            async function lookup() {
+                try { return await queuePost("/api/operations/status.cgi",{nonce:nonce},false); }
+                catch (error) {
+                    if (error.status === 404 && error.payload && error.payload.errorCode === "REQUEST_UNCONFIRMED") {
+                        sessionStorage.removeItem(key);
+                        throw new Error("Задание не найдено в текущей очереди. Обновите данные перед повторным действием.");
+                    }
+                    throw error;
+                }
+            }
+            var result;
+            if (saved) result=await lookup();
+            else {
+                try { result=await queuePost(url,{id:id,nonce:nonce},true); }
+                catch (error) {
+                    if ([400,401,403,404,409,413,415,422].includes(error.status)) {
+                        sessionStorage.removeItem(key);throw error;
+                    }
+                    result=await lookup();
+                }
+            }
+            if (["completed","failed","cancelled"].includes(result.state)) sessionStorage.removeItem(key);
+            return result;
+        }).finally(function () { queueInFlight.delete(key); });
+        queueInFlight.set(key,promise);
+        return promise;
+    }
+    var queueWatches=new Map(), queueTimer=null;
+    function hasQueuedRequest(url,id) {
+        try { return sessionStorage.getItem("broray.queue.v1:"+url+":"+id) !== null; }
+        catch (error) { return false; }
+    }
+    function queueNotify(key,watch,result) {
+        watch.last=result;
+        if (!["queued","running"].includes(result.state)) {
+            queueWatches.delete(key);
+            if (["completed","failed","cancelled"].includes(result.state)) {
+                sessionStorage.removeItem("broray.queue.v1:"+watch.url+":"+watch.id);
+            }
+        }
+        watch.listeners.forEach(function (listener) { listener(result); });
+    }
+    function queueSchedule() {
+        if (queueTimer || !queueWatches.size) return;
+        queueTimer=setTimeout(async function () {
+            queueTimer=null;
+            if (document.hidden) { queueSchedule();return; }
+            var controller=new AbortController(), timeout=setTimeout(function () { controller.abort(); },30000);
+            try {
+                var data=await apiRequest("/api/operations/status.cgi",{signal:controller.signal});
+                if (!data || data.complete !== true || !Array.isArray(data.queue)) throw new Error("Состояние очереди недоступно.");
+                queueWatches.forEach(function (watch,key) {
+                    if (!watch.last) return;
+                    var row=data.queue.find(function (item) { return item.requestId === watch.last.requestId; });
+                    queueNotify(key,watch,row || {state:"unknown",message:"Задание не найдено в текущем снимке. Проверьте состояние повторно."});
+                });
+            } catch (error) {
+                queueWatches.forEach(function (watch,key) {
+                    // Admission owns its timeout/lost-response lookup. A
+                    // status failure cannot settle a request without a reply.
+                    if (!watch.last) return;
+                    queueNotify(key,watch,{state:"unknown",message:"Не удалось обновить состояние задания. Проверьте состояние повторно."});
+                });
+            } finally { clearTimeout(timeout);queueSchedule(); }
+        },5000);
+    }
+    function followQueued(url,id,listener) {
+        var key=url+":"+id,watch=queueWatches.get(key);
+        if (watch) {
+            watch.listeners.add(listener);
+            if (watch.last) listener(watch.last);
+            return watch.promise;
+        }
+        watch={url:url,id:id,listeners:new Set([listener]),last:null,promise:null};
+        queueWatches.set(key,watch);
+        watch.promise=submitQueued(url,id).then(function (result) {
+            queueNotify(key,watch,result);queueSchedule();return result;
+        },function (error) { queueWatches.delete(key);throw error; });
+        return watch.promise;
+    }
+
     // UI-TOAST-01: the existing public toast(message, type) API stays intact.
     var toastRecords = [];
     var toastHistory = [];
@@ -280,6 +403,10 @@
 
     window.BROrayUI = {
         apiRequest: apiRequest,
+        submitQueued: submitQueued,
+        followQueued: followQueued,
+        hasQueuedRequest: hasQueuedRequest,
+        queueLabel: queueLabel,
         toast: toast,
         redirectToLogin: redirectToLogin,
         normalizeHealth: normalizeHealth,

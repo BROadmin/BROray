@@ -96,6 +96,36 @@ class Integration(unittest.TestCase):
         self.assertEqual(p.returncode,125);self.verify_gone()
         self.assertEqual(self.call('recover')['result'],'recovered')
         self.assertFalse((self.temp/'global.lock').exists())
+
+    def test_child_ledger_validates_every_birth_and_preserves_reused_pid(self):
+        self.begin();marker=self.temp/'ready';p=self.launch(f'echo yes >"{marker}"; sleep 60')
+        self.ready(p,marker);p.kill();p.communicate(timeout=5);self.verify_gone()
+        data=json.loads(self.ledger.read_bytes())
+        registry=self.op/'supervisors.json'
+        registry_before=registry.read_bytes()
+        sentinel=subprocess.Popen(['/bin/sleep','60']);self.processes.append(sentinel)
+        live={'pid':sentinel.pid,'startTicks':ticks(sentinel.pid),'bootId':self.env['TEST_BOOT']}
+        reused=dict(live,startTicks=str(int(live['startTicks'])+1))
+        # The departed birth can never return, but the reused foreign PID must
+        # neither be signalled nor mistaken for a still-running old child.
+        for invalid in [dict(live,pid=0),dict(live,pid='42'),dict(live,pid=2.5),
+                        dict(live,startTicks='bad'),dict(live,bootId=''),live]:
+            with self.subTest(child=invalid):
+                data['children']=[reused,invalid]
+                self.ledger.write_text(json.dumps(data))
+                before=self.ledger.read_bytes()
+                self.assertEqual(self.call('helpers-drain',self.id,self.token,expected=2)['errorCode'],
+                                 'CHILDREN_UNCONFIRMED')
+                self.assertEqual(self.ledger.read_bytes(),before)
+                self.assertEqual(registry.read_bytes(),registry_before)
+                self.assertTrue((self.temp/'global.lock').exists())
+                self.assertIsNone(sentinel.poll())
+        data['children']=[reused,dict(live,bootId='previous-boot')]
+        self.ledger.write_text(json.dumps(data))
+        self.drain()
+        self.assertEqual(json.loads(registry.read_bytes())['supervisors'],[])
+        self.assertIsNone(sentinel.poll())
+        self.finish('failed','OPERATION_FAILED')
     def test_cancelled_admission_never_opens_command_gate(self):
         self.begin();self.call('cancel',self.id);marker=self.temp/'forbidden'
         p=self.launch(f'echo BAD >"{marker}"');p.communicate(timeout=5)

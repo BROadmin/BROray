@@ -875,6 +875,18 @@ run_quality_refresh()
 
         S_Q_CHECKED=$((S_Q_CHECKED + 1))
         save_state
+
+        # A long catalog must not postpone active VPN health until its end.
+        # The completed probe is already published and its children drained.
+        if [ "$CFG_ENABLED" = true ]; then
+            run_active_cycle || return $?
+            if ! quality_refresh_can_run; then
+                quality_refresh_defer
+                rm -f "$QUALITY_SUMMARY" "$QUALITY_SUMMARY_ERR" "$QUALITY_IDS" \
+                    "$QUALITY_OUT" "$QUALITY_ERR"
+                return 0
+            fi
+        fi
     done <"$QUALITY_IDS"
 
     if [ ! -x "$HOME_SNAPSHOT" ] ||
@@ -894,17 +906,12 @@ run_quality_refresh()
     return 0
 }
 
-run_cycle_inner()
+run_active_cycle()
 {
     load_config
     load_state
 
     S_ENABLED="$CFG_ENABLED"
-    NOW_EPOCH="$(date '+%s')"
-
-    QUALITY_CYCLE_RC=0
-    run_quality_refresh || QUALITY_CYCLE_RC=$?
-    [ "$QUALITY_CYCLE_RC" = 0 ] || return "$QUALITY_CYCLE_RC"
     NOW_EPOCH="$(date '+%s')"
 
     if [ "$CFG_ENABLED" != "true" ]; then
@@ -1204,6 +1211,37 @@ run_cycle_inner()
     return 0
 }
 
+quality_refresh_can_run()
+{
+    case "$S_STATUS" in
+        healthy|disabled|manual-off) return 0 ;;
+        paused) [ "$XRAY_RUNNING" = false ] && return 0 ;;
+    esac
+    return 1
+}
+
+quality_refresh_defer()
+{
+    # Keep completed measurements; do not claim the interrupted batch finished.
+    S_Q_STATUS="paused"
+    S_Q_RUN_STARTED_AT=""
+    S_Q_LAST_RESULT="Проверено: $S_Q_CHECKED из $S_Q_TOTAL. Плановая проверка отложена."
+    S_Q_LAST_ERROR="Плановая проверка продолжится после обработки активного подключения."
+    save_state
+}
+
+run_cycle_inner()
+{
+    # One failed health sample ends this job before any scheduled probe.
+    # In particular, a switched/protected job does not start another scan.
+    run_active_cycle || return $?
+    if ! quality_refresh_can_run; then
+        [ "$S_Q_STATUS" != running ] || quality_refresh_defer
+        return 0
+    fi
+    run_quality_refresh
+}
+
 run_cycle()
 {
     load_config
@@ -1215,6 +1253,18 @@ run_cycle()
          (.qualityRefresh.status=="success" or .qualityRefresh.status=="scheduled" or .qualityRefresh.status=="partial" or .qualityRefresh.status=="error")' "$STATE" >/dev/null 2>&1; then return 0; fi
     if [ "$DRY_RUN" = true ]; then job_mode=--job-dry-run; else job_mode=--job; fi
     broray_service_run_job "$ROOT/bin/broray-server-auto-switch" "$job_mode"
+}
+
+run_queue_cycle()
+{
+    local queue_cycle_rc=0
+    [ ! -e "$LOCK" ] && [ ! -L "$LOCK" ] || return 2
+    # Admit urgent current-proxy work before maintenance of prior stages.
+    broray_auto_enqueue_due continue >/dev/null || queue_cycle_rc=$?
+    [ "$queue_cycle_rc" != 77 ] || return 77
+    broray_ops_call queue-recover >/dev/null || return $?
+    broray_job_dispatch_step continue || return $?
+    return "$queue_cycle_rc"
 }
 
 if [ "$MODE" = job ]; then
@@ -1248,10 +1298,14 @@ trap 'exit 143' TERM
 if [ "$MODE" = once ]; then run_cycle; exit $?; fi
 broray_service_daemon_enter auto-switch || exit $?
 trap 'broray_service_daemon_exit' EXIT
+BRORAY_AUTO_HEALTH_REQUEST=''; BRORAY_AUTO_HEALTH_CONTEXT=''
+BRORAY_AUTO_QUALITY_REQUEST=''; BRORAY_AUTO_QUALITY_CONTEXT=''
 log_message "Сервис автоматического выбора запущен"
 while :; do
     broray_service_stop_requested && break
-    run_cycle || log_message "Цикл завершился ошибкой"
+    queue_loop_rc=0
+    run_queue_cycle >>"$LOG" 2>&1 || queue_loop_rc=$?
+    case "$queue_loop_rc" in 0|77) ;; *) log_message "Цикл очереди завершился ошибкой" ;; esac
     broray_service_sleep "$INTERVAL_SECONDS" || break
 done
 exit 0

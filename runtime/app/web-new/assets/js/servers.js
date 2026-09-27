@@ -5,6 +5,7 @@
         summary: null,
         details: {},
         detailsPending: {},
+        queuedChecks: {},
         busy: false
     };
 
@@ -380,6 +381,12 @@
                 : "Сохранено серверов: " + count;
 
         renderServers(state.summary.servers || []);
+        (state.summary.servers || []).forEach(function (server) {
+            if (!BROrayUI.hasQueuedRequest("/api/servers/check.cgi",server.id)) return;
+            var button=Array.from(document.querySelectorAll("[data-check-server]")).find(function (item) { return item.dataset.checkServer === server.id; });
+            if (active && active.id === server.id) button=element("check-active-server");
+            if (button) checkServer(server.id,button);
+        });
     }
     function renderServers(servers) {
         var list = element("servers-list");
@@ -497,6 +504,7 @@
 
         checkButton = create("button", "button button-secondary", "Проверить");
         checkButton.type = "button";
+        checkButton.dataset.checkServer=server.id;
         checkButton.setAttribute("data-icon", "speed");
         checkButton.addEventListener("click", function () {
             checkServer(server.id, checkButton);
@@ -715,27 +723,35 @@
 
     function checkServer(serverId, button) {
         setBusy(button, true, "Проверка…");
-
-        request(
-            "/api/servers/check.cgi",
-            {
-                method: "POST",
-                body: { id: serverId }
+        if (state.queuedChecks[serverId]) {
+            BROrayUI.followQueued("/api/servers/check.cgi",serverId,state.queuedChecks[serverId]).catch(function () {
+                setBusy(button,false);
+            });
+            return;
+        }
+        var listener=function (result) {
+            var pending=["queued","running"].includes(result.state);
+            var buttons=new Set([button]);
+            document.querySelectorAll("[data-check-server]").forEach(function (item) {
+                if (item.dataset.checkServer === serverId) buttons.add(item);
+            });
+            var active=element("check-active-server");
+            if (active && active.getAttribute("data-server-id") === serverId) buttons.add(active);
+            buttons.forEach(function (item) {
+                setBusy(item,false);item.textContent=pending ? BROrayUI.queueLabel(result) : "Проверить";item.disabled=pending;
+            });
+            if (!pending) {
+                delete state.queuedChecks[serverId];
+                BROrayUI.toast(result.state === "completed" ? "Проверка сервера завершена." :
+                    result.message || BROrayUI.queueLabel(result),result.state === "completed" ? "success" : "warning");
+                delete state.details[serverId];loadSummary(false).catch(function () {});
             }
-        ).then(function () {
-            BROrayUI.toast("Проверка сервера завершена.", "success");
-        }).catch(function (error) {
-            BROrayUI.toast(
-                error.message || "Сервер недоступен.",
-                "error"
-            );
-        }).then(function () {
-            delete state.details[serverId];
-            return loadSummary(false);
-        }).then(function () {
+        };
+        state.queuedChecks[serverId]=listener;
+        BROrayUI.followQueued("/api/servers/check.cgi",serverId,listener).catch(function (error) {
+            delete state.queuedChecks[serverId];
             setBusy(button, false);
-        }).catch(function () {
-            setBusy(button, false);
+            BROrayUI.toast(error.message || "Результат запроса не подтверждён.","error");
         });
     }
 

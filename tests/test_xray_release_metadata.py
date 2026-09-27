@@ -54,8 +54,22 @@ class CandidateCompatibility(unittest.TestCase):
   self.assertEqual(record['candidateId'],'3.2.0-r01c19')
   self.assertIn('CP06-XRAY-CURRENT-PROFILE',record['evidence'])
  def test_other_candidate_architecture_or_archive_remains_untested(self):
-  for changed in [dict(candidate='3.2.0-r01c20'),dict(architecture='amd64'),dict(digest='0'*64),dict(tag='v26.9.7')]:
+  for changed in [dict(candidate='3.2.0-r01c999999'),dict(architecture='amd64'),dict(digest='0'*64),dict(tag='v26.9.7')]:
    with self.subTest(changed=changed):self.assertEqual(self.resolve(**changed)['status'],'untested')
+ def test_priority_candidate_retains_exact_compatibility_scope(self):
+  records=json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())['records']
+  current=[r for r in records if r['candidateId']=='3.2.0-r01c20']
+  self.assertEqual(len(current),7)
+  for row in current:
+   with self.subTest(tag=row['xrayTag']):
+    old=next(r for r in records if r['candidateId']=='3.2.0-r01c19' and r['xrayTag']==row['xrayTag'])
+    self.assertEqual(row['status'],old['status'])
+    self.assertEqual(row.get('configurationGate'),old.get('configurationGate'))
+    self.assertEqual(row['testedSourceSha256'],old['testedSourceSha256'])
+    for rel,digest in row['testedSourceSha256'].items():
+     self.assertEqual(hashlib.sha256((ROOT/'runtime/app'/rel).read_bytes()).hexdigest(),digest)
+    result=self.resolve(candidate='3.2.0-r01c20',tag=row['xrayTag'],digest=row['archiveSha256'])
+    self.assertEqual(result['status'],row['status'])
  def test_historical_evidence_remains_available(self):
   self.assertEqual(self.resolve(candidate='3.1.1-r12c01')['status'],'compatible')
  def test_older_cores_expose_proven_configuration_failures(self):

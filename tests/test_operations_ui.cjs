@@ -2,7 +2,7 @@
 const {chromium}=require('playwright');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'../runtime/app/web-new');
-const out=path.resolve(__dirname,'../../docs/evidence/operations-ui-20260915');fs.mkdirSync(out,{recursive:true});
+const out=process.env.BRORAY_BROWSER_OUTPUT || path.resolve(__dirname,'../../docs/evidence/operations-ui-20260915');fs.mkdirSync(out,{recursive:!process.env.BRORAY_BROWSER_OUTPUT});
 const operation={operationId:'op-20260915123400-3456-012345abcdef',type:'server_operation',source:'SERVER_CHECK_AUTO',phase:'checking',state:'running',running:true,revision:1,cancelability:'cooperative',cancelRequested:false,startedAt:'2026-09-15T12:34:00Z',ownerStatus:'ACTIVE'};
 let scenario='checking',paused=false,cancelled=false,checks=0;
 function snapshot(){
@@ -13,7 +13,7 @@ function snapshot(){
   return {ok:scenario!=='ambiguous',complete:scenario!=='ambiguous',operations:scenario==='idle'?[]:[op],automationPaused:paused,globalFence:scenario==='idle'?'absent':scenario==='ambiguous'?'ambiguous':'managed_active'};
 }
 (async()=>{
- const browser=await chromium.launch({headless:true}),context=await browser.newContext({acceptDownloads:true}),page=await context.newPage();
+ const browser=await chromium.launch({headless:true,executablePath:process.env.BRORAY_CHROMIUM}),context=await browser.newContext({acceptDownloads:true}),page=await context.newPage();
  const errors=[],mutations=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/*',async route=>{
   const req=route.request(),u=new URL(req.url());if(u.hostname!=='broray.test')return route.abort();

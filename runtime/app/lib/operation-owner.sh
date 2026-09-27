@@ -62,26 +62,29 @@ broray_ops_capture_owner()
 
 broray_ops_classify_owner()
 {
-    local expected pid live rc boot
+    local expected pid live rc boot comparison
     expected="$1"
     OPS_OWNER_STATUS=AMBIGUOUS
     OPS_OWNER_REASON=invalid_identity
     printf '%s\n' "$expected" | broray_ops_owner_valid || return 0
     boot="$(broray_ops_boot_id)" || return 0
     [ -n "$boot" ] || return 0
-    if [ "$(printf '%s\n' "$expected" | jq -r '.bootId')" != "$boot" ]; then
+    pid="$(printf '%s\n' "$expected" | jq -r --arg boot "$boot" '
+      if .bootId!=$boot then "previous_boot" else (.pid|tostring) end')"
+    if [ "$pid" = previous_boot ]; then
         OPS_OWNER_STATUS=STALE; OPS_OWNER_REASON=previous_boot; return 0
     fi
-    pid="$(printf '%s\n' "$expected" | jq -r '.pid')"
     rc=0; live="$(broray_ops_capture_owner "$pid")" || rc=$?
     if [ "$rc" = 2 ]; then OPS_OWNER_STATUS=STALE; OPS_OWNER_REASON=absent; return 0; fi
     [ "$rc" = 0 ] || { OPS_OWNER_REASON=process_unreadable; return 0; }
-    if [ "$(printf '%s\n' "$expected" | jq -r '.startTicks')" != "$(printf '%s\n' "$live" | jq -r '.startTicks')" ]; then
-        OPS_OWNER_STATUS=STALE; OPS_OWNER_REASON=pid_reused; return 0
-    fi
-    if jq -en --argjson a "$expected" --argjson b "$live" '$a==$b' >/dev/null 2>&1; then
-        OPS_OWNER_STATUS=ACTIVE; OPS_OWNER_REASON=identity_matches
-    else
-        OPS_OWNER_REASON=identity_changed
-    fi
+    # Compare the same validated identities in one query. Capture remains a
+    # fresh double /proc snapshot; no PID, executable or command check is lost.
+    comparison="$(jq -nr --argjson a "$expected" --argjson b "$live" '
+      if $a.startTicks!=$b.startTicks then "pid_reused"
+      elif $a==$b then "identity_matches" else "identity_changed" end')" || comparison=identity_changed
+    case "$comparison" in
+      pid_reused) OPS_OWNER_STATUS=STALE; OPS_OWNER_REASON=pid_reused ;;
+      identity_matches) OPS_OWNER_STATUS=ACTIVE; OPS_OWNER_REASON=identity_matches ;;
+      *) OPS_OWNER_REASON=identity_changed ;;
+    esac
 }

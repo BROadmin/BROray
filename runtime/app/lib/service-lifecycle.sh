@@ -309,3 +309,31 @@ EOF_SERVICE_PARENT
     unset BRORAY_SERVICE_LEASE_FD BRORAY_SERVICE_BOOTSTRAP BRORAY_SERVICE_GENERATION
     exec "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$@"
 )
+
+broray_service_spawn_step()
+{
+    local request code continuation
+    request="${1:-}"; code="${BRORAY_OPS_CODE_ROOT:-${BRORAY_ROOT:-/opt/broray}}"
+    continuation="${2:-}"
+    case "$continuation" in ''|continue) ;; *) return 64 ;; esac
+    case "$request" in q-*) ;; *) return 64 ;; esac
+    [ "${#request}" = 34 ] || return 64
+    case "${request#q-}" in *[!0-9a-f]*) return 64 ;; esac
+    case "${BRORAY_SERVICE_LEASE_FD:-}" in ''|[3-9]) ;; *) return 74 ;; esac
+    [ -f "$code/lib/operation-worker.sh" ] && [ ! -L "$code/lib/operation-worker.sh" ] || return 74
+    # One background child closes the lease then execs. There is no outer
+    # waiting shell retaining the daemon's singleton file descriptor.
+    {
+        case "${BRORAY_SERVICE_LEASE_FD:-}" in
+          [3-9]) eval "exec ${BRORAY_SERVICE_LEASE_FD}>&-" ;;
+        esac
+        unset BRORAY_SERVICE_LEASE_FD BRORAY_SERVICE_BOOTSTRAP BRORAY_SERVICE_GENERATION BRORAY_SERVICE_DAEMON_PID
+        unset BRORAY_OPS_GUARD_HELD BRORAY_BACKGROUND_OPERATION_ID BRORAY_BACKGROUND_OPERATION_TOKEN BRORAY_BACKGROUND_LAUNCH_NONCE
+        unset BRORAY_JOB_ACTIVE BRORAY_JOB_UNRESOLVED
+        unset BRORAY_QUEUE_DISPATCH_NEXT
+        if [ "$continuation" = continue ]; then
+            BRORAY_QUEUE_DISPATCH_NEXT=1; export BRORAY_QUEUE_DISPATCH_NEXT
+        fi
+        exec "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$code/lib/operation-worker.sh" --request "$request"
+    } </dev/null >/dev/null 2>&1 &
+}

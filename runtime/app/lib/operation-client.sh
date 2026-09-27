@@ -1,6 +1,51 @@
 #!/opt/bin/ash
 # Client of the single coordinator; shared by old Operation Manager consumers.
 
+broray_ops_queue_submit() { broray_ops_call queue-submit "$@"; }
+broray_ops_queue_lookup() { broray_ops_call queue-lookup "$@"; }
+broray_ops_queue_next() { broray_ops_call queue-next; }
+broray_ops_queue_cancel() { broray_ops_call queue-cancel "$@"; }
+
+broray_ops_request_id_valid()
+{
+    case "${1:-}" in q-*) ;; *) return 1 ;; esac
+    [ "${#1}" = 34 ] || return 1
+    case "${1#q-}" in *[!0-9a-f]*) return 1 ;; esac
+}
+
+broray_ops_queue_claim()
+{
+    local request pid rest response attempt rc id token
+    request="${1:-}"
+    broray_ops_request_id_valid "$request" || return 64
+    [ -z "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || return 73
+    BRORAY_BACKGROUND_LAUNCH_NONCE="${2:-$(hexdump -n 16 -v -e '1/1 "%02x"' /dev/urandom)}"
+    IFS=' ' read -r pid rest </proc/self/stat || return 73
+    attempt=0
+    while [ "$attempt" -lt 3 ]; do
+        attempt=$((attempt+1)); rc=0
+        response="$(broray_ops_call queue-claim "$request" "$BRORAY_BACKGROUND_LAUNCH_NONCE" "$pid")" || rc=$?
+        if [ "$rc" = 0 ] && printf '%s\n' "$response" | broray_ops_response_valid token &&
+           printf '%s\n' "$response" | jq -es --arg id "$request" 'length==1 and .[0].requestId==$id' >/dev/null 2>&1; then break; fi
+        [ "$rc" != 0 ] || rc=1
+        if printf '%s\n' "$response" | jq -e '.ok==false' >/dev/null 2>&1; then rc=2; break; fi
+    done
+    [ "$rc" = 0 ] || { BRORAY_OPS_LAST_ERROR="$response"; return "$rc"; }
+    id="$(printf '%s\n' "$response" | jq -er .operationId)" || return 1
+    token="$(printf '%s\n' "$response" | jq -er .token)" || return 1
+    BRORAY_BACKGROUND_OPERATION_ID="$id"; BRORAY_BACKGROUND_OPERATION_TOKEN="$token"
+    export BRORAY_BACKGROUND_OPERATION_ID BRORAY_BACKGROUND_OPERATION_TOKEN
+    attempt=0
+    while [ "$attempt" -lt 3 ]; do
+        attempt=$((attempt+1)); rc=0
+        response="$(broray_ops_call ack "$id" "$token" "$pid")" || rc=$?
+        if [ "$rc" = 0 ] && printf '%s\n' "$response" | jq -es 'length==1 and .[0].ok==true and .[0].acknowledged==true' >/dev/null 2>&1; then return 0; fi
+        if printf '%s\n' "$response" | jq -e '.ok==false' >/dev/null 2>&1; then break; fi
+    done
+    # No acknowledged identity means no handler may start.
+    return 1
+}
+
 broray_ops_call()
 {
     local app code state guard ash controller rc response attempt attempt_limit
@@ -25,11 +70,43 @@ broray_ops_call()
     attempt_limit=15
     attempt=0
     while :; do
+        # A scheduling daemon may stop while waiting for the coordinator.
+        # Check only before a new admission attempt, never after an executed
+        # command/lost response. Workers clear service identity on spawn and
+        # must still complete their own cancellation/settlement protocol.
+        case "${1:-}" in
+          queue-submit|queue-next|queue-recover|queue-lookup)
+            if [ -n "${BRORAY_SERVICE_GENERATION:-}" ] &&
+              command -v broray_service_stop_requested >/dev/null 2>&1 &&
+              broray_service_stop_requested; then
+                printf '%s\n' '{"ok":false,"errorCode":"SERVICE_STOP_REQUESTED"}'
+                return 2
+            fi ;;
+        esac
         attempt=$((attempt+1)); rc=0
         if [ "${BRORAY_OPS_TEST:-0}" = 1 ] && [ "$app" != /opt/broray ]; then
             response="$("$guard" "$state/operations.guard" "$ash" ash "$controller" "$@")" || rc=$?
         else
             response="$("$guard" "$state/operations.guard" "$ash" "$controller" "$@")" || rc=$?
+        fi
+        if [ "$rc" = 75 ] && [ -z "$response" ] &&
+           [ -n "${BRORAY_SERVICE_GENERATION:-}" ] &&
+           command -v broray_service_stop_requested >/dev/null 2>&1; then
+            # No command executed. Scheduling maintenance must yield to a
+            # finite worker's publication/drain instead of competing through
+            # repeated guard waits. Workers have no service generation.
+            case "${1:-}" in queue-submit|queue-next|queue-recover|queue-lookup)
+                if broray_service_stop_requested; then
+                    printf '%s\n' '{"ok":false,"errorCode":"SERVICE_STOP_REQUESTED"}'
+                    return 2
+                fi ;;
+            esac
+            case "${1:-}:${2:-}:${4:-}" in
+              queue-submit:servers:active-health:AUTO_SWITCH) ;;
+              queue-submit:*|queue-next:*|queue-recover:*|queue-lookup:*)
+                printf '%s\n' '{"ok":false,"errorCode":"QUEUE_ADMISSION_DEFERRED"}'
+                return 77 ;;
+            esac
         fi
         # Guard exit 75 with no response means its two-second lock wait ended
         # before exec: no coordinator work has run. Bound total wait to 30 seconds.
@@ -95,30 +172,56 @@ broray_ops_response_valid()
 broray_ops_finish()
 {
     [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || return 0
-    broray_ops_call finish "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "${1:-completed}" "${2:-}" >/dev/null || return $?
+    # Job callers bind identity and mutation under one guard acquisition.
+    # Existing protected/legacy callers retain their original call contract.
+    if [ "$#" -ge 3 ]; then
+        broray_ops_call finish "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "${1:-completed}" "${2:-}" "$3" >/dev/null || return $?
+    else
+        broray_ops_call finish "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "${1:-completed}" "${2:-}" >/dev/null || return $?
+    fi
     unset BRORAY_BACKGROUND_OPERATION_ID BRORAY_BACKGROUND_OPERATION_TOKEN BRORAY_BACKGROUND_LAUNCH_NONCE
 }
 
 broray_ops_tick()
 {
     [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || return 0
-    broray_ops_call tick "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "${1:-working}" >/dev/null
+    if [ "$#" -ge 2 ]; then
+        broray_ops_call tick "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "${1:-working}" "$2" >/dev/null
+    else
+        broray_ops_call tick "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "${1:-working}" >/dev/null
+    fi
+}
+
+broray_ops_operation_directory()
+{
+    local state ram id directory
+    state="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}"
+    ram="${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}"
+    id="${BRORAY_BACKGROUND_OPERATION_ID:-}"
+    case "$id" in ''|*[!A-Za-z0-9._-]*|.*|-*) return 1 ;; esac
+    directory="$state/operations/$id"
+    if [ -e "$ram/steps/$id" ] || [ -L "$ram/steps/$id" ]; then
+        [ ! -e "$directory" ] && [ ! -L "$directory" ] || return 1
+        directory="$ram/steps/$id"
+    fi
+    [ -d "$directory" ] && [ ! -L "$directory" ] &&
+      [ -f "$directory/state.json" ] && [ ! -L "$directory/state.json" ] || return 1
+    jq -e --arg id "$id" '.schemaVersion==2 and .operationId==$id' "$directory/state.json" >/dev/null || return 1
+    printf '%s\n' "$directory"
 }
 
 broray_ops_cancel_requested()
 {
-    local state id
-    state="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}"
-    id="${BRORAY_BACKGROUND_OPERATION_ID:-}"
-    case "$id" in ''|*[!A-Za-z0-9._-]*|.*) return 1 ;; esac
-    [ -f "$state/operations/$id/cancel.json" ] && [ ! -L "$state/operations/$id/cancel.json" ]
+    local directory
+    directory="$(broray_ops_operation_directory)" || return 1
+    [ -f "$directory/cancel.json" ] && [ ! -L "$directory/cancel.json" ]
 }
 
 broray_ops_run_helper()
 {
     # Only bounded cooperative work belongs here. Starting the persistent Xray
     # service is a protected owner action, never a traced helper command.
-    local app code ash supervisor state timeout rc attempt
+    local app code ash supervisor state timeout rc attempt directory
     [ "$#" -ge 3 ] && [ "$2" = -- ] || return 64
     timeout="$1"; shift 2
     [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] && [ -n "${BRORAY_BACKGROUND_OPERATION_TOKEN:-}" ] || return 73
@@ -129,9 +232,10 @@ broray_ops_run_helper()
     code="${BRORAY_OPS_CODE_ROOT:-$app}"
     supervisor="${BRORAY_OPS_SUPERVISOR:-$code/bin/broray-ops-supervisor}"
     [ -f "$supervisor" ] && [ ! -L "$supervisor" ] || return 74
+    directory="$(broray_ops_operation_directory)" || return 73
     rc=0
     "$supervisor" "$ash" "$code/lib/operation-supervisor-control.sh" \
-      "$state/operations/$BRORAY_BACKGROUND_OPERATION_ID/cancel.json" "$timeout" 1 2 -- "$@" || rc=$?
+      "$directory/cancel.json" "$timeout" 1 2 -- "$@" || rc=$?
     # EXITKILL is asynchronous. The next commit/finish is permitted only after
     # the coordinator confirms every registered helper has disappeared.
     attempt=0

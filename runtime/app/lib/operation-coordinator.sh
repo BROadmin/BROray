@@ -7,6 +7,7 @@ OPS_APP="${BRORAY_ROOT:-/opt/broray}"
 OPS_CODE="${BRORAY_OPS_CODE_ROOT:-$OPS_APP}"
 OPS_PREFLIGHT_EXPECTED_SHA=''
 OPS_PREFLIGHT_SERVICE_STOP=null
+OPS_QUEUE_BEGIN=null
 OPS_STATE="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}"
 OPS_ROOT="$OPS_STATE/operations"
 OPS_GLOBAL="${BRORAY_ROUTES_API_LOCK:-${BRORAY_GLOBAL_LOCK:-/opt/var/lock/broray/global-operation.lock}}"
@@ -26,6 +27,7 @@ OPS_RAM="${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}"
 . "$OPS_CODE/lib/operation-platform-service.sh"
 . "$OPS_CODE/lib/operation-platform-generation.sh"
 . "$OPS_CODE/lib/operation-platform-bootguard.sh"
+. "$OPS_CODE/lib/operation-scheduling.sh"
 
 ops_error()
 {
@@ -123,14 +125,31 @@ ops_load()
 {
     local id dir
     id="$1"; ops_id_valid "$id" || return 1
-    dir="$OPS_ROOT/$id"; ops_dir_safe "$dir" || return 1
+    dir="$OPS_ROOT/$id"
+    if [ -e "$OPS_RAM/steps/$id" ] || [ -L "$OPS_RAM/steps/$id" ]; then
+        [ ! -e "$dir" ] && [ ! -L "$dir" ] || return 1
+        dir="$OPS_RAM/steps/$id"
+    fi
+    ops_dir_safe "$dir" || return 1
     ops_file_safe "$dir/owner.json" 4096 && ops_file_safe "$dir/state.json" || return 1
-    jq -e --arg id "$id" 'type=="object" and .schemaVersion==2 and .kind=="background" and .operationId==$id and
-      (.revision|type)=="number" and (.running|type)=="boolean" and (.resourceLocks|type)=="array"' "$dir/state.json" >/dev/null 2>&1 || return 1
-    jq -e --arg id "$id" 'type=="object" and .schemaVersion==2 and .operationId==$id and
-      (.token|type)=="string" and (.token|length)==32 and
-      (.token|all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102)))' "$dir/owner.json" >/dev/null 2>&1 || return 1
-    jq -c '.owner' "$dir/owner.json" | broray_ops_owner_valid || return 1
+    # Validate the same state/owner contract together under the coordinator
+    # guard. Separate jq processes here were repeated for every callback and
+    # delayed urgent observers behind bookkeeping. This does not cache either
+    # record or skip the independent live-process identity checks.
+    jq -en --arg id "$id" --arg dir "$dir" --arg ram "$OPS_RAM/steps/" \
+      --slurpfile state "$dir/state.json" --slurpfile owner "$dir/owner.json" '
+      def hex($n): type=="string" and length==$n and all(explode[];(.>=48 and .<=57) or (.>=97 and .<=102));
+      def identity: type=="object" and (.pid|type)=="number" and .pid>1 and
+        (.startTicks|type)=="string" and (.startTicks|length)>0 and
+        (.startTicks|all(explode[];.>=48 and .<=57)) and
+        (.bootId|type)=="string" and (.bootId|length)>0 and
+        (.executable|type)=="string" and (.executable|startswith("/")) and (.commandDigest|hex(64));
+      ($state|length)==1 and ($owner|length)==1 and
+      ($state[0]|type=="object" and .schemaVersion==2 and .kind=="background" and .operationId==$id and
+        (.revision|type)=="number" and (.running|type)=="boolean" and (.resourceLocks|type)=="array" and
+        (if $dir|startswith($ram) then .queueStep.schemaVersion==1 else true end)) and
+      ($owner[0]|type=="object" and .schemaVersion==2 and .operationId==$id and
+        (.token|hex(32)) and (.owner|identity))' >/dev/null 2>&1 || return 1
     OPS_CURRENT="$dir"; OPS_ID="$id"; OPS_EXECUTOR="$dir/owner.json"
     if [ -e "$dir/executor.json" ] || [ -L "$dir/executor.json" ]; then
         ops_file_safe "$dir/executor.json" 8192 || return 1
@@ -276,8 +295,7 @@ ops_children_absent()
 {
     local child state children
     children="$OPS_CURRENT/children.json"
-    ops_supervisors_absent || return 1
-    ops_supervisors_collect || return 1
+    ops_supervisors_collect all-absent || return 1
     [ -e "$children" ] || { [ ! -L "$children" ]; return $?; }
     ops_file_safe "$children" || return 1
     jq -e '.children|type=="array"' "$children" >/dev/null 2>&1 || return 1
@@ -313,7 +331,7 @@ ops_child_birth_absent()
 
 ops_supervisor_absent()
 {
-    local record id owner dir ledger boot child rows count n
+    local record id owner dir ledger boot rows pid ticks previous current
     record="$1"; id="$(printf '%s\n' "$record" | jq -r '.supervisorId')"
     ops_nonce_valid "$id" || return 1
     owner="$(printf '%s\n' "$record" | jq -c '.owner')"
@@ -323,15 +341,32 @@ ops_supervisor_absent()
     dir="$OPS_RAM/supervisors/$OPS_ID/$id"; ledger="$dir/children.json"
     ops_dir_safe "$OPS_RAM" && ops_dir_safe "$OPS_RAM/supervisors" &&
       ops_dir_safe "$OPS_RAM/supervisors/$OPS_ID" && ops_dir_safe "$dir" && ops_file_safe "$ledger" 65536 || return 1
-    jq -e --arg id "$OPS_ID" --arg sid "$id" --argjson owner "$owner" '
-      .schemaVersion==1 and .operationId==$id and .supervisorId==$sid and .supervisorPid==$owner.pid and
-      .supervisorStartTicks==$owner.startTicks and .bootId==$owner.bootId and (.children|type)=="array" and (.children|length)<=256' "$ledger" >/dev/null 2>&1 || return 1
-    count="$(jq '.children|length' "$ledger")"; n=0
-    while [ "$n" -lt "$count" ]; do
-        child="$(jq -c --argjson n "$n" '.children[$n]' "$ledger")" || return 1
-        ops_child_birth_absent "$child" || return 1
-        n=$((n+1))
-    done
+    boot="$(broray_ops_boot_id)" || return 1
+    [ -n "$boot" ] || return 1
+    # Validate the complete bounded ledger once, before using any row. The
+    # boot cannot change during this process. Every same-boot birth is still
+    # checked against live /proc; no cached PID or timeout proves absence.
+    rows="$(jq -er --arg id "$OPS_ID" --arg sid "$id" --arg boot "$boot" --argjson owner "$owner" '
+      def child: (.pid|type)=="number" and .pid>1 and .pid<=2147483647 and .pid==(.pid|floor) and
+        (.startTicks|type)=="string" and (.startTicks|length)>0 and
+        (.startTicks|all(explode[];.>=48 and .<=57)) and (.bootId|type)=="string" and (.bootId|length)>0;
+      if .schemaVersion==1 and .operationId==$id and .supervisorId==$sid and .supervisorPid==$owner.pid and
+        .supervisorStartTicks==$owner.startTicks and .bootId==$owner.bootId and
+        (.children|type)=="array" and (.children|length)<=256 and all(.children[];child)
+      then [.children[] | [(.pid|tostring),.startTicks,(.bootId!=$boot|tostring)] | join("|")] | join("\n")
+      else error("invalid child ledger") end' "$ledger" 2>/dev/null)" || return 1
+    while IFS='|' read -r pid ticks previous; do
+        [ -n "$pid" ] || continue
+        [ "$previous" != true ] || continue
+        if [ ! -e "$OPS_PROC/$pid" ] && [ ! -L "$OPS_PROC/$pid" ]; then
+            kill -0 "$pid" 2>/dev/null && return 1
+            continue
+        fi
+        current="$(broray_ops_start_ticks "$OPS_PROC/$pid")"
+        [ -n "$current" ] && [ "$current" != "$ticks" ] || return 1
+    done <<EOF_SUPERVISOR_CHILDREN
+$rows
+EOF_SUPERVISOR_CHILDREN
 }
 
 ops_supervisors_absent()
@@ -351,7 +386,10 @@ ops_supervisors_absent()
 
 ops_supervisors_collect()
 {
-    local file records kept removed record sid ledger count n changed
+    local file records kept removed record sid ledger count n changed mode terms kills
+    mode="${1:-partial}"
+    case "$mode" in partial|all-absent) ;; *) return 1 ;; esac
+    terms=''; kills=''
     file="$OPS_CURRENT/supervisors.json"
     [ -e "$file" ] || { [ ! -L "$file" ]; return $?; }
     ops_file_safe "$file" 131072 || return 1
@@ -365,16 +403,27 @@ ops_supervisors_collect()
             ledger="$OPS_RAM/supervisors/$OPS_ID/$sid/children.json"
             # A previous boot is already proof of absence; its RAM is gone.
             if ops_file_safe "$ledger" 65536; then
-                jq -e '.termSent==true' "$ledger" >/dev/null && ops_event term '' "$sid" >/dev/null 2>&1 || true
-                jq -e '.killTriggered==true' "$ledger" >/dev/null && ops_event kill '' "$sid" >/dev/null 2>&1 || true
+                if [ "$mode" = all-absent ]; then
+                    # Publish nothing until every registry entry is proved.
+                    jq -e '.termSent==true' "$ledger" >/dev/null && terms="$terms $sid"
+                    jq -e '.killTriggered==true' "$ledger" >/dev/null && kills="$kills $sid"
+                else
+                    jq -e '.termSent==true' "$ledger" >/dev/null && ops_event term '' "$sid" >/dev/null 2>&1 || true
+                    jq -e '.killTriggered==true' "$ledger" >/dev/null && ops_event kill '' "$sid" >/dev/null 2>&1 || true
+                fi
             fi
             removed="$removed $sid"; changed=true
         else
+            [ "$mode" != all-absent ] || return 1
             kept="$(jq -nc --argjson rows "$kept" --argjson item "$record" '$rows+[$item]')" || return 1
         fi
         n=$((n+1))
     done
     [ "$changed" = true ] || return 0
+    # The full absence proof is stable: a departed birth cannot return.
+    # Reuse it within this guarded call, never a timestamp or cached PID.
+    for sid in $terms; do ops_event term '' "$sid" >/dev/null 2>&1 || true; done
+    for sid in $kills; do ops_event kill '' "$sid" >/dev/null 2>&1 || true; done
     records="$(jq -nc --argjson rows "$kept" '{schemaVersion:1,supervisors:$rows}')" || return 1
     ops_write "$file" "$records" || return 1
     # Registry retirement is durable before deleting any ledger. An interrupted
@@ -393,6 +442,7 @@ ops_supervisor_register()
 {
     local owner records record dir directory context file nonce route_mode expected_exe
     ops_authorize "$1" "$2"
+    ops_step_permission "${verb:-supervisor-register}" || ops_error STEP_PERMISSION_DENIED
     route_mode="${5:-false}"
     if [ "$route_mode" = platform ] || [ "$route_mode" = service ]; then
         ops_platform_stop_valid || ops_error PLATFORM_PHASE_INVALID
@@ -428,7 +478,7 @@ ops_supervisor_register()
         [ "$(printf '%s\n' "$owner" | jq -r .executable)" = "$expected_exe" ] &&
           [ "$(tr '\000' '\n' <"$OPS_PROC/$3/cmdline" | sed -n '2p')" = --protected-route ] || ops_error OWNER_UNCONFIRMED
     fi
-    ops_global_matches || ops_error OWNER_CHANGED
+    ops_resources_match || ops_error OWNER_CHANGED
     ops_supervisors_collect || ops_error CHILDREN_UNCONFIRMED
     records='{"schemaVersion":1,"supervisors":[]}'
     file="$OPS_CURRENT/supervisors.json"
@@ -609,7 +659,8 @@ ops_recover_global()
         ops_children_absent || { OPS_RECOVERY_RESULT=children_unconfirmed; return 2; }
         ops_platform_finish_ready || { OPS_RECOVERY_RESULT=platform_domain_pending; return 2; }
         ops_route_finish_ready || { OPS_RECOVERY_RESULT=domain_pending; return 2; }
-        ops_retire_global || return 1
+        if ops_is_queue_step; then ops_queue_step_finish "$(jq -r .state "$OPS_CURRENT/state.json")" >/dev/null || return 1
+        else ops_retire_global || return 1; fi
         OPS_RECOVERY_RESULT=terminal_lock_retired
         return 0
     fi
@@ -640,14 +691,16 @@ ops_recover_global()
     ops_state_transition aborted recovering OWNER_DISAPPEARED || return 1
     ops_retire_global || return 1
     ops_state_transition recovered finished OWNER_DISAPPEARED || return 1
+    if ops_is_queue_step; then ops_queue_step_finish recovered OWNER_DISAPPEARED >/dev/null || return 1; fi
     OPS_RECOVERY_RESULT=recovered
     return 0
 }
 
 ops_begin()
 {
-    local scope action bundle source pid cancelability owner nonce id dir final_dir record state rc fence launch file count
+    local scope action bundle source pid cancelability owner nonce id dir final_dir record state rc fence launch file count queue_paused
     scope="$1"; action="$2"; bundle="$3"; source="$4"; pid="$5"; cancelability="$6"
+    ops_step_runtime_gate "$action" || ops_error RESOURCE_BUSY
     launch="$7"; ops_nonce_valid "$launch" || ops_error INVALID_LAUNCH_NONCE 1
     if [ "$action" = system:platform-preflight ]; then
         [ "$verb" = platform-preflight-begin ] &&
@@ -694,6 +747,24 @@ ops_begin()
         jq -c '{ok:true,operationId,token}' "$OPS_CURRENT/owner.json"
         return 0
     done
+    # Only a queue claim carries a scheduler-selected stage. Legacy synchronous
+    # callers keep a busy response; they may not overtake pending failover.
+    # Exact replay above stays valid and never becomes a second admission.
+    if [ "$OPS_QUEUE_BEGIN" = null ]; then
+        ops_queue_load
+        if printf '%s\n' "$OPS_Q_JSON" | jq -e 'any(.requests[];.priority==1)' >/dev/null; then
+            queue_paused=false
+            if [ -e "$OPS_AUTOMATION" ] || [ -L "$OPS_AUTOMATION" ]; then
+                ops_file_safe "$OPS_AUTOMATION" 4096 || ops_error AUTOMATION_STATE_INVALID
+                queue_paused="$(jq -er 'select((.paused|type)=="boolean")|.paused|tostring' "$OPS_AUTOMATION")" || ops_error AUTOMATION_STATE_INVALID
+            fi
+            # Paused, unclaimed automation cannot reserve a writer forever.
+            # Running stages and their resource/domain fences remain protected.
+            if [ "$queue_paused" != true ] || printf '%s\n' "$OPS_Q_JSON" | jq -e 'any(.requests[];.priority==1 and .state=="running")' >/dev/null; then
+                ops_error OPERATION_BUSY
+            fi
+        fi
+    fi
     if [ "$source" != USER ] && [ "$action" != system:platform-preflight ] && [ -e "$OPS_AUTOMATION" ]; then
         ops_file_safe "$OPS_AUTOMATION" 4096 || ops_error AUTOMATION_STATE_INVALID
         jq -e '.paused==false' "$OPS_AUTOMATION" >/dev/null 2>&1 || ops_error AUTOMATION_PAUSED
@@ -713,13 +784,14 @@ ops_begin()
     mkdir "$dir" || ops_error STATE_UNAVAILABLE 1
     ops_launch_test_point directory
     record="$(jq -nc --arg id "$id" --arg token "$nonce" --arg launch "$launch" --argjson owner "$owner" '{schemaVersion:2,operationId:$id,token:$token,launchNonce:$launch,owner:$owner}')" || ops_error STATE_UNAVAILABLE 1
-    state="$(jq -nc --arg id "$id" --arg action "$action" --arg source "$source" --arg scope "$scope" --arg bundle "$bundle" --arg now "$(ops_now)" --arg mono "$(ops_monotonic)" --arg mode "$cancelability" --arg platformSha "$OPS_PREFLIGHT_EXPECTED_SHA" --argjson serviceStop "$OPS_PREFLIGHT_SERVICE_STOP" \
+    state="$(jq -nc --arg id "$id" --arg action "$action" --arg source "$source" --arg scope "$scope" --arg bundle "$bundle" --arg now "$(ops_now)" --arg mono "$(ops_monotonic)" --arg mode "$cancelability" --arg platformSha "$OPS_PREFLIGHT_EXPECTED_SHA" --argjson serviceStop "$OPS_PREFLIGHT_SERVICE_STOP" --argjson queueStep "$OPS_QUEUE_BEGIN" \
       '{schemaVersion:2,kind:"background",operationId:$id,operation:$action,type:$action,source:$source,scope:$scope,bundleId:$bundle,
         state:"starting",phase:"starting",running:true,revision:1,resourceLocks:["global"],cancelRequested:false,cancelability:$mode,initialCancelability:$mode,acknowledged:false,
         startedAt:$now,updatedAt:$now,startedMonotonic:$mono,finishedAt:null,errorCode:null} +
        (if $platformSha=="" then {} else {platformPreflight:{schemaVersion:1,contract:"broray-platform-preflight/1",
          expectedPlatformManifestSha256:$platformSha,phase:"PREPARED",mutationStarted:false}} end) +
-       (if $serviceStop==null then {} else {serviceStop:$serviceStop} end)' )" || ops_error STATE_UNAVAILABLE 1
+       (if $serviceStop==null then {} else {serviceStop:$serviceStop} end) +
+       (if $queueStep==null then {} else {queueStep:$queueStep} end)' )" || ops_error STATE_UNAVAILABLE 1
     ops_write "$dir/owner.json" "$record" || ops_error STATE_UNAVAILABLE 1
     ops_launch_test_point owner
     ops_write "$dir/state.json" "$state" || ops_error STATE_UNAVAILABLE 1
@@ -782,7 +854,7 @@ ops_ack()
 {
     ops_authorize "$1" "$2"; ops_owner_authorize "$3"
     ops_platform_finish_ready || ops_error DOMAIN_OPERATION_BUSY
-    ops_global_matches || ops_error OWNER_CHANGED
+    ops_resources_match || ops_error OWNER_CHANGED
     if jq -e '.acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null; then
         printf '%s\n' '{"ok":true,"acknowledged":true}'; return 0
     fi
@@ -793,7 +865,8 @@ ops_ack()
         # Settle only this generation, without signalling or admitting work.
         ops_children_absent || ops_error CHILDREN_UNCONFIRMED
         ops_publication_ready || ops_error PUBLICATION_UNCONFIRMED 75
-        ops_state_transition aborted finished CANCELLED && ops_retire_global || ops_error STATE_UNAVAILABLE 1
+        if ops_is_queue_step; then ops_queue_step_finish aborted CANCELLED >/dev/null
+        else ops_state_transition aborted finished CANCELLED && ops_retire_global || ops_error STATE_UNAVAILABLE 1; fi
         ops_error CANCELLED
     fi
     ops_state_transition running working || ops_error STATE_UNAVAILABLE 1
@@ -878,7 +951,7 @@ ops_stop_background()
     local file id dir results result rc count
     ops_write "$OPS_AUTOMATION" "$(jq -nc --arg now "$(ops_now)" '{schemaVersion:1,paused:true,updatedAt:$now}')" || ops_error STATE_UNAVAILABLE 1
     results='[]'; count=0
-    for file in "$OPS_ROOT"/*/state.json; do
+    for file in "$OPS_ROOT"/*/state.json "$OPS_RAM/steps"/*/state.json; do
         [ -e "$file" ] || [ -L "$file" ] || continue
         count=$((count+1)); [ "$count" -le 128 ] || ops_error HISTORY_LIMIT 1
         ops_file_safe "$file" || ops_error STATE_UNAVAILABLE 1
@@ -940,9 +1013,15 @@ ops_emergency_recover()
 
 ops_status()
 {
-    local file dir id owner status rows errors count item paused fence cancelled
+    local file dir id owner status rows errors count item paused fence cancelled history queue pointer
     rows=''; errors='[]'; count=0
-    for file in "$OPS_ROOT"/*/state.json; do
+    for history in "$OPS_ROOT" "$OPS_RAM/steps"; do
+      [ -e "$history" ] || [ -L "$history" ] || continue
+      if ! ops_dir_safe "$history" || { [ "$history" = "$OPS_RAM/steps" ] && ! ops_dir_safe "$OPS_RAM"; }; then
+          errors='["STATE_UNAVAILABLE"]'; continue
+      fi
+      count=0
+      for file in "$history"/*/state.json; do
         [ -e "$file" ] || [ -L "$file" ] || continue
         count=$((count+1)); [ "$count" -le 128 ] || { errors='["HISTORY_LIMIT"]'; break; }
         dir="${file%/state.json}"; id="${dir##*/}"
@@ -976,9 +1055,10 @@ ops_status()
         fi
         rows="$rows$item
 "
+      done
     done
     paused=false
-    if [ -e "$OPS_AUTOMATION" ]; then
+    if [ -e "$OPS_AUTOMATION" ] || [ -L "$OPS_AUTOMATION" ]; then
         ops_file_safe "$OPS_AUTOMATION" 4096 && jq -e '.paused==false' "$OPS_AUTOMATION" >/dev/null 2>&1 || paused=true
     fi
     fence=absent
@@ -993,8 +1073,20 @@ ops_status()
         fi
         [ "$fence" != ambiguous ] || errors='["OWNER_UNCONFIRMED"]'
     fi
-    printf '%s' "$rows" | jq -sc --argjson errors "$errors" --argjson paused "$paused" --arg fence "$fence" --arg now "$(ops_now)" \
-      '. as $rows | {ok:($errors|length==0),complete:($errors|length==0),capturedAt:$now,operations:($rows|sort_by(.startedAt)|reverse),errors:$errors,automationPaused:$paused,globalFence:$fence}'
+    for pointer in "$OPS_RAM/resources/active-observer" "$OPS_RAM/resources/background-prepare"; do
+        [ -e "$pointer" ] || [ -L "$pointer" ] || continue
+        if [ -L "$pointer" ]; then
+            dir="$(readlink "$pointer")"; id="${dir%/fence}"; id="${id##*/}"
+            ops_load "$id" && ops_resources_match && continue
+        fi
+        errors='["OWNER_UNCONFIRMED"]'
+    done
+    queue="$(ops_queue_public "$paused")" || {
+        queue='[]'
+        errors="$(printf '%s\n' "$errors" | jq -c '.+["QUEUE_STATE_INVALID"]|unique')"
+    }
+    printf '%s' "$rows" | jq -sc --argjson errors "$errors" --argjson paused "$paused" --argjson queue "$queue" --arg fence "$fence" --arg now "$(ops_now)" \
+      '. as $rows | {ok:($errors|length==0),complete:($errors|length==0),capturedAt:$now,operations:($rows|sort_by(.startedAt)|reverse),queue:$queue,errors:$errors,automationPaused:$paused,globalFence:$fence}'
 }
 
 for directory in "$OPS_STATE" "$OPS_ROOT"; do
@@ -1004,6 +1096,13 @@ for directory in "$OPS_STATE" "$OPS_ROOT"; do
 done
 verb="${1:-}"; [ "$#" -gt 0 ] && shift
 case "$verb" in
+    queue-submit) [ "$#" = 5 ] || ops_error INVALID_REQUEST 1; ops_queue_submit "$@" ;;
+    queue-lookup) [ "$#" = 1 ] || ops_error INVALID_REQUEST 1; ops_queue_lookup "$@" ;;
+    queue-next) [ "$#" = 0 ] || ops_error INVALID_REQUEST 1; ops_queue_select ;;
+    queue-cancel) [ "$#" = 1 ] || ops_error INVALID_REQUEST 1; ops_queue_cancel "$@" ;;
+    queue-claim) [ "$#" = 3 ] || ops_error INVALID_REQUEST 1; ops_queue_claim "$@" ;;
+    queue-yield) [ "$#" = 5 ] || ops_error INVALID_REQUEST 1; ops_queue_yield "$@" ;;
+    queue-recover) [ "$#" = 0 ] || ops_error INVALID_REQUEST 1; ops_queue_recover ;;
     initialize)
         # Preserve existing policy and current-boot work. A prior-boot
         # cooperative owner cannot survive and follows the normal recovery.
@@ -1017,13 +1116,11 @@ case "$verb" in
     owner-check)
         [ "$#" = 3 ] || ops_error INVALID_REQUEST 1
         ops_authorize "$1" "$2"; ops_owner_authorize "$3"
-        ops_global_matches || ops_error OWNER_CHANGED
+        ops_resources_match || ops_error OWNER_CHANGED
         jq -e '.acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error NOT_ACKNOWLEDGED
         printf '%s\n' '{"ok":true}' ;;
     publish-json)
         [ "$#" = 8 ] || ops_error INVALID_REQUEST 1
-        ops_load "$1" || ops_error STATE_UNAVAILABLE 1
-        ops_platform_is_preflight && ops_error PLATFORM_MUTATION_NOT_IMPLEMENTED
         ops_publish_json "$@" ;;
     updater-stop-supervisor-register) [ "$#" = 4 ] || ops_error INVALID_REQUEST 1; ops_supervisor_register "$@" service ;;
     platform-preflight-stop-target) ops_platform_service_stop_target "$@" ;;
@@ -1060,18 +1157,31 @@ case "$verb" in
     helpers-drain)
         [ "$#" = 2 ] || ops_error INVALID_REQUEST 1
         ops_authorize "$1" "$2"
-        ops_global_matches || ops_error OWNER_CHANGED
+        ops_resources_match || ops_error OWNER_CHANGED
         ops_children_absent || ops_error CHILDREN_UNCONFIRMED
         printf '%s\n' '{"ok":true}' ;;
     finish)
-        [ "$#" = 4 ] || ops_error INVALID_REQUEST 1
+        case "$#" in 4|5) ;; *) ops_error INVALID_REQUEST 1 ;; esac
         ops_load "$1" || ops_error STATE_UNAVAILABLE 1
         [ "$(jq -r '.token' "$OPS_EXECUTOR")" = "$2" ] || ops_error OWNER_CHANGED
+        [ "$#" = 4 ] || ops_owner_authorize "$5"
         ops_publication_ready || ops_error PUBLICATION_UNCONFIRMED 75
         case "$3" in completed|failed|aborted) ;; *) ops_error INVALID_STATE 1 ;; esac
         case "$4" in ''|CANCELLED|OPERATION_FAILED) ;; *) ops_error INVALID_ERROR_CODE 1 ;; esac
         ops_children_absent || ops_error CHILDREN_UNCONFIRMED
         ops_platform_finish_ready || ops_error DOMAIN_OPERATION_BUSY
+        if ops_is_queue_step; then
+            ops_step_binding || ops_error OWNER_CHANGED
+            [ "$OPS_STEP_RESOURCE" != global ] || ops_route_finish_ready || ops_error DOMAIN_OPERATION_BUSY
+            # Bound finish already authorized the exact caller above in this
+            # guarded command. Legacy token-only callers still require their
+            # independent live-owner classification here.
+            if [ "$#" = 4 ] && jq -e '.running==true' "$OPS_CURRENT/state.json" >/dev/null; then
+                broray_ops_classify_owner "$(jq -c .owner "$OPS_EXECUTOR")"
+                [ "$OPS_OWNER_STATUS" = ACTIVE ] || ops_error OWNER_CHANGED
+            fi
+            ops_queue_step_finish "$3" "$4"; exit $?
+        fi
         ops_route_finish_ready || ops_error DOMAIN_OPERATION_BUSY
         if jq -e '.running==false' "$OPS_CURRENT/state.json" >/dev/null; then
             if ops_global_matches; then ops_retire_global || ops_error STATE_UNAVAILABLE 1; fi
@@ -1082,12 +1192,14 @@ case "$verb" in
         ops_state_transition "$3" finished "$4" && ops_retire_global || ops_error STATE_UNAVAILABLE 1
         printf '%s\n' '{"ok":true}' ;;
     tick)
-        [ "$#" = 3 ] || ops_error INVALID_REQUEST 1
+        case "$#" in 3|4) ;; *) ops_error INVALID_REQUEST 1 ;; esac
         ops_authorize "$1" "$2"
+        [ "$#" = 3 ] || ops_owner_authorize "$4"
         ops_publication_ready || ops_error PUBLICATION_UNCONFIRMED 75
         ops_platform_is_preflight && ops_error PLATFORM_MUTATION_NOT_IMPLEMENTED
         case "$3" in working|checking|fetching|parsing|committing|switching|waiting) ;; *) ops_error INVALID_PHASE 1 ;; esac
-        ops_global_matches || ops_error OWNER_CHANGED
+        ops_step_permission tick "$3" || ops_error STEP_PERMISSION_DENIED
+        ops_resources_match || ops_error OWNER_CHANGED
         jq -e '.acknowledged==true' "$OPS_CURRENT/state.json" >/dev/null || ops_error NOT_ACKNOWLEDGED
         # The commit boundary and cancellation request serialize on this guard.
         case "$3" in committing|switching)

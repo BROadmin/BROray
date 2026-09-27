@@ -184,18 +184,25 @@
     }
 
     function renderDns(data) {
-        var severity, requested, effective, max;
+        var severity, requested, effective, max, observed;
         if (!data) {
-            setText("home-routes-dns", "Сводка DNS-over-TLS недоступна.");
+            renderUnavailable("home-dns", "Сводка DNS-over-TLS недоступна.");
+            setText("home-dns-selected", null);
+            setText("home-dns-installed", null);
             return;
         }
         severity = severityOf(data);
         requested = Number(data.selectedCount != null ? data.selectedCount : (data.selectedIds || []).length);
         effective = Number(data.effectiveCount != null ? data.effectiveCount : (data.managed || []).length);
         max = Number(data.maxServers || 8);
-        setText("home-routes-dns", severity === "ok"
-            ? "DNS-over-TLS: " + Number(data.managedPresentCount || 0) + " из " + effective
-            : "DNS-over-TLS: " + requested + " из " + max + " · требуется проверка");
+        observed = data.runningConfigAvailable !== false && data.observationState !== "unknown" &&
+            data.managedPresentCount != null;
+        setStatus("home-dns-status", labelOf(severity), toneOf(severity));
+        setText("home-dns-main", firstReason(data, severity === "ok"
+            ? "DNS-over-TLS настроен в Keenetic."
+            : "Проверьте состояние DNS-over-TLS."));
+        setText("home-dns-selected", requested + " из " + max);
+        setText("home-dns-installed", observed ? Number(data.managedPresentCount) + " из " + effective : null);
     }
 
     function renderRoutes(data) {

@@ -158,6 +158,53 @@ esac
         up=cycle('working');self.assertEqual(up['status'],'healthy');self.assertEqual(up['consecutiveFailures'],0)
         self.assertEqual((self.app/'config/active-server').read_text(),self.server+'\n');self.assert_drained()
 
+    def test_due_quality_never_precedes_failed_active_health(self):
+        self.set_config(enabled=True,failureThreshold=3,qualityRefreshEnabled=True)
+        (self.app/'config/active-server').write_text(self.server+'\n')
+        self.active_runtime_fixture()
+        before=self.old_quality()
+        self.shell(self.once(),timeout=150)
+        state=self.auto_state()
+        self.assertEqual(state['status'],'waiting-threshold')
+        self.assertEqual(state['consecutiveFailures'],1)
+        self.assertEqual(self.quality.read_bytes(),before,
+          'An overdue quality scan ran before the failed active connection was handled')
+        self.assertEqual(len(self.states()),1);self.assert_drained()
+
+    def test_active_failure_interrupts_quality_before_next_server(self):
+        self.set_config(enabled=True,failureThreshold=3,qualityRefreshEnabled=True)
+        self.shell('. "$BRORAY_ROOT/lib/server-import.sh"; broray_server_import_dispatch "$(cat "$TEST_PAYLOAD")" subscription second 0')
+        (self.app/'config/active-server').write_text(self.server+'\n')
+        self.active_runtime_fixture();self.env['TEST_ACTIVE_MODE']='working'
+        self.env['TEST_QUALITY_FINISHED']=str(self.temp/'quality-finished')
+        curl=self.app/'bin/curl';original=curl.read_text()
+        curl.write_text('''#!/bin/ash
+case "$*" in
+  *'--proxy socks5h://127.0.0.1:2080'*)
+    if [ -e "$TEST_QUALITY_FINISHED" ] && [ "${TEST_HEALTH_RECOVERED:-no}" != yes ]; then
+      export TEST_ACTIVE_MODE=timeout
+    fi ;;
+  *https://*) touch "$TEST_QUALITY_FINISHED" ;;
+esac
+'''+original.removeprefix('#!/bin/ash\n'))
+        self.shell(self.once(),timeout=180)
+        state=self.auto_state();quality=state['qualityRefresh']
+        self.assertEqual(state['status'],'waiting-threshold')
+        self.assertEqual(state['consecutiveFailures'],1)
+        self.assertEqual(quality['checkedCount'],1,'A second quality probe delayed active VPN recovery')
+        self.assertEqual(quality['totalCount'],2)
+        self.assertEqual(quality['status'],'paused')
+        self.assertIsNone(quality['lastCompletedAt'],'An interrupted batch is not complete')
+        self.assert_drained()
+        self.env['TEST_HEALTH_RECOVERED']='yes'
+        self.shell(self.once(),timeout=180)
+        state=self.auto_state();quality=state['qualityRefresh']
+        self.assertEqual(state['status'],'healthy')
+        self.assertEqual(state['consecutiveFailures'],0)
+        self.assertEqual(quality['status'],'success')
+        self.assertEqual(quality['checkedCount'],2);self.assertEqual(quality['totalCount'],2)
+        self.assert_drained()
+
     def test_active_recovery_during_candidate_probe_prevents_switch(self):
         self.set_config(enabled=True,failureThreshold=1)
         self.shell('. "$BRORAY_ROOT/lib/server-import.sh"; broray_server_import_dispatch "$(cat "$TEST_PAYLOAD")" subscription second 0')

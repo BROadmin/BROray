@@ -33,6 +33,18 @@ scheduler_cycle()
     return "$subscription_rc"
 }
 
+scheduler_queue_cycle()
+{
+    local scheduler_queue_rc=0
+    # Reconcile only proved absent finite owners; protected domain recovery
+    # retains its existing fence. Admission and dispatch never wait for jobs.
+    broray_ops_call queue-recover >/dev/null || return $?
+    broray_subscription_enqueue_due >/dev/null || scheduler_queue_rc=$?
+    [ "$scheduler_queue_rc" != 77 ] || return 77
+    broray_job_dispatch_step continue || return $?
+    return "$scheduler_queue_rc"
+}
+
 case "${1:-}" in
     --dot-job)
         job_rc=0
@@ -70,10 +82,13 @@ trap 'exit 143' TERM
 
 while :; do
     broray_service_stop_requested && break
-    if ! scheduler_cycle >>"$LOG_FILE" 2>&1; then
+    scheduler_loop_rc=0
+    scheduler_queue_cycle >>"$LOG_FILE" 2>&1 || scheduler_loop_rc=$?
+    case "$scheduler_loop_rc" in 0|77) ;; *)
         printf '%s scheduler cycle failed\n' \
             "$(broray_subscription_now_iso)" >>"$LOG_FILE"
-    fi
+        ;;
+    esac
     broray_service_sleep "$INTERVAL_SECONDS" || break
 done
 exit 0

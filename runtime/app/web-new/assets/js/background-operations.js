@@ -23,11 +23,14 @@
     }
     function render(data, stale) {
         var active = data && Array.isArray(data.operations) ? data.operations.filter(function (op) { return op.running !== false; }) : [];
+        var queue = data && Array.isArray(data.queue) ? data.queue : [];
+        var waiting = queue.filter(function (item) { return item.state === "queued"; });
+        var queuedRows = waiting.concat(queue.filter(function (item) { return ["completed","cancelled","failed"].includes(item.state); }).slice(-20));
         var unknown = stale || !data || data.complete !== true || data.globalFence === "ambiguous";
-        badge("bg-badge", unknown ? "Нужно проверить состояние" : active.length ? "Выполняется: " + active.length : "Нет операций", unknown ? "warning" : active.length ? "loading" : "success");
-        text("bg-summary", unknown ? (snapshot ? "Не удалось обновить состояние. Ниже — последние полученные данные; они могут быть устаревшими." : "Не удалось получить состояние операций.") : active.length ? "Текущие фоновые задачи BROray." : "Активных фоновых операций нет.");
+        badge("bg-badge", unknown ? "Нужно проверить состояние" : active.length ? "Выполняется: " + active.length : waiting.length ? "В очереди: " + waiting.length : "Нет операций", unknown ? "warning" : active.length || waiting.length ? "loading" : "success");
+        text("bg-summary", unknown ? (snapshot ? "Не удалось обновить состояние. Ниже — последние полученные данные; они могут быть устаревшими." : "Не удалось получить состояние операций.") : active.length || waiting.length ? "Текущие задания BROray. В очереди: " + waiting.length + "." : "Активных фоновых операций нет.");
         byId("bg-recover").hidden = !unknown && !active.some(function (op) { return op.ownerStatus !== "ACTIVE"; });
-        var nextFingerprint = JSON.stringify([active,unknown,busy]);
+        var nextFingerprint = JSON.stringify([active,queuedRows,unknown,busy]);
         if (nextFingerprint !== fingerprint) {
             var focused = document.activeElement && document.activeElement.dataset.operation;
             byId("bg-list").replaceChildren();
@@ -41,6 +44,24 @@
                     button.type="button"; button.dataset.operation=op.operationId; button.disabled=busy || unknown || op.cancelRequested;
                     button.addEventListener("click",function () { mutate("cancel",{operationId:op.operationId}); }); actions.append(button); row.append(actions);
                 } else row.appendChild(node("p",op.type === "route_operation" ? "Остановка операций с маршрутами недоступна. Дождитесь завершения операции." : "Выполняется защищённый этап. Остановка недоступна до его завершения.","section-note"));
+                byId("bg-list").appendChild(row);
+            });
+            queuedRows.forEach(function (item) {
+                var row=node("article",undefined,"bg-operation"), facts=node("dl",undefined,"bg-facts");
+                var label=item.state === "completed" ? "Завершено" : item.state === "cancelled" ? "Отменено" : item.state === "failed" ? "Ошибка" :
+                    item.reason === "automation_paused" ? "На паузе" : item.reason === "active_connection" ? "Отложено ради активного подключения" : "В очереди";
+                row.appendChild(node("strong",types[item.type] || "Задание BROray"));
+                [["Состояние",label],["Источник",sources[item.source] || "Неизвестен"],
+                 ["Приоритет",["Активное подключение","Переключение сервера","Ручное задание","Проверка серверов","Обновление подписок","Проверка DoT"][item.priority] || "Неизвестен"]].forEach(function (fact) {
+                    var div=node("div");div.append(node("dt",fact[0]),node("dd",fact[1]));facts.append(div);
+                });
+                row.appendChild(facts);
+                if (item.state === "queued" && /^q-[0-9a-f]{32}$/.test(item.requestId)) {
+                    var button=node("button","Отменить задание","button button-secondary");
+                    button.type="button";button.dataset.operation=item.requestId;button.disabled=busy || unknown;
+                    button.addEventListener("click",function () { mutate("cancel",{requestId:item.requestId}); });
+                    row.appendChild(button);
+                }
                 byId("bg-list").appendChild(row);
             });
             if (focused) { var restored=Array.from(byId("bg-list").querySelectorAll("button")).find(function (el) { return el.dataset.operation===focused; }); if (restored) restored.focus({preventScroll:true}); }
@@ -80,7 +101,7 @@
                 }
             }
             var message="Настройка автоматики сохранена.";
-            if (endpoint === "cancel") message=data.alreadyFinished ? "Операция уже завершена." : "Остановка запрошена. Ожидаем завершения текущего шага.";
+            if (endpoint === "cancel") message=data.state === "cancelled" ? "Задание отменено." : data.alreadyFinished ? "Операция уже завершена." : "Остановка запрошена. Ожидаем завершения текущего шага.";
             if (endpoint === "stop-background") message="Новые автоматические задачи поставлены на паузу. Для доступных операций запрошена остановка; операции с маршрутами и защищённые этапы продолжаются.";
             if (endpoint === "recover") message="Проверка завершена. Подтверждённые остаточные блокировки обработаны. Автоматика остаётся на паузе.";
             text("bg-feedback",message);
