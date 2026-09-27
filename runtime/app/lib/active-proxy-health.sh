@@ -75,7 +75,7 @@ broray_active_proxy_cached() {
 # history are not copied back from this worker's earlier cache snapshot.
 broray_auto_health_step()
 {
-    local request directory active context settings config_hash enabled threshold previous count status reason payload health_rc nonce response
+    local request directory active context settings config_hash enabled threshold previous count status reason payload health_rc nonce response pending_rc
     request="$1"
     . "${BRORAY_OPS_CODE_ROOT:-${BRORAY_ROOT:-/opt/broray}}/lib/server-service.sh" || return 74
     broray_job_require_owner || return $?
@@ -93,6 +93,15 @@ broray_auto_health_step()
     if [ -e "$BRORAY_BASE/run/server-auto-switch-state.json" ]; then
         [ ! -L "$BRORAY_BASE/run/server-auto-switch-state.json" ] || return 74
         previous="$(jq -ce 'select(type=="object")' "$BRORAY_BASE/run/server-auto-switch-state.json")" || return 74
+    fi
+    # Admission can precede P1's fresh publication. Recheck after claim so a
+    # periodic observation cannot postpone its already-prepared failover using
+    # an obsolete admission snapshot. Manual requests always take a new sample.
+    # Coalescing publishes no sample and never advances the failure counter.
+    if [ "$enabled" = true ] && [ "$(jq -er .source "$directory/state.json")" = AUTO_SWITCH ]; then
+        pending_rc=0
+        broray_auto_failover_pending "$previous" "$active" "$context" "$config_hash" "$(date '+%s')" || pending_rc=$?
+        case "$pending_rc" in 0) return 0 ;; 1) ;; *) return "$pending_rc" ;; esac
     fi
     health_rc=0
     broray_active_proxy_measure "$active" || health_rc=$?
@@ -231,6 +240,12 @@ broray_auto_enqueue_due()
     [ -f "$settings" ] && [ ! -L "$settings" ] &&
       jq -e 'type=="object"' "$settings" >/dev/null || return 74
     config_hash="$(sha256sum "$settings" | cut -d ' ' -f 1)" || return 74
+    active="$(cat "$BRORAY_ACTIVE_SERVER_FILE" 2>/dev/null)" || active=''
+    context=''
+    [ -z "$active" ] || context="$(broray_active_proxy_context "$active" 2>/dev/null)" || context=''
+    # Runtime identity collection can overlap a P1 publication. Decide from
+    # the latest completed state after that work; the worker rechecks any
+    # publication that races the subsequent admission itself.
     state='{}'
     if [ -e "$cache" ] || [ -L "$cache" ]; then
         [ -f "$cache" ] && [ ! -L "$cache" ] || return 74
@@ -238,10 +253,9 @@ broray_auto_enqueue_due()
     fi
     now="$(date '+%s')" || return 74
     health=null; quality=null
-    active="$(cat "$BRORAY_ACTIVE_SERVER_FILE" 2>/dev/null)" || active=''
     # A stopped or unconfirmed persistent Xray creates no failover request.
     # Isolated quality checks remain independent of manual VPN-off.
-    if [ -n "$active" ] && context="$(broray_active_proxy_context "$active" 2>/dev/null)"; then
+    if [ -n "$active" ] && [ -n "$context" ]; then
         if ! printf '%s\n' "$state" | jq -e --arg active "$active" --arg context "$context" \
           --arg hash "$config_hash" --argjson now "$now" '
             .autoConfigSha256==$hash and .activeHealth.serverId==$active and

@@ -1,6 +1,7 @@
 """Automatic request producer: real queue, real process identity, fixture transport."""
 import ctypes
 import json
+import subprocess
 import unittest
 from pathlib import Path
 import test_auto_switch_queue as automatic
@@ -206,6 +207,65 @@ broray_auto_enqueue_due continue
         value['activeHealth']=dict(value['activeHealth'],status='healthy',checkedEpoch=now-16)
         cache.write_text(json.dumps(value))
         self.assertEqual(self.produce()['health']['priority'],0)
+
+    def prepared_after_due_snapshot(self):
+        cache,value,request=self.pending_failover()
+        now=value['activeHealth']['checkedEpoch']+140
+        (self.app/'tmp/producer-now').write_text(str(now))
+        prepared=json.loads(json.dumps(value))
+        prepared['failover'].update(status='prepared',
+            activeHealth=dict(value['activeHealth'],checkedEpoch=now-1))
+        return cache,value,request,prepared
+
+    def test_preparation_published_during_context_read_prevents_redundant_admission(self):
+        cache,value,request,prepared=self.prepared_after_due_snapshot()
+        (self.app/'tmp/published-preparation.json').write_text(json.dumps(prepared))
+        # Deterministic interleaving: the producer has read the older state;
+        # P1 publishes its fresh sample while the runtime identity is read.
+        result=self.shell('''. "$BRORAY_ROOT/lib/server-service.sh"
+. "$BRORAY_ROOT/lib/active-proxy-health.sh"
+fixture_context="$(broray_active_proxy_context "$TEST_ACTIVE_ID")" || exit $?
+[ "${#fixture_context}" = 64 ] || exit 93
+broray_active_proxy_context() {
+    cp "$BRORAY_ROOT/tmp/published-preparation.json" "$BRORAY_ROOT/run/server-auto-switch-state.json"
+    printf '%s\\n' "$fixture_context"
+}
+broray_auto_enqueue_due
+''')
+        self.assertIsNone(json.loads(result.stdout)['health'])
+        self.assertEqual([r['requestId'] for r in self.rows()],[request['requestId']])
+
+    def run_published_preparation_check(self, source):
+        cache,value,request,prepared=self.prepared_after_due_snapshot()
+        context=value['activeHealth']['context']
+        check=json.loads(self.shell('. "$BRORAY_ROOT/lib/operation-client.sh"; '
+            'broray_ops_queue_submit servers:active-health "'+self.server+'" '+source+' "'+context+'" "'+'d'*32+'"').stdout)
+        # The observation was admitted while the old sample was expired.
+        # Before its worker starts P1 publishes a fresh, bound failed sample.
+        cache.write_text(json.dumps(prepared))
+        before=cache.read_bytes()
+        curl=self.app/'bin/curl';original=curl.read_text()
+        curl.write_text('#!/bin/ash\necho check >>"$BRORAY_ROOT/tmp/active-probe-calls"\n'+
+                        original.removeprefix('#!/bin/ash\n'))
+        worker=subprocess.Popen(['/bin/ash',str(self.app/'lib/operation-worker.sh'),
+            '--request',check['requestId']],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        out,err=self.collect(worker,60)
+        self.assertEqual(worker.returncode,0,(out,err))
+        receipt=json.loads(self.shell('. "$BRORAY_ROOT/lib/operation-client.sh"; '
+            'broray_ops_queue_lookup "'+'d'*32+'"').stdout)
+        self.assertEqual(receipt['state'],'completed')
+        return cache,before
+
+    def test_admitted_automatic_check_coalesces_fresh_preparation_before_probe(self):
+        cache,before=self.run_published_preparation_check('AUTO_SWITCH')
+        self.assertFalse((self.app/'tmp/active-probe-calls').exists(),
+                         'A newly published failed P1 sample must coalesce the redundant periodic probe')
+        self.assertEqual(cache.read_bytes(),before,'Coalescing must not fabricate a sample or increment failures')
+
+    def test_manual_check_is_not_coalesced_by_fresh_preparation(self):
+        cache,before=self.run_published_preparation_check('USER')
+        self.assertTrue((self.app/'tmp/active-probe-calls').exists())
+        self.assertNotEqual(cache.read_bytes(),before)
 
 
 if __name__=='__main__':
