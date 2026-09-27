@@ -33,9 +33,26 @@ a WebUI-specific pin or infer its address from the lighttpd configuration.
 Hints are always revalidated. An expired automatic hint may fall back only to a
 single remaining admitted address. With multiple candidates and no valid choice,
 LAN_SELECTION_REQUIRED is retained: no arbitrary first IP or wildcard listener.
-Clean installation with multiple segments and no selected transport address still
-requires explicit configuration; an automatic first-install network wizard is NOT
-implemented. This limitation is separate from the reported previously-working case.
+Clean installation with multiple segments uses the explicit `install` selection
+mode. It lists admitted IPv4 addresses and Keenetic interface names, accepts a
+number through the controlling `/dev/tty`, and offers 0 to cancel. It never reads
+the installation script's stdin. Empty or invalid input does not select a default.
+The selected address is revalidated against fresh configured/live snapshots before
+it is returned. With no controlling terminal, installation explains the supported
+`BRORAY_LAN_IP_OVERRIDE` setting and stops before the clean bootstrap's mutation
+boundary. Ordinary transport/WebUI service discovery never opens a dialog.
+
+Existing `configure_local_address` persists the choice in `settings.listenAddress`;
+initial SOCKS and WebUI use that setting. Update/reinstall preservation is unchanged.
+The separate WebUI-only pin continues to take precedence for WebUI when configured.
+
+The clean bootstrap has an earlier pre-mutation check outside the application
+archive. `scripts/prepare-clean-lan-selection.py` integrates selection into that
+exact verified postinst block and exports the selected address for later setup.
+Use it before generating the IPK/bootstrap hashes and signatures. An application
+archive alone does not update a previously published immutable installer. The tool
+requires the input SHA-256, refuses unknown/already-modified boundaries, writes a
+new output file only and does not install, sign or publish anything.
 
 ## Lifecycle and preservation
 No changes to settings.listenAddress, Xray config, server data or ProxyN are made by
@@ -56,4 +73,16 @@ exact stage10 output. No runtime deployment, installation, reboot or complete up
 is performed in this package. Tests use synthetic ndmc/ip/daemon/HTTP fixtures.
 Physical multiple-private restart, real lighttpd, native authentication/KeenDNS,
 updater/reinstall retention, IP renumbering and role changes need candidate acceptance.
-UI-TOAST-01 is the next separate stage; no notification code is changed here.
+UI-TOAST-01 was the next separate historic stage; no notification code changed there.
+
+## LAN-INSTALL-01 continuation (2026-09-27)
+
+The first-install gap above is now addressed in working source. Evidence resides
+in `artifacts/BROray-3.2.0-lan-selection-20260927` in the enclosing project.
+Tests cover actual ash/PTY selection, clean postinst pre-mutation integration,
+cancel/EOF/headless installation, explicit invalid addresses, changed interface
+roles during selection and preservation of existing multi-LAN behavior.
+On KN-2710, the exact new network library was exercised only in an isolated RAM
+fixture using actual Entware utilities and an SSH terminal. Its `sort -o` behavior
+required plain input/output redirection; that regression is retained. No clean
+installation or live LAN configuration change was performed in this stage.

@@ -246,7 +246,7 @@ configure_local_address()
         BRORAY_ROOT="$BRORAY_SETUP_TARGET" \
         BRORAY_NETWORK_ROOT="$BRORAY_SETUP_TARGET" \
         BRORAY_NETWORK_LIBRARY="$network_library" \
-            "$BRORAY_SETUP_ASH" -c '. "$BRORAY_NETWORK_LIBRARY"; broray_save_lan_ip'
+            "$BRORAY_SETUP_ASH" -c '. "$BRORAY_NETWORK_LIBRARY"; broray_save_lan_ip install'
     )" || fail "Не удалось определить LAN-IP"
     jq -e 'type == "object"' "$settings_file" >/dev/null 2>&1 ||
         fail "Некорректный файл настроек $settings_file"
