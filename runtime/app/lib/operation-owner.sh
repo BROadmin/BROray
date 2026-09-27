@@ -91,13 +91,16 @@ broray_ops_classify_owner()
 
 # File identity uses the same BusyBox terse fields as protected platform checks.
 broray_ops_file_stat()
-(
+{
     # Entware may omit standalone stat and BusyBox FEATURE_STAT_FORMAT.
     # An installed stat's failure remains authoritative; never mask it.
     if command -v stat >/dev/null 2>&1; then
         stat "$@"
-        exit $?
+        return $?
     fi
+    # Keep fallback scratch variables/options isolated, without spawning an
+    # extra shell for every metadata read on systems with standalone stat.
+(
     follow=''
     if [ "${1:-}" = -L ]; then follow=-L; shift; fi
     [ "$#" -ge 3 ] && [ "$1" = -c ] || exit 75
@@ -132,3 +135,4 @@ broray_ops_file_stat()
         esac
     done
 )
+}

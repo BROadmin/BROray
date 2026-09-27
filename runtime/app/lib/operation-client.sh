@@ -530,7 +530,13 @@ broray_ops_preflight_stop_service()
 # Read-only metadata helper for finite queue workers. Keep the implementation
 # in the existing owner module, which is already in authenticated recovery code.
 broray_ops_stat()
+{
+    if command -v stat >/dev/null 2>&1; then
+        stat "$@"
+        return $?
+    fi
 (
     . "${BRORAY_OPS_CODE_ROOT:-${BRORAY_ROOT:-/opt/broray}}/lib/operation-owner.sh" || exit 74
     broray_ops_file_stat "$@"
 )
+}

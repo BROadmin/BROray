@@ -55,6 +55,27 @@ class QueueIntegrity(unittest.TestCase):
             '. "$1"; '+name+' -c "$2" "$3"', 'metadata-test', str(lib), fmt, str(file)],
             env=self.env, capture_output=True, text=True, timeout=10)
 
+    def test_available_stat_does_not_add_intermediate_shell_processes(self):
+        # Native guard observes every fork: metadata wrappers must not add a
+        # shell around an already available command. This detects process
+        # amplification directly, without a timing threshold or sleep.
+        for client in (False, True):
+            lib = core.APP/'lib'/('operation-client.sh' if client else 'operation-owner.sh')
+            name = 'broray_ops_stat' if client else 'broray_ops_file_stat'
+            script = '''. "$1"
+IFS=' ' read -r caller rest </proc/self/stat
+stat() {
+    IFS=' ' read -r actual rest </proc/self/stat
+    [ "$actual" = "$caller" ] || { printf 'EXTRA_METADATA_SHELL %s %s\\n' "$caller" "$actual" >&2; return 97; }
+    printf '640\\n'
+}
+'''+name+' -c %a /unused\n'
+            with self.subTest(client=client):
+                result = subprocess.run([str(core.BB), 'ash', '-c', script, 'stat-process-test', str(lib)],
+                    env=self.env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, '640\n')
+
     def test_busybox_metadata_formats_preserve_mode_uid_links_and_size(self):
         self.without_stat()
         file = self.temp/'file with spaces'
