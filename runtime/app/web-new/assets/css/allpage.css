@@ -2307,6 +2307,7 @@ pre {
 
     .workspace-header-actions {
         gap: 8px;
+        flex-shrink: 0;
     }
 
     .theme-control-text {

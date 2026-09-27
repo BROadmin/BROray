@@ -822,9 +822,10 @@ ops_begin()
 
 ops_prune()
 {
-    local file dir id count owner evidence
-    count=0
-    # Keep the latest twenty terminal records. Never remove a live/ambiguous
+    local file dir id count total size owner evidence
+    count=0; total=0
+    # Keep at most twenty terminal records / 4 MiB of ordinary history.
+    # Protected evidence is exempt. Never remove a live/ambiguous
     # owner, a fence, an unreadable state or a child whose absence is unproven.
     printf '%s\n' "$OPS_ROOT"/*/state.json | sort -r | while IFS= read -r file; do
         [ -e "$file" ] || continue
@@ -837,7 +838,11 @@ ops_prune()
         for evidence in "$dir"/platform-*; do
             [ ! -e "$evidence" ] && [ ! -L "$evidence" ] || continue 2
         done
-        count=$((count+1)); [ "$count" -gt 20 ] || continue
+        size="$(du -sk "$dir" | awk '{print $1}')" || continue
+        case "$size" in ''|*[!0-9]*) continue ;; esac
+        if [ "$count" -lt 20 ] && [ $((total + size)) -le 4096 ]; then
+            count=$((count+1)); total=$((total+size)); continue
+        fi
         dir="${file%/state.json}"; id="${dir##*/}"
         ops_load "$id" || continue
         ops_global_matches && continue
@@ -1227,6 +1232,16 @@ case "$verb" in
         [ "$#" = 0 ] || ops_error INVALID_REQUEST 1
         paused=true; [ "$verb" != resume ] || paused=false
         ops_write "$OPS_AUTOMATION" "$(jq -nc --argjson paused "$paused" --arg now "$(ops_now)" '{schemaVersion:1,paused:$paused,updatedAt:$now}')" || ops_error STATE_UNAVAILABLE 1
+        printf '%s\n' '{"ok":true}' ;;
+    history-prune)
+        [ "$#" = 0 ] || ops_error INVALID_REQUEST 1
+        ops_prune || ops_error STATE_UNAVAILABLE 1
+        parent="$OPS_APP/routes/locks"
+        if ops_dir_safe "$parent" && [ "$(readlink -f "$parent")" = "$parent" ]; then
+            "$OPS_GUARD" "$parent/resource.control.guard" "${BRORAY_OPS_ASH:-/opt/bin/ash}" \
+              "$OPS_CODE/lib/routes-resource-recover.sh" "$parent/operation.lock" history prune ||
+              ops_error HISTORY_PRESERVED 75
+        fi
         printf '%s\n' '{"ok":true}' ;;
     status) ops_status ;;
     report) [ "$#" = 0 ] || ops_error INVALID_REQUEST 1; ops_report || ops_error REPORT_UNAVAILABLE 1 ;;

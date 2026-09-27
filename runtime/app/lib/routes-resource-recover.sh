@@ -10,9 +10,9 @@ state="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}"
 [ "$lock" = "$OPS_APP/routes/locks/operation.lock" ] || exit 73
 case "$id" in ''|.*|-*|*[!A-Za-z0-9._-]*) exit 73 ;; esac
 [ "${#id}" -le 96 ] || exit 73
-case "$mode" in check|retire) ;; *) exit 64 ;; esac
+case "$mode" in check|retire|prune) ;; *) exit 64 ;; esac
 parent="${lock%/*}"; directory="$state/operations/$id"
-for path in "$parent" "$directory"; do
+for path in "$parent"; do
     [ -d "$path" ] && [ "$(readlink -f "$path")" = "$path" ] || exit 73
 done
 for guard in "$state/operations.guard" "$parent/resource.control.guard"; do
@@ -22,6 +22,13 @@ for guard in "$state/operations.guard" "$parent/resource.control.guard"; do
     done
     [ "$held" = true ] || exit 73
 done
+if [ "$mode" = prune ]; then
+    [ "$id" = history ] || exit 73
+    . "${BRORAY_OPS_CODE_ROOT:-$OPS_APP}/lib/operation-route-recovery.sh"
+    ops_route_history_prune
+    exit $?
+fi
+[ -d "$directory" ] && [ "$(readlink -f "$directory")" = "$directory" ] || exit 73
 OPS_PROC=/proc
 unset BRORAY_OPS_TEST_IDENTITIES
 . "$OPS_APP/lib/operation-owner.sh"

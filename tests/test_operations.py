@@ -371,6 +371,18 @@ class Operations(unittest.TestCase):
             (d/'owner.json').write_text(json.dumps({**owner,'operationId':id}))
         self.begin();self.assertEqual(len(list(root.iterdir())),27)
 
+    def test_history_byte_budget_removes_only_dead_terminal_records(self):
+        a=self.begin();self.call('finish',a['operationId'],a['token'],'completed','')
+        state=json.loads(self.opfile(a,'state.json').read_text());owner=json.loads(self.opfile(a,'owner.json').read_text())
+        root=self.state/'operations';dirs=[]
+        for index in range(3):
+            id=f'op-20000101000000-900001-{index:012x}';d=root/id;d.mkdir();dirs.append(d)
+            (d/'state.json').write_text(json.dumps({**state,'operationId':id}))
+            (d/'owner.json').write_text(json.dumps({**owner,'operationId':id}))
+            (d/'stdout').write_bytes(b'x'*2000000)
+        self.set_owner({**self.owner,'startTicks':'999'})
+        self.begin();self.assertEqual([d.exists() for d in dirs],[False,True,True])
+
 if __name__=='__main__':
     if os.name=='nt':raise SystemExit('Atomic publication requires Linux. Use tools/run_linux_tests.py; stage02 contains the earlier Windows-adapter evidence.')
     suite=unittest.defaultTestLoader.loadTestsFromTestCase(Operations)

@@ -18,11 +18,26 @@ broray_xray_github_get() {
         "$BRORAY_XRAY_GITHUB/$1" -o "$2"
 }
 
+broray_xray_source_identity() {
+    local path
+    for path in lib/server-config-generator.sh lib/xray.sh lib/parser-vless.sh; do
+        if [ ! -f "$BRORAY_BASE/$path" ] || [ -L "$BRORAY_BASE/$path" ]; then
+            printf '{}\n'
+            return
+        fi
+    done
+    jq -nc \
+        --arg generator "$(sha256sum "$BRORAY_BASE/lib/server-config-generator.sh" | awk '{print $1}')" \
+        --arg runtime "$(sha256sum "$BRORAY_BASE/lib/xray.sh" | awk '{print $1}')" \
+        --arg parser "$(sha256sum "$BRORAY_BASE/lib/parser-vless.sh" | awk '{print $1}')" \
+        '{"lib/server-config-generator.sh":$generator,"lib/xray.sh":$runtime,"lib/parser-vless.sh":$parser}'
+}
+
 broray_xray_context() {
     local architecture
     case "$(uname -m)" in aarch64|arm64) architecture=arm64 ;; *) architecture=unsupported ;; esac
-    jq -c --arg arch "$architecture" \
-        '{candidateId,releaseId,version,architecture:$arch}' \
+    jq -c --arg arch "$architecture" --argjson source "$(broray_xray_source_identity)" \
+        '{candidateId,releaseId,version,architecture:$arch,sourceSha256:$source}' \
         "$BRORAY_BASE/share/release/manifest.json"
 }
 
@@ -83,8 +98,8 @@ broray_xray_catalog_fetch() {
         page=$((page + 1))
     done
     # Fetch exact installed and last compatible entries even outside the recent window.
-    extra="$(printf '%s' "$records" | jq -r --argjson context "$context" \
-        '[.[]|select(.status=="compatible" and .candidateId==$context.candidateId and .architecture==$context.architecture)]|sort_by(.testedAt)|last|.xrayTag // empty')"
+    extra="$(printf '%s' "$records" | jq -r -L "$BRORAY_BASE/lib" --argjson context "$context" \
+        'include "xray-releases"; [.[]|select(.status=="compatible" and compatibility_context_matches($context))]|sort_by(.testedAt)|last|.xrayTag // empty')"
     jq -c '([.[]|select(.prerelease==false)][:2]+[.[]|select(.prerelease)][:5])|unique_by(.tag_name)' "$work/all.json" >"$work/selected.json" || return 1
     for tag in "v$current" "$extra"; do
         [ -n "$tag" ] || continue

@@ -27,6 +27,13 @@ class ReleaseMetadata(unittest.TestCase):
    with self.subTest(value=value):self.assertEqual(self.request(value),['User-Agent: BROray-Xray/unknown'])
 
 class CandidateCompatibility(unittest.TestCase):
+ def test_candidate_transition_retains_exact_component_evidence(self):
+  records=json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())['records']
+  proof=next(r for r in records if r['candidateId']=='3.2.0-r01c23' and r['xrayTag']=='v26.9.9')['testedSourceSha256']
+  result=self.resolve(candidate='3.2.0-r01c999999',components=proof)
+  self.assertEqual(result['status'],'compatible',result)
+  self.assertEqual(result['testedSourceSha256'],proof)
+  self.assertNotEqual(result['candidateId'],'3.2.0-r01c999999','retain evidence provenance')
  def test_registry_requires_exact_installed_manifest(self):
   with tempfile.TemporaryDirectory(prefix='xray-registry-') as tmp:
    home=Path(tmp);(home/'share').mkdir();(home/'current').mkdir();(home/'lib').mkdir()
@@ -43,18 +50,22 @@ class CandidateCompatibility(unittest.TestCase):
    registry.write_bytes(body);manifest.unlink();self.assertEqual(load(),[])
    manifest.write_text(hashlib.sha256(body).hexdigest()+'  app/share/xray-compatibility.json\n')
    self.assertTrue(load())
- def resolve(self,candidate='3.2.0-r01c19',architecture='arm64',digest='3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c',tag='v26.9.9'):
+ def component_identity(self):
+  return {n:hashlib.sha256((ROOT/'runtime/app'/n).read_bytes()).hexdigest() for n in ['lib/server-config-generator.sh','lib/xray.sh','lib/parser-vless.sh']}
+ def resolve(self,candidate='3.2.0-r01c19',architecture='arm64',digest='3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c',tag='v26.9.9',components='current',records=None):
   registry=json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())
   release=dict(tag_name=tag,assets=[dict(digest='sha256:'+digest)])
   context=dict(candidateId=candidate,architecture=architecture)
-  r=subprocess.run(['jq','-nc','-L',str(ROOT/'runtime/app/lib'),'--argjson','records',json.dumps(registry['records']),'--argjson','context',json.dumps(context),'--argjson','release',json.dumps(release),'include "xray-releases"; $release|compatibility($records;$context)'],capture_output=True,text=True,timeout=5)
+  if components=='current':components=self.component_identity()
+  if components is not None:context['sourceSha256']=components
+  r=subprocess.run(['jq','-nc','-L',str(ROOT/'runtime/app/lib'),'--argjson','records',json.dumps(registry['records'] if records is None else records),'--argjson','context',json.dumps(context),'--argjson','release',json.dumps(release),'include "xray-releases"; $release|compatibility($records;$context)'],capture_output=True,text=True,timeout=5)
   self.assertEqual(r.returncode,0,r.stderr);return json.loads(r.stdout)
  def test_current_candidate_exposes_proven_xray_result(self):
   record=self.resolve();self.assertEqual(record['status'],'compatible',record)
   self.assertEqual(record['candidateId'],'3.2.0-r01c19')
   self.assertIn('CP06-XRAY-CURRENT-PROFILE',record['evidence'])
  def test_other_candidate_architecture_or_archive_remains_untested(self):
-  for changed in [dict(candidate='3.2.0-r01c999999'),dict(architecture='amd64'),dict(digest='0'*64),dict(tag='v26.9.7')]:
+  for changed in [dict(candidate='3.2.0-r01c999999',components=None),dict(architecture='amd64'),dict(digest='0'*64),dict(tag='v26.9.7')]:
    with self.subTest(changed=changed):self.assertEqual(self.resolve(**changed)['status'],'untested')
  def test_priority_candidate_retains_exact_compatibility_scope(self):
   records=json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())['records']
@@ -73,6 +84,72 @@ class CandidateCompatibility(unittest.TestCase):
      self.assertEqual(result['status'],row['status'])
  def test_historical_evidence_remains_available(self):
   self.assertEqual(self.resolve(candidate='3.1.1-r12c01')['status'],'compatible')
+ def test_component_drift_invalidates_even_same_candidate(self):
+  for path in self.component_identity():
+   changed=self.component_identity();changed[path]='0'*64
+   for candidate in ['3.2.0-r01c19','3.2.0-r01c999999']:
+    with self.subTest(path=path,candidate=candidate):self.assertEqual(self.resolve(candidate=candidate,components=changed)['status'],'untested')
+ def test_incomplete_or_invalid_component_proof_is_not_accepted(self):
+  proof=self.component_identity()
+  invalid=[None,{},[],{**proof,'lib/unknown.sh':'a'*64}]
+  for path in proof:
+   invalid += [{k:v for k,v in proof.items() if k!=path},{**proof,path:'z'*64},{**proof,path:None}]
+  for value in invalid:
+   with self.subTest(value=value):self.assertEqual(self.resolve(components=value)['status'],'untested')
+  row=next(r for r in json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())['records'] if r['candidateId']=='3.2.0-r01c19' and r['xrayTag']=='v26.9.9')
+  for value in invalid:
+   with self.subTest(record=value):self.assertEqual(self.resolve(records=[{**row,'testedSourceSha256':value}])['status'],'untested')
+ def test_negative_evidence_and_scope_survive_candidate_transition(self):
+  records=json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())['records']
+  for row in [r for r in records if r['candidateId']=='3.2.0-r01c23']:
+   result=self.resolve(candidate='3.2.0-r01c999999',tag=row['xrayTag'],digest=row['archiveSha256'])
+   self.assertEqual(result['status'],row['status'])
+   self.assertEqual(result.get('configurationGate'),row.get('configurationGate'))
+   self.assertEqual(result['testedAt'],row['testedAt'])
+ def test_legacy_without_hashes_cannot_prove_other_candidate(self):
+  records=[r for r in json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())['records'] if 'testedSourceSha256' not in r]
+  self.assertTrue(records)
+  self.assertEqual(self.resolve(candidate='3.2.0-r01c999999',records=records)['status'],'untested')
+ def test_generator_only_proof_requires_rejection_evidence(self):
+  row=next(r for r in json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())['records'] if r['candidateId']=='3.2.0-r01c23' and r['xrayTag']=='v26.9.8')
+  for update in [dict(status='compatible'),dict(configurationGate={}),dict(configurationGate={**row['configurationGate'],'failed':0}),dict(testedSourceSha256={'lib/server-config-generator.sh':'0'*64})]:
+   result=self.resolve(candidate='3.2.0-r01c999999',tag=row['xrayTag'],digest=row['archiveSha256'],records=[{**row,**update}])
+   self.assertEqual(result['status'],'untested')
+ def test_selected_admission_uses_same_component_evidence_as_catalog(self):
+  with tempfile.TemporaryDirectory(prefix='xray-admission-') as tmp:
+   home=Path(tmp);(home/'lib').mkdir();(home/'share/release').mkdir(parents=True);(home/'current').mkdir();(home/'bin').mkdir()
+   for path in [*self.component_identity(),'lib/xray-releases.jq','share/xray-compatibility.json']:shutil.copyfile(ROOT/'runtime/app'/path,home/path)
+   registry=home/'share/xray-compatibility.json';(home/'current/SHA256SUMS').write_text(hashlib.sha256(registry.read_bytes()).hexdigest()+'  app/share/xray-compatibility.json\n')
+   (home/'share/release/manifest.json').write_text('{"candidateId":"3.2.0-r01c999999","version":"3.2.0"}')
+   uname=home/'bin/uname';uname.write_text('#!/bin/sh\necho aarch64\n');uname.chmod(0o755)
+   digest='3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c'
+   (home/'official.json').write_text(json.dumps(dict(tag_name='v26.9.9',prerelease=False,assets=[dict(digest='sha256:'+digest),{}])))
+   request=home/'request.json';request.write_text(json.dumps(dict(tag='v26.9.9',currentVersion='26.9.9',archiveSha256=digest,allowUntested=False,allowPrerelease=False,allowDowngrade=False)))
+   script='''. "$1"
+broray_xray_version_number() { echo 26.9.9; }
+broray_xray_version_key() { echo 260909; }
+broray_xray_release_resolve() { cp "$BRORAY_BASE/official.json" "$2"; }
+broray_xray_update_error() { echo "$*" >&2; }
+broray_xray_selected_check "$BRORAY_BASE/request.json"
+'''
+   def run():return subprocess.run(['/bin/ash','-c',script,'test',str(ROOT/'runtime/app/lib/xray-releases.sh')],env={**os.environ,'PATH':str(home/'bin')+':/usr/bin:/bin','BRORAY_BASE':str(home),'BRORAY_XRAY_UPDATE_WORK':str(home)},capture_output=True,text=True,timeout=8)
+   result=run();self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(json.loads(result.stdout)['compatibility']['status'],'compatible')
+   path=home/'lib/parser-vless.sh';path.write_bytes(path.read_bytes()+b'\n');result=run()
+   self.assertNotEqual(result.returncode,0,'drift must require fresh untested consent');self.assertIn('Подтвердите',result.stderr)
+ def test_live_context_hashes_actual_files_and_rejects_missing_or_symlink(self):
+  with tempfile.TemporaryDirectory(prefix='xray-context-') as tmp:
+   home=Path(tmp);(home/'share/release').mkdir(parents=True);(home/'lib').mkdir()
+   (home/'share/release/manifest.json').write_text(json.dumps(dict(candidateId='3.2.0-r01c999999',version='3.2.0')))
+   for path in self.component_identity():shutil.copyfile(ROOT/'runtime/app'/path,home/path)
+   def load():
+    r=subprocess.run(['/bin/ash','-c','. "$1"; broray_xray_context','test',str(ROOT/'runtime/app/lib/xray-releases.sh')],env={**os.environ,'BRORAY_BASE':str(home)},capture_output=True,text=True,timeout=5)
+    self.assertEqual(r.returncode,0,r.stderr);return json.loads(r.stdout)['sourceSha256']
+   self.assertEqual(load(),self.component_identity())
+   path=home/'lib/parser-vless.sh';path.write_bytes(path.read_bytes()+b'\n');changed=load()
+   self.assertEqual(changed['lib/parser-vless.sh'],hashlib.sha256(path.read_bytes()).hexdigest())
+   self.assertEqual(self.resolve(components=changed)['status'],'untested')
+   path.unlink();self.assertEqual(load(),{})
+   path.symlink_to(ROOT/'runtime/app/lib/parser-vless.sh');self.assertEqual(load(),{})
  def test_older_cores_expose_proven_configuration_failures(self):
   records=json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())['records']
   expected={'v26.9.8':2,'v26.7.28':2,'v26.7.11':2,'v26.6.27':2,'v26.3.27':4,'v26.2.6':10}

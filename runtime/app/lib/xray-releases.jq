@@ -27,15 +27,40 @@ def valid_record:
     (.testedAt|type=="string" and length>=20 and (split("T")[0]|split("-")|length==3 and all(.[];decimal))) and
     (.evidence|type=="string" and length>0) and
     (.status=="compatible" or .status=="incompatible")) catch false;
+# These are the complete component identities recorded for the tested profiles.
+# Never interpret an arbitrary subset (or an unknown path) as equivalent proof.
+def valid_source_identity:
+  try (type=="object" and
+    keys==["lib/parser-vless.sh","lib/server-config-generator.sh","lib/xray.sh"] and
+    all(.[];sha256)) catch false;
+
+# Existing configuration-rejection evidence has a narrower, explicit scope:
+# the exact generator plus the hashes of the configurations rejected by Xray.
+def valid_generator_rejection:
+  try (.status=="incompatible" and
+    (.testedSourceSha256|type=="object" and keys==["lib/server-config-generator.sh"] and all(.[];sha256)) and
+    (.configurationGate.failed|type=="number" and .>0 and .==floor) and
+    (.configurationGate.evidenceSha256|sha256) and
+    (.configurationGate.rejectedConfigurationSha256|type=="array" and all(.[];sha256)) and
+    (.configurationGate.rejectedConfigurationSha256|length)==.configurationGate.failed) catch false;
+
+def compatibility_context_matches($context):
+  valid_record and .architecture == $context.architecture and
+  (if has("testedSourceSha256") then
+     ($context.sourceSha256|valid_source_identity) and
+     (((.testedSourceSha256|valid_source_identity) and .testedSourceSha256 == $context.sourceSha256) or
+      (valid_generator_rejection and .testedSourceSha256["lib/server-config-generator.sh"] == $context.sourceSha256["lib/server-config-generator.sh"]))
+   else .candidateId == $context.candidateId end);
+
 def compatibility($records; $context):
   . as $release
   | (.assets[0].digest // "" | ltrimstr("sha256:")) as $sha
   | [$records[] | select(valid_record) | select(
-      .candidateId == $context.candidateId and .architecture == $context.architecture and
+      compatibility_context_matches($context) and
       .xrayTag == $release.tag_name and .archiveSha256 == $sha and ($sha | sha256) and
       (.testedAt | type == "string" and length > 0) and (.evidence | type == "string" and length > 0) and
       (.status == "compatible" or .status == "incompatible")
-    )] | sort_by([(.status == "incompatible"), .testedAt]) | last
+    )] | sort_by([(.status == "incompatible"), (.candidateId == $context.candidateId), .testedAt]) | last
   | if . == null then {status:"untested",label:"Не проверялась на совместимость с BROray"}
     else . + {label:(if .status == "compatible" then "Совместима с BROray" else "Несовместима с BROray" end)} end;
 def summarize($current):

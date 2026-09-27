@@ -8,10 +8,10 @@ LOG_DIR="$ROOT/logs"
 STATE_ROOT="${BRORAY_STATE_ROOT:-/opt/var/lib/broray}"
 OPERATION_ROOT="${BRORAY_OPERATION_ROOT:-$STATE_ROOT/operations}"
 OPERATION_POINTER="${BRORAY_OPERATION_POINTER:-$STATE_ROOT/last-operation}"
-ACCESS_MAX_BYTES="${BRORAY_ACCESS_LOG_MAX_BYTES:-5242880}"
-ERROR_MAX_BYTES="${BRORAY_ERROR_LOG_MAX_BYTES:-1048576}"
-RUNTIME_MAX_BYTES="${BRORAY_RUNTIME_LOG_MAX_BYTES:-1048576}"
-KEEP_ROTATIONS="${BRORAY_LOG_ROTATIONS:-3}"
+ACCESS_MAX_BYTES="${BRORAY_ACCESS_LOG_MAX_BYTES:-1048576}"
+ERROR_MAX_BYTES="${BRORAY_ERROR_LOG_MAX_BYTES:-262144}"
+RUNTIME_MAX_BYTES="${BRORAY_RUNTIME_LOG_MAX_BYTES:-262144}"
+KEEP_ROTATIONS="${BRORAY_LOG_ROTATIONS:-2}"
 KEEP_OPERATIONS="${BRORAY_OPERATION_KEEP:-20}"
 
 valid_number()
@@ -29,7 +29,8 @@ rotate_file()
 {
     file="$1"
     max_bytes="$2"
-    [ -f "$file" ] || return 0
+    [ -f "$file" ] && [ ! -L "$file" ] || return 0
+    [ "$(find "$file" -maxdepth 0 -type f -links 1 -print)" = "$file" ] || return 0
     size="$(file_size "$file" 2>/dev/null || printf '0')"
     valid_number "$size" || size=0
     [ "$size" -gt "$max_bytes" ] || return 0
@@ -43,9 +44,18 @@ rotate_file()
             source="$file.$previous.gz"
         fi
         destination="$file.$index.gz"
-        if [ -e "$source" ]; then
+        if [ -f "$source" ] && [ ! -L "$source" ] && [ ! -L "$destination" ]; then
+            [ "$(find "$source" -maxdepth 0 -type f -links 1 -print)" = "$source" ] || return 1
             if [ "$previous" -eq 0 ]; then
-                gzip -c "$source" >"$destination.tmp.$$" || return 1
+                # Keep only the recent diagnostic tail, including the first
+                # pass over an oversized log left by an older installation.
+                [ ! -e "$destination.tmp.$$" ] && [ ! -L "$destination.tmp.$$" ] || return 1
+                [ ! -e "$destination.tail.$$" ] && [ ! -L "$destination.tail.$$" ] || return 1
+                (set -C; tail -c "$max_bytes" "$source" >"$destination.tail.$$") || return 1
+                (set -C; gzip -c "$destination.tail.$$" >"$destination.tmp.$$") || {
+                    rm -f "$destination.tail.$$"; return 1;
+                }
+                rm -f "$destination.tail.$$" || return 1
                 mv -f "$destination.tmp.$$" "$destination" || return 1
             else
                 mv -f "$source" "$destination" || return 1
@@ -57,9 +67,29 @@ rotate_file()
     chmod 600 "$file" 2>/dev/null || true
 }
 
+[ ! -L "$LOG_DIR" ] && [ ! -L "$OPERATION_ROOT" ] || exit 1
 mkdir -p "$LOG_DIR" "$OPERATION_ROOT" || exit 1
-valid_number "$KEEP_ROTATIONS" || KEEP_ROTATIONS=3
+# Serialize concurrent manual/monitor maintenance using the existing native
+# guard. Its lock is released by the kernel; no PID/age-based lock deletion.
+if [ "${1:-}" != --locked ]; then
+    exec "${BRORAY_OPS_GUARD:-$ROOT/bin/broray-ops-guard}" "$LOG_DIR/maintenance.guard" \
+      "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$0" --locked
+fi
+[ "${BRORAY_OPS_GUARD_HELD:-}" = 1 ] || exit 73
+held=false
+for fd in /proc/$$/fd/*; do
+    if [ "$(readlink "$fd" 2>/dev/null)" = "$LOG_DIR/maintenance.guard" ]; then held=true; break; fi
+done
+[ "$held" = true ] || exit 73
+valid_number "$KEEP_ROTATIONS" || KEEP_ROTATIONS=2
 [ "$KEEP_ROTATIONS" -ge 1 ] || KEEP_ROTATIONS=1
+for setting in ACCESS_MAX_BYTES ERROR_MAX_BYTES RUNTIME_MAX_BYTES; do
+    case "$setting" in
+        ACCESS_MAX_BYTES) valid_number "$ACCESS_MAX_BYTES" && [ "$ACCESS_MAX_BYTES" -gt 0 ] || ACCESS_MAX_BYTES=1048576 ;;
+        ERROR_MAX_BYTES) valid_number "$ERROR_MAX_BYTES" && [ "$ERROR_MAX_BYTES" -gt 0 ] || ERROR_MAX_BYTES=262144 ;;
+        RUNTIME_MAX_BYTES) valid_number "$RUNTIME_MAX_BYTES" && [ "$RUNTIME_MAX_BYTES" -gt 0 ] || RUNTIME_MAX_BYTES=262144 ;;
+    esac
+done
 valid_number "$KEEP_OPERATIONS" || KEEP_OPERATIONS=20
 [ "$KEEP_OPERATIONS" -ge 1 ] || KEEP_OPERATIONS=1
 
@@ -71,6 +101,27 @@ rotate_file "$LOG_DIR/subscriptions.log" "$RUNTIME_MAX_BYTES"
 rotate_file "$LOG_DIR/server-auto-switch.log" "$RUNTIME_MAX_BYTES"
 rotate_file "$LOG_DIR/subscription-scheduler.log" "$RUNTIME_MAX_BYTES"
 rotate_file "$LOG_DIR/update-last.log" "$RUNTIME_MAX_BYTES"
+rotate_file "$LOG_DIR/home-snapshots.log" "$RUNTIME_MAX_BYTES"
+rotate_file "$LOG_DIR/home-snapshotd-service.log" "$RUNTIME_MAX_BYTES"
+rotate_file "$LOG_DIR/interface-reconcile.log" "$RUNTIME_MAX_BYTES"
+
+# Remove superseded rotations only for the explicitly maintained log names.
+for name in access error lighttpd-error connection-monitor subscriptions server-auto-switch subscription-scheduler update-last home-snapshots home-snapshotd-service interface-reconcile; do
+    for archive in "$LOG_DIR/$name.log."*.gz; do
+        suffix="${archive##*.log.}"; suffix="${suffix%.gz}"
+        valid_number "$suffix" && [ "${#suffix}" -le 4 ] || continue
+        [ "$suffix" -gt "$KEEP_ROTATIONS" ] || continue
+        [ ! -L "$archive" ] && [ "$(find "$archive" -maxdepth 0 -type f -links 1 -print 2>/dev/null)" = "$archive" ] || continue
+        rm -f "$archive" || exit 1
+    done
+done
+
+# Background and route evidence belongs to the serialized coordinator.
+# Busy or unproven state is retained until a later maintenance pass.
+if [ -f "$ROOT/lib/operation-client.sh" ]; then
+    . "$ROOT/lib/operation-client.sh"
+    broray_ops_call history-prune >/dev/null 2>&1 || true
+fi
 
 current=""
 [ -r "$OPERATION_POINTER" ] && current="$(sed -n '1p' "$OPERATION_POINTER" 2>/dev/null)"

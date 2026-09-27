@@ -128,7 +128,8 @@ broray_api_error(){ jq -nc --arg code "$2" --arg message "$3" '{success:false,er
         latest=ops/'op-999-new';latest.mkdir();(latest/'state.json').write_text('{"running":false,"state":"success"}')
         before={str(p):p.read_bytes() for d in keep for p in d.rglob('*') if p.is_file()}
         r=subprocess.run(['/bin/ash',str(ROOT/'runtime/app/bin/broray-log-maintenance')],env=self.env|{
-            'BRORAY_STATE_ROOT':str(ops.parent),'BRORAY_OPERATION_KEEP':'1'},capture_output=True,timeout=15)
+            'BRORAY_STATE_ROOT':str(ops.parent),'BRORAY_OPERATION_KEEP':'1',
+            'BRORAY_OPS_GUARD':'/work/.local/bin/linux-guard','BRORAY_OPS_ASH':'/bin/ash'},capture_output=True,timeout=15)
         self.assertEqual(r.returncode,0,r.stderr)
         self.assertTrue(all(d.is_dir() for d in keep),'maintenance removed protected or unproven operation evidence')
         self.assertEqual(before,{str(p):p.read_bytes() for d in keep for p in d.rglob('*') if p.is_file()})

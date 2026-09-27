@@ -1,5 +1,106 @@
 #!/opt/bin/ash
 # Existing route repair remains a page action. This retires only dead job state.
+ops_route_history_plain_file()
+{
+    [ -f "$1" ] && [ ! -L "$1" ] &&
+      [ "$(find "$1" -maxdepth 0 -type f -links 1 -print)" = "$1" ]
+}
+
+ops_route_history_entry()
+{
+    local entry file child nested name bundle operation
+    entry="$1"; name="${entry##*/}"
+    case "$name" in ''|*[!a-zA-Z0-9._-]*) return 1 ;; esac
+    [ ! -L "$entry" ] || return 1
+    if [ -d "$entry" ]; then
+        [ "$(readlink -f "$entry")" = "$entry" ] || return 1
+        file="$entry/transaction.json"
+        # These are the snapshots emitted by routes-router-sync.sh. Unknown
+        # entries are evidence, not garbage; preserve the entire directory.
+        for child in "$entry"/* "$entry"/.[!.]* "$entry"/..?*; do
+            [ -e "$child" ] || [ -L "$child" ] || continue
+            case "${child##*/}" in
+                transaction.json|plan.json|running-config-before.json|running-config-after.json)
+                    ops_route_history_plain_file "$child" || return 1 ;;
+                original)
+                    [ -d "$child" ] && [ ! -L "$child" ] || return 1
+                    for nested in "$child"/* "$child"/.[!.]* "$child"/..?*; do
+                        [ -e "$nested" ] || [ -L "$nested" ] || continue
+                        case "${nested##*/}" in routes.json|bundle.json|state.json|export-plan.json|router-export-result.json|result.missing) ;; *) return 1 ;; esac
+                        ops_route_history_plain_file "$nested" || return 1
+                    done ;;
+                *) return 1 ;;
+            esac
+        done
+    else file="$entry"; fi
+    ops_route_history_plain_file "$file" && [ "$(wc -c <"$file")" -le 16384 ] || return 1
+    jq -e 'type=="object" and .schemaVersion==1 and .phase=="committed" and
+      (.operation=="sync" or .operation=="export" or .operation=="delete") and
+      (.bundleId|type)=="string" and (.bundleId|length)>0 and (.bundleId|length)<=63 and
+      (.bundleId|all(explode[]; (.>=97 and .<=122) or (.>=48 and .<=57) or .==45 or .==95)) and
+      (.updatedAt|type)=="string"' "$file" >/dev/null || return 1
+    bundle="$(jq -r .bundleId "$file")"; operation="$(jq -r .operation "$file")"
+    case "$operation:$name" in
+        sync:????????-??????-sync-"$bundle"-*) [ -d "$entry" ] || return 1 ;;
+        export:export-"$bundle"-*.json|delete:delete-"$bundle"-*.json) [ -f "$entry" ] || return 1 ;;
+        *) return 1 ;;
+    esac
+    # The router writer uses %z (+0300); fixtures/UTC writers also use Z.
+    # Validate the complete timestamp and compare UTC seconds across offsets.
+    jq -er '
+      def digits: length>0 and all(explode[]; .>=48 and .<=57);
+      .updatedAt as $t |
+      select(($t|length)==20 and $t[19:]=="Z" or
+        (($t|length)==24 and ($t[19:20]=="+" or $t[19:20]=="-") and
+         ($t[20:24]|digits) and ($t[20:22]|tonumber)<24 and ($t[22:24]|tonumber)<60)) |
+      ($t[0:19]+"Z" | fromdateiso8601) as $base |
+      select(($base|strftime("%Y-%m-%dT%H:%M:%S"))==$t[0:19]) |
+      $base - (if ($t|length)==20 then 0 else
+        (($t[20:22]|tonumber)*3600+($t[22:24]|tonumber)*60) *
+        (if $t[19:20]=="+" then 1 else -1 end) end)' "$file"
+}
+
+ops_route_history_prune()
+{
+    local routes root fence file entry stamp size name count total tab
+    routes="$OPS_APP/routes"; root="$routes/transactions"
+    # Both native guards are verified by routes-resource-recover.sh. Never
+    # infer a stale lock from its age/PID; defer while any owner is published.
+    for fence in "${BRORAY_ROUTES_API_LOCK:-${BRORAY_GLOBAL_LOCK:-/opt/var/lock/broray/global-operation.lock}}" \
+      "${BRORAY_LEGACY_GLOBAL_LOCK:-/tmp/broray-global-operation.lock}" "$routes/locks/operation.lock"; do
+        [ ! -e "$fence" ] && [ ! -L "$fence" ] || return 75
+    done
+    [ -e "$root" ] || { [ ! -L "$root" ]; return $?; }
+    for entry in "$routes" "$root" "$routes/operations"; do
+        [ -d "$entry" ] && [ ! -L "$entry" ] && [ "$(readlink -f "$entry")" = "$entry" ] || return 75
+    done
+    for file in "$routes/operations"/*.json; do
+        [ -e "$file" ] || [ -L "$file" ] || continue
+        ops_route_history_plain_file "$file" && [ "$(wc -c <"$file")" -le 32768 ] &&
+          jq -e 'type=="object" and .running==false and .resumable!=true' "$file" >/dev/null || return 75
+    done
+    # Time sorts already-proven terminal records; it never establishes safety.
+    for entry in "$root"/*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        stamp="$(ops_route_history_entry "$entry" 2>/dev/null)" || continue
+        size="$(du -sk "$entry" | awk '{print $1}')" || return 1
+        case "$size" in ''|*[!0-9]*) return 1 ;; esac
+        printf '%s\t%s\t%s\n' "$stamp" "$size" "${entry##*/}"
+    done | sort -nr | {
+        count=0; total=0; tab="$(printf '\t')"
+        while IFS="$tab" read -r stamp size name; do
+            entry="$root/$name"
+            if [ "$count" -lt 5 ] && [ $((total + size)) -le 4096 ]; then
+                count=$((count + 1)); total=$((total + size)); continue
+            fi
+            # Revalidate before unlink. Partial cleanup remains restartable:
+            # no retained record is needed to authorize a future route write.
+            ops_route_history_entry "$entry" >/dev/null 2>&1 || continue
+            rm -rf "$entry" || return 1
+        done
+    }
+}
+
 ops_route_resource_absent()
 {
     local resource
