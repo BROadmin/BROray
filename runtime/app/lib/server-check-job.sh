@@ -159,7 +159,7 @@ broray_quality_step()
     q_digest="$(jq -r '.queueStep.resultSha256 // empty' "$q_owner/state.json")" || return 74
     if [ -n "$q_digest" ]; then
         [ -f "$q_result" ] && [ ! -L "$q_result" ] &&
-          [ "$(stat -c '%u:%a:%h' "$q_result")" = "$(id -u):600:1" ] &&
+          [ "$(broray_ops_stat -c '%u:%a:%h' "$q_result")" = "$(id -u):600:1" ] &&
           [ "$(sha256sum "$q_result" | cut -d ' ' -f 1)" = "$q_digest" ] || return 76
         q_state="$(jq -ce --arg context "$q_context" '
           def count: type=="number" and .>=0 and floor==.;

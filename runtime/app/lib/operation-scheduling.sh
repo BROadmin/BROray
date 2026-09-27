@@ -27,7 +27,7 @@ ops_queue_private()
 {
     local metadata size identity
     [ -f "$1" ] && [ ! -L "$1" ] || return 1
-    metadata="$(stat -c '%s:%u:%a:%h' "$1" 2>/dev/null)" || return 1
+    metadata="$(broray_ops_file_stat -c '%s:%u:%a:%h' "$1" 2>/dev/null)" || return 1
     size="${metadata%%:*}"; identity="${metadata#*:}"
     case "$size" in ''|*[!0-9]*) return 1 ;; esac
     [ "$size" -le "${2:-524288}" ] && [ "$identity" = "$(id -u):600:1" ]
@@ -45,7 +45,7 @@ ops_queue_load()
         if [ ! -e "$directory" ] && [ ! -L "$directory" ]; then
             [ "$create" != create ] || mkdir -m 700 "$directory" || ops_error QUEUE_STATE_INVALID
         else
-            ops_dir_safe "$directory" && [ "$(stat -c '%u:%a' "$directory" 2>/dev/null)" = "$(id -u):700" ] || ops_error QUEUE_STATE_INVALID
+            ops_dir_safe "$directory" && [ "$(broray_ops_file_stat -c '%u:%a' "$directory" 2>/dev/null)" = "$(id -u):700" ] || ops_error QUEUE_STATE_INVALID
         fi
     done
     if [ ! -e "$OPS_Q_DIR" ] && [ ! -L "$OPS_Q_DIR" ]; then
@@ -65,7 +65,7 @@ ops_queue_load()
         return 0
     fi
     # An existing namespace without its ledger is damaged, never a new queue.
-    ops_dir_safe "$OPS_Q_DIR" && [ "$(stat -c '%u:%a' "$OPS_Q_DIR" 2>/dev/null)" = "$(id -u):700" ] || ops_error QUEUE_STATE_INVALID
+    ops_dir_safe "$OPS_Q_DIR" && [ "$(broray_ops_file_stat -c '%u:%a' "$OPS_Q_DIR" 2>/dev/null)" = "$(id -u):700" ] || ops_error QUEUE_STATE_INVALID
     ops_queue_private "$OPS_Q_FILE" || ops_error QUEUE_STATE_INVALID
     OPS_Q_JSON="$(jq -ce --arg boot "$OPS_Q_BOOT" '
       def hex($n): type=="string" and length==$n and all(explode[];(.>=48 and .<=57) or (.>=97 and .<=102));
@@ -408,10 +408,10 @@ ops_queue_request_tree_safe()
     uid="$(id -u)" || exit 1
     [ -z "$(find "$1" ! -type d ! -type f -print)" ] || exit 1
     find "$1" -type d -print | while IFS= read -r file; do
-        [ "$(stat -c '%u:%a' "$file")" = "$uid:700" ] || exit 1
+        [ "$(broray_ops_file_stat -c '%u:%a' "$file")" = "$uid:700" ] || exit 1
     done || exit 1
     find "$1" -type f -print | while IFS= read -r file; do
-        [ "$(stat -c '%u:%a:%h' "$file")" = "$uid:600:1" ] || exit 1
+        [ "$(broray_ops_file_stat -c '%u:%a:%h' "$file")" = "$uid:600:1" ] || exit 1
     done
 )
 
@@ -583,7 +583,7 @@ ops_queue_claim()
         id="op-q-$launch"; directory="$OPS_RAM/steps/$id"
         for fence in "$OPS_RAM/steps" "$OPS_RAM/resources" "$OPS_RAM/requests" "$OPS_RAM/requests/$request"; do
             if [ ! -e "$fence" ] && [ ! -L "$fence" ]; then mkdir -m 700 "$fence" || ops_error UNSAFE_STATE; fi
-            ops_dir_safe "$fence" && [ "$(stat -c '%u:%a' "$fence")" = "$(id -u):700" ] || ops_error UNSAFE_STATE
+            ops_dir_safe "$fence" && [ "$(broray_ops_file_stat -c '%u:%a' "$fence")" = "$(id -u):700" ] || ops_error UNSAFE_STATE
         done
         # A failed launch remains inspectable and cannot silently be reused.
         [ ! -e "$directory" ] && [ ! -L "$directory" ] || ops_error OPERATION_EXISTS

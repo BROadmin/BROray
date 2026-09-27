@@ -94,13 +94,13 @@ broray_subscription_queue_inventory()
     uid="$(id -u)" || exit 76
     [ -z "$(find . ! -type f ! -type d -print)" ] || exit 76
     find . -type d -print | while IFS= read -r file; do
-        [ "$(stat -c '%u:%a' "$file")" = "$uid:700" ] || exit 76
+        [ "$(broray_ops_stat -c '%u:%a' "$file")" = "$uid:700" ] || exit 76
     done || exit 76
     find . -type f -print | LC_ALL=C sort | {
         total=0; count=0
         while IFS= read -r file; do
             case "$file" in ''|*[!a-zA-Z0-9._/-]*) exit 76 ;; esac
-            metadata="$(stat -c '%u %a %h %s' "$file")" || exit 76
+            metadata="$(broray_ops_stat -c '%u %a %h %s' "$file")" || exit 76
             case "$metadata" in "$uid 600 1 "*) ;; *) exit 76 ;; esac
             size="${metadata##* }"
             case "$size" in ''|*[!0-9]*) exit 76 ;; esac
@@ -134,7 +134,7 @@ broray_subscription_step()
     esac
     sq_directory="${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}/requests/$sq_request"
     [ -d "$sq_directory" ] && [ ! -L "$sq_directory" ] &&
-      [ "$(stat -c '%u:%a' "$sq_directory")" = "$(id -u):700" ] || return 74
+      [ "$(broray_ops_stat -c '%u:%a' "$sq_directory")" = "$(id -u):700" ] || return 74
     sq_prep="$sq_directory/preparation"; sq_result="$sq_directory/result.json"
     sq_digest="$(jq -r '.queueStep.resultSha256 // empty' "$sq_owner/state.json")" || return 74
     if [ "$sq_stage" = fetch ]; then
@@ -152,7 +152,7 @@ broray_subscription_step()
           '{schemaVersion:1,kind:"subscription",requestId:$request,context:$context,startedAt:$now,startedEpoch:$epoch}')"
     else
         [ -n "$sq_digest" ] && [ -f "$sq_result" ] && [ ! -L "$sq_result" ] &&
-          [ "$(stat -c '%u:%a:%h' "$sq_result")" = "$(id -u):600:1" ] &&
+          [ "$(broray_ops_stat -c '%u:%a:%h' "$sq_result")" = "$(id -u):600:1" ] &&
           [ "$(sha256sum "$sq_result" | cut -d ' ' -f 1)" = "$sq_digest" ] || return 76
         sq_expected=fetch
         [ "$sq_stage" != apply ] || sq_expected=parse
@@ -240,7 +240,7 @@ broray_subscription_queue_use_prepared()
     qr_directory="${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}/requests/$1"
     qr_result="$qr_directory/result.json"
     [ -f "$qr_result" ] && [ ! -L "$qr_result" ] &&
-      [ "$(stat -c '%u:%a:%h' "$qr_result")" = "$(id -u):600:1" ] &&
+      [ "$(broray_ops_stat -c '%u:%a:%h' "$qr_result")" = "$(id -u):600:1" ] &&
       [ "$(sha256sum "$qr_result" | cut -d ' ' -f 1)" = "$qr_digest" ] || return 76
     qr_record="$(jq -ce --arg request "$1" --arg context "$qr_context" '
       select(.schemaVersion==1 and .kind=="subscription" and .stage=="parse" and

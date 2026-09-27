@@ -1,8 +1,8 @@
 """Retained coordinator closure must survive the authenticated temporary source."""
-import hashlib,json,shutil,stat,subprocess,unittest
+import hashlib,json,os,shutil,stat,subprocess,unittest
 from test_generation_bootguard_binding import GuardBinding,GEN,CODE
 
-FILES=['bin/broray-ops-guard']+['lib/'+n for n in ['operation-client.sh','operation-coordinator.sh','operation-owner.sh','operation-journal.sh','operation-report.sh','operation-report-facts.sh','operation-publication.sh','operation-route-recovery.sh','operation-platform-recovery.sh','operation-platform-service.sh','operation-platform-generation.sh','operation-platform-bootguard.sh','operation-public.jq','operation-report-public.jq']]
+FILES=['bin/broray-ops-guard']+['lib/'+n for n in ['operation-client.sh','operation-coordinator.sh','operation-owner.sh','operation-journal.sh','operation-report.sh','operation-report-facts.sh','operation-publication.sh','operation-route-recovery.sh','operation-platform-recovery.sh','operation-platform-service.sh','operation-platform-generation.sh','operation-platform-bootguard.sh','operation-public.jq','operation-report-public.jq','operation-scheduling.sh']]
 class RecoveryCode(GuardBinding):
  def setUp(self):
   super().setUp();self.source=self.home/'temporary-code';self.source.mkdir(mode=0o700)
@@ -25,6 +25,16 @@ class RecoveryCode(GuardBinding):
  def test_verify_survives_removed_temporary_source(self):
   self.assertEqual(self.code_call().returncode,0);shutil.rmtree(self.source);before=self.snapshot();r=self.code_call(True)
   self.assertEqual(r.returncode,0,r.stderr);self.assertEqual(json.loads(r.stdout)['phase'],'RECOVERY_CODE_VERIFIED');self.assertEqual(self.snapshot(),before)
+ def test_retained_coordinator_runs_after_temporary_source_removed(self):
+  self.assertEqual(self.code_call().returncode,0)
+  shutil.rmtree(self.source)
+  env=dict(os.environ,BRORAY_ROOT=str(self.live_root/'opt/broray'),BRORAY_OPS_CODE_ROOT=str(self.code),
+   BRORAY_OPS_GUARD_HELD='1',BRORAY_STATE_ROOT=str(self.home/'probe-state'),
+   BRORAY_OPS_RAM_ROOT=str(self.home/'probe-ram'),BRORAY_GLOBAL_LOCK=str(self.home/'probe-lock'))
+  r=subprocess.run(['/bin/ash',str(self.code/'lib/operation-coordinator.sh'),'unsupported-readiness-probe'],env=env,capture_output=True,text=True,timeout=5)
+  self.assertEqual(r.returncode,1,r.stdout+r.stderr)
+  self.assertEqual(json.loads(r.stdout),{'ok':False,'errorCode':'INVALID_REQUEST'})
+  self.assertEqual((self.code/'lib/operation-scheduling.sh').read_bytes(),(CODE/'lib/operation-scheduling.sh').read_bytes())
  def test_verify_cannot_create_missing_store(self):self.refuse(True)
  def test_missing_retained_library_not_recreated(self):self.assertEqual(self.code_call().returncode,0);(self.code/FILES[2]).unlink();self.refuse();self.refuse(True)
  def test_corrupt_retained_library_preserved(self):self.assertEqual(self.code_call().returncode,0);(self.code/FILES[2]).write_bytes(b'FOREIGN');self.refuse();self.refuse(True)

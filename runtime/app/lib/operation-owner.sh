@@ -88,3 +88,47 @@ broray_ops_classify_owner()
       *) OPS_OWNER_REASON=identity_changed ;;
     esac
 }
+
+# File identity uses the same BusyBox terse fields as protected platform checks.
+broray_ops_file_stat()
+(
+    # Entware may omit standalone stat and BusyBox FEATURE_STAT_FORMAT.
+    # An installed stat's failure remains authoritative; never mask it.
+    if command -v stat >/dev/null 2>&1; then
+        stat "$@"
+        exit $?
+    fi
+    follow=''
+    if [ "${1:-}" = -L ]; then follow=-L; shift; fi
+    [ "$#" -ge 3 ] && [ "$1" = -c ] || exit 75
+    format="$2"; shift 2
+    case "$format" in '%a'|'%a:%u'|'%u:%a'|'%u:%a:%h'|'%s:%u:%a:%h'|'%u %a %h %s') ;; *) exit 75 ;; esac
+    for path in "$@"
+    do
+        if [ -n "$follow" ]; then
+            row="$(busybox stat -L -t "$path")" || exit 75
+        else
+            row="$(busybox stat -t "$path")" || exit 75
+        fi
+        # Strip the exact filename first so embedded spaces do not shift fields.
+        case "$row" in "$path "*) fields="${row#"$path "}" ;; *) exit 75 ;; esac
+        set -f
+        set -- $fields
+        [ "$#" -eq 14 ] || exit 75
+        size="$1"; raw_mode="$3"; owner="$4"; links="$8"
+        case "$raw_mode" in ''|*[!0-9a-fA-F]*) exit 75 ;; esac
+        [ "${#raw_mode}" -le 8 ] || exit 75
+        case "$size" in ''|*[!0-9]*) exit 75 ;; esac
+        case "$owner" in ''|*[!0-9]*) exit 75 ;; esac
+        case "$links" in ''|*[!0-9]*) exit 75 ;; esac
+        mode="$((0x$raw_mode & 07777))"
+        case "$format" in
+            '%a') printf '%o\n' "$mode" ;;
+            '%u:%a') printf '%s:%o\n' "$owner" "$mode" ;;
+            '%s:%u:%a:%h') printf '%s:%s:%o:%s\n' "$size" "$owner" "$mode" "$links" ;;
+            '%u %a %h %s') printf '%s %o %s %s\n' "$owner" "$mode" "$links" "$size" ;;
+            '%a:%u') printf '%o:%s\n' "$mode" "$owner" ;;
+            '%u:%a:%h') printf '%s:%o:%s\n' "$owner" "$mode" "$links" ;;
+        esac
+    done
+)

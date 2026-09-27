@@ -58,7 +58,7 @@ class CandidateCompatibility(unittest.TestCase):
    with self.subTest(changed=changed):self.assertEqual(self.resolve(**changed)['status'],'untested')
  def test_priority_candidate_retains_exact_compatibility_scope(self):
   records=json.loads((ROOT/'runtime/app/share/xray-compatibility.json').read_bytes())['records']
-  for candidate in ['3.2.0-r01c20','3.2.0-r01c21']:
+  for candidate in ['3.2.0-r01c20','3.2.0-r01c21','3.2.0-r01c22']:
    current=[r for r in records if r['candidateId']==candidate]
    self.assertEqual(len(current),7)
    for row in current:

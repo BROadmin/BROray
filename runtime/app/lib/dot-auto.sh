@@ -171,12 +171,12 @@ broray_dot_auto_step() {
  [ "$dq_ids" != '[]' ] || return 76
  dq_directory="${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}/requests/$dq_request"
  [ -d "$dq_directory" ] && [ ! -L "$dq_directory" ] &&
- [ "$(stat -c '%u:%a' "$dq_directory")" = "$(id -u):700" ] || return 74
+ [ "$(broray_ops_stat -c '%u:%a' "$dq_directory")" = "$(id -u):700" ] || return 74
  dq_result="$dq_directory/result.json"
  dq_digest="$(jq -r '.queueStep.resultSha256 // empty' "$dq_owner/state.json")" || return 74
  if [ -n "$dq_digest" ]; then
   [ -f "$dq_result" ] && [ ! -L "$dq_result" ] &&
-  [ "$(stat -c '%u:%a:%h' "$dq_result")" = "$(id -u):600:1" ] &&
+  [ "$(broray_ops_stat -c '%u:%a:%h' "$dq_result")" = "$(id -u):600:1" ] &&
   [ "$(sha256sum "$dq_result" | cut -d ' ' -f 1)" = "$dq_digest" ] || return 76
   dq_state="$(jq -ce --arg request "$dq_request" --arg context "$dq_context" --argjson ids "$dq_ids" '
    def count: type=="number" and .>=0 and floor==.;

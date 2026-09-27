@@ -1,13 +1,14 @@
 /* Exact bounded coordinator closure, from authenticated CODE_ROOT only.
  * Retention is not an executor admission and never launches this code. */
-#define RC_FILES 15
+#define RC_FILES 16
 static const char *rc_paths[RC_FILES]={
     "bin/broray-ops-guard","lib/operation-client.sh","lib/operation-coordinator.sh",
     "lib/operation-owner.sh","lib/operation-journal.sh","lib/operation-report.sh",
     "lib/operation-report-facts.sh","lib/operation-publication.sh","lib/operation-route-recovery.sh",
     "lib/operation-platform-recovery.sh","lib/operation-platform-service.sh",
     "lib/operation-platform-generation.sh","lib/operation-platform-bootguard.sh",
-    "lib/operation-public.jq","lib/operation-report-public.jq"
+    "lib/operation-public.jq","lib/operation-report-public.jq",
+    "lib/operation-scheduling.sh"
 };
 static void rc_free(struct migration_file files[RC_FILES]){for(int i=0;i<RC_FILES;i++)free(files[i].bytes);}
 static int rc_load(int root,struct migration_file files[RC_FILES],char **manifest,size_t *size,char sha[65]){

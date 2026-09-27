@@ -377,7 +377,7 @@ broray_auto_failover_step()
       probe|activate)
         f_digest="$(jq -er .queueStep.resultSha256 "$f_owner/state.json")" || return 76
         [ -f "$f_result" ] && [ ! -L "$f_result" ] &&
-          [ "$(stat -c '%u:%a:%h' "$f_result")" = "$(id -u):600:1" ] &&
+          [ "$(broray_ops_stat -c '%u:%a:%h' "$f_result")" = "$(id -u):600:1" ] &&
           [ "$(sha256sum "$f_result" | cut -d ' ' -f 1)" = "$f_digest" ] || return 76
         f_state="$(jq -ce --arg context "$f_context" --arg active "$f_active" --arg hash "$f_hash" '
           select(.schemaVersion==1 and .kind=="failover" and .context==$context and
@@ -415,7 +415,7 @@ broray_auto_failover_step()
               [ "$(sha256sum "$f_output" | cut -d ' ' -f 1)" = "$f_node_hash" ] || return 76
             f_runtime="$(broray_xray_config_path)" || return 76
             f_runtime_hash="$(sha256sum "$f_runtime" | cut -d ' ' -f 1)" || return 76
-            f_runtime_mode="$(stat -c %a "$f_runtime")" || return 76
+            f_runtime_mode="$(broray_ops_stat -c %a "$f_runtime")" || return 76
             f_system="$BRORAY_BASE/config/system/settings.json"
             [ -f "$f_system" ] && [ ! -L "$f_system" ] || return 76
             f_system_hash="$(sha256sum "$f_system" | cut -d ' ' -f 1)" || return 76
@@ -555,10 +555,10 @@ broray_auto_failover_activate()
       "$(printf '%s\n' "$a_state" | jq -er .prepared.previousSha256)" ] || return 76
     a_mode="$(printf '%s\n' "$a_state" | jq -er '.prepared.previousMode |
       select(type=="string" and length>=3 and length<=4 and all(explode[];.>=48 and .<=55))')" || return 76
-    [ "$(stat -c %a "$a_runtime")" = "$a_mode" ] || return 76
+    [ "$(broray_ops_stat -c %a "$a_runtime")" = "$a_mode" ] || return 76
     for a_file in previous-runtime new-runtime; do
         [ -f "$a_dir/$a_file.json" ] && [ ! -L "$a_dir/$a_file.json" ] &&
-          [ "$(stat -c '%u:%a:%h' "$a_dir/$a_file.json")" = "$(id -u):600:1" ] || return 76
+          [ "$(broray_ops_stat -c '%u:%a:%h' "$a_dir/$a_file.json")" = "$(id -u):600:1" ] || return 76
         case "$a_file" in previous-runtime) a_expected=previousSha256 ;; *) a_expected=newSha256 ;; esac
         [ "$(sha256sum "$a_dir/$a_file.json" | cut -d ' ' -f 1)" = \
           "$(printf '%s\n' "$a_state" | jq -er --arg k "$a_expected" '.prepared[$k]')" ] || return 76
@@ -588,7 +588,7 @@ broray_auto_failover_activate()
           >"$a_dir/rollback-output" 2>"$a_dir/rollback-error" || return 75
         a_status="$(broray_xray_status_json)" || return 75
         [ "$(cat "$BRORAY_ACTIVE_SERVER_FILE")" = "$a_old" ] &&
-          [ "$(stat -c %a "$a_runtime")" = "$a_mode" ] &&
+          [ "$(broray_ops_stat -c %a "$a_runtime")" = "$a_mode" ] &&
           printf '%s\n' "$a_status" | jq -e --arg hash "$(printf '%s\n' "$a_state" | jq -r .prepared.previousSha256)" \
             '.success==true and .data.running==true and .data.configValid==true and
              .data.socks.active==true and .data.configSha256==$hash' >/dev/null || return 75
