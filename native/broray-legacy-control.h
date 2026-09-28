@@ -7,6 +7,9 @@ struct lc_inventory {struct migration_file file[2];int lock_present;unsigned loc
  * A present live AND retired object is ambiguous, never a preferred copy. */
 static int lc_retired=-1;
 static int lc_new_generation;
+/* Only verified recovery after a different kernel boot may accept shutdown's
+ * removal of live projections. This never makes staged evidence optional. */
+static int lc_post_boot;
 static int platform_started_current(int op,const char *op_path,const char *root,const struct bg_input *input,const char *migration,const char *native);
 static int platform_stop_current_proof(int op,const char *op_path,const char *root,const struct bg_input *input,const char *migration,const char *native);
 static int platform_stopped_current_proof(int op,const char *op_path,const char *root,const struct bg_input *input,const char *migration,const char *native);
@@ -83,7 +86,8 @@ static int lc_read(int root,const char *owner,struct lc_inventory *out){
         out->lock_present=1;out->lock_mode=st.st_mode&0777;
     }else if(errno!=ENOENT)return -1;
     if(!strcmp(owner,"null"))return out->file[0].present||out->file[1].present||out->lock_present?-1:0;
-    if(!out->file[0].present||!out->lock_present||lc_pid_value(&out->file[0],owner))return -1;
+    if(!lc_post_boot&&(!out->file[0].present||!out->lock_present))return -1;
+    if(out->file[0].present&&lc_pid_value(&out->file[0],owner))return -1;
     return out->file[1].present?lc_pid_value(&out->file[1],owner):0;
 }
 static int lc_same(const struct lc_inventory *a,const struct lc_inventory *b){
@@ -95,6 +99,71 @@ static int lc_live_exact(int root,const char *owner,const struct lc_inventory *e
     struct lc_inventory now;int rc=lc_read(root,owner,&now);
     if(!rc)rc=lc_same(expected,&now);lc_free(&now);
     return rc||(current_owner&&lc_owner_valid(owner)<0)?-1:0;
+}
+/* Recover the historical inventory from retained evidence, not from current
+ * daemon.pid/ready. The caller reserializes and verifies the entire snapshot,
+ * binding, copies and staged receipt byte-for-byte before granting anything. */
+static int lc_snapshot_read(int base,struct lc_inventory *out){
+    struct migration_file snapshot;memset(&snapshot,0,sizeof snapshot);int result=-1;
+    if(migration_read(base,"snapshot.json",&snapshot,0)||snapshot.mode!=0600||
+       snapshot.size>PATH_MAX+4096U||memchr(snapshot.bytes,0,snapshot.size))goto done;
+    for(int i=0;i<2;i++){
+        char prefix[96],copy[16],hash[65]={0};unsigned mode=0;int used=0,present=0;
+        snprintf(prefix,sizeof prefix,"{\"name\":\"%s\",\"kind\":\"file\",\"present\":",lc_names[i]);
+        const char *entry=strstr(snapshot.bytes,prefix);if(!entry)goto done;entry+=strlen(prefix);
+        if(!strncmp(entry,"true,",5)){
+            if(sscanf(entry,"true,\"mode\":%u,\"sha256\":\"%64[0-9a-f]\"}%n",&mode,hash,&used)!=2||
+               !used||!hex64(hash)||(mode&~0777U)||(mode&0022))goto done;
+            present=1;
+        }else if(strncmp(entry,"false,\"mode\":0,\"sha256\":null}",strlen("false,\"mode\":0,\"sha256\":null}")))goto done;
+        snprintf(copy,sizeof copy,"file-%d",i);
+        if(migration_read(base,copy,&out->file[i],1)||out->file[i].present!=present||out->file[i].size>32)goto done;
+        if(present&&(out->file[i].mode!=0600||strcmp(out->file[i].sha,hash)))goto done;
+        out->file[i].mode=mode;
+    }
+    const char *prefix="{\"name\":\"daemon.lock\",\"kind\":\"directory\",\"present\":";
+    const char *entry=strstr(snapshot.bytes,prefix);if(!entry)goto done;entry+=strlen(prefix);
+    if(!strncmp(entry,"true,",5)){
+        int used=0;
+        if(sscanf(entry,"true,\"mode\":%u,\"empty\":true}%n",&out->lock_mode,&used)!=1||
+           !used||(out->lock_mode&~0777U)||(out->lock_mode&0022))goto done;
+        out->lock_present=1;
+    }else if(strncmp(entry,"false,\"mode\":0,\"empty\":false}",strlen("false,\"mode\":0,\"empty\":false}")))goto done;
+    result=0;
+done:free(snapshot.bytes);return result;
+}
+/* Once retirement has recorded an existing projection, disappearance of its
+ * retained object is evidence loss, never an old shutdown. */
+static int lc_retired_absence(int index){
+    if(lc_retired<0)return 0;
+    int base=openat(lc_retired,"..",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC),result=-1;
+    struct stat st;struct migration_file intent,done;memset(&intent,0,sizeof intent);memset(&done,0,sizeof done);
+    if(base<0||fstat(base,&st)||st.st_uid!=geteuid()||(st.st_mode&0022))goto end;
+    char name[32];snprintf(name,sizeof name,"move-%d.intent",index);
+    if(migration_read(base,name,&intent,1))goto end;
+    snprintf(name,sizeof name,"move-%d.done",index);if(migration_read(base,name,&done,1))goto end;
+    int terminal=bg_exists(base,"stopped.receipt");if(terminal<0)goto end;
+    if(!intent.present){if(done.present||terminal)goto end;result=0;goto end;}
+    char sha[65]={0},writer[65]={0},projection[32]={0};int entry=-1,used=0;
+    if(intent.mode!=0600||sscanf(intent.bytes,"BROray-legacy-retire-entry/1\n%64[0-9a-f]\n%d\n0\n0000\n%31[^\n]\n%64[0-9a-f]\n%n",sha,&entry,projection,writer,&used)!=4||
+       !hex64(sha)||!hex64(writer)||strcmp(projection,index<2?"-":"empty-directory")||
+       entry!=index||used<1||(size_t)used!=intent.size)goto end;
+    if(done.present&&(done.mode!=0600||done.size!=intent.size||memcmp(done.bytes,intent.bytes,intent.size)))goto end;
+    if(terminal&&!done.present)goto end;result=0;
+end:if(base>=0)close(base);free(intent.bytes);free(done.bytes);return result;
+}
+static int lc_snapshot_live_exact(int root,const char *owner,const struct lc_inventory *expected,int current_owner){
+    if(!lc_post_boot)return lc_live_exact(root,owner,expected,current_owner);
+    struct lc_inventory now;memset(&now,0,sizeof now);int rc=lc_read(root,owner,&now);
+    if(!rc){
+        if(now.lock_present?(!expected->lock_present||now.lock_mode!=expected->lock_mode):lc_retired_absence(2))rc=-1;
+        for(int i=0;i<2;i++){
+            if(now.file[i].present){
+                if(!expected->file[i].present||now.file[i].mode!=expected->file[i].mode||strcmp(now.file[i].sha,expected->file[i].sha))rc=-1;
+            }else if(lc_retired_absence(i))rc=-1;
+        }
+    }
+    lc_free(&now);return rc;
 }
 static int lc_directory_exact(int base,const struct lc_inventory *r){
     DIR *d=directory_stream(base);if(!d)return -1;struct dirent *e;unsigned seen=0;int bad=0;errno=0;
@@ -122,6 +191,7 @@ static int legacy_control_impl(int argc,char **argv,int emit){
     if(op<0||mig<0||flock(op,LOCK_EX|LOCK_NB)||flock(mig,LOCK_SH|LOCK_NB)||migration_boot(boot)||peer_executable_hash(getpid(),native)||
        bg_source(mig,argv[4],argv[3],argv[5],&input)||lc_service_exact(op,argv[6]))goto done;
     same_boot=!strcmp(boot,input.old_boot);if(!verify&&!same_boot)goto done;
+    lc_post_boot=verify&&!same_boot;
     const char *name=strrchr(argv[2],'/');if(!name||strcmp(name+1,input.operation))goto done;
     int gn=bg_binding_text(guard,&input,argv[5],native);
     if(gn<0||bg_bound_exact(op,guard,(size_t)gn))goto done;digest_bytes(guard,(size_t)gn,guard_sha);
@@ -135,7 +205,9 @@ static int legacy_control_impl(int argc,char **argv,int emit){
         if(same_boot||platform_attempt_control_view(op,argv[2],argv[3],&input,argv[5],native))goto done;
         lc_new_generation=1;
     }
-    if(lc_read(live,argv[7],&before))goto done;
+    if(lc_post_boot){
+        base=checked_directory(directory);if(base<0||flock(base,LOCK_EX|LOCK_NB)||lc_snapshot_read(base,&before))goto done;
+    }else if(lc_read(live,argv[7],&before))goto done;
     FILE *f=open_memstream(&snapshot,&size);if(!f)goto done;
     fprintf(f,"{\"schemaVersion\":1,\"contract\":\"broray-legacy-updater-control/1\",\"operationId\":\"%s\",\"stopNonce\":\"%s\",\"oldBootId\":\"%s\",\"nativeSha256\":\"%s\",\"migrationIntentSha256\":\"%s\",\"bootGuardBindingSha256\":\"%s\",\"serviceReceiptSha256\":\"%s\",\"oldServiceWasRunning\":%s,\"oldOwner\":%s,\"entries\":[",input.operation,input.nonce,input.old_boot,native,argv[5],guard_sha,argv[6],owner?"true":"false",argv[7]);
     for(int i=0;i<2;i++){
@@ -149,25 +221,25 @@ static int legacy_control_impl(int argc,char **argv,int emit){
     if(bn<0||bn>=(int)sizeof binding||rn<0||rn>=(int)sizeof receipt)goto done;
     int prior=bg_exists(op,"platform-legacy-control.json");if(prior<0||(verify&&!prior))goto done;
     if(!prior&&bg_exists(op,"platform-legacy-control")!=0)goto done;
-    if(bg_bound_exact(op,guard,(size_t)gn)||lc_service_exact(op,argv[6])||lc_live_exact(live,argv[7],&before,same_boot)||
+    if(bg_bound_exact(op,guard,(size_t)gn)||lc_service_exact(op,argv[6])||lc_snapshot_live_exact(live,argv[7],&before,same_boot)||
        migration_record(op,"platform-legacy-control.json",binding,(size_t)bn,!prior))goto done;
     if(!prior&&(mkdirat(op,"platform-legacy-control",0700)||fsync(op)))goto done;
-    base=checked_directory(directory);if(base<0||flock(base,LOCK_EX|LOCK_NB))goto done;
+    if(base<0)base=checked_directory(directory);if(base<0||flock(base,LOCK_EX|LOCK_NB))goto done;
     if(prior?lc_directory_exact(base,&before):bg_empty(base))goto done;
     if(migration_record(base,"snapshot.json",snapshot,size,!prior))goto done;
     for(int i=0;i<2;i++)if(before.file[i].present){char file[16];snprintf(file,sizeof file,"file-%d",i);if(migration_record(base,file,before.file[i].bytes,before.file[i].size,!prior))goto done;}
-    if(lc_live_exact(live,argv[7],&before,same_boot)||bg_bound_exact(op,guard,(size_t)gn)||lc_service_exact(op,argv[6])||
+    if(lc_snapshot_live_exact(live,argv[7],&before,same_boot)||bg_bound_exact(op,guard,(size_t)gn)||lc_service_exact(op,argv[6])||
        bg_record_exact(op,"platform-legacy-control.json",binding,(size_t)bn)||bg_record_exact(base,"snapshot.json",snapshot,size)||
        migration_record(base,"staged.receipt",receipt,(size_t)rn,!prior)||lc_directory_exact(base,&before)||migration_sync_directory(directory,base))goto done;
     for(int i=0;i<2;i++)if(before.file[i].present){char file[16];snprintf(file,sizeof file,"file-%d",i);if(bg_record_exact(base,file,before.file[i].bytes,before.file[i].size))goto done;}
     if(bg_record_exact(base,"snapshot.json",snapshot,size)||bg_record_exact(base,"staged.receipt",receipt,(size_t)rn)||
        bg_record_exact(op,"platform-legacy-control.json",binding,(size_t)bn)||bg_bound_exact(op,guard,(size_t)gn)||
-       lc_service_exact(op,argv[6])||lc_live_exact(live,argv[7],&before,same_boot))goto done;
+       lc_service_exact(op,argv[6])||lc_snapshot_live_exact(live,argv[7],&before,same_boot))goto done;
     if(emit&&verify)printf("{\"ok\":true,\"phase\":\"LEGACY_CONTROL_VERIFIED\",\"snapshotSha256\":\"%s\",\"oldBootId\":\"%s\",\"currentBootId\":\"%s\",\"oldBootEnded\":%s,\"signalsAuthorized\":false,\"serviceStopped\":false,\"activationAllowed\":false}\n",snapshot_sha,input.old_boot,boot,same_boot?"false":"true");
     else if(emit)printf("{\"ok\":true,\"phase\":\"LEGACY_CONTROL_STAGED\",\"snapshotSha256\":\"%s\",\"signalsAuthorized\":false,\"serviceStopped\":false,\"activationAllowed\":false}\n",snapshot_sha);
     result=0;
 done:
-    if(lc_retired>=0)close(lc_retired);lc_retired=-1;lc_new_generation=0;
+    if(lc_retired>=0)close(lc_retired);lc_retired=-1;lc_new_generation=0;lc_post_boot=0;
     if(op>=0)close(op);if(mig>=0)close(mig);if(live>=0)close(live);if(base>=0)close(base);lc_free(&before);free(input.intent);free(snapshot);
     return result?migration_error("LEGACY_CONTROL_EVIDENCE_UNCONFIRMED"):0;
 }
@@ -230,6 +302,7 @@ static int legacy_retirement_apply(char **argv,int op,const char *op_path,const 
     char *owner=NULL,*execution=NULL;size_t execution_size=0;
     if(!strcmp(boot,input->old_boot)||migration_read(op,"platform-legacy-control/snapshot.json",&original,0)||original.mode!=0600||
        migration_read(op,"platform-service.json",&service,0)||service.mode!=0600)goto done;
+    lc_post_boot=1;
     const char *begin=strstr(original.bytes,"\"oldOwner\":");if(!begin)goto done;begin+=11;const char *end=strstr(begin,",\"entries\":[");if(!end||end<=begin)goto done;
     owner=strndup(begin,(size_t)(end-begin));if(!owner)goto done;
     int pn=lc_retirement_prefix(prefix,sizeof prefix,input,argv[4],native,original.sha);if(pn<0)goto done;
@@ -309,7 +382,7 @@ static int legacy_retirement_apply(char **argv,int op,const char *op_path,const 
        (!verify_only&&recovery_context_proof(argv,held,statefd,op_path,shell,controller,input)))goto done;
     if(!verify_only)printf("{\"ok\":true,\"phase\":\"STOPPED\",\"serviceStopped\":true,\"activationAllowed\":false,\"signalsSent\":false,\"replayed\":%s}\n",terminal_exists?"true":"false");result=0;
 done:
-    lc_retired=-1;lc_new_generation=0;if(objects>=0)close(objects);if(base>=0)close(base);if(live>=0)close(live);
+    lc_retired=-1;lc_new_generation=0;lc_post_boot=0;if(objects>=0)close(objects);if(base>=0)close(base);if(live>=0)close(live);
     free(original.bytes);free(service.bytes);free(intent.bytes);free(owner);free(execution);lc_free(&expected);
     return result?migration_error("LEGACY_RETIREMENT_UNCONFIRMED"):0;
 }
