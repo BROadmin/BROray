@@ -1001,7 +1001,7 @@ static int service_cycle_main(int argc,char **argv,int action){
         if(n<0||n>=(int)sizeof cycle_name||sc_join(sc.cyclepath,sc.uppath,cycle_name))goto done;
     }
     sc.state=checked_directory(sc.statepath);if(sc.state<0)goto done;
-    sc.guard=recovery_inherited_guard(sc.state);if(sc.guard<0)sc.guard=sc_lock_exact(sc.state,"operations.guard",0);
+    sc.guard=recovery_inherited_guard(sc.state);if(sc.guard<0)sc.guard=sc_lock_exact_wait(sc.state,"operations.guard",0,action==SC_STATUS?30000:0);
     if(sc.guard<0){why="SERVICE_TRANSITION_BUSY";goto done;}
     sc.op=checked_directory(sc.oppath);sc.up=checked_directory(sc.uppath);
     int self=open("/proc/self/exe",O_RDONLY|O_CLOEXEC);if(self<0)goto done;int bad=hash_fd(self,sc.native);close(self);if(bad||sc.op<0||sc.up<0)goto done;
