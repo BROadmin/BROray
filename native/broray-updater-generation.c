@@ -334,6 +334,28 @@ static int syscall_guard(pid_t pid){
     }
     return 0;
 }
+/* SIGKILL/exit_group can supersede a syscall-stop before GETREGSET. On
+ * ARM64 4.9 even a successful read can then expose restored user x7 rather
+ * than the syscall phase marker. Never resume on an unreadable/unknown phase.
+ * Accept only a subsequent kernel exit event for this unreaped owned task;
+ * feed it through the normal exit accounting. No event, wrong event or expiry
+ * is still a containment failure. The deadline bounds refusal, not proof. */
+static int syscall_exit_event(pid_t pid,int *status){
+    int i=kid_index(pid);if(i<0||awaiting_birth[i])return -1;
+    unsigned long long birth=kids[i].ticks;uint64_t until=millis()+100;
+    for(;;){
+        pid_t got=waitpid(pid,status,__WALL|WNOHANG);
+        if(got==pid){
+            if(WIFEXITED(*status)||WIFSIGNALED(*status))return 0;
+            if(WIFSTOPPED(*status)&&WSTOPSIG(*status)==SIGTRAP&&
+               (unsigned)*status>>16==PTRACE_EVENT_EXIT&&ticks(pid)==birth)return 0;
+            return -1;
+        }
+        if(got<0&&errno!=EINTR)return -1;
+        if(millis()>=until)return -1;
+        struct timespec pause={0,1000000L};nanosleep(&pause,NULL);
+    }
+}
 static int run_generation(int argc,char **argv){/* run PRIVATE_DIR GEN SHA -- absolute command... */
     if(argc<8||strcmp(argv[5],"--")||!token(argv[3],64)||!hex64(argv[4])||argv[6][0]!='/')return 64;
     strcpy(generation,argv[3]);strcpy(manifest,argv[4]);umask(077);
@@ -394,6 +416,7 @@ static int run_generation(int argc,char **argv){/* run PRIVATE_DIR GEN SHA -- ab
         int status;pid_t pid=waitpid(-1,&status,__WALL|WNOHANG);
         if(pid<0&&errno!=ECHILD&&errno!=EINTR)return fail("TRACE_WAIT_FAILED");
         if(pid<=0){struct timespec pause={0,10000000L};sigtimedwait(&child_events,NULL,&pause);continue;}
+consume_wait:
         if(!WIFSTOPPED(status)||WSTOPSIG(status)!=(SIGTRAP|0x80))recent[recent_at++%16]=(struct wait_evidence){pid,status,kid_index(pid),ticks(pid)};
         if(WIFEXITED(status)||WIFSIGNALED(status)){
             int i=kid_index(pid);if(i<0){int dead=exited_index(pid);if(dead<0)return fail("UNREGISTERED_EXIT");exited[dead]=exited[--exited_count];}
@@ -410,7 +433,7 @@ static int run_generation(int argc,char **argv){/* run PRIVATE_DIR GEN SHA -- ab
         if(event==PTRACE_EVENT_FORK||event==PTRACE_EVENT_VFORK||event==PTRACE_EVENT_CLONE){unsigned long born=0;if(ptrace(PTRACE_GETEVENTMSG,pid,0,&born)||born>INT_MAX)return fail("DESCENDANT_ID_UNCONFIRMED");int idx=kid_index((pid_t)born),held=idx>=0&&awaiting_birth[idx];if(register_kid((pid_t)born,0))return fail("DESCENDANT_REGISTRATION_FAILED");if(held){if(killing&&terminate_stopped_kid((pid_t)born))return fail("BIRTH_TERMINATION_UNCONFIRMED");if(ptrace(PTRACE_SYSCALL,(pid_t)born,0,0)<0&&errno!=ESRCH)return fail("BIRTH_RELEASE_FAILED");}}
         else if(event==PTRACE_EVENT_EXEC){unsigned long former=0;if(ptrace(PTRACE_GETEVENTMSG,pid,0,&former))return fail("EXEC_IDENTITY_FAILED");if(former&&(pid_t)former!=pid)forget_kid((pid_t)former);if(register_kid(pid,0))return fail("EXEC_LEDGER_FAILED");if(pid==root&&!stopping&&persist_checkpoint("RUNNING"))return fail("RUNNING_NOT_DURABLE");}
         else if(event==PTRACE_EVENT_STOP&&WSTOPSIG(status)!=SIGTRAP&&!killing){if(ptrace(PTRACE_LISTEN,pid,0,0)<0&&errno!=ESRCH)return fail("TRACE_LISTEN_FAILED");continue;}
-        else if(event==0&&WSTOPSIG(status)==(SIGTRAP|0x80)){if(syscall_guard(pid))return fail("SYSCALL_CONTAINMENT_UNCONFIRMED");}
+        else if(event==0&&WSTOPSIG(status)==(SIGTRAP|0x80)){if(syscall_guard(pid)){if(syscall_exit_event(pid,&status))return fail("SYSCALL_CONTAINMENT_UNCONFIRMED");goto consume_wait;}}
         else if(event==0)deliver=WSTOPSIG(status);
         if(killing){if(event!=PTRACE_EVENT_EXIT&&terminate_stopped_kid(pid))return fail("TRACE_TERMINATION_UNCONFIRMED");deliver=0;}
         if(ptrace(PTRACE_SYSCALL,pid,0,deliver)<0&&errno!=ESRCH)return fail("TRACE_CONTINUE_FAILED");

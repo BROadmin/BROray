@@ -59,7 +59,11 @@ static int service_actor(int fd,char **argv,struct identity *actor){
         char sha[65],field[128];
         if(service_host_record_sha(argv,&supervisor,sha))return -1;
         snprintf(field,sizeof field,"\"serviceHostRecordSha256\":\"%s\"",sha);
-        if(!strstr(snapshot,"\"platformReady\":true,")||!strstr(snapshot,field)){service_error("HOST_GENERATION_BINDING_UNCONFIRMED");return -1;}
+        /* Recovery restores app services before the queue may become READY.
+         * LIVE already verifies the exact launch/platform and tracked actor;
+         * the pinned host record authorizes this action independently of
+         * readiness to admit new updater requests. */
+        if(!strstr(snapshot,field)){service_error("HOST_GENERATION_BINDING_UNCONFIRMED");return -1;}
     }
     char *begin=strstr(snapshot,"\"children\":["),*end=strstr(snapshot,"],\"awaitingBirth\":[");if(!begin||!end||end<=begin)return -1;
     char *identity=NULL;size_t identity_size=0;FILE *f=open_memstream(&identity,&identity_size);if(!f)return -1;identity_json(f,actor);if(fclose(f)){free(identity);return -1;}
