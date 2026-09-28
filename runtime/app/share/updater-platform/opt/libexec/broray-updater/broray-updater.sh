@@ -2963,6 +2963,70 @@ request_process()
     return 0
 }
 
+# Resume only a completed layout rollback whose service restoration failed.
+# Unknown layouts, state-seed ownership and other rollback failures stay fenced.
+recover_service_rollback()
+{
+    local path previous_slot target_slot reason operation before state_file
+    state_file="$CURRENT_OPERATION_DIR/state.json"
+    before="$CURRENT_OPERATION_DIR/service-recovery.before.json"
+    for path in state.json request.json previous-slot target rollback-reason switch.phase mutation.started services.tsv
+    do
+        [ -f "$CURRENT_OPERATION_DIR/$path" ] && [ ! -L "$CURRENT_OPERATION_DIR/$path" ] || return 1
+    done
+    [ -d "$REQUEST_LOCK" ] && [ ! -L "$REQUEST_LOCK" ] || return 1
+    [ -f "$REQUEST_LOCK/operation-id" ] && [ ! -L "$REQUEST_LOCK/operation-id" ] || return 1
+    [ "$(cat "$REQUEST_LOCK/operation-id")" = "$CURRENT_OPERATION_ID" ] || return 1
+    [ -f "$QUEUE_ROOT/$CURRENT_OPERATION_ID.json" ] && [ ! -L "$QUEUE_ROOT/$CURRENT_OPERATION_ID.json" ] || return 1
+    cmp -s "$QUEUE_ROOT/$CURRENT_OPERATION_ID.json" "$CURRENT_OPERATION_DIR/request.json" || return 1
+    operation="$(jq -ser --arg id "$CURRENT_OPERATION_ID" '
+        if length == 1 and .[0].schemaVersion == 1 and .[0].operationId == $id and
+           (.[0].operation == "update" or .[0].operation == "reinstall")
+        then .[0].operation else error("unknown request") end
+    ' "$CURRENT_OPERATION_DIR/request.json")" || return 1
+    jq -se --arg id "$CURRENT_OPERATION_ID" --arg operation "$operation" '
+        length == 1 and (.[0] | .schemaVersion == 1 and .operationId == $id and
+        .operation == $operation and .state == "error" and .stage == "rollback-failed" and
+        .error == "ROLLBACK_SERVICE_FAILED" and .running == false and
+        .mutationStarted == true and .rollbackPerformed == true)
+    ' "$state_file" >/dev/null || return 1
+    previous_slot="$(cat "$CURRENT_OPERATION_DIR/previous-slot")"
+    target_slot="$(cat "$CURRENT_OPERATION_DIR/target")"
+    reason="$(cat "$CURRENT_OPERATION_DIR/rollback-reason")"
+    valid_id "$previous_slot" && valid_id "$target_slot" && valid_id "$reason" || return 1
+    [ "$previous_slot" != "$target_slot" ] || return 1
+    [ "$(cat "$CURRENT_OPERATION_DIR/switch.phase")" = rollback-previous-active ] || return 1
+    [ "$(current_slot)" = "$previous_slot" ] || return 1
+    slot_marker_matches "$RELEASES_ROOT/$target_slot" "$target_slot" || return 1
+    for path in state-seed.created state-seed-owners
+    do
+        [ ! -e "$CURRENT_OPERATION_DIR/$path" ] && [ ! -L "$CURRENT_OPERATION_DIR/$path" ] || return 1
+    done
+    awk -F '\t' '
+        NF != 2 || ($2 != "running" && $2 != "stopped") {exit 1}
+        $1 !~ /^(S23broray-monitor|S24broray|S25broray-web|S27broray-auto-switch|S28broray-subscriptions)$/ {exit 1}
+        seen[$1]++ {exit 1}
+        END {if (NR != 5) exit 1}
+    ' "$CURRENT_OPERATION_DIR/services.tsv" || return 1
+    # Exclusive evidence creation. An interrupted or different receipt is
+    # preserved and blocks retry; it is never silently overwritten.
+    if [ ! -e "$before" ] && [ ! -L "$before" ]; then
+        (umask 077; set -C; cat "$state_file" >"$before") || return 1
+        sync || return 1
+    fi
+    [ -f "$before" ] && [ ! -L "$before" ] && cmp -s "$state_file" "$before" || return 1
+    operation_log 'SERVICE_ROLLBACK_RECOVERY_BEGIN'
+    services_start_captured >>"$CURRENT_OPERATION_LOG" 2>&1 || return 1
+    slot_health "$previous_slot" || return 1
+    cmp -s "$state_file" "$before" || return 1
+    status_write "$operation" error rolled-back 100 \
+        'Предыдущая версия и её службы восстановлены; откат завершён.' \
+        "$reason" true true || return 1
+    sync || return 1
+    operation_log 'SERVICE_ROLLBACK_RECOVERY=PASS'
+    operation_cleanup_terminal
+}
+
 recover_incomplete()
 {
     local operation_id state_file request_file running operation previous_slot target_slot actual stage state work_dir retry_file retry_path
@@ -3004,12 +3068,20 @@ recover_incomplete()
       if length != 1 or (.[0] | type) != "object"
       then error("ambiguous recovery state") else .[0] end |
       if field_text(.running // false) == "true" then "true"
+      elif .schemaVersion == 1 and .state == "error" and .stage == "rollback-failed" and
+           .error == "ROLLBACK_SERVICE_FAILED" and .running == false and
+           .mutationStarted == true and .rollbackPerformed == true
+      then "service-rollback"
       elif field_text(.stage // "") == "rollback-failed" or
            field_text(.stage // "") == "recovery-ambiguous" or
            field_text(.state // "") == "recovery-required"
       then "recovery-required" else "false" end
     ' "$state_file" 2>/dev/null)" || return 1
     if [ "$running" != true ]; then
+        if [ "$running" = service-rollback ]; then
+            recover_service_rollback
+            return $?
+        fi
         if [ "$running" = recovery-required ]; then
             operation_log 'RECOVERY_REQUIRED fence retained'
             return 1

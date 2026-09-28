@@ -115,12 +115,13 @@ struct gb_record {
     char id[65],manifest[65],from[64],through[64],scope[65],seal[65],ready[65];
     char host[65],journal[65],launch[65],transaction[65],inventory[65],last[65];
     unsigned long total;
+    int unready;
 };
 /* Only the typed historical STOPPED repair may resume its own immutable
  * retirement publication. Expected bytes are derived again before publish. */
 static int gb_stopped_retirement;
 static int gb_text(const struct gb_record *b,char out[2048]){
-    return snprintf(out,2048,"BROray-generation-boot-ended/1\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%lu\n%s\n%s\n",b->id,b->manifest,b->from,b->through,b->scope,b->seal,b->ready,b->host,b->journal,b->launch,b->transaction,b->total,b->inventory,b->last);
+    return snprintf(out,2048,"%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%lu\n%s\n%s\n",b->unready?"BROray-generation-unready-boot-ended/1":"BROray-generation-boot-ended/1",b->id,b->manifest,b->from,b->through,b->scope,b->seal,b->ready,b->host,b->journal,b->launch,b->transaction,b->total,b->inventory,b->last);
 }
 static int gb_parent(const char *domain,const char *id,char up[PATH_MAX]){
     if(strlen(domain)>=PATH_MAX)return -1;strcpy(up,domain);char *p=strrchr(up,'/');
@@ -236,6 +237,10 @@ static int gb_measure_ledger(int base,const char *domain,struct gb_record *b,con
         if(safe_bytes_at(base,name,&bytes,&size))goto done;
         int k=snprintf(prefix,sizeof prefix,"{\"schemaVersion\":2,\"contract\":\"broray-updater-generation/2\",\"generationId\":\"%s\",\"platformManifestSha256\":\"%s\",\"bootId\":\"%s\",\"revision\":%lu,\"previousRecordSha256\":\"%s\",",b->id,b->manifest,b->from,nr,prior);
         bad=k<0||k>=(int)sizeof prefix||size<(size_t)k+2||memchr(bytes,0,size)||memcmp(bytes,prefix,(size_t)k)||memcmp(bytes+size-2,"}\n",2)||!strstr(bytes,"\"supervisedFromBirth\":true,");
+        /* Absence of a READY file is not proof of never having been ready.
+         * Every independently witnessed revision must explicitly be unready;
+         * removing a real READY pin cannot select this recovery contract. */
+        if(b->unready&&(!strstr(bytes,"\"platformReady\":false,")||strstr(bytes,"\"platformReady\":true,")))bad=1;
         if(pinned&&nr==anchor&&(size!=ready.size-(size_t)pn||memcmp(bytes,accepted,size)))bad=1;
         if(!pinned&&nr==1){digest_bytes(bytes,size,sha);if(strcmp(sha,b->ready))bad=1;}
         if(!pinned&&nr==maximum){
@@ -255,22 +260,40 @@ static int gb_measure_ledger(int base,const char *domain,struct gb_record *b,con
  done:if(witness>=0)close(witness);if(dir)closedir(dir);if(h>=0)close(h);free(host.bytes);return result;
 }
 static int gb_measure(int base,const char *domain,struct gb_record *b){
-    char up[PATH_MAX],name[128],native[65];int cycles=-1,result=-1;
+    char up[PATH_MAX],name[128],native[65];int cycles=-1,start=-1,result=-1;
     struct migration_file ready,origin;memset(&ready,0,sizeof ready);memset(&origin,0,sizeof origin);
+    struct migration_file launch,transaction;memset(&launch,0,sizeof launch);memset(&transaction,0,sizeof transaction);
     int n=snprintf(name,sizeof name,"ready-%s.record",b->id);
     if(n<0||n>=(int)sizeof name||gb_parent(domain,b->id,up))goto done;
     cycles=gb_cycle_directory(up,b->seal);
     if(cycles<0||sc_file(cycles,"origin.record",&origin)||strcmp(origin.sha,b->seal)||
-       gb_origin_native(up,&origin,b->manifest,native)||sc_file(cycles,name,&ready))goto done;
-    result=gb_measure_ledger(base,domain,b,&ready,native);
- done:if(cycles>=0)close(cycles);free(ready.bytes);free(origin.bytes);return result;
+       gb_origin_native(up,&origin,b->manifest,native))goto done;
+    if(b->unready){
+        char parent[PATH_MAX],path[PATH_MAX],binding[192];
+        if(sc_record_exists(cycles,name)!=0||sc_file(base,"state.json",&ready)||strcmp(ready.sha,b->ready)||
+           sc_join(parent,up,"starts")||sc_join(path,parent,b->id))goto done;
+        start=checked_directory(path);
+        int k=snprintf(binding,sizeof binding,"\n%s\n%s\n",b->seal,b->launch);
+        if(start<0||sc_file(start,"launch.record",&launch)||strcmp(launch.sha,b->launch)||
+           sc_file(start,"transaction.record",&transaction)||strcmp(transaction.sha,b->transaction)||
+           strncmp(transaction.bytes,"BROray-service-start-intent/1\nSTART_INTENT\n",sizeof("BROray-service-start-intent/1\nSTART_INTENT\n")-1)||
+           k<0||k>=(int)sizeof binding||!strstr(transaction.bytes,binding))goto done;
+        result=gb_measure_ledger(base,domain,b,NULL,native);
+    }else{
+        if(sc_file(cycles,name,&ready))goto done;
+        result=gb_measure_ledger(base,domain,b,&ready,native);
+    }
+ done:if(start>=0)close(start);if(cycles>=0)close(cycles);free(launch.bytes);free(transaction.bytes);free(ready.bytes);free(origin.bytes);return result;
 }
 static int gb_validate(int base,const char *domain,struct gb_record *out){
     struct migration_file record;memset(&record,0,sizeof record);struct gb_record b;memset(&b,0,sizeof b);
-    char canonical[2048],extra;int result=-1;
+    char canonical[2048],magic[64],extra;int result=-1;
     if(sc_file(base,"boot-ended.receipt",&record))goto done;
-    int count=sscanf(record.bytes,"BROray-generation-boot-ended/1\n%64s\n%64s\n%63s\n%63s\n%64s\n%64s\n%64s\n%64s\n%64s\n%64s\n%64s\n%lu\n%64s\n%64s\n%c",b.id,b.manifest,b.from,b.through,b.scope,b.seal,b.ready,b.host,b.journal,b.launch,b.transaction,&b.total,b.inventory,b.last,&extra);
-    int n=gb_text(&b,canonical);if(count!=14||n<0||n>=2048||record.size!=(size_t)n||memcmp(record.bytes,canonical,(size_t)n)||
+    int count=sscanf(record.bytes,"%63s\n%64s\n%64s\n%63s\n%63s\n%64s\n%64s\n%64s\n%64s\n%64s\n%64s\n%64s\n%lu\n%64s\n%64s\n%c",magic,b.id,b.manifest,b.from,b.through,b.scope,b.seal,b.ready,b.host,b.journal,b.launch,b.transaction,&b.total,b.inventory,b.last,&extra);
+    if(count!=15)goto done;
+    if(!strcmp(magic,"BROray-generation-unready-boot-ended/1"))b.unready=1;
+    else if(strcmp(magic,"BROray-generation-boot-ended/1"))goto done;
+    int n=gb_text(&b,canonical);if(n<0||n>=2048||record.size!=(size_t)n||memcmp(record.bytes,canonical,(size_t)n)||
        !hex64(b.scope)||!hex64(b.seal)||!hex64(b.ready)||!hex64(b.host)||!hex64(b.journal)||!hex64(b.launch)||!hex64(b.transaction)||!hex64(b.inventory)||!hex64(b.last))goto done;
     struct gb_record actual=b;if(gb_measure(base,domain,&actual))goto done;
     n=gb_text(&actual,canonical);if(n<0||n>=2048||record.size!=(size_t)n||memcmp(record.bytes,canonical,(size_t)n))goto done;
@@ -736,17 +759,30 @@ static int sc_predecessor(struct sc_node *n,char retired[65],char host[65],char 
     return sc_stopped_seal(n,0)||sc_terminal(n,retired,host)||sc_ready(n,0,ready)||sc_stop_tree(n,tree)?-1:0;
 }
 static int sc_boot_retire(struct sc_node *n){
-    if(!strcmp(n->born,boot)||sc_load_node(n)||sc_host_record(n))return -1;
+    if(!strcmp(n->born,boot)||sc_load_node(n))return -1;
     int domain=checked_directory(pl.domain),host=checked_directory(pl.host),gens=-1,whole=-1,life=-1,result=-1;
     char path[PATH_MAX],name[128],text[2048],current[64];struct gb_record b;memset(&b,0,sizeof b);
     struct migration_file r,saved;memset(&r,0,sizeof r);memset(&saved,0,sizeof saved);
+    struct migration_file host_record;memset(&host_record,0,sizeof host_record);
     if(domain<0||host<0||sc_join(path,sc.uppath,"generations"))goto done;gens=checked_directory(path);
     if(gens<0||(whole=sc_lock_exact(gens,".generation-lifetime.lock",0))<0||
        (life=sc_lock_exact(domain,"lifetime.lock",0))<0||flock(host,LOCK_EX|LOCK_NB)||migration_boot(current)||!strcmp(current,n->born))goto done;
+    /* An ordinary failed start has no READY pin for its host. Bind the exact
+     * private host record to the complete witnessed ledger before publishing
+     * any boot proof. This grants no live process or signalling authority. */
+    if(sc_file(host,"host.record",&host_record)||(n->host[0]&&strcmp(n->host,host_record.sha)))goto done;
+    strcpy(n->host,host_record.sha);
     strcpy(b.id,n->id);strcpy(b.manifest,sc.input.manifest);strcpy(b.from,n->born);strcpy(b.through,current);
     strcpy(b.seal,sc.seal);strcpy(b.host,n->host);strcpy(b.launch,n->launch);strcpy(b.transaction,n->transaction);scope_digest(pl.domain,b.scope);
     int k=snprintf(name,sizeof name,"ready-%s.record",n->id);
-    if(k<0||k>=(int)sizeof name||sc_file(sc.cycles,name,&r))goto done;strcpy(b.ready,r.sha);
+    if(k<0||k>=(int)sizeof name)goto done;
+    int ready_exists=sc_record_exists(sc.cycles,name);if(ready_exists<0)goto done;
+    if(ready_exists){if(sc_file(sc.cycles,name,&r))goto done;}
+    else{
+        if(!n->index||sc_file(domain,"state.json",&r))goto done;
+        b.unready=1;
+    }
+    strcpy(b.ready,r.sha);
     int exists=sc_record_exists(domain,"boot-ended.receipt");if(exists<0)goto done;
     if(exists){
         if(sc_service_file(domain,"boot-ended.receipt",&saved,NULL))goto done;
@@ -757,7 +793,7 @@ static int sc_boot_retire(struct sc_node *n){
     if(gb_measure(domain,pl.domain,&b))goto done;k=gb_text(&b,text);
     if(k<0||k>=2048||sc_publish(domain,"boot-ended.receipt",text,(size_t)k,1)||gb_validate(domain,pl.domain,NULL))goto done;
     result=0;
- done:if(life>=0)close(life);if(whole>=0)close(whole);if(gens>=0)close(gens);if(host>=0)close(host);if(domain>=0)close(domain);free(r.bytes);free(saved.bytes);return result;
+ done:if(life>=0)close(life);if(whole>=0)close(whole);if(gens>=0)close(gens);if(host>=0)close(host);if(domain>=0)close(domain);free(host_record.bytes);free(r.bytes);free(saved.bytes);return result;
 }
 /* Preserve old daemon projections under their own boot receipt instead of
  * deleting them. Only exact, private, boot-ended markers may move. A foreign
@@ -768,7 +804,13 @@ static int sc_boot_markers(struct sc_node *n,int finish){
     struct migration_file saved;memset(&saved,0,sizeof saved);
     char receipt_name[128],receipt[256];unsigned mask=7;
     int archive=-1,result=-1;if(sc_boot_proof(n,&b,proof))goto done;
-    int k=snprintf(name,sizeof name,"ready-%s.record",n->id);if(k<0||k>=(int)sizeof name||sc_file(sc.cycles,name,&r))goto done;
+    int k;
+    if(b.unready){
+        int domain=checked_directory(pl.domain);if(domain<0)goto done;record_name(b.total,name);
+        int bad=sc_file(domain,name,&r);close(domain);if(bad||strcmp(r.sha,b.last))goto done;
+    }else{
+        k=snprintf(name,sizeof name,"ready-%s.record",n->id);if(k<0||k>=(int)sizeof name||sc_file(sc.cycles,name,&r))goto done;
+    }
     const char *u=strstr(r.bytes,",\"updater\":{\"pid\":");long pid;
     if(!u||sscanf(u,",\"updater\":{\"pid\":%ld,",&pid)!=1||pid<=1||pid>INT_MAX)goto done;
     k=snprintf(expected,sizeof expected,"%ld\n",pid);if(k<=0||k>=(int)sizeof expected)goto done;
