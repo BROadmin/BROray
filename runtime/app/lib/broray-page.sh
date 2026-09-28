@@ -2338,6 +2338,16 @@ broray_system_worker_acceptance_publish() {
     sync
 }
 
+broray_system_spawn_worker() {
+    # ash builtins suffice on Entware; keep the inherited coordinator fd.
+    (
+        trap '' HUP
+        export BRORAY_SYSTEM_LIB
+        exec /opt/bin/ash "$@"
+    ) </dev/null >>"$BRORAY_LOG" 2>&1 &
+    BRORAY_LAUNCHED_WORKER_PID=$!
+}
+
 broray_system_start_worker() {
     operation="$1"; mode="${2:-}"
     worker_acceptance_path="${BRORAY_WORKER_ACCEPTANCE_FILE:-}"
@@ -2407,16 +2417,12 @@ broray_system_start_worker() {
         broray_system_global_lock_release
         return 1
     }
-    command -v start-stop-daemon >/dev/null 2>&1 || {
-        broray_system_handoff_retire "$handoff" "$operation_id" >/dev/null 2>&1 || true
-        rm -f "$worker_bin" "$worker_lib"
-        broray_system_global_lock_release
-        return 1
-    }
-    BRORAY_SYSTEM_LIB="$worker_lib" start-stop-daemon \
-        -S -b -m -p "$worker_pidfile" -x /opt/bin/ash -O "$BRORAY_LOG" -- \
+    # Keep the inherited coordinator flock through the existing exact-owner
+    # handoff. Daemonizing via start-stop-daemon may close that descriptor.
+    BRORAY_SYSTEM_LIB="$worker_lib" broray_system_spawn_worker \
         "$worker_bin" "worker-$operation" "$operation_id" "$mode" "$handoff" \
-        "$worker_acceptance_path" || {
+        "$worker_acceptance_path"
+    printf '%s\n' "$BRORAY_LAUNCHED_WORKER_PID" >"$worker_pidfile" || {
         broray_system_handoff_retire "$handoff" "$operation_id" >/dev/null 2>&1 || true
         rm -f "$worker_pidfile" "$worker_bin" "$worker_lib"
         broray_system_global_lock_release
@@ -2487,6 +2493,11 @@ broray_system_worker_finish() {
     worker_bin="$1"; worker_lib="$2"
     if [ -n "${BRORAY_CURRENT_OPERATION_ID:-}" ] && command -v broray_operation_finalize_from_state >/dev/null 2>&1; then broray_operation_finalize_from_state "$BRORAY_CURRENT_OPERATION_ID" >/dev/null 2>&1 || true; fi
     broray_system_global_lock_release || return 1
+    # The completed/error operation and its own legacy fence must no longer
+    # block canonical S22 admission. The kernel scope still excludes rivals.
+    if [ "${uninstall_opkg_committed:-false}" != true ]; then
+        broray_system_uninstall_updater_restore || return 1
+    fi
     worker_pidfile="$BRORAY_WORKER_ROOT/pid-${BRORAY_CURRENT_OPERATION_ID:-}"
     if [ -n "${BRORAY_CURRENT_OPERATION_ID:-}" ] &&
        [ -f "$worker_pidfile" ] && [ ! -L "$worker_pidfile" ] &&
@@ -2496,6 +2507,36 @@ broray_system_worker_finish() {
         rm -f "$worker_pidfile"
     fi
     rm -f "$worker_bin" "$worker_lib"
+}
+
+broray_system_uninstall_guard_assert() {
+    [ "${BRORAY_OPS_SCOPE_FD:-}" = 6 ] || return 1
+    "${BRORAY_OPS_GUARD:-$BRORAY_BASE/bin/broray-ops-guard}" \
+        --assert-held "$BRORAY_STATE_ROOT/operations.guard"
+}
+
+broray_system_uninstall_stop_proven() {
+    broray_system_uninstall_guard_assert || return 1
+    printf '%s\n' "${BRORAY_UNINSTALL_UPDATER_STOP_PROOF:-}" | jq -es '
+      length==1 and .[0].ok==true and .[0].phase=="SERVICE_STOP_COMPLETED" and
+      .[0].serviceStopped==true and .[0].platformReady==false and
+      (.[0].generationId|type=="string" and length>0)' >/dev/null 2>&1
+}
+
+broray_system_uninstall_updater_restore() {
+    [ "${BRORAY_UNINSTALL_UPDATER_WAS_RUNNING:-false}" = true ] || return 0
+    broray_system_uninstall_stop_proven || return 1
+    /opt/bin/ash "$BRORAY_INIT_ROOT/S22broray-updater" start >>"$BRORAY_LOG" 2>&1 &&
+        /opt/bin/ash "$BRORAY_INIT_ROOT/S22broray-updater" status >>"$BRORAY_LOG" 2>&1 || return 1
+    BRORAY_UNINSTALL_UPDATER_WAS_RUNNING=false
+}
+
+broray_system_uninstall_scope_release() {
+    # Called only in an ordinary service's launch subshell. The uninstall
+    # worker keeps its descriptor until finalization and updater restoration.
+    [ "${BRORAY_OPS_SCOPE_FD:-}" = 6 ] || return 1
+    exec 6>&-
+    unset BRORAY_OPS_SCOPE_FD BRORAY_OPS_SCOPE_LOCK BRORAY_OPS_GUARD_HELD
 }
 
 broray_system_uninstall_start() {
@@ -2520,7 +2561,39 @@ broray_system_uninstall_start() {
         return 1
     }
 
-    broray_system_start_worker uninstall "$mode"
+    uninstall_guard="${BRORAY_OPS_GUARD:-$BRORAY_BASE/bin/broray-ops-guard}"
+    if [ -z "${BRORAY_OPS_SCOPE_FD:-}" ]; then
+        [ -f "$BRORAY_STATE_ROOT/operations.guard" ] &&
+            [ ! -L "$BRORAY_STATE_ROOT/operations.guard" ] || return 1
+        "$uninstall_guard" --scope "$BRORAY_STATE_ROOT/operations.guard" \
+            /opt/bin/ash "$BRORAY_BIN" uninstall-start "$mode" "$confirmation"
+        return $?
+    fi
+    broray_system_uninstall_guard_assert || return 1
+    for uninstall_fence in "$BRORAY_GLOBAL_LOCK" "$BRORAY_COMPACT_GLOBAL_LOCK" "$BRORAY_COMPACT_REQUEST_LOCK"; do
+        if [ -e "$uninstall_fence" ] || [ -L "$uninstall_fence" ]; then
+            broray_system_error_json OPERATION_CONFLICT 'Другая операция BROray выполняется или требует восстановления.'
+            return 1
+        fi
+    done
+    BRORAY_UNINSTALL_UPDATER_WAS_RUNNING=false
+    /opt/bin/ash "$BRORAY_INIT_ROOT/S22broray-updater" status >/dev/null 2>&1 &&
+        BRORAY_UNINSTALL_UPDATER_WAS_RUNNING=true
+    # Canonical stop enters before the legacy uninstall fence is published.
+    # The same kernel flock excludes updater start and all modern writers
+    # continuously, including after the HTTP request process has exited.
+    BRORAY_UNINSTALL_UPDATER_STOP_PROOF="$(/opt/bin/ash "$BRORAY_INIT_ROOT/S22broray-updater" stop)" &&
+        broray_system_uninstall_stop_proven || {
+            broray_system_error_json UPDATER_STOP_UNCONFIRMED 'Остановка updater не подтверждена. Удаление не началось.'
+            return 1
+        }
+    export BRORAY_UNINSTALL_UPDATER_WAS_RUNNING BRORAY_UNINSTALL_UPDATER_STOP_PROOF
+    uninstall_admission_rc=0
+    broray_system_start_worker uninstall "$mode" || uninstall_admission_rc=$?
+    if [ "$uninstall_admission_rc" != 0 ]; then
+        broray_system_uninstall_updater_restore || return 1
+    fi
+    return "$uninstall_admission_rc"
 }
 
 broray_system_worker_uninstall() {
@@ -2742,10 +2815,12 @@ broray_system_worker_uninstall() {
         while IFS= read -r restore_service
         do
             case "$restore_service" in
-                S22broray-updater|S23broray-monitor|S25broray-web|S27broray-auto-switch|S28broray-subscriptions)
+                S22broray-updater) : ;; # Restored after legacy finalization.
+                S23broray-monitor|S25broray-web|S27broray-auto-switch|S28broray-subscriptions)
                     restore_init="$BRORAY_INIT_ROOT/$restore_service"
                     if [ -x "$restore_init" ]; then
-                        /opt/bin/ash "$restore_init" start >>"$BRORAY_LOG" 2>&1 ||
+                        ( broray_system_uninstall_scope_release &&
+                          exec /opt/bin/ash "$restore_init" start ) >>"$BRORAY_LOG" 2>&1 ||
                             services_restore_failed=true
                     else
                         services_restore_failed=true
@@ -2767,6 +2842,7 @@ broray_system_worker_uninstall() {
     }
 
     broray_system_uninstall_aux_services_stop() {
+        broray_system_uninstall_stop_proven || return 1
         : >"$uninstall_services" || return 1
         chmod 600 "$uninstall_services" || return 1
 
@@ -2786,6 +2862,10 @@ broray_system_worker_uninstall() {
             S28broray-subscriptions S27broray-auto-switch S25broray-web \
             S23broray-monitor S22broray-updater
         do
+            if [ "$stop_service" = S22broray-updater ]; then
+                broray_system_uninstall_stop_proven || return 1
+                continue
+            fi
             stop_init="$BRORAY_INIT_ROOT/$stop_service"
             [ -x "$stop_init" ] || continue
             /opt/bin/ash "$stop_init" stop >>"$BRORAY_LOG" 2>&1 || return 1
@@ -2978,10 +3058,12 @@ broray_system_worker_uninstall() {
         # Do not hold the native OPKG FIFO across a persistent daemon start.
         if broray_lifecycle_uninstall_owner; then
             if [ "$uninstall_xray_running" = true ]; then
-                /opt/bin/ash "$BRORAY_INIT_ROOT/S24broray" restart \
+                ( broray_system_uninstall_scope_release &&
+                  exec /opt/bin/ash "$BRORAY_INIT_ROOT/S24broray" restart ) \
                     >>"$BRORAY_LOG" 2>&1 || restore_failed=true
             else
-                /opt/bin/ash "$BRORAY_INIT_ROOT/S24broray" stop \
+                ( broray_system_uninstall_scope_release &&
+                  exec /opt/bin/ash "$BRORAY_INIT_ROOT/S24broray" stop ) \
                     >>"$BRORAY_LOG" 2>&1 || restore_failed=true
             fi
         else restore_failed=true; fi
@@ -3347,7 +3429,7 @@ EOF_UNINSTALL_BUNDLES
     lifecycle_library="$BRORAY_BASE/lib/component-lifecycle.sh"
     if [ ! -f "$lifecycle_library" ] || [ -L "$lifecycle_library" ] ||
        [ ! -r "$lifecycle_library" ] || ! . "$lifecycle_library" ||
-       ! command -v broray_lifecycle_routes_remove_all >/dev/null 2>&1 ||
+       ! command -v broray_lifecycle_dot_remove_owned >/dev/null 2>&1 ||
        ! command -v broray_lifecycle_keenetic_delete >/dev/null 2>&1 ||
        ! command -v broray_lifecycle_web_publish_delete >/dev/null 2>&1 ||
        ! command -v broray_lifecycle_servers_deactivate >/dev/null 2>&1 ||
@@ -3457,15 +3539,15 @@ EOF_UNINSTALL_BUNDLES
     # snapshot, owned Keenetic objects, routes and prior service state.
     uninstall_mutation_started=true
 
-    broray_system_status_write "$operation_id" uninstall running routes 25 \
-        'Удаляются маршруты BROray.' ''
-    broray_lifecycle_routes_remove_all >>"$BRORAY_LOG" 2>&1 || {
-        broray_system_uninstall_abort routes 'Удаление маршрутов не завершено.'
+    broray_system_status_write "$operation_id" uninstall running dot 25 \
+        'Удаляются управляемые записи DNS-over-TLS BROray.' ''
+    broray_lifecycle_dot_remove_owned >>"$BRORAY_LOG" 2>&1 || {
+        broray_system_uninstall_abort dot 'Удаление DNS-over-TLS BROray не завершено.'
         return 1
     }
 
     broray_system_status_write "$operation_id" uninstall running keenetic 38 \
-        'Удаляется управляемый ProxyN.' ''
+        'Удаляется управляемый ProxyN; связанные маршруты удаляет Keenetic.' ''
     broray_lifecycle_keenetic_delete >>"$BRORAY_LOG" 2>&1 || {
         broray_system_uninstall_abort keenetic 'Удаление управляемого ProxyN не завершено.'
         return 1
@@ -3849,6 +3931,7 @@ broray_system_main() {
             worker_bin="$0"
             worker_lib="${BRORAY_SYSTEM_LIB:-$BRORAY_BASE/lib/broray-page.sh}"
             result=0
+            broray_system_uninstall_stop_proven || return 1
             broray_system_global_lock_worker_adopt "$operation_id" "$handoff" || return 1
             if ! broray_system_select_operation "$operation_id"; then
                 result=1

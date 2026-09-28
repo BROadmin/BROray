@@ -141,20 +141,55 @@ done:
     return rc;
 }
 
+/* Explicit uninstall scope only. Normal coordinator calls never set this
+ * descriptor: unrelated workers still acquire independent flock descriptions.
+ * The descriptor is inherited by the sequential teardown worker, not inferred
+ * from an environment boolean or a PID. */
+static int scope_fd(const char *path) {
+    const char *value=getenv("BRORAY_OPS_SCOPE_FD");
+    char *end=NULL; struct stat named,opened;
+    if(!value||!*value||path[0]!='/')return -1;
+    errno=0;long n=strtol(value,&end,10);
+    if(errno||!end||*end||n!=6)return -1;
+    int fd=(int)n,flags=fcntl(fd,F_GETFL);
+    if(flags<0||(flags&O_ACCMODE)!=O_RDWR||lstat(path,&named)||fstat(fd,&opened)||
+       !S_ISREG(named.st_mode)||named.st_uid!=geteuid()||(named.st_mode&0077)||named.st_nlink!=1||
+       named.st_dev!=opened.st_dev||named.st_ino!=opened.st_ino||
+       flock(fd,LOCK_EX|LOCK_NB))return -1;
+    if(lstat(path,&named)||named.st_dev!=opened.st_dev||named.st_ino!=opened.st_ino||
+       !S_ISREG(named.st_mode)||named.st_nlink!=1)return -1;
+    return fd;
+}
+
 int main(int argc, char **argv) {
     int fd, flags, attempts = 0;
+    int scope=0;
     struct stat before, after;
     struct timespec pause = {0, 10000000};
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
         puts("broray-ops-guard/6 flock-fork-exec atomic-fence durable-state durable-append sync-state");
         return 0;
     }
+    if(argc==3&&!strcmp(argv[1],"--assert-held"))return scope_fd(argv[2])<0?74:0;
+    if(argc>=4&&!strcmp(argv[1],"--scope")){scope=1;--argc;++argv;}
     if (argc==4 && strcmp(argv[1],"--publish-fence")==0) return publish_fence(argv[2],argv[3]);
     if (argc==4 && strcmp(argv[1],"--replace-file")==0) return replace_file(argv[2],argv[3]);
     if (argc==3 && strcmp(argv[1],"--sync-state")==0) return sync_state(argv[2]);
     if (argc==4 && strcmp(argv[1],"--append-file")==0) return append_file(argv[2],argv[3]);
     if (argc < 3 || argv[1][0] != '/' || argv[2][0] != '/') return 64;
     umask(077);
+    if(getenv("BRORAY_OPS_SCOPE_FD")){
+        const char *scope_lock=getenv("BRORAY_OPS_SCOPE_LOCK");
+        if(!scope_lock)return 74;
+        fd=scope_fd(scope_lock);
+        if(fd<0)return 74;
+        if(!strcmp(scope_lock,argv[1])){
+            if(setenv("BRORAY_OPS_GUARD_HELD","1",1))return 74;
+            execv(argv[2],argv+2);return 74;
+        }
+        /* A route resource has a separate lock. Keep the verified global
+         * descriptor and acquire that distinct lock normally below. */
+    }
     fd = open(argv[1], O_RDWR | O_CREAT | O_NOFOLLOW, 0600);
     if (fd < 0) return 74;
     if (fstat(fd, &before) || !S_ISREG(before.st_mode) || before.st_nlink != 1 ||
@@ -176,6 +211,14 @@ int main(int argc, char **argv) {
     flags = fcntl(fd, F_GETFD);
     if (flags < 0 || fcntl(fd, F_SETFD, flags & ~FD_CLOEXEC) < 0) return 74;
     if (setenv("BRORAY_OPS_GUARD_HELD", "1", 1)) return 74;
+    if(scope){
+        if(fd!=6){
+            if(fcntl(6,F_GETFD)>=0||errno!=EBADF||dup2(fd,6)<0)return 74;
+            close(fd);
+        }
+        if(setenv("BRORAY_OPS_SCOPE_FD","6",1)||
+           setenv("BRORAY_OPS_SCOPE_LOCK",argv[1],1))return 74;
+    }
     execv(argv[2], argv + 2);
     perror("broray-ops-guard exec");
     return 74;

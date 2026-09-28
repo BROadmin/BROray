@@ -66,49 +66,10 @@ broray_lifecycle_component() {
     return "$component_rc"
 }
 
-broray_lifecycle_routes_remove_all() {
-    routes_cli="$BRORAY_LIFECYCLE_BASE/bin/broray-routes"
-    dot_cli="$BRORAY_LIFECYCLE_BASE/bin/broray-routes-dot"
-    routes_bundles="$BRORAY_LIFECYCLE_BASE/routes/bundles.json"
-    [ -x "$routes_cli" ] || return 1
-    [ -f "$routes_bundles" ] && [ ! -L "$routes_bundles" ] || return 1
-    [ -r "$BRORAY_LIFECYCLE_BASE/lib/routes-summary.sh" ] || return 1
-    jq -e '
-      (.bundles|type)=="array" and
-      ((.bundles|length)==(.bundles|unique|length)) and
-      all(.bundles[]; type=="string" and length>0 and
-          all(explode[];
-              (.>=48 and .<=57) or (.>=65 and .<=90) or
-              (.>=97 and .<=122) or .==45 or .==46 or .==95))
-    ' "$routes_bundles" >/dev/null 2>&1 || return 1
-    routes_bundle_list="$(jq -r '.bundles[]' "$routes_bundles" 2>/dev/null)" || return 1
-    . "$BRORAY_LIFECYCLE_BASE/lib/routes-summary.sh"
-
-    while IFS= read -r routes_bundle_id
-    do
-        [ -n "$routes_bundle_id" ] || continue
-        summary="$(
-            broray_routes_summary "$routes_bundle_id" 2>/dev/null
-        )" || return 1
-
-        installed="$(
-            printf '%s' "$summary" |
-                jq -er '.installed | if .==true then "true" elif .==false then "false" else error("invalid") end' \
-                    2>/dev/null
-        )" || return 1
-
-        case "$installed" in
-            true) broray_lifecycle_component route-delete "$routes_bundle_id" || return 1 ;;
-            false) ;;
-            *) return 1 ;;
-        esac
-    done <<EOF_ROUTES_BUNDLES
-$routes_bundle_list
-EOF_ROUTES_BUNDLES
-
-    # DNS-over-TLS has an independent ownership receipt and transaction
-    # engine.  Removing ordinary route bundles must not strand those owned
-    # Keenetic entries when the package is uninstalled.
+broray_lifecycle_dot_remove_owned() {
+    # Keenetic removes interface routes when the owned interface is deleted.
+    # DoT is independent: delete only the verified managed entries under its
+    # existing confirmation and ownership protocol.
     if [ "${uninstall_dot_owned:-false}" = true ]; then
         broray_lifecycle_component dot-delete >/dev/null || return 1
     fi

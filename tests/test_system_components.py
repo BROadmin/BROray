@@ -47,15 +47,48 @@ broray_routes_router_delete_run() { echo DELETE >>"$BRORAY_ROOT/changed"; }
 broray_server_deactivate() { echo DEACTIVATE >>"$BRORAY_ROOT/changed"; }
 broray_server_deactivate_commit() { echo DEACTIVATE >>"$BRORAY_ROOT/changed"; }
 ''')
-        # Independent DoT protocol is outside this regression's scope.
+        # Independent DoT protocol is outside this wiring regression's scope.
+        (self.app/'tmp').mkdir(exist_ok=True)
+        (self.app/'lib/routes-dot.sh').write_text('''
+broray_dot_delete_preview() { echo '{"fixture":true}'; }
+broray_dot_delete() {
+    [ "$(cat "$1")" = '{"fixture":true}' ] || return 1
+    echo DOT_DELETE >>"$BRORAY_ROOT/changed"
+}
+''')
         (self.app/'bin/broray-routes-dot').write_text('#!/bin/ash\nexit 0\n')
         for p in (self.app/'bin').iterdir():p.chmod(0o700)
     def shell(self,cmd):
         return subprocess.run(['/bin/ash','-c',SETUP+cmd],env=self.env,capture_output=True,timeout=40)
-    def test_uninstall_deletes_owned_bundle_under_its_existing_fence(self):
-        p=self.shell('broray_lifecycle_routes_remove_all\n')
+    def test_uninstall_removes_interface_without_individual_route_deletes(self):
+        # Execute the actual worker sequence; only external device calls are
+        # replaced. Keenetic's route cascade needs separate physical evidence.
+        page=(self.app/'lib/broray-page.sh').read_text()
+        sequence=page.split('    uninstall_mutation_started=true\n',1)[1].split(
+            '    broray_system_status_write "$operation_id" uninstall running publish',1)[0]
+        (self.app/'lib/keenetic-page.sh').write_text('''
+broray_keenetic_run_action() {
+    [ "$1" = delete ] || return 1
+    echo INTERFACE_DELETE >>"$BRORAY_ROOT/changed"
+}
+''')
+        p=self.shell('''
+broray_system_status_write() { :; }
+broray_system_uninstall_abort() { return 1; }
+BRORAY_LOG="$BRORAY_ROOT/sequence.log"
+uninstall_dot_owned=false
+fixture_remove() {
+'''+sequence+'\n}\nfixture_remove\n')
         self.assertEqual(p.returncode,0,(p.stdout,p.stderr))
-        self.assertEqual((self.app/'changed').read_text(),'DELETE\n')
+        self.assertEqual((self.app/'changed').read_text(),'INTERFACE_DELETE\n')
+    def test_uninstall_deletes_owned_dot_under_its_existing_fence(self):
+        p=self.shell('uninstall_dot_owned=true; broray_lifecycle_dot_remove_owned\n')
+        self.assertEqual(p.returncode,0,(p.stdout,p.stderr))
+        self.assertEqual((self.app/'changed').read_text(),'DOT_DELETE\n')
+    def test_uninstall_preserves_unowned_dot_and_does_not_delete_routes(self):
+        p=self.shell('uninstall_dot_owned=false; broray_lifecycle_dot_remove_owned\n')
+        self.assertEqual(p.returncode,0,(p.stdout,p.stderr))
+        self.assertFalse((self.app/'changed').exists())
     def test_uninstall_deactivates_under_its_existing_fence(self):
         p=self.shell('broray_lifecycle_servers_deactivate\n')
         self.assertEqual(p.returncode,0,(p.stdout,p.stderr))
@@ -66,12 +99,12 @@ broray_server_deactivate_commit() { echo DEACTIVATE >>"$BRORAY_ROOT/changed"; }
         p=self.shell('broray_lifecycle_component route-export fixture\n')
         self.assertEqual(p.returncode,0,(p.stdout,p.stderr));self.assertEqual((self.app/'changed').read_text(),'BUILD\nAPPLY\n')
     def test_failed_control_fence_prevents_mutation(self):
-        p=self.shell('broray_tx_control_transition_begin() { return 1; }; broray_lifecycle_routes_remove_all\n')
+        p=self.shell('broray_tx_control_transition_begin() { return 1; }; uninstall_dot_owned=true; broray_lifecycle_dot_remove_owned\n')
         self.assertNotEqual(p.returncode,0);self.assertFalse((self.app/'changed').exists())
     def test_foreign_owner_and_wrong_action_remain_blocked(self):
         for mutation in ['printf "update\\n" >"$BRORAY_GLOBAL_LOCK/action"',
                          'printf "BAD\\n" >"$BRORAY_GLOBAL_LOCK/owner-identity.tsv"']:
-            p=self.shell(mutation+'\nbroray_lifecycle_routes_remove_all\n')
+            p=self.shell(mutation+'\nuninstall_dot_owned=true; broray_lifecycle_dot_remove_owned\n')
             self.assertNotEqual(p.returncode,0,(p.stdout,p.stderr));self.assertFalse((self.app/'changed').exists())
 
 if __name__=='__main__':
