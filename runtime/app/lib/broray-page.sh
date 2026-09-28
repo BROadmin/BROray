@@ -2883,7 +2883,156 @@ broray_system_worker_uninstall() {
         return 0
     }
 
+    broray_system_uninstall_artifact_regular() {
+        local p="$1" wanted="$2"
+        [ -f "$p" ] && [ ! -L "$p" ] || return 1
+        [ "$(find -P "$p" -maxdepth 0 -type f -printf '%U:%m:%n')" = "0:$wanted:1" ]
+    }
+
+    broray_system_uninstall_artifact_dir() {
+        [ -d "$1" ] && [ ! -L "$1" ] || return 1
+        [ "$(find -P "$1" -maxdepth 0 -type d -printf '%U:%m')" = '0:700' ]
+    }
+
+    broray_system_uninstall_artifact_verify() {
+        local p="$1" name digest index kind op base binding intent entry expected metadata matches row
+        [ -d "${p%/*}" ] && [ ! -L "${p%/*}" ] || return 1
+        broray_system_uninstall_artifact_dir /opt/var/lib/broray/operations || return 1
+        broray_system_uninstall_artifact_regular "$p" 755 || return 1
+        name="${p##*/}"
+        case "$name" in
+            .broray-pt-*.previous) kind=pt; digest="${name#.broray-pt-}" ;;
+            .broray-bg-*.previous) kind=bg; digest="${name#.broray-bg-}" ;;
+            *) return 1 ;;
+        esac
+        index="${digest#*-}"; index="${index%.previous}"; digest="${digest%%-*}"
+        [ "${#digest}" = 64 ] || return 1
+        case "$digest" in *[!0-9a-f]*) return 1 ;; esac
+        case "$kind:$index:$p" in
+            pt:0:/opt/bin/.broray-pt-*|pt:1:/opt/etc/init.d/.broray-pt-*|bg:1:/opt/etc/init.d/.broray-bg-*) ;;
+            *) return 1 ;;
+        esac
+        matches=0
+        for op in /opt/var/lib/broray/operations/op-*; do
+            [ -e "$op" ] || [ -L "$op" ] || continue
+            broray_system_uninstall_artifact_dir "$op" || return 1
+            for base in "$op/platform-install" "$op/platform-replacement-install" "$op/platform-migration"; do
+                [ -e "$base" ] || [ -L "$base" ] || continue
+                broray_system_uninstall_artifact_dir "$base" || return 1
+                intent="$base/intent.record"
+                broray_system_uninstall_artifact_regular "$intent" 600 || return 1
+                [ "$(sha256sum "$intent" | cut -d ' ' -f 1)" = "$digest" ] || continue
+                broray_system_uninstall_artifact_regular "$op/state.json" 600 || return 1
+                jq -e '.operation=="system:platform-preflight" and .running==false and
+                    (.state=="completed" or .state=="recovered")' "$op/state.json" >/dev/null || return 1
+                if [ "$kind" = pt ]; then
+                    case "$base" in */platform-install|*/platform-replacement-install) ;; *) return 1 ;; esac
+                    binding="$base.record"
+                    broray_system_uninstall_artifact_regular "$binding" 600 || return 1
+                    [ "$(cat "$binding")" = "$(printf 'BROray-%s-binding/1\n%s' "${base##*/}" "$digest")" ] || return 1
+                    entry="$base/entry-$index.intent"
+                    broray_system_uninstall_artifact_regular "$entry" 600 || return 1
+                    [ "$(wc -l <"$entry" | tr -d ' ')" = 8 ] || return 1
+                    [ "$(sed -n '1p' "$entry")" = 'BROray-platform-install-entry/1' ] &&
+                    [ "$(sed -n '2p' "$entry")" = "$digest" ] &&
+                    [ "$(sed -n '3p' "$entry")" = "$index" ] &&
+                    [ "$(sed -n '5p' "$entry")" = 0755 ] || return 1
+                    expected="$(sed -n '4p' "$entry")"
+                    metadata="$(find -P "$p" -maxdepth 0 -printf '%D:%i')"
+                    [ "$metadata" = "$(sed -n '7p' "$entry"):$(sed -n '8p' "$entry")" ] || return 1
+                else
+                    [ "$base" = "$op/platform-migration" ] || return 1
+                    [ "$(sed -n '1p' "$intent")" = 'BROray-updater-migration/1' ] &&
+                    [ "$(sed -n '2p' "$intent")" = "$base" ] &&
+                    [ "$(sed -n '6p' "$intent")" = "${op##*/}" ] || return 1
+                    broray_system_uninstall_artifact_dir "$op/platform-bootguard" || return 1
+                    entry="$op/platform-bootguard/intent.record"
+                    broray_system_uninstall_artifact_regular "$entry" 600 || return 1
+                    [ "$(sed -n '1p' "$entry")" = 'BROray-boot-guard-staging/1' ] &&
+                    [ "$(sed -n '4p' "$entry")" = "$base" ] &&
+                    [ "$(sed -n '5p' "$entry")" = "$digest" ] || return 1
+                    row="$(awk -F '\t' '$1=="opt/etc/init.d/S22broray-updater" {n++;r=$0} END{if(n==1)print r;else exit 1}' "$intent")" || return 1
+                    [ "$(printf '%s\n' "$row" | cut -f 2,3)" = "$(printf '1\t0755')" ] || return 1
+                    expected="$(printf '%s\n' "$row" | cut -f 4)"
+                    broray_system_uninstall_artifact_regular "$op/platform-bootguard/before-1" 600 || return 1
+                    [ "$(sha256sum "$op/platform-bootguard/before-1" | cut -d ' ' -f 1)" = "$expected" ] || return 1
+                fi
+                [ "$(sha256sum "$p" | cut -d ' ' -f 1)" = "$expected" ] || return 1
+                matches=$((matches+1))
+            done
+        done
+        [ "$matches" = 1 ] || return 1
+        printf 'F\t%s\t%s\t%s\n' "$p" "$(find -P "$p" -maxdepth 0 -printf '%D:%i:%m:%n')" "$expected"
+    }
+
+    broray_system_uninstall_artifact_inventory() {
+        local p root rel inventory expected row
+        for p in /opt/bin/.broray-pt-* /opt/bin/.broray-bg-* /opt/etc/init.d/.broray-pt-* /opt/etc/init.d/.broray-bg-*; do
+            [ -e "$p" ] || [ -L "$p" ] || continue
+            broray_system_uninstall_artifact_verify "$p" || return 1
+        done
+        root=/opt/var/lib/broray-platform-handoff
+        [ -e "$root" ] || [ -L "$root" ] || return 0
+        broray_system_uninstall_artifact_dir "$root" || return 1
+        [ ! -e "$root/worker.lock" ] && [ ! -L "$root/worker.lock" ] || return 1
+        broray_system_uninstall_artifact_regular "$root/status.json" 600 &&
+        broray_system_uninstall_artifact_regular "$root/phase" 600 || return 1
+        jq -e '.schemaVersion==1 and .contract=="broray-universal-platform-handoff/1" and
+            .running==false and (.state=="success" or .state=="error")' "$root/status.json" >/dev/null || return 1
+        case "$(cat "$root/phase")" in complete|rolled-back) ;; *) return 1 ;; esac
+        # A terminal legacy namespace has only these generated records and its
+        # seven-file platform backup. Unknown children retain the entire tree.
+        inventory="$(find -P "$root" -mindepth 1 -printf '%P\n')" || return 1
+        while IFS= read -r rel; do
+            [ -n "$rel" ] || continue
+            p="$root/$rel"
+            case "$rel" in
+                platform-backup|platform-backup/opt|platform-backup/opt/bin|platform-backup/opt/etc|platform-backup/opt/etc/init.d|platform-backup/opt/libexec|platform-backup/opt/libexec/broray-updater)
+                    broray_system_uninstall_artifact_dir "$p" || return 1
+                    printf 'D\t%s\t%s\t-\n' "$p" "$(find -P "$p" -maxdepth 0 -printf '%D:%i:%m:%n')"; continue ;;
+                status.json|phase|worker.pid|request.json|daemon-was-running|platform-backup/inventory.tsv)
+                    broray_system_uninstall_artifact_regular "$p" 600 || return 1 ;;
+                platform-backup/opt/bin/broray-updaterctl|platform-backup/opt/etc/init.d/S22broray-updater|platform-backup/opt/libexec/broray-updater/broray-compat.sh|platform-backup/opt/libexec/broray-updater/broray-migrate-legacy.sh|platform-backup/opt/libexec/broray-updater/minisign|platform-backup/opt/libexec/broray-updater/broray-updater.sh|platform-backup/opt/libexec/broray-updater/xray-wrapper)
+                    broray_system_uninstall_artifact_regular "$p" 755 &&
+                    broray_system_uninstall_artifact_regular "$root/platform-backup/inventory.tsv" 600 || return 1
+                    row="$(awk -F '\t' -v path="${rel#platform-backup/}" '$2==path{n++;r=$0}END{if(n==1)print r;else exit 1}' "$root/platform-backup/inventory.tsv")" || return 1
+                    [ "$(printf '%s\n' "$row" | cut -f 1)" = present ] || return 1
+                    expected="$(printf '%s\n' "$row" | cut -f 3)"
+                    [ "$(sha256sum "$p" | cut -d ' ' -f 1)" = "$expected" ] || return 1 ;;
+                *) return 1 ;;
+            esac
+            printf 'F\t%s\t%s\t%s\n' "$p" "$(find -P "$p" -maxdepth 0 -printf '%D:%i:%m:%n')" "$(sha256sum "$p" | cut -d ' ' -f 1)"
+        done <<EOF_UNINSTALL_LEGACY
+$inventory
+EOF_UNINSTALL_LEGACY
+        printf 'D\t%s\t%s\t-\n' "$root" "$(find -P "$root" -maxdepth 0 -printf '%D:%i:%m:%n')"
+    }
+
+    broray_system_uninstall_artifact_remove() {
+        local list="$BRORAY_OPKG_AUTH_ROOT/platform-artifacts.tsv" kind p metadata digest
+        broray_system_uninstall_artifact_dir "$BRORAY_OPKG_AUTH_ROOT" || return 1
+        [ ! -e "$list" ] && [ ! -L "$list" ] || return 1
+        (umask 077; set -C; broray_system_uninstall_artifact_inventory >"$list") || return 1
+        chmod 600 "$list" && sync || return 1
+        # Keep this inventory with the existing finalization recovery marker
+        # until every owned payload has gone. Journals are still present here.
+        while IFS="$(printf '\t')" read -r kind p metadata digest; do
+            [ "$kind" = F ] || continue
+            [ "$(find -P "$p" -maxdepth 0 -type f -printf '%D:%i:%m:%n')" = "$metadata" ] &&
+            [ ! -L "$p" ] && [ "$(sha256sum "$p" | cut -d ' ' -f 1)" = "$digest" ] || return 1
+            rm -- "$p" || return 1
+        done <"$list"
+        # Children sort before parents; rmdir refuses any unexpected survivor.
+        sort -r "$list" | while IFS="$(printf '\t')" read -r kind p metadata digest; do
+            [ "$kind" = D ] || continue
+            [ ! -L "$p" ] && [ "$(find -P "$p" -maxdepth 0 -type d -printf '%D:%i:%m')" = "${metadata%:*}" ] || return 1
+            rmdir -- "$p" || return 1
+        done || return 1
+        sync
+    }
+
     broray_system_uninstall_payload_preflight() {
+        broray_system_uninstall_artifact_inventory >/dev/null || return 1
         for owned_root in /opt/broray /opt/var/lib/broray /opt/var/lib/broray-updater
         do
             [ -d "$owned_root" ] && [ ! -L "$owned_root" ] || return 1
@@ -2963,6 +3112,7 @@ broray_system_worker_uninstall() {
     }
 
     broray_system_uninstall_payload_finalize() {
+        broray_system_uninstall_artifact_remove || return 1
         finalize_failed=false
 
         for finalize_service in \
@@ -2991,7 +3141,7 @@ broray_system_worker_uninstall() {
         for finalized_path in \
             /opt/broray /opt/libexec/broray-updater /opt/bin/broray-updaterctl \
             /opt/var/lib/broray /opt/var/lib/broray-updater \
-            /opt/var/lock/broray
+            /opt/var/lib/broray-platform-handoff /opt/var/lock/broray
         do
             [ ! -e "$finalized_path" ] && [ ! -L "$finalized_path" ] || finalize_failed=true
         done
