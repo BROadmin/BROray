@@ -1,5 +1,5 @@
 """Real connection monitor lifecycle, private files and harmless address source."""
-import ctypes,json,os,subprocess,time,unittest
+import ctypes,fcntl,json,os,subprocess,time,unittest
 from test_service_lifecycle import Services,ROOT
 class MonitorService(unittest.TestCase):
     tearDown=Services.tearDown
@@ -28,6 +28,30 @@ class MonitorService(unittest.TestCase):
     def direct(self):
         p=subprocess.Popen(['/bin/ash',str(self.app/'bin/broray-connection-monitor')],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         self.children.append(p);return p
+    def test_00_stop_during_real_history_maintenance_under_coordinator_lock(self):
+        self.state.mkdir(mode=0o700)
+        operations=self.state/'operations';operations.mkdir()
+        evidence=operations/'KEEP';evidence.write_bytes(b'existing evidence\n')
+        lock=self.state/'operations.guard'
+        with lock.open('w') as held:
+            lock.chmod(0o600);fcntl.flock(held,fcntl.LOCK_EX)
+            wrapper=self.app/'bin/fixture-maintenance'
+            wrapper.write_text('''#!/bin/ash
+echo entered >"$BRORAY_ROOT/tmp/maintenance.ready"
+exec /bin/ash "$BRORAY_ROOT/bin/broray-log-maintenance" --once
+''')
+            p=self.direct();self.wait_running(p)
+            until=time.monotonic()+10
+            while not (self.app/'tmp/maintenance.ready').exists():
+                self.assertLess(time.monotonic(),until);time.sleep(.1)
+            try:
+                self.call('stop')
+                self.assertFalse(json.loads(self.call('status-json').stdout)['running'])
+                p.communicate(timeout=10);self.assertEqual(p.returncode,0)
+            finally:
+                fcntl.flock(held,fcntl.LOCK_UN)
+        self.assertEqual(list(operations.iterdir()),[evidence])
+        self.assertEqual(evidence.read_bytes(),b'existing evidence\n')
     def test_empty_status_does_not_create_state(self):
         data=json.loads(self.call('status-json').stdout)
         self.assertTrue(data['complete']);self.assertFalse(data['running']);self.assertFalse(self.state.exists())

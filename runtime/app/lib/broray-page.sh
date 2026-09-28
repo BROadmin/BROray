@@ -2819,9 +2819,16 @@ broray_system_worker_uninstall() {
                 S23broray-monitor|S25broray-web|S27broray-auto-switch|S28broray-subscriptions)
                     restore_init="$BRORAY_INIT_ROOT/$restore_service"
                     if [ -x "$restore_init" ]; then
-                        ( broray_system_uninstall_scope_release &&
-                          exec /opt/bin/ash "$restore_init" start ) >>"$BRORAY_LOG" 2>&1 ||
-                            services_restore_failed=true
+                        if [ "$restore_service" = S25broray-web ]; then
+                            # Synchronous runtime preparation needs our held
+                            # coordinator. S25 drops it only for the daemon exec.
+                            /opt/bin/ash "$restore_init" start >>"$BRORAY_LOG" 2>&1 ||
+                                services_restore_failed=true
+                        else
+                            ( broray_system_uninstall_scope_release &&
+                              exec /opt/bin/ash "$restore_init" start ) >>"$BRORAY_LOG" 2>&1 ||
+                                services_restore_failed=true
+                        fi
                     else
                         services_restore_failed=true
                     fi

@@ -212,7 +212,18 @@ start()
     broray_web_prepare_runtime_binary || return 1
     broray_web_configure_bind "$lan" || return 1
     broray_network_store_lan_ip "$lan" || return 1
-    "$RUNTIME_BINARY" -f "$CONF" || return 1
+    (
+        # Rollback may hold the coordinator while preparing runtime above.
+        # Only the new daemon loses that verified scope; its parent keeps it.
+        if [ -n "${BRORAY_OPS_SCOPE_FD:-}" ]; then
+            [ "$BRORAY_OPS_SCOPE_FD" = 6 ] && [ -n "${BRORAY_OPS_SCOPE_LOCK:-}" ] || exit 73
+            "${BRORAY_OPS_GUARD:-$BASE/bin/broray-ops-guard}" \
+                --assert-held "$BRORAY_OPS_SCOPE_LOCK" || exit 73
+            exec 6>&-
+            unset BRORAY_OPS_SCOPE_FD BRORAY_OPS_SCOPE_LOCK BRORAY_OPS_GUARD_HELD
+        fi
+        exec "$RUNTIME_BINARY" -f "$CONF"
+    ) || return 1
     sleep 1
 
     status >/dev/null 2>&1 || {

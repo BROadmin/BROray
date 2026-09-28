@@ -89,6 +89,13 @@ broray_ops_call()
         else
             response="$("$guard" "$state/operations.guard" "$ash" "$controller" "$@")" || rc=$?
         fi
+        if [ "${1:-}" = history-prune ] && [ "$rc" = 75 ] && [ -z "$response" ]; then
+            # Retention is optional maintenance. No command ran under the busy
+            # guard; defer to the next pass so its monitor can stop cooperatively.
+            # Never retry an executed command or treat an unknown reply as PASS.
+            printf '%s\n' '{"ok":false,"errorCode":"HISTORY_MAINTENANCE_DEFERRED"}'
+            return 77
+        fi
         if [ "$rc" = 75 ] && [ -z "$response" ] &&
            [ -n "${BRORAY_SERVICE_GENERATION:-}" ] &&
            command -v broray_service_stop_requested >/dev/null 2>&1; then

@@ -15,6 +15,32 @@ class Web(unittest.TestCase):
   self.env.update({'BRORAY_WEB_BASE':str(self.app),'BRORAY_WEB_SOURCE_BINARY':str(self.app/'bin/lighttpd'),'BRORAY_WEB_RUNTIME_BINARY':str(self.app/'runtime/broray-lighttpd')})
  def shell(self,command='start',extra=''):
   p=subprocess.run(['/bin/ash','-c','. "$BRORAY_ROOT/init-defs.sh"\nsleep(){ :; };status(){ return 0; };\n'+extra+'\n'+command],env=self.env,capture_output=True,timeout=25);return p
+ def test_00_rollback_prepares_under_scope_but_daemon_does_not_inherit_it(self):
+  Path('/opt/bin').mkdir(parents=True,exist_ok=True)
+  if not Path('/opt/bin/ash').exists():Path('/opt/bin/ash').symlink_to('/bin/ash')
+  guard=ROOT.parent/'.local/bin/linux-guard';state=self.app/'state';state.mkdir(mode=0o700)
+  self.env.update({'BRORAY_OPS_GUARD':str(guard),'BRORAY_STATE_ROOT':str(state)})
+  (self.app/'bin/broray-runtime-prepare').write_text('''#!/bin/ash
+"$BRORAY_OPS_GUARD" --assert-held "$BRORAY_STATE_ROOT/operations.guard" || exit 90
+echo prepared >"$BRORAY_ROOT/prepared"
+''')
+  (self.app/'bin/lighttpd').write_text('''#!/bin/ash
+[ "$1" != -tt ] || exit 0
+[ -z "${BRORAY_OPS_SCOPE_FD:-}" ] || exit 91
+[ ! -e /proc/self/fd/6 ] || exit 92
+echo started >"$BRORAY_ROOT/launches"
+''')
+  init=self.app/'init';init.mkdir();launcher=init/'S25broray-web'
+  launcher.write_text('#!/bin/ash\n. "$BRORAY_ROOT/init-defs.sh"\nsleep(){ :; };status(){ return 0; };start\n');launcher.chmod(0o700)
+  page=(ROOT/'runtime/app/lib/broray-page.sh').read_text()
+  restore=page.split('    broray_system_uninstall_aux_services_restore() {',1)[1].split('    broray_system_uninstall_auth_retire()',1)[0]
+  release=page.split('broray_system_uninstall_scope_release() {',1)[1].split('broray_system_uninstall_start()',1)[0]
+  services=self.app/'services';services.write_text('S25broray-web\n')
+  self.env.update({'BRORAY_INIT_ROOT':str(init),'BRORAY_LOG':str(self.app/'restore.log'),'uninstall_services':str(services)})
+  code='broray_system_uninstall_scope_release() {'+release+'\nbroray_system_uninstall_aux_services_restore() {'+restore+'\nbroray_system_uninstall_aux_services_restore\n'
+  p=subprocess.run([str(guard),'--scope',str(state/'operations.guard'),'/bin/ash','-c',code],env=self.env,capture_output=True,timeout=25)
+  self.assertEqual(p.returncode,0,(p.stdout,p.stderr,(self.app/'restore.log').read_text()))
+  self.assertEqual((self.app/'prepared').read_text(),'prepared\n');self.assertEqual((self.app/'launches').read_text(),'started\n')
  def test_start_two_private_keeps_saved_bind(self):
   before=self.settings.read_bytes();r=self.shell();self.assertEqual(r.returncode,0,(r.stdout,r.stderr));self.assertEqual((self.app/'run/lan-ip').read_text(),'192.168.2.1\n');self.assertIn('server.bind = "192.168.2.1"',self.conf.read_text());self.assertEqual(self.settings.read_bytes(),before)
  def test_start_explicit_web_pin_keeps_socks(self):
