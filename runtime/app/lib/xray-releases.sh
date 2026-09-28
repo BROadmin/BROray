@@ -148,7 +148,8 @@ broray_xray_update_check() (
 
 broray_xray_install_request_valid() {
     jq -se -L "$BRORAY_BASE/lib" 'include "xray-releases"; length==1 and (.[0] | type=="object" and
-        (keys|sort)==["allowDowngrade","allowPrerelease","allowUntested","archiveSha256","currentVersion","tag"] and
+        ((del(.allowPartial)|keys|sort)==["allowDowngrade","allowPrerelease","allowUntested","archiveSha256","currentVersion","tag"]) and
+        ((has("allowPartial")|not) or (.allowPartial|type)=="boolean") and
         (.tag|valid_tag) and (.currentVersion|type)=="string" and
         (.archiveSha256|sha256) and
         ([.allowDowngrade,.allowPrerelease,.allowUntested]|all(.[];type=="boolean")))' "$1" >/dev/null 2>&1 &&
@@ -170,7 +171,7 @@ broray_xray_selected_check() {
         'include "xray-releases"; .+{brorayCompatibility:compatibility($records;$context)}|summarize($current)' "$BRORAY_XRAY_UPDATE_WORK/selected.json")" || return 1
     [ "$(printf '%s' "$target"|jq -r .archiveSha256)" = "$(jq -r .archiveSha256 "$request")" ] || { broray_xray_update_error 'Контрольная сумма выбранного релиза изменилась. Повторите проверку версий.'; return 1; }
     compatibility="$(printf '%s' "$target"|jq -r .compatibility.status)"
-    [ "$compatibility" != incompatible ] || { broray_xray_update_error 'Выбранная версия несовместима с этой сборкой BROray.'; return 1; }
+    if [ "$compatibility" = incompatible ] && [ "$(jq -r .allowPartial "$request")" != true ]; then broray_xray_update_error 'Подтвердите установку частично совместимой версии Xray после ознакомления с её ограничениями.'; return 1; fi
     if [ "$compatibility" = untested ] && [ "$(jq -r .allowUntested "$request")" != true ]; then broray_xray_update_error 'Подтвердите установку версии, не проверявшейся на совместимость с BROray.'; return 1; fi
     if [ "$(printf '%s' "$target"|jq -r .prerelease)" = true ] && [ "$(jq -r .allowPrerelease "$request")" != true ]; then broray_xray_update_error 'Подтвердите установку предварительного релиза.'; return 1; fi
     old="$(broray_xray_version_key "$current")"; new="$(broray_xray_version_key "${tag#v}")"

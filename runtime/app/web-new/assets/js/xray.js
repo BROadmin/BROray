@@ -233,7 +233,7 @@
 
     function installable(row) {
         return Boolean(row && row.available === true && /^[a-f0-9]{64}$/.test(row.archiveSha256 || "") &&
-            compatibilityStatus(row) !== "incompatible" && catalogCurrentVersion &&
+            catalogCurrentVersion &&
             spaceReady(row) &&
             (!latestStatus || latestStatus.version === catalogCurrentVersion));
     }
@@ -251,13 +251,23 @@
         return key(row.version) < key(catalogCurrentVersion);
     }
 
+    function compatibilityLimitations(row) {
+        var details = row && row.compatibility && row.compatibility.limitations;
+        return Array.isArray(details) ? details.filter(function (text) {
+            return typeof text === "string" && text.trim();
+        }) : [];
+    }
+
     function releaseWarnings(row) {
         var warnings = [];
         if (!row.available || !/^[a-f0-9]{64}$/.test(row.archiveSha256 || "")) {
             warnings.push("Официальный архив этой версии не подтверждён. Установка недоступна.");
         }
         if (compatibilityStatus(row) === "incompatible") {
-            warnings.push("Установка недоступна: часть конфигураций BROray не поддерживается этой версией Xray.");
+            warnings.push("Частично совместима с BROray. Установку можно продолжить с учётом ограничений.");
+            var limitations = compatibilityLimitations(row);
+            warnings.push(limitations.length ? "Не поддерживаются: " + limitations.join("; ") + "." :
+                "В сохранённых проверках выявлены несовместимости; подробный перечень ограничений отсутствует.");
         } else if (compatibilityStatus(row) === "untested") {
             warnings.push("Мы не подтверждали совместимость этой версии с вашей сборкой BROray.");
         }
@@ -268,6 +278,11 @@
     }
 
     function renderSelectedRelease() {
+        var row = selectedRelease();
+        var details = byId("xray-selected-release-note");
+        details.hidden = !row;
+        details.textContent = row ? "Xray " + row.version + ": " + (releaseWarnings(row) ||
+            "Совместима с BROray по выполненным проверкам. Известных ограничений в проверенных конфигурациях нет.") : "";
         applyControlState();
     }
 
@@ -308,14 +323,14 @@
         if (controlsLocked || catalogLoading || !installable(row)) return;
         var body = {tag: row.tagName, currentVersion: catalogCurrentVersion, archiveSha256: row.archiveSha256,
             allowUntested: compatibilityStatus(row) === "untested", allowPrerelease: row.prerelease === true,
-            allowDowngrade: isDowngrade(row)};
+            allowDowngrade: isDowngrade(row), allowPartial: compatibilityStatus(row) === "incompatible"};
         runAction("install.cgi", button, {
             body: body, busyLabel: "Запуск…", background: true, operation: "install",
             successMessage: "Установка выбранной версии запущена.",
             confirm: {title: (row.installed ? "Переустановить Xray " : "Установить Xray ") + row.version + "?",
                 message: releaseWarnings(row) + " Архив и действующая конфигурация будут проверены. Соединение кратковременно прервётся, если Xray запущен. При ошибке замены будет выполнен откат.",
                 acceptLabel: body.allowDowngrade ? "Подтвердить понижение" : "Подтвердить установку",
-                danger: body.allowDowngrade || body.allowPrerelease || body.allowUntested}
+                danger: body.allowDowngrade || body.allowPrerelease || body.allowUntested || body.allowPartial}
         }).catch(function (error) { window.BROrayUI.toast(errorMessage(error), "error"); });
     }
 

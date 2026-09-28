@@ -1301,7 +1301,10 @@
           "96b37c25de642909c74349910c4fb5cfb444445911aa82bb4f0aed48184fde02",
           "9e86fc6c1b8c91c0bf7bd1c0c087f0fa29ef745920d9b1a04fc074c2182c41c7"
         ]
-      }
+      },
+      "limitations": [
+        "Hysteria2: переключение UDP-портов (udphop)"
+      ]
     },
     {
       "candidateId": "3.2.0-r01c23",
@@ -1322,7 +1325,10 @@
           "96b37c25de642909c74349910c4fb5cfb444445911aa82bb4f0aed48184fde02",
           "9e86fc6c1b8c91c0bf7bd1c0c087f0fa29ef745920d9b1a04fc074c2182c41c7"
         ]
-      }
+      },
+      "limitations": [
+        "Hysteria2: переключение UDP-портов (udphop)"
+      ]
     },
     {
       "candidateId": "3.2.0-r01c23",
@@ -1343,7 +1349,10 @@
           "96b37c25de642909c74349910c4fb5cfb444445911aa82bb4f0aed48184fde02",
           "9e86fc6c1b8c91c0bf7bd1c0c087f0fa29ef745920d9b1a04fc074c2182c41c7"
         ]
-      }
+      },
+      "limitations": [
+        "Hysteria2: переключение UDP-портов (udphop)"
+      ]
     },
     {
       "candidateId": "3.2.0-r01c23",
@@ -1364,7 +1373,10 @@
           "96b37c25de642909c74349910c4fb5cfb444445911aa82bb4f0aed48184fde02",
           "9e86fc6c1b8c91c0bf7bd1c0c087f0fa29ef745920d9b1a04fc074c2182c41c7"
         ]
-      }
+      },
+      "limitations": [
+        "Hysteria2: переключение UDP-портов (udphop)"
+      ]
     },
     {
       "candidateId": "3.2.0-r01c23",
@@ -1387,7 +1399,11 @@
           "9bf081acce7e2142615c5a804c7aaa7547ef57d8d636f95f13438bd79e1b90e5",
           "9e86fc6c1b8c91c0bf7bd1c0c087f0fa29ef745920d9b1a04fc074c2182c41c7"
         ]
-      }
+      },
+      "limitations": [
+        "Hysteria2: переключение UDP-портов (udphop)",
+        "VLESS и VMess: параметры seed и headerType транспорта mKCP (mkcp-legacy)"
+      ]
     },
     {
       "candidateId": "3.2.0-r01c23",
@@ -1416,7 +1432,12 @@
           "c102a1447ac5373a63e80d6d956765eca322580e85beed4954d585c561b48203",
           "d9ab5fc42a964e9f9d614432baf54d298f1bd7337c8b378abdb6542d323c49de"
         ]
-      }
+      },
+      "limitations": [
+        "Hysteria2: переключение UDP-портов (udphop)",
+        "VLESS и VMess: параметры seed и headerType транспорта mKCP (mkcp-legacy)",
+        "VLESS, VMess и Trojan: проверенные настройки TCP-фрагментации FinalMask (fragment)"
+      ]
     }
   ]
 }

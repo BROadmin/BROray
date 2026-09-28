@@ -61,8 +61,8 @@ def compatibility($records; $context):
       (.testedAt | type == "string" and length > 0) and (.evidence | type == "string" and length > 0) and
       (.status == "compatible" or .status == "incompatible")
     )] | sort_by([(.status == "incompatible"), (.candidateId == $context.candidateId), .testedAt]) | last
-  | if . == null then {status:"untested",label:"Не проверялась на совместимость с BROray"}
-    else . + {label:(if .status == "compatible" then "Совместима с BROray" else "Несовместима с BROray" end)} end;
+  | if . == null then {status:"untested",label:"Совместимость не проверялась"}
+    else . + {label:(if .status == "compatible" then "Совместима с BROray" else "Частично совместима с BROray" end)} end;
 def summarize($current):
   {tagName:.tag_name, version:(.tag_name|ltrimstr("v")), prerelease, publishedAt:.published_at,
    installed:(.tag_name == ("v"+$current)), available:true,
