@@ -2161,7 +2161,14 @@ services_stop_captured()
     for service in S28broray-subscriptions S27broray-auto-switch S25broray-web S24broray S23broray-monitor
     do
         state="$(awk -F '\t' -v service="$service" '$1 == service {print $2; exit}' "$services_file")"
-        [ "$state" = running ] || continue
+        # The target app must restore its management UI even when the old
+        # S25 refused startup after protected platform migration. Keep the
+        # captured state unchanged so rollback restores the original services.
+        if [ "${1:-}" = target ] && [ "$service" = S25broray-web ]; then
+            case "$state" in running|stopped) ;; *) return 1 ;; esac
+        else
+            [ "$state" = running ] || continue
+        fi
         service_call stop "$service" >>"$CURRENT_OPERATION_LOG" 2>&1 || return 1
     done
 }
@@ -2175,7 +2182,14 @@ services_start_captured()
     for service in S23broray-monitor S24broray S25broray-web S27broray-auto-switch S28broray-subscriptions
     do
         state="$(awk -F '\t' -v service="$service" '$1 == service {print $2; exit}' "$services_file")"
-        [ "$state" = running ] || continue
+        # The target app must restore its management UI even when the old
+        # S25 refused startup after protected platform migration. Keep the
+        # captured state unchanged so rollback restores the original services.
+        if [ "${1:-}" = target ] && [ "$service" = S25broray-web ]; then
+            case "$state" in running|stopped) ;; *) return 1 ;; esac
+        else
+            [ "$state" = running ] || continue
+        fi
         service_call start "$service" >>"$CURRENT_OPERATION_LOG" 2>&1 || return 1
     done
     routes_reconcile_wait || return 1
@@ -2187,10 +2201,22 @@ services_health_captured()
     local services_file service state
     services_file="$CURRENT_OPERATION_DIR/services.tsv"
     [ -s "$services_file" ] || return 1
+    if [ "${1:-}" = target ]; then
+        awk -F '\t' '$1 == "S25broray-web" {
+            count++; valid = (NF == 2 && ($2 == "running" || $2 == "stopped"))
+        } END {exit !(count == 1 && valid)}' "$services_file" || return 1
+    fi
 
     while read -r service state
     do
-        [ "$state" = running ] || continue
+        # The target app must restore its management UI even when the old
+        # S25 refused startup after protected platform migration. Keep the
+        # captured state unchanged so rollback restores the original services.
+        if [ "${1:-}" = target ] && [ "$service" = S25broray-web ]; then
+            case "$state" in running|stopped) ;; *) return 1 ;; esac
+        else
+            [ "$state" = running ] || continue
+        fi
         service_call status "$service" >>"$CURRENT_OPERATION_LOG" 2>&1 || return 1
     done <"$services_file"
 }
@@ -2335,7 +2361,7 @@ slot_health()
     slot_root="$CURRENT_PATH"
     slot_tree_valid "$slot_root" || return 1
     xray_config_valid "$slot_root" || return 1
-    services_health_captured || return 1
+    services_health_captured "${2:-}" || return 1
     webui_backend_health "$expected_slot" || return 1
     routes_verify_captured || return 1
 
@@ -2464,7 +2490,7 @@ rollback_after_switch()
         "$reason" true false || true
     operation_log "ROLLBACK_BEGIN reason=$reason target=$target_slot previous=$previous_slot"
 
-    services_stop_captured >>"$CURRENT_OPERATION_LOG" 2>&1 || true
+    services_stop_captured target >>"$CURRENT_OPERATION_LOG" 2>&1 || true
 
     layout_rc=0
     rollback_layout "$previous_slot" "$target_slot" || layout_rc=$?
@@ -2907,20 +2933,20 @@ request_process()
 
     status_write \
         "$operation" running starting 82 \
-        'Запускаются службы в том же состоянии, что до обновления.' \
+        'Восстанавливаются службы и запускается WebUI новой версии.' \
         '' true false || return 1
 
-    if ! services_start_captured; then
+    if ! services_start_captured target; then
         rollback_after_switch "$operation" SERVICE_START_FAILED
         return 1
     fi
 
     status_write \
         "$operation" running health 92 \
-        'Проверяются новый slot, конфигурация Xray, службы и JSON backend страницы BROray.' \
+        'Проверяются новый slot, конфигурация Xray, службы, HTTP WebUI и JSON backend страницы BROray.' \
         '' true false || return 1
 
-    if ! failpoint before-health || ! slot_health "$target_slot"; then
+    if ! failpoint before-health || ! slot_health "$target_slot" target; then
         rollback_after_switch "$operation" POST_SWITCH_HEALTH_FAILED
         return 1
     fi
@@ -3040,8 +3066,8 @@ recover_incomplete()
 
         if [ "$actual" = "$target_slot" ]; then
             operation_log 'RECOVERY current directory is target; completing health gate.'
-            services_start_captured >>"$CURRENT_OPERATION_LOG" 2>&1 || true
-            if slot_health "$target_slot"; then
+            services_start_captured target >>"$CURRENT_OPERATION_LOG" 2>&1 || true
+            if slot_health "$target_slot" target; then
                 release_prune_after_success "$previous_slot" || operation_log 'RELEASE_PRUNE=SKIPPED'
                 state_seed_commit || return 1
                 status_write "$operation" success complete 100 'Updater восстановил операцию после перезапуска; новый slot исправен.' '' true false || return 1
