@@ -5,14 +5,15 @@ umask 077
 [ "${BRORAY_OPS_SUPERVISED:-}" = ptrace/1 ] || exit 73
 BRORAY_BASE="${BRORAY_ROOT:-/opt/broray}"
 BRORAY_XRAY_UPDATE_WORK="$1"
-case "$BRORAY_XRAY_UPDATE_WORK" in "$BRORAY_BASE/tmp/xray-job-$BRORAY_BACKGROUND_OPERATION_ID-"*) ;; *) exit 73 ;; esac
-[ -d "$BRORAY_XRAY_UPDATE_WORK" ] && [ ! -L "$BRORAY_XRAY_UPDATE_WORK" ] || exit 73
-[ "$(cat "$BRORAY_XRAY_UPDATE_WORK/operation-id")" = "$BRORAY_BACKGROUND_OPERATION_ID" ] || exit 73
 BRORAY_XRAY_DOWNLOAD_ROOT="$BRORAY_XRAY_UPDATE_WORK/download"
 BRORAY_XRAY_UPDATE_TMP_ROOT="$BRORAY_XRAY_UPDATE_WORK"
 export BRORAY_XRAY_UPDATE_WORK BRORAY_XRAY_DOWNLOAD_ROOT BRORAY_XRAY_UPDATE_TMP_ROOT
 . "$BRORAY_BASE/lib/xray-control.sh"
 . "$BRORAY_BASE/lib/xray-update.sh"
+broray_xray_ram="$(broray_xray_update_ram_root)" || exit 73
+case "$BRORAY_XRAY_UPDATE_WORK" in "$broray_xray_ram/xray-job-$BRORAY_BACKGROUND_OPERATION_ID-"*) ;; *) exit 73 ;; esac
+[ -d "$BRORAY_XRAY_UPDATE_WORK" ] && [ ! -L "$BRORAY_XRAY_UPDATE_WORK" ] || exit 73
+[ "$(cat "$BRORAY_XRAY_UPDATE_WORK/operation-id")" = "$BRORAY_BACKGROUND_OPERATION_ID" ] || exit 73
 . "$BRORAY_BASE/lib/xray-releases.sh"
 broray_xray_update_mode="$2"
 broray_xray_requested_file="$BRORAY_XRAY_UPDATE_WORK/request.json"
@@ -314,8 +315,8 @@ broray_xray_update_prepare_body()
         return 1
     }
 
-    # The signed archive has already been verified and extracted. Releasing it
-    # before replacement keeps /opt consumption bounded by one new binary.
+    # The signed archive has already been verified and extracted. Release its
+    # RAM before replacement; only the final binary is copied onto /opt.
     rm -f "$broray_xray_archive" "$broray_xray_digest"
 
     jq -n --arg current "$broray_xray_current_version" --arg target "$broray_xray_target_version" \

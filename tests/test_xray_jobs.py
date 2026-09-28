@@ -59,6 +59,60 @@ printf 'Filesystem 1K-blocks Used Available Use%% Mounted on\nfixture 262144 409
         for name,body in scripts.items():
             path=self.app/'bin'/name;path.write_text(body);path.chmod(0o755)
     def command(self):return 'exec "$BRORAY_OPS_ASH" "$BRORAY_ROOT/bin/broray" xray install "$TEST_REQUEST"'
+    def test_a_ram_preparation_preserves_installation_space(self):
+        # Model the observed /opt quota: one installation fits, but staging
+        # another copy there consumes the reserve needed by atomic commit.
+        df=self.app/'bin/df'
+        df.write_text('''#!/bin/ash
+available=221184
+for f in "$BRORAY_ROOT"/tmp/xray-job-*/xray.new; do
+ [ ! -f "$f" ] || available=512
+done
+printf 'Filesystem 1K-blocks Used Available Use%% Mounted on\\nfixture 262144 40960 %s 16%% /fixture\\n' "$available"
+''')
+        df.chmod(0o755)
+        curl=self.app/'bin/curl'
+        curl.write_text(curl.read_text().replace('[ -n "$out" ] || exit 2',
+            '[ -n "$out" ] || exit 2\nprintf "%s\\n" "$out" >>"$TEST_FIXTURE/download-paths"'))
+        p=self.shell(self.command(),timeout=150)
+        self.assertTrue(json.loads(p.stdout)['success'],p.stdout+p.stderr)
+        paths=(self.temp/'download-paths').read_text().splitlines()
+        self.assertTrue(paths)
+        for name in paths:self.assertTrue(name.startswith(str(self.temp/'ram')+'/xray-job-'),name)
+        self.assertEqual(self.binary.read_bytes(),(ROOT/'.local/bin/linux-xray-install-new').read_bytes())
+        self.assertEqual(self.config.read_text(),'{"PRIVATE_CANARY":"unchanged"}')
+        self.assertEqual(list((self.temp/'ram').glob('xray-job-*')),[])
+        self.assertEqual(list((self.app/'tmp').glob('xray-job-*')),[])
+        self.assert_drained()
+    def test_b_space_rejection_does_not_stop_running_xray(self):
+        # Execute the production commit function; service adapters only record
+        # calls. A capacity failure must precede any stop/start side effect.
+        p=self.shell('''
+. "$BRORAY_ROOT/lib/xray-update.sh"
+BRORAY_XRAY_UPDATE_WORK="$TEST_FIXTURE/commit"
+mkdir "$BRORAY_XRAY_UPDATE_WORK"
+broray_xray_candidate_size=35389566
+ broray_xray_is_running() { [ ! -f "$TEST_FIXTURE/service-calls" ]; }
+broray_xray_update_free_bytes() { echo 0; }
+broray_xray_stop() { echo stop >>"$TEST_FIXTURE/service-calls"; }
+broray_xray_start() { echo start >>"$TEST_FIXTURE/service-calls"; }
+broray_xray_update_commit
+''',expected=1)
+        self.assertFalse(json.loads(p.stdout)['success'])
+        self.assertIn('недостаточно места',json.loads(p.stdout)['error'])
+        self.assertFalse((self.temp/'service-calls').exists(),'Space failure stopped or restarted Xray')
+        self.assertEqual(self.binary.read_bytes(),self.before)
+    def test_c_ram_root_rejects_symlink_and_open_permissions(self):
+        ram=self.temp/'ram';ram.mkdir(mode=0o700,exist_ok=True)
+        command='. "$BRORAY_ROOT/lib/xray-update.sh"; broray_xray_update_ram_root'
+        self.assertEqual(self.shell(command).stdout.decode().strip(),str(ram))
+        ram.chmod(0o777)
+        self.shell(command,expected=1)
+        ram.chmod(0o700)
+        link=self.temp/'ram-link';link.symlink_to(ram,target_is_directory=True)
+        self.env['BRORAY_OPS_RAM_ROOT']=str(link)
+        self.shell(command,expected=1)
+        self.assertTrue(link.is_symlink());self.assertTrue(ram.is_dir())
     def test_ambiguous_old_xray_lock_is_not_reclaimed(self):
         lock=self.app/'update/xray.lock';lock.mkdir(parents=True)
         (lock/'foreign').write_text('KEEP')

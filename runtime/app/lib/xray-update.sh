@@ -384,10 +384,30 @@ broray_xray_update_lock_acquire()
 
 broray_xray_update_lock_release() { :; }
 
+broray_xray_update_ram_root()
+{
+    local ram
+    ram="${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}"
+    [ -d "$ram" ] && [ ! -L "$ram" ] || return 1
+    [ "$(readlink -f "$ram")" = "$ram" ] || return 1
+    [ "$(find -P "$ram" -maxdepth 0 -type d -uid "$(id -u)" -perm 0700 -print)" = "$ram" ] || return 1
+    # BusyBox stat on Keenetic has no -f. Use the longest matching mount,
+    # including nested mounts, and never fall back to persistent storage.
+    awk -v path="$ram" '
+      ($2=="/" || path==$2 || index(path,$2"/")==1) && length($2)>length(best) {
+        best=$2;fs=$3
+      }
+      END {exit !(fs=="tmpfs" || fs=="ramfs" || fs=="rootfs")}
+    ' /proc/mounts || return 1
+    printf '%s\n' "$ram"
+}
+
 broray_xray_update_work_clean()
 {
+    local ram
     [ "${BRORAY_XRAY_PREP_DRAINED:-false}" = true ] || return 0
-    case "${BRORAY_XRAY_UPDATE_WORK:-}" in "$BRORAY_BASE/tmp/xray-job-$BRORAY_BACKGROUND_OPERATION_ID-"*) ;; *) return 1 ;; esac
+    ram="$(broray_xray_update_ram_root)" || return 1
+    case "${BRORAY_XRAY_UPDATE_WORK:-}" in "$ram/xray-job-$BRORAY_BACKGROUND_OPERATION_ID-"*) ;; *) return 1 ;; esac
     [ -d "$BRORAY_XRAY_UPDATE_WORK" ] && [ ! -L "$BRORAY_XRAY_UPDATE_WORK" ] || return 1
     [ "$(cat "$BRORAY_XRAY_UPDATE_WORK/operation-id")" = "$BRORAY_BACKGROUND_OPERATION_ID" ] || return 1
     rm -rf "$BRORAY_XRAY_UPDATE_WORK" || return 1
@@ -492,12 +512,25 @@ broray_xray_commit_failure()
 
 broray_xray_update_commit()
 {
+    broray_xray_opt_free="$(
+        broray_xray_update_free_bytes "$BRORAY_BASE"
+    )"
+    broray_xray_opt_required="$(expr "$broray_xray_candidate_size" + 8388608)"
+    if [ "$broray_xray_opt_free" -lt "$broray_xray_opt_required" ]; then
+        broray_xray_update_error "На /opt недостаточно места для атомарной замены Xray."
+        return 1
+    fi
+
     broray_xray_was_running=false
 
     if broray_xray_is_running; then
         broray_xray_was_running=true
     fi
 
+    # The protected switching checkpoint precedes this call. A rejected
+    # capacity check has no service mutation and needs no service rollback.
+    BRORAY_XRAY_COMMIT_STARTED=true
+    BRORAY_JOB_UNRESOLVED=true
     if [ "$broray_xray_was_running" = "true" ]; then
         if ! broray_xray_stop \
             > "$BRORAY_XRAY_UPDATE_WORK/stop.log" \
@@ -513,28 +546,6 @@ broray_xray_update_commit()
                 "Xray продолжает работать после команды остановки."
             return 1
         fi
-    fi
-
-    broray_xray_opt_free="$(
-        broray_xray_update_free_bytes "$BRORAY_BASE"
-    )"
-
-    broray_xray_opt_required="$(
-        expr \
-            "$broray_xray_candidate_size" \
-            + 8388608
-    )"
-
-    if [ "$broray_xray_opt_free" -lt \
-         "$broray_xray_opt_required" ]
-    then
-        if [ "$broray_xray_was_running" = "true" ]; then
-            broray_xray_start >/dev/null 2>&1
-        fi
-
-        broray_xray_update_error \
-            "На /opt недостаточно места для атомарной замены Xray."
-        return 1
     fi
 
     rm -f "$BRORAY_XRAY_BINARY.new"

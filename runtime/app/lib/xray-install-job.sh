@@ -15,7 +15,7 @@ broray_xray_job_exit()
 
 broray_xray_update_install()
 {
-    local install_prepare_rc install_meta install_legacy
+    local install_prepare_rc install_meta install_legacy install_ram
     broray_job_require_owner || return $?
     broray_xray_update_mode="${1:-update}"
     case "$broray_xray_update_mode" in install|update|reinstall) ;; *) return 64 ;; esac
@@ -25,8 +25,9 @@ broray_xray_update_install()
     for install_legacy in "$BRORAY_XRAY_BINARY.new" "$BRORAY_XRAY_BINARY".broray-*-backup; do
         [ ! -e "$install_legacy" ] && [ ! -L "$install_legacy" ] || return 75
     done
-    mkdir -p "$BRORAY_BASE/tmp" || return 1
-    BRORAY_XRAY_UPDATE_WORK="$(mktemp -d "$BRORAY_BASE/tmp/xray-job-$BRORAY_BACKGROUND_OPERATION_ID-XXXXXX")" || return 1
+    broray_job_checkpoint fetching || return $?
+    install_ram="$(broray_xray_update_ram_root)" || return 1
+    BRORAY_XRAY_UPDATE_WORK="$(mktemp -d "$install_ram/xray-job-$BRORAY_BACKGROUND_OPERATION_ID-XXXXXX")" || return 1
     chmod 700 "$BRORAY_XRAY_UPDATE_WORK" || return 1
     printf '%s\n' "$BRORAY_BACKGROUND_OPERATION_ID" >"$BRORAY_XRAY_UPDATE_WORK/operation-id" || return 1
     BRORAY_XRAY_PREP_DRAINED=true
@@ -35,7 +36,6 @@ broray_xray_update_install()
         [ "$(wc -c <"$2")" -le 4096 ] || return 1
         cp "$2" "$BRORAY_XRAY_UPDATE_WORK/request.json" || return 1
     fi
-    broray_job_checkpoint fetching || return $?
     install_prepare_rc=0; BRORAY_XRAY_PREP_DRAINED=false
     broray_ops_run_helper 600 -- "${BRORAY_OPS_ASH:-/opt/bin/ash}" \
       "$BRORAY_BASE/lib/xray-install-prepare.sh" "$BRORAY_XRAY_UPDATE_WORK" "$broray_xray_update_mode" \
@@ -66,7 +66,5 @@ broray_xray_update_install()
     broray_xray_was_running=false
     broray_xray_is_running && broray_xray_was_running=true
     broray_job_checkpoint switching || return $?
-    BRORAY_XRAY_COMMIT_STARTED=true
-    BRORAY_JOB_UNRESOLVED=true
     broray_xray_update_commit
 }
