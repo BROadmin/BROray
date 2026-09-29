@@ -1,17 +1,17 @@
 name: Remove withdrawn BROray 3.2.0 release
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/remove-withdrawn-release.yml
+  issues:
+    types:
+      - opened
 
 permissions:
   contents: write
+  issues: read
 
 jobs:
   remove-release:
+    if: ${{ github.event.issue.title == 'REMOVE_WITHDRAWN_RELEASE_3_2_0' }}
     runs-on: ubuntu-latest
     steps:
       - name: Delete only the withdrawn v3.2.0-r01 release object
