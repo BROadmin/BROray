@@ -1,0 +1,27 @@
+name: Remove withdrawn BROray 3.2.0 release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/remove-withdrawn-release.yml
+
+permissions:
+  contents: write
+
+jobs:
+  remove-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete only the withdrawn v3.2.0-r01 release object
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='v3.2.0-r01'
+          expected_id='399291480'
+          actual_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq '.id')"
+          test "${actual_id}" = "${expected_id}"
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${expected_id}"
