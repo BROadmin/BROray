@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>История версий BROray</title>
+<meta name="description" content="История пользовательских релизов BROray: 3.2.0, 3.1.1, 3.1.0, 3.0.1, 3.0.0 и предыдущие версии.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray/releases/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/" aria-current="page">BROray</a>
+      <a href="/broray-light/">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/" aria-current="page">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero"><div><p class="eyebrow">Релизы</p><h1>История версий BROray</h1><p class="lead">Пользовательская история Stable-релизов. Внутренние candidate ID остаются только в технических сведениях.</p></div></section><section id="new"><h2>Что нового в BROray 3.2.0</h2><p>Stable · 29 сентября 2026</p><ul class="check-list"><li>Очередь фоновых операций с приоритетами: проверка активного соединения получает преимущество, длительные задания выполняются короткими этапами.</li><li>Исправлены пауза и возобновление автоматики, ручные и фоновые проверки серверов, обновление их результатов и статус активного подключения.</li><li>Расширена обработка URI VLESS, VMess, Trojan, Hysteria2 и Shadowsocks: декодирование параметров, transport/TLS, Hysteria2 без явного порта и сертификатные отпечатки. Неподдерживаемые параметры отклоняются с объяснением.</li><li>Исправлены BOM и пробелы в подписках, точное распознавание дубликатов и сохранение ID при смене реквизитов подключения. При частичном ответе прежние узлы сохраняются; после полного успешного обновления отсутствующие удаляются.</li><li>Восстановлены операции с готовыми и пользовательскими маршрутами, интерфейсом Keenetic и DNS-over-TLS, включая автопроверку DoT и защиту устаревшего подтверждения удаления.</li><li>При первой установке LAN-адрес определяется по конфигурации Keenetic; при неоднозначном выборе требуется явный выбор подходящего адреса.</li><li>Исправлены запуск, повторный запуск и восстановление updater после перезагрузки. Проверяются принадлежность процессов и готовность конкретного поколения; посторонние процессы не завершаются.</li><li>Полное удаление продолжает незавершённые шаги и удаляет подтверждённо принадлежащий BROray интерфейс; связанные маршруты удаляет Keenetic. Entware и чужая конфигурация сохраняются.</li><li>Статусы совместимости Xray привязаны к проверенным компонентам. Частично совместимую версию можно установить после подтверждения; ограничения выбранной версии показаны перед установкой.</li><li>Загрузка и проверка Xray выполняются в оперативной памяти с предварительной проверкой свободного места.</li><li>На Главной добавлена отдельная карточка DNS-over-TLS. Исправлены обновление сводки, сведения о версии, мобильная вёрстка, кнопки и сообщения об ошибках.</li><li>Списки фоновых операций и журнала сворачиваются; ограничено накопление завершённой истории и журналов. Исключена неиспользуемая графика.</li></ul><p><a class="button" href="/broray/start/">Установка и обновление</a></p><p>Приёмка: Keenetic Peak KN-2710, KeeneticOS 5.1.4; 10 страниц WebUI, более двух часов автоматики и три перезагрузки.</p></section><section id="history">
+    <h2>История версий</h2>
+
+    <h3>3.1.1</h3>
+    <p>Управление фоновыми операциями, восстановление блокировок, журнал, диагностический отчёт и импорт JSON-подписок Xray. Исправлены удаление и восстановление сохранённых настроек.</p>
+
+    <h3>3.1.0</h3>
+    <p><strong>Исправлено:</strong> определение рабочего процесса Xray, проверка SOCKS при замене ядра, фильтр предварительных версий и повторяющиеся подписи.</p>
+    <p><strong>Добавлено:</strong> выбор версии Xray со статусом совместимости, Xray 26.9.9 при чистой установке, запрет установки несовместимой 26.2.6. При обновлении BROray установленный Xray сохраняется; updater-v5 не изменён.</p>
+
+    <h3>3.0.1</h3>
+    <p><strong>Исправлено:</strong> восстановление и атомарное состояние монитора соединения, установка Wikipedia, повторяющийся статус DNS-over-TLS, свежесть качества, запуск служб при обновлении, восстановление планировщика подписок, синхронизация имени активного сервера с ProxyN, длинные UTF-8-имена, точное восстановление владения legacy Lighttpd, безопасное восстановление разрешённых пользовательских путей и кэширование внутренних страниц WebUI.</p>
+    <p><strong>Добавлено:</strong> маршрут Wikipedia, управление адресом WebUI через KeenDNS и прямая чистая установка текущего приложения без промежуточного <code>r14c68</code>.</p>
+
+    <h3>3.0.0</h3>
+    <p><strong>Исправлено:</strong> обработка современных конфигураций Xray, транзакции маршрутов и DoT, удаление, переустановка и отображение канала обновлений.</p>
+    <p><strong>Добавлено:</strong> updater-v5 с откатом, универсальный переход от 3.0.0-r1, новый авторизованный WebUI, управление Xray, серверами, подписками, ProxyN, DNS-over-TLS и маршрутами, автоматическая проверка качества.</p>
+
+    <h3>2.2.5</h3>
+    <p><strong>Исправлено:</strong> OPKG-обновление, транзакционный DoT и JSON backend.</p>
+    <p><strong>Добавлено:</strong> адаптивный WebUI, отдельная страница DNS-over-TLS, обновление Xray и девять готовых маршрутных наборов.</p>
+
+    <h3>2.2.0</h3>
+    <p><strong>Исправлено:</strong> серия полевых замечаний после обновления на реальном Keenetic.</p>
+    <p><strong>Добавлено:</strong> первая отдельная страница DNS-over-TLS и новая архитектура маршрутов.</p>
+
+    <h3>2.1.1-2</h3>
+    <p><strong>Исправлено:</strong> сохранение общих маршрутов при обновлении.</p>
+    <p><strong>Добавлено:</strong> проверка удалённых источников и автоматический откат обновителя.</p>
+
+    <h3>2.1.1</h3>
+    <p><strong>Исправлено:</strong> повторы и ненормализованные CIDR при импорте.</p>
+    <p><strong>Добавлено:</strong> безопасный импорт пользовательских BAT и карточки пользовательских наборов.</p>
+
+    <h3>2.1.0</h3>
+    <p><strong>Добавлено:</strong> авторизованный WebUI, страницы серверов, подписок, ProxyN, маршрутов, Xray и BROray, а также три темы.</p>
+
+    <h3>2.0.0</h3>
+    <p><strong>Добавлено:</strong> первая публичная версия с базовым WebUI, серверами, подписками и интеграцией Xray с KeeneticOS.</p>
+
+    <p><a class="button" href="https://github.com/BROadmin/BROray/blob/main/CHANGELOG.md">Подробная техническая история на GitHub</a></p>
+</section>
+<section class="what-next"><div><p class="eyebrow">Технические детали</p><h2>Нужны точные идентификаторы сборки?</h2><p>Версии компонентов, package/release/candidate сведения и границы совместимости находятся в справочнике.</p></div><a class="primary-action" href="/broray/reference/">Открыть справочник →</a></section>
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray · История версий</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>

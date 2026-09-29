@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Установка BROray-Light 2.0.0</title>
+<meta name="description" content="Пошаговая установка BROray-Light 2.0.0: совместимость, Entware, терминал, чистая установка и вход в WebUI.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray-light/start/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/">BROray</a>
+      <a href="/broray-light/" aria-current="page">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray-light/">Обзор</a><a href="/broray-light/start/" aria-current="page">Установка</a><a href="/broray-light/webui/">WebUI</a><a href="/broray-light/scenarios/">Сценарии</a><a href="/broray-light/maintenance/">Обслуживание</a><a href="/broray-light/troubleshooting/">Решение проблем</a><a href="/broray-light/releases/">История версий</a><a href="/broray-light/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero"><div><p class="eyebrow">Начало работы</p><h1>Установка BROray-Light</h1><p class="lead">Пошаговый путь для первой установки Light. Если Entware и терминал уже настроены, соответствующие этапы можно пропустить.</p></div><div class="release-state"><span class="status-dot" aria-hidden="true"></span>Stable 2.0.0</div></section><section id="compatibility"><h2>1. Проверьте совместимость</h2><ul class="check-list"><li>Keenetic с Entware <code>aarch64-3.10</code>;</li><li>накопитель подключён как <code>/opt</code>;</li><li>есть root-доступ к Entware shell;</li><li>на роутере корректны время, DNS и HTTPS.</li></ul><p>Если эти условия выполнены, переходите к Entware и установке. Точные требования к месту, временным каталогам и владению компонентами вынесены в технический справочник.</p><a class="card-link" href="/broray-light/reference/">Подробные требования →</a></section><h2 id="guide-2">2. Установите Entware, если его ещё нет</h2>
+<ol>
+<li>Откройте веб-интерфейс Keenetic по LAN-адресу своего роутера, обычно <code>http://192.168.1.1/</code>.</li>
+<li>Проверьте раздел приложений: если OPKG/Entware уже работает и выбран накопитель, переустанавливать Entware не нужно.</li>
+<li>Если Entware отсутствует, сохраните нужные файлы с выделенного накопителя. <strong>Форматирование удаляет его содержимое.</strong></li>
+<li>Подготовьте накопитель и компоненты «Поддержка открытых пакетов»/OPKG согласно инструкции для своей модели и версии KeeneticOS. Названия пунктов могут различаться.</li>
+<li>Установите именно Entware <code>aarch64-3.10</code> по <a href="https://forum.keenetic.ru/topic/4299-entware/">инструкции Keenetic Community</a>.</li>
+<li>Дождитесь завершения установки и убедитесь, что OPKG работает, а <code>/opt</code> доступен на запись.</li>
+</ol>
+<p>Не переносите команды форматирования с другой модели и не выполняйте установку Light в командной строке KeeneticOS.</p>
+<h2 id="guide-3">3. Подключитесь к терминалу Entware</h2>
+<p>Используйте <a href="https://termius.com/">Termius</a>, <a href="https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html">PuTTY</a> или встроенный SSH-клиент.</p>
+<p>В Termius создайте <strong>New Host</strong>, в PuTTY заполните <strong>Host Name</strong>. Укажите LAN-IP роутера, SSH-порт <strong>Entware</strong>, пользователя <code>root</code> и свой пароль Entware. Сверьте ключ сервера при первом подключении. Пароль WebUI Keenetic и пароль root Entware могут различаться.</p>
+<p>Во встроенном терминале:</p>
+<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">ssh root@192.168.1.1
+</code></pre></div>
+<p>Для другого SSH-порта: <code>ssh -p НОМЕР_ПОРТА root@IP_РОУТЕРА</code>. Если приглашение выглядит как <code>(config)&gt;</code>, это KeeneticOS CLI, а не Entware. Откройте правильный SSH-порт. При вводе пароля символы могут не отображаться — это нормально.</p>
+<p>Проверьте окружение:</p>
+<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">opkg --version
+opkg print-architecture
+ls -ld /opt
+df -h /opt /tmp
+test -x /opt/bin/ash &amp;&amp; echo &quot;Entware shell: OK&quot;
+</code></pre></div>
+<p>Архитектура должна включать <code>aarch64-3.10</code>. При ошибке остановитесь и устраните её до следующего шага.</p>
+<h2 id="guide-4">4. Чистая установка 2.0.0</h2>
+<p>Этот путь — <strong>только для отсутствующей установки Light</strong>. Если Light уже установлен, используйте раздел 8.</p>
+<p>Скопируйте весь блок в Entware shell от root. Он устанавливает зависимости, скачивает точный установщик в оперативную память и проверяет его SHA-256 до запуска:</p>
+<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">(
+set -eu
+PATH=/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+export PATH
+[ &quot;$(id -u)&quot; = 0 ]
+[ -d /tmp ] &amp;&amp; [ ! -L /tmp ]
+awk &#39;$2==&quot;/tmp&quot; &amp;&amp; ($3==&quot;tmpfs&quot; || $3==&quot;ramfs&quot;) {ok=1} END {exit !ok}&#39; /proc/mounts
+umask 077
+D=&quot;$(mktemp -d /tmp/broray-light-guide.XXXXXX)&quot;
+trap &#39;rm -f &quot;$D/install.sh&quot;; rmdir &quot;$D/opkg&quot; 2&gt;/dev/null || :; rmdir &quot;$D&quot; 2&gt;/dev/null || :&#39; EXIT
+mkdir &quot;$D/opkg&quot;
+TMPDIR=&quot;$D/opkg&quot; opkg --tmp-dir &quot;$D/opkg&quot; update
+TMPDIR=&quot;$D/opkg&quot; opkg --tmp-dir &quot;$D/opkg&quot; install ca-bundle ca-certificates curl coreutils-stat
+curl -q --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --tlsv1.2 \
+  --connect-timeout 15 --max-time 600 -fsSL \
+  -H &#39;Cache-Control: no-cache, no-store&#39; -H &#39;Accept-Encoding: identity&#39; \
+  &#39;https://github.com/BROadmin/BROray-Light/releases/download/v2.0.0/broray-light-install-2.0.0.sh&#39; \
+  -o &quot;$D/install.sh&quot;
+[ &quot;$(sha256sum &quot;$D/install.sh&quot; | awk &#39;NR==1{print $1}&#39;)&quot; = \
+  &#39;d7d1a709621f3154c0f5b5892a98bddd3f3f782b57d01eb15025e739abcd44f2&#39; ]
+/opt/bin/ash &quot;$D/install.sh&quot;
+)
+</code></pre></div>
+<p>Не используйте <code>curl -k</code>, <code>opkg --force-reinstall</code> или ручную распаковку вместо отказавшего установщика. Не запускайте тот же блок бесконечно при ошибке: сохраните сообщение, выясните причину и только затем повторите установку. Если аварийное завершение OPKG оставило файлы, удаляйте только каталог <code>/tmp/broray-light-guide.XXXXXX</code>, созданный этой попыткой, после проверки его точного имени и содержимого; не очищайте весь <code>/tmp</code>.</p>
+<p>Проверка результата:</p>
+<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">/opt/etc/init.d/S23broray-light-updater status &amp;&amp; echo &quot;Updater: OK&quot;
+/opt/etc/init.d/S24broray-light status &amp;&amp; echo &quot;BROray-Light: OK&quot;
+/opt/broray-light/runtime/xray version
+/opt/bin/broray-light-web-publishctl status
+</code></pre></div>
+<p>При чистой установке используется Xray <strong>26.9.9</strong>. Это предварительный выпуск самого Xray, отдельно проверенный в рамках Light; слово Stable относится к релизу приложения, а не меняет статус upstream-ядра. Пока сервер не выбран, Xray может быть остановлен — добавьте и активируйте рабочий VLESS-сервер.</p>
+<h2 id="guide-5">5. Откройте WebUI и войдите</h2>
+<p>Локально: <code>http://LAN-IP-РОУТЕРА:8080/</code>.</p>
+<p>При настроенном KeenDNS: <code>https://brolight.ВАШ-ДОМЕН-KEENDNS/</code>. Например, для <code>myrouter.keenetic.link</code> адрес будет <code>https://brolight.myrouter.keenetic.link/</code>. Порт <code>8080</code> в этом HTTPS-адресе не добавляется. Внешний доступ зависит от настроек KeenDNS и подтверждённого владения публикацией.</p>
+<p>Введите <strong>логин и пароль пользователя Keenetic</strong>, не пароль root Entware. Пароль проверяется KeeneticOS и не сохраняется Light. Не открывайте порт 8080 напрямую в интернет, не отключайте авторизацию и защиту сессии.</p>
+
+<section class="what-next"><div><p class="eyebrow">Следующий шаг</p><h2>Добавьте VLESS</h2><p>После успешной установки переходите к подписке или отдельному серверу через WebUI.</p></div><a class="primary-action" href="/broray-light/scenarios/">Настроить Light →</a></section>
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray-Light · Установка</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>

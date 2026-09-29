@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>История версий BROray-Light</title>
+<meta name="description" content="История релизов BROray-Light: 2.0.0, 1.0.0-r2, 1.0.0-r1 и невыпущенные работы.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray-light/releases/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/">BROray</a>
+      <a href="/broray-light/" aria-current="page">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray-light/">Обзор</a><a href="/broray-light/start/">Установка</a><a href="/broray-light/webui/">WebUI</a><a href="/broray-light/scenarios/">Сценарии</a><a href="/broray-light/maintenance/">Обслуживание</a><a href="/broray-light/troubleshooting/">Решение проблем</a><a href="/broray-light/releases/" aria-current="page">История версий</a><a href="/broray-light/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero"><div><p class="eyebrow">Релизы</p><h1>История версий BROray-Light</h1><p class="lead">Публичные Stable-релизы отделены от невыпущенной инженерной истории.</p></div></section><h2 id="guide-11">История версий и поддержка</h2>
+<ul>
+<li><a href="https://github.com/BROadmin/BROray-Light/blob/main/CHANGELOG.md">История версий</a>.</li>
+<li><a href="https://github.com/BROadmin/BROray-Light/blob/main/docs/RELEASE-2.0.0.md">Состав и границы проверки 2.0.0</a>.</li>
+<li><a href="https://docs.brovibe.cloud/broray-light/">Отдельный раздел сайта</a>.</li>
+<li><a href="https://t.me/myBROvibe">Обсуждение</a>, <a href="https://github.com/BROadmin/BROray-Light/issues">Issues</a>, <a href="https://pay.cloudtips.ru/p/09b23d0a">поддержать проект</a>.</li>
+</ul>
+<p>Light не содержит Routes, управления DNS-over-TLS, рейтингов, истории качества и поддержки протоколов кроме VLESS. Лицензия приложения — GPL-3.0; Xray-core распространяется отдельно под MPL-2.0, остальные компоненты сохраняют собственные лицензии.</p>
+<h2 id="guide-12">История версий BROray-Light</h2>
+<h2 id="guide-13">2.0.0 — 11 сентября 2026 г.</h2>
+<p>Публичная версия и версия пакета — <code>2.0.0</code>, технический releaseId — <code>2.0.0-r1</code>. <a href="https://github.com/BROadmin/BROray-Light/releases/tag/v2.0.0">Релиз v2.0.0</a>.</p>
+<ul>
+<li>Выбор конкретной официальной версии Xray на Главной; переустановка текущего ядра и отдельное подтверждение предварительной версии, downgrade и непроверенного архива.</li>
+<li>Совместимость привязана к сборке Light, архитектуре, тегу и SHA-256 архива. Точная 26.2.6 запрещена по собственному отрицательному тесту Light.</li>
+<li>Xray 26.9.9 при чистой установке; обычное обновление приложения сохраняет установленное ядро.</li>
+<li>Сохранение идентификаторов одинаковых серверов при добавлении пересекающейся подписки: новая подписка не перехватывает существующие записи и не сбрасывает их порядок и исключения автопереключения.</li>
+<li>Избирательно перенесены применимые изменения проверенного BROray 3.1.0-r09c02: идентификация процесса, безопасные операции Xray, синхронизация подписок и имени интерфейса, согласованная навигация и управление подписками.</li>
+<li>Операционные временные файлы, загрузки и bootstrap перенесены в защищённые RAM-каталоги; долговременные данные и проверенные транзакционные слоты остаются на <code>/opt</code>.</li>
+<li>Фоновый сервис больше не наследует удаляемый временный каталог установщика: собственный <code>TMPDIR</code> в RAM предотвращает ложную ошибку состояния интерфейса после установки.</li>
+<li>Сохранены три страницы, VLESS-only, native-аутентификация, fail-closed владение, подпись обновлений и откат. Полная инструкция находится на GitHub и сайте, не внутри приложения.</li>
+</ul>
+<h2 id="guide-14">1.0.0-r2 — 2 сентября 2026</h2>
+<p>Исторический опубликованный документационный выпуск с инструкцией внутри WebUI. Такое размещение было отклонено владельцем проекта; рекомендованным Stable снова выбран проверенный <code>1.0.0-r1</code>. Предыдущие артефакты не переписываются. <a href="https://github.com/BROadmin/BROray-Light/releases/tag/v1.0.0-r2">Архив релиза</a>.</p>
+<h2 id="guide-15">1.0.0-r1 — 2 сентября 2026</h2>
+<p>Первый проверенный публичный Light: три страницы WebUI, VLESS-серверы и подписки, имена подписок, автообновление, дедупликация, защита активного сервера, детерминированное автопереключение, интерфейс Keenetic, Xray 26.7.28 и подписанный обновитель 5-light1 с откатом. <a href="https://github.com/BROadmin/BROray-Light/releases/tag/v1.0.0-r1">Релиз</a>.</p>
+<h2 id="guide-16">Невыпущенные работы</h2>
+<p>Тег <code>v1.0.0-r3</code> относится к отклонённой подготовке и не является публичным Stable-релизом. Незавершённые работы над <code>1.0.0-r4</code> сохранены как инженерная история и не используются автоматически в 2.0.0.</p>
+
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray-Light · История версий</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>

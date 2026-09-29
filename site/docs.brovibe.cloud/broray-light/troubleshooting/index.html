@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Решение проблем BROray-Light</title>
+<meta name="description" content="Решение проблем BROray-Light по симптомам: WebUI, VLESS, подписки, Xray и обновление.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray-light/troubleshooting/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/">BROray</a>
+      <a href="/broray-light/" aria-current="page">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray-light/">Обзор</a><a href="/broray-light/start/">Установка</a><a href="/broray-light/webui/">WebUI</a><a href="/broray-light/scenarios/">Сценарии</a><a href="/broray-light/maintenance/">Обслуживание</a><a href="/broray-light/troubleshooting/" aria-current="page">Решение проблем</a><a href="/broray-light/releases/">История версий</a><a href="/broray-light/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero"><div><p class="eyebrow">Помощь</p><h1>Решение проблем BROray-Light</h1><p class="lead">Начните с наблюдаемого симптома. Не удаляйте файлы, receipts или интерфейсы вручную, если состояние владения неясно.</p></div></section>
+<section><h2>Выберите симптом</h2><div class="symptom-grid">
+<a class="symptom-card" href="#light-webui"><strong>WebUI не открывается</strong><span>Проверка LAN, KeenDNS и служб.</span></a>
+<a class="symptom-card" href="#light-server"><strong>VLESS не подключается</strong><span>Проверка сервера и Xray.</span></a>
+<a class="symptom-card" href="#light-sub"><strong>Подписка не обновляется</strong><span>Сохраните точную ошибку, не публикуйте URL.</span></a>
+<a class="symptom-card" href="#light-update"><strong>Ошибка обновления</strong><span>Не повторяйте установку бесконечно.</span></a>
+</div></section>
+<section id="light-webui"><h2>WebUI не открывается</h2><p>Сначала проверьте LAN-адрес и порт, затем отдельно KeenDNS. Если интерфейс недоступен, используйте проверки служб из подробного блока ниже.</p></section>
+<section id="light-server"><h2>VLESS не подключается</h2><p>Проверьте сервер на странице «Серверы», затем состояние Xray и интерфейса на Главной. Успех одного сервера не доказывает работоспособность остальных узлов подписки.</p></section>
+<section id="light-sub"><h2>Подписка не обновляется</h2><p>Запустите синхронизацию и сохраните точный текст ошибки. Ссылка подписки — секрет и не должна попадать в Issues или скриншоты.</p></section>
+<section id="light-update"><h2>Ошибка обновления</h2><p>Сохраните текст ошибки и состояние обновителя. Не запускайте чистый IPK поверх установленного Light и не выполняйте скрытые повторные установки.</p></section>
+<h2 id="guide-9">9. Резервная копия, диагностика и сохранность</h2>
+<p>Пользовательские данные находятся в <code>/opt/broray-light/config</code>, <code>/opt/broray-light/servers</code>, <code>/opt/broray-light/subscriptions</code>; Xray — в <code>/opt/broray-light/runtime/xray</code>. Сохраняйте их на компьютер перед удалением или восстановлением. Копия может содержать секреты и не должна попадать в открытый репозиторий. Журналы и сессии в <code>/tmp</code> исчезают после перезагрузки — это ожидаемо; серверы и подписки исчезать не должны.</p>
+<p>Для обращения в поддержку достаточно версии Light/Xray, модели и KeeneticOS, действия, точного текста ошибки, времени и обезличенного скриншота. Не прикладывайте весь <code>/opt</code>, running-config, URL подписки, UUID, приватные ключи, пароли или cookies.</p>
+<p>При недоступном WebUI:</p>
+<ol>
+<li>Проверьте LAN-адрес и порт, затем отдельно KeenDNS.</li>
+<li>Проверьте два сервиса командами из раздела 4.</li>
+<li>Проверьте свободное место, время и доступность GitHub по HTTPS.</li>
+<li>При сообщении о чужом владении остановитесь: не удаляйте квитанции, блокировки или интерфейсы наугад.</li>
+<li>При ошибке обновления сохраните её текст и состояние обновителя, не выполняйте скрытые повторные установки.</li>
+</ol>
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray-Light · Решение проблем</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>

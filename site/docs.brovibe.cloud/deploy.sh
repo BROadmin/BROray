@@ -14,7 +14,7 @@ SERVICE_PATH="/etc/systemd/system/brovibe-docs-deploy.service"
 TIMER_PATH="/etc/systemd/system/brovibe-docs-deploy.timer"
 LOCK_FILE="${BROVIBE_DOCS_LOCK_FILE:-/run/lock/brovibe-docs-deploy.lock}"
 SITE_OWNER="${BROVIBE_DOCS_OWNER-www-data:www-data}"
-FILES="index.html styles.css broray/index.html broray/beginner-installation/index.html broray-light/index.html favicon.ico favicon-16x16.png favicon-32x32.png apple-touch-icon.png icon-192.png icon-512.png site-manifest.json"
+FILES="index.html styles.css site.js broray/index.html broray/start/index.html broray/beginner-installation/index.html broray/webui/index.html broray/scenarios/index.html broray/maintenance/index.html broray/troubleshooting/index.html broray/releases/index.html broray/reference/index.html broray-light/index.html broray-light/start/index.html broray-light/webui/index.html broray-light/scenarios/index.html broray-light/maintenance/index.html broray-light/troubleshooting/index.html broray-light/releases/index.html broray-light/reference/index.html favicon.ico favicon-16x16.png favicon-32x32.png apple-touch-icon.png icon-192.png icon-512.png site-manifest.json"
 
 fail()
 {
@@ -85,8 +85,9 @@ validate_manifest()
 {
     manifest="$1"
 
-    [ "$(wc -l <"$manifest" | tr -d ' ')" = "12" ] ||
-        fail "манифест должен содержать ровно 12 файлов"
+    expected_files="$(printf '%s\n' $FILES | wc -l | tr -d ' ')"
+    [ "$(wc -l <"$manifest" | tr -d ' ')" = "$expected_files" ] ||
+        fail "манифест должен содержать ровно $expected_files файлов"
 
     for file in $FILES
     do
@@ -141,7 +142,6 @@ download_site()
     manifest="$work_root/SHA256SUMS"
     payload="$work_root/site"
 
-    mkdir -p "$payload/broray/beginner-installation" "$payload/broray-light"
     resolve_source "$work_root"
     source_url="$(cat "$work_root/source-url")"
 
@@ -158,6 +158,7 @@ download_site()
 
     for file in $FILES
     do
+        mkdir -p "$payload/$(dirname "$file")"
         curl \
             --proto '=https' \
             --tlsv1.2 \

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebUI BROray — руководство по страницам</title>
+<meta name="description" content="Руководство по страницам WebUI BROray: Главная, Серверы, Подписки, Маршруты, DNS-over-TLS, Keenetic, Xray и BROray.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray/webui/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/" aria-current="page">BROray</a>
+      <a href="/broray-light/">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/webui/" aria-current="page">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero">
+  <div>
+    <p class="eyebrow">Проверено по релизным байтам</p>
+    <h1>WebUI BROray 3.2.0</h1>
+    <p class="lead">Фактический интерфейс Stable 3.2.0-r01. Описание ниже собрано из HTML, JavaScript и CGI точного опубликованного app-bundle, а не из планов или исходников соседних кандидатов.</p>
+  </div>
+  <div class="release-state"><span class="status-dot" aria-hidden="true"></span>WebUI-3.2.0-r01c37</div>
+</section>
+
+<section id="navigation">
+<h2>Что реально есть в WebUI</h2>
+<div class="table-wrap" tabindex="0" aria-label="Страницы WebUI BROray 3.2.0">
+<table>
+<thead><tr><th>Экран</th><th>Что находится внутри</th></tr></thead>
+<tbody>
+<tr><td><strong>Вход</strong></td><td>Логин, пароль, показать/скрыть пароль, вход через сессионный API.</td></tr>
+<tr><td><strong>Главная</strong></td><td>Сводные карточки: Серверы, Подписки, DNS-over-TLS, Маршруты, Keenetic, Xray и BROray.</td></tr>
+<tr><td><strong>Серверы</strong></td><td>Импорт URI, проверка и подключение серверов, отключение VPN, качество, массовая проверка, автоматическое переключение.</td></tr>
+<tr><td><strong>Подписки</strong></td><td>Создание и изменение подписок, ручное и автоматическое обновление, просмотр полученных серверов, включение/отключение и удаление.</td></tr>
+<tr><td><strong>DNS-over-TLS</strong></td><td>Выбор DoT, TLS/SNI-проверка, применение в Keenetic, чтение фактических записей и контролируемое удаление.</td></tr>
+<tr><td><strong>Маршруты</strong></td><td>Три пользовательских экрана: <em>Обзор</em>, <em>Свои маршруты</em>, <em>Готовые маршруты</em>.</td></tr>
+<tr><td><strong>Keenetic</strong></td><td>Управляемый ProxyN, диагностика и восстановление интерфейса, а также отдельное управление адресом WebUI через KeenDNS.</td></tr>
+<tr><td><strong>Xray</strong></td><td>Процесс, конфигурация, выбор официальной версии, установка/переустановка и диагностика.</td></tr>
+<tr><td><strong>BROray</strong></td><td>Версия и компоненты, обновление/переустановка, безопасная очистка, фоновые операции, диагностический отчёт и удаление.</td></tr>
+</tbody>
+</table>
+</div>
+<p class="muted"><code>modules.html</code> присутствует в архиве как служебный compatibility/redirect-файл, но отдельного пункта «Совместимость» в пользовательском меню Stable 3.2.0 нет.</p>
+</section>
+
+<section id="shell">
+<h2>Общие элементы интерфейса</h2>
+<ul class="check-list">
+<li>на компьютере боковое меню можно свернуть; на мобильном оно открывается поверх страницы;</li>
+<li>в меню отображается текущий пользователь KeeneticOS и есть кнопка <strong>Выйти</strong>;</li>
+<li>доступно управление темой интерфейса;</li>
+<li>кнопка <strong>Поддержать проект</strong> открывает встроенное окно поддержки;</li>
+<li>опасные действия используют фирменные окна подтверждения, а для полного удаления BROray требуется точная контрольная фраза.</li>
+</ul>
+</section>
+
+<section id="login">
+<h2>Вход</h2>
+<p>Экран входа содержит поля <strong>Логин</strong> и <strong>Пароль</strong>, кнопку <strong>Показать пароль</strong> и кнопку <strong>Войти</strong>. После успешной проверки создаётся WebUI-сессия; защищённые страницы используют её через session API.</p>
+</section>
+
+<section id="home">
+<h2>Главная</h2>
+<p>Это сводный экран. Он показывает состояние модулей и ведёт на соответствующие страницы, но не дублирует их действия.</p>
+<div class="feature-grid">
+<article class="feature"><h3>Серверы</h3><p>Активный сервер, общее число серверов и качество.</p></article>
+<article class="feature"><h3>Подписки</h3><p>Состояние подписок, число включённых и количество полученных серверов.</p></article>
+<article class="feature"><h3>Маршруты</h3><p>Число установленных наборов, состояние обновления и DNS-over-TLS.</p></article>
+<article class="feature"><h3>Keenetic</h3><p>Состояние управляемого прокси-интерфейса, связь и рабочее состояние.</p></article>
+<article class="feature"><h3>Xray</h3><p>Состояние процесса, версия и конфигурация.</p></article>
+<article class="feature"><h3>BROray</h3><p>Версия приложения и состояние обновления.</p></article>
+</div>
+<p class="muted">В разметке релиза есть служебная кнопка <code>refresh-status</code>, но она скрыта (<code>hidden</code>) и не является обычным пользовательским действием на Главной.</p>
+</section>
+
+<section id="servers">
+<h2>Серверы</h2>
+<p>Страница объединяет активное подключение, сохранённые узлы, импорт, ручные/плановые проверки качества и автопереключение.</p>
+
+<h3>Импорт сервера</h3>
+<p>Форма WebUI сначала разбирает и проверяет URI. В точном релизном JavaScript она распознаёт:</p>
+<div class="meta">
+<span class="badge accent">VLESS</span><span class="badge">VMess</span><span class="badge">Trojan</span><span class="badge">Hysteria2</span><span class="badge">Shadowsocks / ss://</span>
+</div>
+<p>За одну предварительную проверку принимается до 50 URI. Кнопка формы сначала подписана <strong>Проверить конфигурацию</strong>; после успешной проверки пользователь подтверждает импорт. Это описание именно поведения формы Stable 3.2.0, а не заявление о совместимости каждого возможного сочетания транспорта и сервера.</p>
+
+<h3>Действия с серверами</h3>
+<ul class="check-list">
+<li>у активного сервера — <strong>Проверить</strong> и <strong>Отключить VPN</strong>;</li>
+<li>у каждого сохранённого сервера — <strong>Проверить</strong>, <strong>Подключить</strong> (если он не активен), <strong>Подробнее</strong>/<strong>Скрыть</strong>;</li>
+<li>в раскрытых подробностях доступно <strong>Удалить сервер</strong>;</li>
+<li>для списка — <strong>Обновить данные</strong> и <strong>Проверить все</strong>.</li>
+</ul>
+
+<h3>Качество и автоматическое переключение</h3>
+<p>Релиз показывает пинг, джиттер, оценку качества/свежести, время и источник последней проверки. При зафиксированном методе отображается <strong>HTTPS через Xray + ICMP ping</strong>.</p>
+<p>Отдельная настройка автоматической проверки качества позволяет включить расписание и выбрать интервал: 30 минут, 1 час, 3 часа или 6 часов.</p>
+<p>В блоке <strong>Автоматическое переключение</strong> доступны:</p>
+<ul class="check-list">
+<li>включение/выключение автовыбора;</li>
+<li>правило: <strong>Лучшее качество</strong>, <strong>Минимальный пинг</strong> или <strong>Предпочтительный сервер</strong>;</li>
+<li>предпочтительный сервер;</li>
+<li>число ошибок до переключения (1–10);</li>
+<li>защитный интервал после переключения (1–120 минут);</li>
+<li>минимальное качество: Отличное, Хорошее, Приемлемое или Любое доступное;</li>
+<li>состояние сервиса, число ошибок, последнее переключение и причина.</li>
+</ul>
+<p class="muted">В коде релиза прямо указано: при подтверждённой потере связи BROray проверяет резервные серверы реальным HTTPS-запросом. Ручное «Отключить VPN» выключает автовыбор; вручную остановленный Xray автоматически не запускается.</p>
+</section>
+
+<section id="subscriptions">
+<h2>Подписки</h2>
+<p>Форма создания/редактирования содержит поля <strong>Название</strong>, <strong>Интервал, минут</strong>, <strong>URL подписки</strong> и переключатели <strong>Подписка активна</strong>, <strong>Автообновление включено</strong>, <strong>Обновить после добавления</strong>.</p>
+<p>На карточке каждой подписки релизный WebUI умеет:</p>
+<ul class="check-list">
+<li><strong>Обновить сейчас</strong>;</li>
+<li><strong>Показать серверы</strong> / <strong>Скрыть серверы</strong>;</li>
+<li><strong>Изменить</strong>;</li>
+<li><strong>Включить</strong> / <strong>Отключить</strong> подписку;</li>
+<li><strong>Включить автообновление</strong> / <strong>Отключить автообновление</strong>;</li>
+<li><strong>Удалить</strong>.</li>
+</ul>
+<p>Карточка также показывает количество серверов, интервал, последнее и следующее обновление, результат синхронизации, предупреждения и последнюю ошибку.</p>
+</section>
+
+<section id="dns">
+<h2>DNS-over-TLS</h2>
+<p>Страница читает фактическую конфигурацию Keenetic и показывает каталог DoT вместе с уже существующими DoT/DoH-записями.</p>
+<ul class="check-list">
+<li><strong>Проверить выбранные</strong> — выполняется TLS/SNI-проверка выбранных DoT;</li>
+<li><strong>Установить в Keenetic</strong> — доступно только после необходимых проверок и при допустимой ёмкости Keenetic;</li>
+<li><strong>Обновить состояние</strong> — перечитывает фактическую конфигурацию;</li>
+<li><strong>Удалить записи BROray</strong> — проходит через отдельный delete-gate.</li>
+</ul>
+<p>При установке окно подтверждения прямо сообщает, что сторонние записи не удаляются и не переходят под управление BROray. При удалении релиз предупреждает: удаляются <strong>точные выбранные записи</strong>, а невыбранные DoT/DoH сохраняются. Интерфейс контролирует общий лимит защищённых DNS; при отсутствии иного значения используется максимум 8.</p>
+</section>
+
+<section id="routes">
+<h2>Маршруты</h2>
+<p>В Stable 3.2.0 это три самостоятельных пользовательских экрана.</p>
+
+<h3>Обзор</h3>
+<p>Показывает управляемый интерфейс, число маршрутов BROray и общих маршрутов, текущую операцию, статистику пользовательских и готовых наборов. Доступна кнопка <strong>Обновить состояние</strong>.</p>
+
+<h3>Свои маршруты</h3>
+<p>Загрузка BAT обрабатывается как данные маршрутов. В релизе общий размер выбранных файлов ограничен 2 МиБ. Перед сохранением выполняется preview/валидация.</p>
+<ul class="check-list">
+<li><strong>Загрузить BAT</strong>;</li>
+<li>для существующего набора: <strong>Проверить</strong>, основное действие по состоянию (Установить/Обновить/Восстановить/Продолжить), <strong>Заменить файл</strong>, <strong>Удалить</strong>;</li>
+<li>для нового или заменяемого набора: <strong>Проверить</strong> и затем <strong>Создать набор</strong> / <strong>Сохранить замену</strong>.</li>
+</ul>
+
+<h3>Готовые маршруты</h3>
+<p>В релизе ровно 10 встроенных наборов:</p>
+<div class="meta">
+<span class="badge">Telegram</span><span class="badge">WhatsApp</span><span class="badge">YouTube</span><span class="badge">ChatGPT</span><span class="badge">Facebook</span><span class="badge">Instagram</span><span class="badge">Meta</span><span class="badge">TikTok</span><span class="badge">Speedtest</span><span class="badge">Wikipedia</span>
+</div>
+<p>Карточки проходят пошаговый цикл: проверка обновления → загрузка маршрутов → подготовка к установке → действие в Keenetic (установка/обновление/восстановление). Для установленного набора доступно удаление, для остановленной операции — продолжение, также есть подробности.</p>
+
+<h3>Общее окно операции</h3>
+<p>Для операций с маршрутами есть единый прогресс: текущий маршрут, выполнено/всего, сворачивание окна, <strong>Остановить после текущего маршрута</strong> и <strong>Продолжить</strong> при поддерживаемом resumable-состоянии.</p>
+</section>
+
+<section id="keenetic">
+<h2>Keenetic</h2>
+<p>Страница сравнивает ожидаемое и фактическое состояние управляемого SOCKS5 ProxyN.</p>
+<p>Проверяются: существование интерфейса, принадлежность BROray, протокол SOCKS5, адрес Xray, описание, доступность прокси Xray, связь, подключение и рабочее состояние.</p>
+<p>Фактические кнопки релиза:</p>
+<div class="link-list">
+<span class="card-link">Проверить подключение к Xray</span>
+<span class="card-link">Обновить</span>
+<span class="card-link">Создать</span>
+<span class="card-link">Восстановить</span>
+<span class="card-link">Синхронизировать описание</span>
+<span class="card-link">Удалить</span>
+</div>
+
+<h3>Адрес WebUI через KeenDNS</h3>
+<p>На той же странице есть отдельный блок состояния публикации WebUI. Он показывает публичный адрес, локальный адрес и режим KeenDNS. В зависимости от состояния доступны:</p>
+<ul class="check-list">
+<li><strong>Включить</strong> или динамическое <strong>Восстановить адрес</strong>;</li>
+<li><strong>Выключить</strong>;</li>
+<li><strong>Открыть адрес</strong>;</li>
+<li><strong>Копировать адрес</strong>.</li>
+</ul>
+<p class="muted">При выключении релиз предупреждает, что текущая сессия через KeenDNS прервётся, но локальный адрес WebUI останется доступен в домашней сети.</p>
+</section>
+
+<section id="xray">
+<h2>Xray</h2>
+<p>Страница показывает процесс, PID, локальный SOCKS и его доступность, архитектуру, свободное место, а также путь, размер и SHA-256 рабочего конфигурационного файла.</p>
+<h3>Процесс и конфигурация</h3>
+<div class="link-list">
+<span class="card-link">Запустить</span><span class="card-link">Перезапустить</span><span class="card-link">Остановить</span><span class="card-link">Проверить</span>
+</div>
+<p><strong>Проверить</strong> относится к рабочей конфигурации. Перезапуск предупреждает о кратком разрыве соединения, остановка — о недоступности прокси до повторного запуска.</p>
+
+<h3>Выбор версии Xray</h3>
+<ul class="check-list">
+<li><strong>Проверить версии</strong> получает официальный каталог;</li>
+<li>пользователь выбирает <strong>Версию для установки</strong>;</li>
+<li>переключатель <strong>Показать предварительные версии</strong> расширяет список;</li>
+<li>показывается статус совместимости конкретной версии; частичную совместимость можно подтвердить после чтения ограничений;</li>
+<li>кнопка динамически становится <strong>Установить VERSION</strong> или <strong>Переустановить VERSION</strong>;</li>
+<li>отдельно есть <strong>Переустановить текущую версию</strong>;</li>
+<li>непроверенная, предварительная версия и понижение требуют отдельных подтверждений.</li>
+</ul>
+
+<h3>Диагностика</h3>
+<p><strong>Запустить диагностику</strong> формирует список проверок с количеством успешных, предупреждений и ошибок. Установка/переустановка Xray отслеживается как фоновая операция с журналом и результатом.</p>
+</section>
+
+<section id="broray-page">
+<h2>BROray</h2>
+<h3>Обновление и переустановка</h3>
+<ul class="check-list">
+<li><strong>Проверить обновление</strong>;</li>
+<li><strong>Установить обновление</strong> — при незавершённом переходе кнопка может стать <strong>Завершить обновление</strong>;</li>
+<li><strong>Переустановить текущую версию</strong>.</li>
+</ul>
+
+<h3>Безопасная очистка</h3>
+<p>Перед удалением файлов сначала строится точный план кнопкой <strong>Проверить очистку</strong>, затем становится доступно <strong>Очистить</strong>. Пользователь выбирает категории:</p>
+<ul class="check-list">
+<li>временные файлы и незавершённые загрузки;</li>
+<li>старые резервные копии — сохраняются последние три копии каждого управляемого типа;</li>
+<li>копии отката маршрутов — сохраняются три последних набора каждого типа;</li>
+<li>старые журналы — только архивы/ротации старше семи дней.</li>
+</ul>
+
+<h3>Фоновые операции</h3><p>Список операций и журнал можно свернуть. История завершённых операций ограничена; проверка активного подключения получает приоритет перед фоновой работой.</p>
+<div class="link-list">
+<span class="card-link">Аварийное восстановление</span><span class="card-link">Обновить состояние</span><span class="card-link">Остановить фоновые операции</span><span class="card-link">Возобновить автоматику</span><span class="card-link">Обновить журнал</span><span class="card-link">Скопировать диагностику</span><span class="card-link">Скачать диагностический отчёт</span>
+</div>
+<p>Release notes уточняют: остановка относится к отменяемым задачам; защищённые этапы маршрутов не прерываются. Восстановление блокировки сначала проверяет владельца операции и дочерние процессы.</p>
+
+<h3>Восстановление и удаление</h3>
+<p>В релизной разметке присутствует действие восстановления последней доступной резервной копии, но кнопка включается только когда backend подтверждает доступность подходящей копии.</p>
+<p>Опасная зона содержит <strong>Удалить BROray</strong> и <strong>Удалить полностью</strong>. Полное удаление требует точной контрольной фразы и удаляет программу, настройки, подписки, серверы, маршруты, owned ProxyN, KeenDNS HTTP Proxy и служебные данные.</p>
+</section>
+
+<section class="what-next"><div><p class="eyebrow">Нужно выполнить действие?</p><h2>Перейдите к сценариям</h2><p>Там действия собраны по пользовательским задачам, а этот раздел остаётся точным справочником экранов Stable 3.2.0.</p></div><a class="primary-action" href="/broray/scenarios/">Открыть сценарии →</a></section>
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray · WebUI</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>

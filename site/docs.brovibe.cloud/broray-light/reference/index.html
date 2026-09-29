@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Справочник BROray-Light</title>
+<meta name="description" content="Технический справочник BROray-Light: совместимость, хранение данных, ограничения VLESS-only и поддержка.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray-light/reference/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/">BROray</a>
+      <a href="/broray-light/" aria-current="page">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray-light/">Обзор</a><a href="/broray-light/start/">Установка</a><a href="/broray-light/webui/">WebUI</a><a href="/broray-light/scenarios/">Сценарии</a><a href="/broray-light/maintenance/">Обслуживание</a><a href="/broray-light/troubleshooting/">Решение проблем</a><a href="/broray-light/releases/">История версий</a><a href="/broray-light/reference/" aria-current="page">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+<section class="page-hero"><div><p class="eyebrow">Справочник</p><h1>Техническая информация BROray-Light</h1><p class="lead">Совместимость, хранение данных, ограничения редакции и границы безопасных операций.</p></div></section><h2 id="guide-1">1. Проверьте совместимость</h2>
+<p>Нужны Keenetic с Entware <strong>aarch64-3.10</strong>, накопитель, подключённый как <code>/opt</code>, доступ root к Entware shell, корректное время, DNS и HTTPS. Пакета для MIPS, ARM32 или x86 в этом выпуске нет. Не устанавливайте пакет другой архитектуры.</p>
+<p>Постоянный объём — примерно <strong>35 МиБ вместе с Xray</strong>. В сборке 2.0.0 собственный app-slot Light содержит 146 файлов, 858363 байт (около 0,82 МиБ); отдельно находятся обновитель, настройки и Xray 26.9.9 размером 35061884 байта (около 33,44 МиБ). Объём пользовательского каталога зависит от числа серверов и подписок; фактический расход файловой системы может отличаться.</p>
+<p>Рекомендуемый запас перед установкой — около <strong>80 МиБ свободно на <code>/opt</code></strong>, чтобы оставалось место для последующей атомарной замены Xray. Это не постоянный размер Light. Для установки и операций Xray нужен свободный RAM-backed <code>/tmp</code>; ориентир — не менее 64 МиБ, запас 128 МиБ предпочтителен при параллельной работе приложений. Обновление конкретного ядра может потребовать больше: не обходите отказ проверки места.</p>
+<p>Загрузки, распаковка, сессии, журналы, PID, блокировки и промежуточные результаты Light 2.0.0 размещаются в защищённых каталогах <code>/tmp</code>. Настройки, серверы, подписки, установленное ядро, слоты приложения и квитанции владения сохраняются на <code>/opt</code>. Проверенный соседний файл Xray на <code>/opt</code> нужен для атомарного переключения и отката, а не для хранения скачанного архива.</p>
+<p><strong>Полный BROray и BROray-Light не должны одновременно владеть интерфейсом, WebUI или runtime.</strong> При конфликте установка прекращается. Не удаляйте чужие файлы вручную и не обходите проверку: сохраните данные и штатно удалите ненужный продукт.</p>
+
+<section><h2>Границы редакции</h2><ul class="check-list">
+<li>Поддерживается только VLESS.</li>
+<li>Страниц WebUI три: Главная, Серверы и Подписки.</li>
+<li>Routes и управление DNS-over-TLS отсутствуют.</li>
+<li>Рейтингов и истории качества нет; резерв выбирается в заданном порядке.</li>
+<li>Полный BROray и BROray-Light не должны одновременно владеть одним интерфейсом, WebUI или runtime.</li>
+</ul></section>
+<h2 id="guide-11">История версий и поддержка</h2>
+<ul>
+<li><a href="https://github.com/BROadmin/BROray-Light/blob/main/CHANGELOG.md">История версий</a>.</li>
+<li><a href="https://github.com/BROadmin/BROray-Light/blob/main/docs/RELEASE-2.0.0.md">Состав и границы проверки 2.0.0</a>.</li>
+<li><a href="https://docs.brovibe.cloud/broray-light/">Отдельный раздел сайта</a>.</li>
+<li><a href="https://t.me/myBROvibe">Обсуждение</a>, <a href="https://github.com/BROadmin/BROray-Light/issues">Issues</a>, <a href="https://pay.cloudtips.ru/p/09b23d0a">поддержать проект</a>.</li>
+</ul>
+<p>Light не содержит Routes, управления DNS-over-TLS, рейтингов, истории качества и поддержки протоколов кроме VLESS. Лицензия приложения — GPL-3.0; Xray-core распространяется отдельно под MPL-2.0, остальные компоненты сохраняют собственные лицензии.</p>
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray-Light · Справочник</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20260920-docs-r2"></script>
+</body></html>
