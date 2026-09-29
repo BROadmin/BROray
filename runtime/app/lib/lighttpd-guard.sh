@@ -575,6 +575,14 @@ broray_lighttpd_guard_uninstall_restore()
 
 broray_lighttpd_guard_status()
 {
+    # Compact bootstrap keeps shared Entware Lighttpd outside BROray ownership.
+    # Require its existing exact package/assets contract and the real listeners.
+    if broray_lighttpd_guard_uninstall_unmanaged &&
+       broray_lighttpd_guard_wait_ports
+    then
+        printf '{"ok":true,"managed":false,"port80":"nginx","port8080":"broray-lighttpd"}\n'
+        return 0
+    fi
     if { broray_lighttpd_guard_receipt_valid ||
          broray_lighttpd_guard_known_legacy_adopt; } &&
        broray_lighttpd_guard_maintain &&

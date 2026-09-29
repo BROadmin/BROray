@@ -15,6 +15,7 @@
     var pollTimer = null;
     var pollInFlight = false;
     var formDirty = false;
+    var formReady = false;
     var formRevision = 0;
     var loadSequence = 0;
 
@@ -192,6 +193,14 @@
         return section;
     }
 
+    function setInitialLoading(loading) {
+        var form = element("auto-switch-form");
+        form.setAttribute("aria-busy", loading ? "true" : "false");
+        Array.prototype.forEach.call(form.querySelectorAll("input, select, button"), function (control) {
+            control.disabled = loading;
+        });
+    }
+
     function syncPreferredState() {
         var preferred = element("auto-switch-preferred");
         var rule = element("auto-switch-rule");
@@ -324,6 +333,11 @@
             if (savedRevision === formRevision) formDirty = false;
             lastSummary = values[1];
             render(values[0], values[1]);
+            if (!formReady) {
+                formReady = true;
+                setInitialLoading(false);
+                syncPreferredState();
+            }
         }).catch(function (error) {
             if (error.status === 401) {
                 BROrayUI.redirectToLogin();
@@ -355,6 +369,7 @@
         var savedRevision = formRevision;
 
         event.preventDefault();
+        if (!formReady) return;
 
         payload = {
             enabled: element("auto-switch-enabled").checked,
@@ -440,6 +455,7 @@
             return;
         }
 
+        setInitialLoading(true);
         document.addEventListener("visibilitychange", onVisibilityChange);
         loadStatus(true, true).then(schedulePolling);
     }

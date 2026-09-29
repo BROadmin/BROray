@@ -48,6 +48,25 @@ class Integration(unittest.TestCase):
     def finish(self,state='completed',code=''):
         self.call('finish',self.id,self.token,state,code)
         self.assertFalse((self.temp/'global.lock').exists())
+    def test_registration_survives_supported_coordinator_wait(self):
+        import fcntl
+        self.begin()
+        marker=self.temp/'helper-entered'
+        with (self.state/'operations.guard').open('rb') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX)
+            p=self.launch(f'printf entered >"{marker}"',timeout=5)
+            # The production client permits 15 two-second admission waits.
+            # A valid16-second wait must not expire a different15-second timer.
+            time.sleep(16)
+            self.assertFalse(marker.exists(),'Helper ran before coordinator authorization')
+            fcntl.flock(lock,fcntl.LOCK_UN)
+        out,err=p.communicate(timeout=20)
+        self.assertEqual(p.returncode,0,(out,err))
+        self.assertEqual(marker.read_text(),'entered')
+        records=json.loads((self.op/'supervisors.json').read_text())['supervisors']
+        self.assertEqual(len(records),1)
+        self.ledger=self.ram/'supervisors'/self.id/records[0]['supervisorId']/'children.json'
+        self.verify_gone();self.drain();self.finish()
     def test_live_helper_blocks_commit_finish_and_drain(self):
         self.begin();marker=self.temp/'ready';p=self.launch(f'echo yes >"{marker}"; sleep 60')
         self.ready(p,marker)

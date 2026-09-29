@@ -358,12 +358,23 @@ ops_platform_service_stop()
     ops_error UPDATER_STOP_UNCONFIRMED 75
 }
 
+# Select only the two existing, explicit origin contracts. This is discovery,
+# not readiness: the native verifier authenticates the complete retained origin.
+ops_platform_service_stop_kind()
+{
+    jq -er '.serviceStop | if .schemaVersion==1 and .contract=="broray-service-stop/1" and
+      (has("originKind")|not) and (has("originProofSha256")|not) then "service-cycle"
+      elif .schemaVersion==2 and .contract=="broray-service-stop/2" and
+      .originKind=="supervised-replacement" and (has("originMigrationIntentSha256")|not)
+      then "replacement-service" else empty end' "$1"
+}
+
 # A service stop interrupted BEFORE target binding never sent STOP. A real
 # boot boundary plus the complete native ledger proves its old writers ended.
 # Keep that distinction: abort the request, never forge generation STOPPED.
 ops_platform_recover_unissued_service_stop()
 {
-    local id origin proof original_nonce generation nonce native old_native live state_sha response next file
+    local id origin proof original_nonce generation nonce native old_native live state_sha response next file kind
     case "${verb:-}" in recover|initialize) ;; *) return 1 ;; esac
     [ "$OPS_PROC" = /proc ] || return 1
     ops_platform_stop_valid STOP_INTENT || return 1
@@ -371,9 +382,9 @@ ops_platform_recover_unissued_service_stop()
       ((.state=="running" and .running==true) or
        (.state=="aborted" and .running==false and .errorCode=="STOP_INTERRUPTED_BY_REBOOT")) and
       (.platformPreflight|has("generationStop")|not) and
-      .serviceStop.schemaVersion==2 and .serviceStop.contract=="broray-service-stop/2" and
-      .serviceStop.originKind=="supervised-replacement" and
       .serviceStop.platformManifestSha256==.platformPreflight.expectedPlatformManifestSha256' "$OPS_CURRENT/state.json" >/dev/null || return 1
+    kind="$(ops_platform_service_stop_kind "$OPS_CURRENT/state.json")" || return 1
+
     broray_ops_classify_owner "$(jq -c .owner "$OPS_EXECUTOR")"
     [ "$OPS_OWNER_STATUS:$OPS_OWNER_REASON" = STALE:previous_boot ] || return 1
     ops_global_matches && ops_publication_ready && ops_children_absent || return 1
@@ -393,7 +404,7 @@ ops_platform_recover_unissued_service_stop()
     done
     id="$OPS_ID"; nonce="$(jq -er .platformPreflight.stopNonce "$OPS_CURRENT/state.json")"
     origin="$(jq -er .serviceStop.originOperationId "$OPS_CURRENT/state.json")"
-    proof="$(jq -er .serviceStop.originProofSha256 "$OPS_CURRENT/state.json")"
+    proof="$(jq -er '.serviceStop | if .schemaVersion==1 then .originMigrationIntentSha256 else .originProofSha256 end' "$OPS_CURRENT/state.json")"
     original_nonce="$(jq -er .serviceStop.originStopNonce "$OPS_CURRENT/state.json")"
     generation="$(jq -er .serviceStop.generationId "$OPS_CURRENT/state.json")"
     old_native="$(jq -er .serviceStop.nativeSha256 "$OPS_CURRENT/state.json")"
@@ -436,7 +447,7 @@ ops_platform_recover_unissued_service_stop()
 # runtime authenticates all old ledger bytes and owns the ordinary boot start.
 ops_platform_resume_unissued_service_stop()
 {
-    local file origin proof nonce native expected live response generation id next
+    local file origin proof nonce native expected live response generation id next kind
     case "${verb:-}" in recover|initialize) ;; *) return 1 ;; esac
     [ "$OPS_PROC" = /proc ] || return 0
     [ ! -e "$OPS_GLOBAL" ] && [ ! -L "$OPS_GLOBAL" ] || return 1
@@ -448,16 +459,17 @@ ops_platform_resume_unissued_service_stop()
           .serviceStopBootEnded.phase=="UNISSUED_STOP_BOOT_ENDED_VERIFIED" and
           .serviceStopBootEnded.generationId==.serviceStop.generationId and
           (has("serviceStopResumed")|not)' "$file" >/dev/null || continue
-        origin="$(jq -er .serviceStop.originOperationId "$file")"; proof="$(jq -er .serviceStop.originProofSha256 "$file")"
+        kind="$(ops_platform_service_stop_kind "$file")" || return 1
+        origin="$(jq -er .serviceStop.originOperationId "$file")"; proof="$(jq -er '.serviceStop | if .schemaVersion==1 then .originMigrationIntentSha256 else .originProofSha256 end' "$file")"
         nonce="$(jq -er .serviceStop.originStopNonce "$file")"; expected="$(jq -er .serviceStop.nativeSha256 "$file")"
         generation="$(jq -er .serviceStop.generationId "$file")"
         ops_id_valid "$origin" && ops_platform_sha_valid "$proof" && ops_nonce_valid "$nonce" && ops_platform_sha_valid "$expected" || return 1
         native="$OPS_UPDATER/runtimes/$expected/runtime"
         ops_platform_service_path_safe "$native" && ops_file_safe "$native" 16777216 && [ -x "$native" ] || return 1
         response="$(sha256sum "$native")"; [ "${response%% *}" = "$expected" ] || return 1
-        response="$("$native" replacement-service-current "$live" "$origin" "$proof" "$nonce")" || return 1
+        response="$("$native" "$kind-current" "$live" "$origin" "$proof" "$nonce")" || return 1
         printf '%s\n' "$response" | jq -e '.ok==true and .phase=="SERVICE_CURRENT_DISCOVERED" and .readinessProven==false' >/dev/null || return 1
-        response="$("$native" replacement-service-start "$live" "$origin" "$proof" "$nonce")" || return 1
+        response="$("$native" "$kind-start" "$live" "$origin" "$proof" "$nonce")" || return 1
         printf '%s\n' "$response" | jq -e --arg old "$generation" '.ok==true and .platformReady==true and .activationAllowed==false and .generationId!=$old' >/dev/null || return 1
         id="${file%/state.json}"; id="${id##*/}"; ops_load "$id" || return 1
         next="$(jq -c --argjson receipt "$response" --arg now "$(ops_now)" '.serviceStopResumed=$receipt|.revision+=1|.updatedAt=$now' "$file")" || return 1
@@ -472,7 +484,7 @@ ops_platform_resume_unissued_service_stop()
 # current /proc absence, PID or timeout never authorize this transition.
 ops_platform_recover_stopped_service()
 {
-    local origin proof original_nonce id nonce generation old_native digest native live response next file phase
+    local origin proof original_nonce id nonce generation old_native digest native live response next file phase kind
     local PG_MANIFEST PG_FILES owner state_sha
     case "${verb:-}" in recover|initialize) ;; *) return 1 ;; esac
     [ "$OPS_PROC" = /proc ] || return 1
@@ -480,12 +492,11 @@ ops_platform_recover_stopped_service()
       .operation=="system:platform-preflight" and .resourceLocks==["global"] and
       .cancelability=="protected" and .initialCancelability=="protected" and
       (.platformPreflight.phase=="STOP_INTENT" or .platformPreflight.phase=="STOPPED") and
-      .serviceStop.schemaVersion==2 and .serviceStop.contract=="broray-service-stop/2" and
-      .serviceStop.originKind=="supervised-replacement" and
       .serviceStop.generationId==.platformPreflight.generationStop.generationId and
       .serviceStop.nativeSha256==.platformPreflight.generationStop.nativeSha256 and
       .serviceStop.platformManifestSha256==.platformPreflight.generationStop.platformManifestSha256 and
       .serviceStop.platformManifestSha256==.platformPreflight.expectedPlatformManifestSha256' "$OPS_CURRENT/state.json" >/dev/null || return 1
+    kind="$(ops_platform_service_stop_kind "$OPS_CURRENT/state.json")" || return 1
     owner="$(jq -c .owner "$OPS_EXECUTOR")"; broray_ops_classify_owner "$owner"
     [ "$OPS_OWNER_STATUS:$OPS_OWNER_REASON" = STALE:previous_boot ] || return 1
     phase="$(jq -r .platformPreflight.phase "$OPS_CURRENT/state.json")"
@@ -501,7 +512,7 @@ ops_platform_recover_stopped_service()
     done
     id="$OPS_ID"; nonce="$(jq -er .platformPreflight.stopNonce "$OPS_CURRENT/state.json")"
     origin="$(jq -er .serviceStop.originOperationId "$OPS_CURRENT/state.json")"
-    proof="$(jq -er .serviceStop.originProofSha256 "$OPS_CURRENT/state.json")"
+    proof="$(jq -er '.serviceStop | if .schemaVersion==1 then .originMigrationIntentSha256 else .originProofSha256 end' "$OPS_CURRENT/state.json")"
     original_nonce="$(jq -er .serviceStop.originStopNonce "$OPS_CURRENT/state.json")"
     generation="$(jq -er .serviceStop.generationId "$OPS_CURRENT/state.json")"
     old_native="$(jq -er .serviceStop.nativeSha256 "$OPS_CURRENT/state.json")"
@@ -545,7 +556,7 @@ ops_platform_recover_stopped_service()
 # generation: read-only authenticated CURRENT must match the completed stop.
 ops_platform_resume_completed_service_stop()
 {
-    local file id origin proof original_nonce generation native digest live response current seal
+    local file id origin proof original_nonce generation native digest live response current seal kind status_command
     case "${verb:-}" in recover|initialize) ;; *) return 1 ;; esac
     [ "$OPS_PROC" = /proc ] || return 0
     [ ! -e "$OPS_GLOBAL" ] && [ ! -L "$OPS_GLOBAL" ] || return 0
@@ -557,8 +568,8 @@ ops_platform_resume_completed_service_stop()
     for file in "$OPS_ROOT"/op-*/state.json; do
         ops_file_safe "$file" || continue
         jq -e '.state=="completed" and .running==false and .operation=="system:platform-preflight" and
-          .platformPreflight.phase=="STOPPED" and .serviceStop.schemaVersion==2 and
-          .serviceStop.contract=="broray-service-stop/2" and .serviceStop.originKind=="supervised-replacement"' "$file" >/dev/null || continue
+          .platformPreflight.phase=="STOPPED" and has("serviceStop")' "$file" >/dev/null || continue
+        kind="$(ops_platform_service_stop_kind "$file")" || return 1
         origin="$(jq -er .serviceStop.originOperationId "$file")"; generation="$(jq -er .serviceStop.generationId "$file")"
         ops_id_valid "$origin" || return 1
         case "$generation" in ''|*[!A-Za-z0-9_-]*) return 1 ;; esac
@@ -566,6 +577,7 @@ ops_platform_resume_completed_service_stop()
         # Ordinary completed cycles already have their stop seal. They are
         # immutable history, never a request to start an obsolete origin.
         seal="$OPS_UPDATER/cycles-$origin/stopped-$generation.record"
+        [ "$kind" != service-cycle ] || seal="$OPS_UPDATER/cycles/stopped-$generation.record"
         if [ -e "$seal" ] || [ -L "$seal" ]; then
             ops_publication_private "$seal" 8192 || return 1
             continue
@@ -575,21 +587,24 @@ ops_platform_resume_completed_service_stop()
         broray_ops_classify_owner "$(jq -c .owner "$OPS_EXECUTOR")"
         [ "$OPS_OWNER_STATUS:$OPS_OWNER_REASON" = STALE:previous_boot ] || continue
         ops_platform_completion_fence STOPPED || return 1
-        origin="$(jq -er .serviceStop.originOperationId "$file")"; proof="$(jq -er .serviceStop.originProofSha256 "$file")"
+        kind="$(ops_platform_service_stop_kind "$file")" || return 1
+        origin="$(jq -er .serviceStop.originOperationId "$file")"; proof="$(jq -er '.serviceStop | if .schemaVersion==1 then .originMigrationIntentSha256 else .originProofSha256 end' "$file")"
         original_nonce="$(jq -er .serviceStop.originStopNonce "$file")"; generation="$(jq -er .serviceStop.generationId "$file")"
         native="$(jq -er .serviceStop.nativeSha256 "$file")"
         ops_id_valid "$origin" && ops_platform_sha_valid "$proof" && ops_nonce_valid "$original_nonce" && ops_platform_sha_valid "$native" || return 1
         native="$OPS_UPDATER/runtimes/$native/runtime"
         ops_platform_service_path_safe "$native" && ops_file_safe "$native" 16777216 && [ -x "$native" ] || return 1
         digest="$(sha256sum "$native")"; [ "${digest%% *}" = "$(jq -er .serviceStop.nativeSha256 "$file")" ] || return 1
-        response="$("$native" replacement-service-current "$live" "$origin" "$proof" "$original_nonce")" || return 1
+        response="$("$native" "$kind-current" "$live" "$origin" "$proof" "$original_nonce")" || return 1
         current="$(printf '%s\n' "$response" | jq -er 'select(.ok==true and .phase=="SERVICE_CURRENT_DISCOVERED" and .readinessProven==false)|.generationId')" || return 1
         [ "$current" = "$generation" ] || continue
-        response="$("$native" replacement-service-stop "$live" "$origin" "$proof" "$original_nonce")" || return 1
+        response="$("$native" "$kind-stop" "$live" "$origin" "$proof" "$original_nonce")" || return 1
         printf '%s\n' "$response" | jq -e '.ok==true and .phase=="SERVICE_STOP_COMPLETED" and .serviceStopped==true' >/dev/null || return 1
-        response="$("$native" replacement-service-start "$live" "$origin" "$proof" "$original_nonce")" || return 1
+        response="$("$native" "$kind-start" "$live" "$origin" "$proof" "$original_nonce")" || return 1
         printf '%s\n' "$response" | jq -e --arg old "$generation" '.ok==true and .platformReady==true and .activationAllowed==false and .generationId!=$old' >/dev/null || return 1
-        response="$("$native" replacement-service-status "$live" "$origin" "$proof" "$original_nonce")" || return 1
+        status_command="$kind-status"
+        [ "$kind" != service-cycle ] || status_command=recovery-commit-check
+        response="$("$native" "$status_command" "$live" "$origin" "$proof" "$original_nonce")" || return 1
         printf '%s\n' "$response" | jq -e '.ok==true and .phase=="COMMIT_VERIFIED" and .platformReady==true and .activationAllowed==false' >/dev/null || return 1
         return 0
     done

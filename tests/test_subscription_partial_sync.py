@@ -48,6 +48,23 @@ broray_server_subscription_sync test "$BRORAY_ROOT/stage" "$1" qa-update "$2"
    CORE_RESULTS.extend(dict(json.loads(line),case=self.id(),output=(self.app/'xray-config-test.log').read_text()) for line in core.read_text().splitlines());core.unlink()
   if ok:self.assertEqual(p.returncode,0,p.stderr.decode(errors='replace')+((self.app/'xray-config-test.log').read_text() if (self.app/'xray-config-test.log').exists() else ''));return json.loads(p.stdout)
   self.assertNotEqual(p.returncode,0,p.stdout);self.assertEqual(p.stdout,b'');return p.stderr.decode(errors='replace')
+ def test_unchanged_refresh_preserves_exact_server_and_queue_context(self):
+  self.store(node('same'),'stage');self.sync('replace')
+  live=next((self.app/'servers').glob('*.json'));before=live.read_bytes()
+  def context():
+   p=subprocess.run(['/bin/ash','-c','. "$BRORAY_ROOT/lib/server-service.sh"; broray_quality_context all USER'],env=self.env,capture_output=True,timeout=30)
+   self.assertEqual(p.returncode,0,p.stderr);return p.stdout
+  old_context=context();changed=json.loads(before);changed['source']['updatedAt']='new-observation'
+  self.store(changed,'stage');r=self.sync('replace')
+  self.assertEqual((r['unchanged'],r['updated']),(1,0))
+  self.assertEqual(live.read_bytes(),before,'Unchanged subscription node must not invalidate an admitted quality snapshot')
+  self.assertEqual(context(),old_context)
+ def test_non_timestamp_metadata_change_is_still_applied(self):
+  self.store(node('same'),'stage');self.sync('replace')
+  live=next((self.app/'servers').glob('*.json'));changed=json.loads(live.read_bytes())
+  changed['name']='Renamed provider node';changed['source']['nodeIndex']=7;changed['source']['updatedAt']='new-observation'
+  self.store(changed,'stage');r=self.sync('replace')
+  actual=json.loads(live.read_bytes());self.assertEqual(actual['name'],changed['name']);self.assertEqual(actual['source'],changed['source']);self.assertEqual(r['updated'],1)
  def test_regression_preserve_missing_in_partial(self):
   old=self.store(node('old'));before=old.read_bytes();self.store(node('new'),'stage');r=self.sync();self.assertTrue(old.exists());self.assertEqual(old.read_bytes(),before);self.assertEqual(r['retained'],1);self.assertEqual(r['removed'],0)
  def test_regression_keep_active_missing_in_partial(self):

@@ -91,6 +91,77 @@ class ResourceRecovery(unittest.TestCase):
         self.finish(observer)
         self.assertEqual(self.call('queue-next')['requestId'],request['requestId'])
 
+    def admission_boot(self, phase=None, revision=None):
+        request=self.ready_apply()
+        operation=self.claim(request);self.ack(operation)
+        path=self.state/'operations'/operation['operationId']/'state.json'
+        if phase:
+            self.call('tick',operation['operationId'],operation['token'],phase)
+        if revision is not None:
+            data=json.loads(path.read_bytes());data['revision']=revision
+            path.write_text(json.dumps(data))
+        shutil.rmtree(self.temp/'ram')
+        (self.proc/'sys/kernel/random/boot_id').write_text('boot-two\n')
+        return operation,path
+
+    def updater_stub(self, failure=False):
+        stub=self.temp/'updater-init';self.starts=self.temp/'updater-starts'
+        stub.write_text('#!/bin/sh\n'+
+            'echo "$1" >> '+str(self.starts)+'\n'+
+            ('exit 75\n' if failure else
+             "echo '{\"ok\":true,\"phase\":\"COMMIT_VERIFIED\",\"generationId\":\"g-0123456789012345678901\",\"platformReady\":true,\"activationAllowed\":false}'\n"))
+        stub.chmod(0o700)
+        self.env['BRORAY_OPS_BOOT_UPDATER_INIT']=str(stub)
+
+    def test_boot_recovers_acknowledged_subscription_before_first_write(self):
+        operation,path=self.admission_boot();self.updater_stub()
+        self.assertEqual(json.loads(path.read_bytes())['revision'],2)
+        self.assertTrue(self.call('initialize')['ok'])
+        self.assertFalse((self.temp/'global.lock').is_symlink())
+        state=json.loads(path.read_bytes())
+        self.assertEqual(state['state'],'recovered')
+        self.assertEqual(state['bootAdmissionRecovery']['state'],'ready')
+        self.assertEqual(self.starts.read_text().splitlines(),['start','status'])
+        before=path.read_bytes();self.call('initialize')
+        self.assertEqual(path.read_bytes(),before)
+        self.assertEqual(self.starts.read_text().splitlines(),['start','status'])
+
+    def test_boot_resume_failure_retains_intent_and_retry_is_idempotent(self):
+        operation,path=self.admission_boot();self.updater_stub(failure=True)
+        self.assertEqual(self.call('initialize',expected=75)['errorCode'],'PLATFORM_RECOVERY_UNCONFIRMED')
+        state=json.loads(path.read_bytes())
+        self.assertEqual(state['state'],'recovered')
+        self.assertEqual(state['bootAdmissionRecovery']['state'],'pending')
+        self.assertFalse((self.temp/'global.lock').is_symlink())
+        self.updater_stub();self.assertTrue(self.call('initialize')['ok'])
+        self.assertEqual(json.loads(path.read_bytes())['bootAdmissionRecovery']['state'],'ready')
+
+    def test_working_after_mutation_checkpoint_is_not_admission(self):
+        operation,path=self.admission_boot(phase='committing',revision=4)
+        data=json.loads(path.read_bytes());data['phase']='working';path.write_text(json.dumps(data))
+        before=path.read_bytes();self.updater_stub()
+        self.call('initialize')
+        self.assertEqual(path.read_bytes(),before)
+        self.assertTrue((self.temp/'global.lock').is_symlink())
+        self.assertFalse(self.starts.exists())
+
+    def test_admission_unknown_evidence_is_preserved(self):
+        operation,path=self.admission_boot();self.updater_stub()
+        (path.parent/'unknown-writer').write_text('KEEP')
+        before=path.read_bytes();self.call('initialize')
+        self.assertEqual(path.read_bytes(),before)
+        self.assertTrue((self.temp/'global.lock').is_symlink())
+        self.assertFalse(self.starts.exists())
+
+    def test_same_boot_absent_admission_is_not_recovered(self):
+        operation,path=self.admission_boot();self.updater_stub()
+        (self.proc/'sys/kernel/random/boot_id').write_text('boot-one\n')
+        self.set_owner({'status':'absent'});before=path.read_bytes()
+        self.call('initialize')
+        self.assertEqual(path.read_bytes(),before)
+        self.assertTrue((self.temp/'global.lock').is_symlink())
+        self.assertFalse(self.starts.exists())
+
     def test_reboot_drops_ram_queue_without_discarding_protected_commit(self):
         request=self.ready_apply(source='USER')
         operation=self.claim(request);self.ack(operation)

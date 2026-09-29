@@ -17,6 +17,7 @@ class UnmanagedLighttpd(unittest.TestCase):
         # neither shared service stop, adoption nor package removal is allowed.
         setup=f'. "{ROOT}/implementation/runtime/app/lib/lighttpd-guard.sh"\n'+'''
 broray_lighttpd_guard_assets_valid() { [ "${BAD_ASSETS:-0}" = 0 ]; }
+broray_lighttpd_guard_wait_ports() { [ "${BAD_PORTS:-0}" = 0 ]; }
 broray_lighttpd_guard_known_legacy_adopt() { return 1; }
 broray_lighttpd_guard_maintain() { echo MUTATION; return 1; }
 broray_lighttpd_guard_stop_default() { echo MUTATION; return 1; }
@@ -27,6 +28,17 @@ opkg() { echo MUTATION; return 1; }
         self.assertNotIn(b'MUTATION',p.stdout)
         self.assertEqual(before,{str(p):p.read_bytes() for p in self.temp.rglob('*') if p.is_file()})
         return p.returncode
+    def test_compact_status_accepts_intact_unmanaged_service(self):
+        self.assertEqual(self.run_guard('status'),0)
+    def test_compact_status_rejects_wrong_port_owner(self):
+        self.env['BAD_PORTS']='1'
+        self.assertNotEqual(self.run_guard('status'),0)
+    def test_compact_status_rejects_changed_assets(self):
+        self.env['BAD_ASSETS']='1'
+        self.assertNotEqual(self.run_guard('status'),0)
+    def test_compact_status_rejects_corrupt_receipt(self):
+        self.guard.mkdir();(self.guard/'receipt').write_text('broken\n')
+        self.assertNotEqual(self.run_guard('status'),0)
     def test_compact_shared_dependency_is_preserved(self):
         self.assertEqual(self.run_guard('uninstall_unmanaged'),0)
     def test_existing_malformed_receipt_does_not_become_unmanaged(self):

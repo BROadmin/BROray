@@ -628,6 +628,77 @@ ops_interface_recover()
     BRORAY_BASE="$OPS_APP" timeout 15 "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$script" ownership-check >/dev/null 2>&1
 }
 
+# A queued subscription cannot write its live model before the durable
+# committing checkpoint. Revision 2 is exactly its first acknowledged state;
+# phase=working alone would also match a later tick and is insufficient.
+ops_subscription_admission_previous_boot()
+{
+    local entry owner
+    [ "$OPS_EXECUTOR" = "$OPS_CURRENT/owner.json" ] && ops_step_binding || return 1
+    jq -e '.operation=="subscriptions:refresh" and .queueStep.stage=="apply" and
+      .resourceLocks==["global"] and .state=="running" and .phase=="working" and
+      .revision==2 and .running==true and .acknowledged==true and
+      .cancelability=="protected" and .initialCancelability=="protected" and
+      .cancelRequested==false and (has("platformPreflight")|not) and
+      (has("serviceStop")|not)' "$OPS_CURRENT/state.json" >/dev/null || return 1
+    owner="$(jq -c .owner "$OPS_EXECUTOR")"; broray_ops_classify_owner "$owner"
+    [ "$OPS_OWNER_STATUS:$OPS_OWNER_REASON" = STALE:previous_boot ] || return 1
+    ops_global_matches && ops_children_absent && ops_publication_ready || return 1
+    ops_pending_domain && return 1
+    # Unknown writer/effect evidence cannot be interpreted as admission only.
+    for entry in "$OPS_CURRENT"/* "$OPS_CURRENT"/.[!.]* "$OPS_CURRENT"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        case "${entry##*/}" in owner.json|state.json|fence) ;; *) return 1 ;; esac
+    done
+    return 0
+}
+
+# S22 runs before application initialization. A pre-commit fence can have
+# blocked that startup attempt. Keep the continuation in the same operation
+# until the canonical, manifest-verifying service entry proves readiness.
+ops_subscription_boot_resume()
+{
+    local file id init response generation boot
+    [ ! -e "$OPS_GLOBAL" ] && [ ! -L "$OPS_GLOBAL" ] || return 0
+    for file in "$OPS_ROOT"/op-*/state.json; do
+        ops_file_safe "$file" || continue
+        jq -e 'has("bootAdmissionRecovery") and .bootAdmissionRecovery.state!="ready"' "$file" >/dev/null || continue
+        id="${file%/state.json}"; id="${id##*/}"
+        ops_load "$id" && ops_step_binding && ops_step_retired_valid || return 1
+        jq -e '.bootAdmissionRecovery.schemaVersion==1 and .bootAdmissionRecovery.state=="pending" and
+          (.bootAdmissionRecovery.bootId|type)=="string" and
+          .operation=="subscriptions:refresh" and .queueStep.stage=="apply" and
+          .resourceLocks==["global"] and .running==false and .errorCode=="OWNER_DISAPPEARED" and
+          ((.state=="recovered" and .phase=="finished" and .revision==4) or
+           (.state=="aborted" and .phase=="recovering" and .revision==3))' "$file" >/dev/null || return 1
+        broray_ops_classify_owner "$(jq -c .owner "$OPS_EXECUTOR")"
+        [ "$OPS_OWNER_STATUS:$OPS_OWNER_REASON" = STALE:previous_boot ] || return 1
+        ops_children_absent && ops_publication_ready && ops_platform_queue_clear || return 1
+        ops_pending_domain && return 1
+        for init in "$OPS_LEGACY" "$OPS_UPDATER/request.lock"; do
+            [ ! -e "$init" ] && [ ! -L "$init" ] || return 1
+        done
+        if jq -e '.state=="aborted"' "$file" >/dev/null; then
+            ops_state_transition recovered finished OWNER_DISAPPEARED || return 1
+        fi
+        init=/opt/etc/init.d/S22broray-updater
+        if [ "$OPS_APP" != /opt/broray ]; then init="${BRORAY_OPS_BOOT_UPDATER_INIT:-$init}"; fi
+        ops_file_safe "$init" 65536 && [ -x "$init" ] || return 1
+        response="$("$init" start)" || return 1
+        printf '%s\n' "$response" | jq -es 'length==1 and .[0].ok==true and
+          .[0].platformReady==true and .[0].activationAllowed==false' >/dev/null || return 1
+        response="$("$init" status)" || return 1
+        generation="$(printf '%s\n' "$response" | jq -er 'select(.ok==true and
+          .phase=="COMMIT_VERIFIED" and .platformReady==true and .activationAllowed==false)|
+          .generationId|select(type=="string" and length==24 and startswith("g-"))')" || return 1
+        boot="$(broray_ops_boot_id)" || return 1
+        ops_write "$file" "$(jq -c --arg boot "$boot" --arg generation "$generation" \
+          '.bootAdmissionRecovery.state="ready"|.bootAdmissionRecovery.readyBootId=$boot|
+           .bootAdmissionRecovery.generationId=$generation|.revision+=1' "$file")" || return 1
+    done
+    return 0
+}
+
 ops_recover_global()
 {
     local id owner status reason cancelability target
@@ -683,7 +754,12 @@ ops_recover_global()
         ops_platform_recover_prepared || { OPS_RECOVERY_RESULT=protected_recovery; return 2; }
     elif ! ops_executor_pending && ! jq -e '.state=="starting" and .acknowledged==false' "$OPS_CURRENT/state.json" >/dev/null; then
         if [ "$cancelability" != cooperative ]; then
-            ops_route_recover || ops_interface_recover || ops_platform_recover_prepared || { OPS_RECOVERY_RESULT=protected_recovery; return 2; }
+            if ops_subscription_admission_previous_boot; then
+                ops_write "$OPS_CURRENT/state.json" "$(jq -c --arg boot "$(broray_ops_boot_id)" \
+                  '.bootAdmissionRecovery={schemaVersion:1,state:"pending",bootId:$boot}' "$OPS_CURRENT/state.json")" || return 1
+            else
+                ops_route_recover || ops_interface_recover || ops_platform_recover_prepared || { OPS_RECOVERY_RESULT=protected_recovery; return 2; }
+            fi
         else
             ops_pending_domain && { OPS_RECOVERY_RESULT=domain_pending; return 2; }
         fi
@@ -834,6 +910,7 @@ ops_prune()
         # Platform history retains authenticated code and generation bindings.
         # A terminal operation owner does not prove that these can be deleted.
         jq -e 'has("platformPreflight") or .operation=="system:platform-preflight"' "$file" >/dev/null 2>&1 && continue
+        jq -e 'has("bootAdmissionRecovery") and .bootAdmissionRecovery.state!="ready"' "$file" >/dev/null 2>&1 && continue
         dir="${file%/state.json}"
         for evidence in "$dir"/platform-*; do
             [ ! -e "$evidence" ] && [ ! -L "$evidence" ] || continue 2
@@ -933,7 +1010,7 @@ ops_initialize_previous_boot()
     fi
     # Protected domain commits still require their explicit consistency path.
     # This is the same safe cooperative recovery used by the next begin call.
-    jq -e -L "${OPS_CODE:-$OPS_APP}/lib" 'include "operation-public";
+    ops_subscription_admission_previous_boot || jq -e -L "${OPS_CODE:-$OPS_APP}/lib" 'include "operation-public";
       (route_protected|not) and .cancelability=="cooperative"' "$OPS_CURRENT/state.json" >/dev/null || return 0
     ops_recover_global || return 0
 }
@@ -1113,6 +1190,7 @@ case "$verb" in
         # cooperative owner cannot survive and follows the normal recovery.
         [ "$#" = 0 ] || ops_error INVALID_REQUEST 1
         ops_initialize_previous_boot || ops_error PLATFORM_RECOVERY_UNCONFIRMED 75
+        ops_subscription_boot_resume || ops_error PLATFORM_RECOVERY_UNCONFIRMED 75
         printf '%s\n' '{"ok":true}' ;;
     platform-preflight-begin) ops_platform_admission_request "$@" ;;
     platform-service-stop) ops_platform_service_stop "$@" ;;

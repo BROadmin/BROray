@@ -2118,21 +2118,35 @@ static int stopped_boot_retirement_main(int argc,char **argv){
     const char *why="context";char path[PATH_MAX],stop_path[PATH_MAX],fence[PATH_MAX],link[PATH_MAX],field[192],name[128];
     char text[2048],host_text[512],value[128],canonical[PATH_MAX],shell[PATH_MAX],shell_sha[65];
     struct migration_file intent={0},state_file={0},ready={0},last={0},host_record={0},again={0};
-    char *copy=NULL;struct gb_record b;memset(&b,0,sizeof b);
+    char *copy=NULL,*cursor=NULL,*row=NULL;struct gb_record b;memset(&b,0,sizeof b);
     const char *prefix=!strcmp(argv[2],"/")?"":argv[2];
     if(!realpath(argv[2],canonical)||strcmp(canonical,argv[2]))goto done;
-    context=1;if(rs_context(argv[2],argv[3],argv[5]))goto done;sc.may_publish=0;sc.replacement=1;strcpy(sc.migration,argv[4]);
+    context=1;if(rs_context(argv[2],argv[3],argv[5]))goto done;sc.may_publish=0;strcpy(sc.migration,argv[4]);
     why="historical-runtime";
-    if(sc_file(sc.op,"platform-replacement-start/intent.record",&intent)||strcmp(intent.sha,argv[4]))goto done;
-    copy=strdup(intent.bytes);if(!copy)goto done;char *cursor=copy,*row=NULL;
-    for(int i=0;i<7;i++){row=sc_line(&cursor);if(!row)goto done;}
-    if(!hex64(row))goto done;strcpy(sc.native,row);free(copy);copy=NULL;
-    /* rs_service_read validates this SHA against retained runtime, complete
-     * source closure and independently bound replacement intent/manifest. */
-    pl_historical_verification=1;
-    if(rs_service_read())goto done;
+    int replacement=bg_exists(sc.op,"platform-replacement-start");if(replacement<0)goto done;
+    sc.replacement=replacement;pl_historical_verification=1;
+    if(replacement){
+        if(sc_file(sc.op,"platform-replacement-start/intent.record",&intent)||strcmp(intent.sha,argv[4]))goto done;
+        copy=strdup(intent.bytes);if(!copy)goto done;cursor=copy;row=NULL;
+        for(int i=0;i<7;i++){row=sc_line(&cursor);if(!row)goto done;}
+        if(!hex64(row))goto done;strcpy(sc.native,row);free(copy);copy=NULL;
+        if(rs_service_read())goto done;
+    }else{
+        /* Clean-install/migration origins have the same sealed ordinary
+         * lifecycle, but use the original bootguard and recovery-code proof. */
+        if(bg_exists(sc.op,"platform-replacement-service.json")!=0||
+           sc_file(sc.op,"platform-bootguard.json",&intent)||
+           sc_field(intent.bytes,"nativeSha256",sc.native,sizeof sc.native)||!hex64(sc.native)||
+           sc_join(path,sc.oppath,"platform-migration"))goto done;
+        int migration=checked_directory(path);if(migration<0)goto done;
+        int bad=bg_source(migration,path,sc.root,sc.migration,&sc.input)||
+            strcmp(sc.input.operation,sc.origin)||strcmp(sc.input.nonce,sc.nonce);close(migration);
+        if(bad)goto done;
+        char *verify[]={argv[0],"recovery-code-verify",sc.oppath,sc.root,path,sc.migration,NULL};
+        if(recovery_code_impl_native(6,verify,0,sc.native))goto done;
+    }
     why="lifecycle-history";
-    int k=snprintf(name,sizeof name,"cycles-%s",sc.origin);
+    int k=snprintf(name,sizeof name,replacement?"cycles-%s":"cycles",sc.origin);
     if(k<0||k>=(int)sizeof name||sc_join(sc.cyclepath,sc.uppath,name))goto done;
     sc.cycles=checked_directory(sc.cyclepath);
     why="lifecycle-directory";if(sc.cycles<0)goto done;
@@ -2156,8 +2170,10 @@ static int stopped_boot_retirement_main(int argc,char **argv){
         !(unissued&&strstr(state_file.bytes,"\"state\":\"aborted\"")&&strstr(state_file.bytes,"\"errorCode\":\"STOP_INTERRUPTED_BY_REBOOT\"")))||
        !strstr(state_file.bytes,"\"cancelability\":\"protected\""))goto done;
     const char *purpose=strstr(state_file.bytes,"\"serviceStop\":{");if(!purpose)goto done;
-    const char *keys[]={"contract","originOperationId","originKind","originStopNonce","originProofSha256","generationId","nativeSha256","platformManifestSha256"};
-    const char *values[]={"broray-service-stop/2",argv[3],"supervised-replacement",argv[5],argv[4],argv[6],sc.native,sc.input.manifest};
+    const char *keys[]={"contract","originOperationId","originStopNonce",replacement?"originProofSha256":"originMigrationIntentSha256","generationId","nativeSha256","platformManifestSha256"};
+    const char *values[]={replacement?"broray-service-stop/2":"broray-service-stop/1",argv[3],argv[5],argv[4],argv[6],sc.native,sc.input.manifest};
+    if(replacement){if(sc_field(purpose,"originKind",value,sizeof value)||strcmp(value,"supervised-replacement"))goto done;}
+    else if(strstr(purpose,"\"originKind\":")||strstr(purpose,"\"originProofSha256\":"))goto done;
     for(unsigned i=0;i<sizeof keys/sizeof keys[0];i++)if(sc_field(purpose,keys[i],value,sizeof value)||strcmp(value,values[i]))goto done;
     why="exclusion";
     if(sc_join(path,sc.uppath,"generations"))goto done;gens=checked_directory(path);

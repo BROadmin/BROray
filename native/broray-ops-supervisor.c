@@ -125,7 +125,10 @@ int main(int argc,char **argv){
     int durations[3];for(int i=0;i<3;i++){char *end;long n=strtol(argv[4+i],&end,10);if(*end||n<0||n>3600)return 64;durations[i]=(int)n;}
     if(!durations[0]||durations[1]>30||durations[2]>30)return 64;
     umask(077);signal(SIGCHLD,SIG_DFL);signal(SIGTERM,on_signal);signal(SIGINT,on_signal);signal(SIGHUP,on_signal);
-    alarm(15);
+    /* operation-client allows15 two-second guard admissions. Registration
+       must cover that30-second budget plus coordinator identity validation.
+       No helper exists before this completes; its own deadline starts below. */
+    alarm(45);
     if(register_supervisor(argv[1],argv[2]))return 74;
     alarm(0);
     int gate[2];if(pipe(gate))return end_supervisor(74,"failed",0);

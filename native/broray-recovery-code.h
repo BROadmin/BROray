@@ -39,7 +39,7 @@ static int rc_complete(int base,int code,int bin,int lib){
     const char *lib_names[RC_FILES-1];for(int i=1;i<RC_FILES;i++)lib_names[i-1]=rc_paths[i]+4;
     return rc_names(base,root_names,3)||rc_names(code,code_names,2)||rc_names(bin,bin_names,1)||rc_names(lib,lib_names,RC_FILES-1)?-1:0;
 }
-static int recovery_code_impl(int argc,char **argv,int emit){
+static int recovery_code_impl_native(int argc,char **argv,int emit,const char *historical_native){
     /* stage OP LIVE MIGRATION SHA SOURCE; verify OP LIVE MIGRATION SHA */
     int verify=argc>1&&!strcmp(argv[1],"recovery-code-verify");
     if(argc!=(verify?6:7)||!migration_path(argv[2])||!migration_path(argv[3])||!migration_path(argv[4])||!hex64(argv[5])||(!verify&&!migration_path(argv[6])))return 64;
@@ -52,7 +52,17 @@ static int recovery_code_impl(int argc,char **argv,int emit){
        snprintf(codepath,sizeof codepath,"%s/code",directory)>=(int)sizeof codepath||
        snprintf(binpath,sizeof binpath,"%s/bin",codepath)>=(int)sizeof binpath||snprintf(libpath,sizeof libpath,"%s/lib",codepath)>=(int)sizeof libpath)goto done;
     op=checked_directory(argv[2]);mig=checked_directory(argv[4]);
-    if(op<0||mig<0||flock(op,LOCK_EX|LOCK_NB)||flock(mig,LOCK_SH|LOCK_NB)||migration_boot(boot)||peer_executable_hash(getpid(),native)||bg_source(mig,argv[4],argv[3],argv[5],&input))goto done;
+    if(op<0||mig<0||flock(op,LOCK_EX|LOCK_NB)||flock(mig,LOCK_SH|LOCK_NB)||migration_boot(boot)||bg_source(mig,argv[4],argv[3],argv[5],&input))goto done;
+    if(historical_native){
+        /* Read-only boot proof may inspect an older authenticated runtime.
+         * The old native inode and complete bound closure remain mandatory;
+         * staging/execution can never select a historical hash this way. */
+        if(!verify||!hex64(historical_native))goto done;
+        int retained=openat(op,"platform-bootguard",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+        if(retained<0)goto done;
+        int bad=bg_runtime_valid(retained,historical_native);close(retained);
+        if(bad)goto done;strcpy(native,historical_native);
+    }else if(peer_executable_hash(getpid(),native))goto done;
     if(!verify&&strcmp(boot,input.old_boot))goto done;
     const char *name=strrchr(argv[2],'/');if(!name||strcmp(name+1,input.operation))goto done;
     int gn=bg_binding_text(guard,&input,argv[5],native);if(gn<0||bg_bound_exact(op,guard,(size_t)gn))goto done;digest_bytes(guard,(size_t)gn,guard_sha);
@@ -86,6 +96,7 @@ done:
     if(op>=0)close(op);if(mig>=0)close(mig);if(src>=0)close(src);if(base>=0)close(base);if(code>=0)close(code);if(bin>=0)close(bin);if(lib>=0)close(lib);
     rc_free(files);free(input.intent);free(manifest);return result?migration_error("RECOVERY_CODE_EVIDENCE_UNCONFIRMED"):0;
 }
+static int recovery_code_impl(int argc,char **argv,int emit){return recovery_code_impl_native(argc,argv,emit,NULL);}
 static int recovery_code_main(int argc,char **argv){return recovery_code_impl(argc,argv,1);}
 
 static int platform_start_intent_apply(char **argv,int op,const char *op_path,const struct bg_input *input,const char *native,const struct identity *executor,int held,int statefd,const char *shell,const char *controller,int observe);

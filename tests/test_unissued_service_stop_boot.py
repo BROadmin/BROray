@@ -38,13 +38,19 @@ def resume(home,root,up,command):
     state=json.loads((op/'state.json').read_bytes());s=state['serviceStop'];boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
     case.assertNotEqual(boot,row['bootId']);case.assertEqual(sha(op/'state.json'),row['stateSha256'])
     domain=up/'generations'/gen;lock=root/'opt/var/lock/broray/global-operation.lock'
-    native=Path('/work/.local/bin/linux-generation');guard=Path('/work/.local/bin/linux-guard')
+    native=Path('/work/upgrade-native') if Path('/work/upgrade-native').exists() else Path('/work/.local/bin/linux-generation');guard=Path('/work/.local/bin/linux-guard')
     fd=os.open(root/'opt/var/lib/broray/operations.guard',os.O_RDWR);fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
-    args=[str(native),'verify-unissued-stop-boot',str(root),origin.name,s['originProofSha256'],s['originStopNonce'],gen,op.name,state['platformPreflight']['stopNonce'],sha(op/'state.json')]
+    args=[str(native),'verify-unissued-stop-boot',str(root),origin.name,s['originMigrationIntentSha256'] if s['schemaVersion']==1 else s['originProofSha256'],s['originStopNonce'],gen,op.name,state['platformPreflight']['stopNonce'],sha(op/'state.json')]
     def run(a):return subprocess.run(a,capture_output=True,text=True,pass_fds=(fd,),timeout=30)
     def snapshot():return {str(p):p.read_bytes() for folder in [domain,op] for p in folder.rglob('*') if p.is_file() and not p.is_symlink()}
     foreign=subprocess.Popen(['/bin/sleep','1000'])
     try:
+        before=snapshot()
+        if s['schemaVersion']==1:
+            baseline_args=args.copy();baseline_args[0]=str(Path('/work/.local/bin/linux-generation'))
+            failed=run(baseline_args);case.assertNotEqual(failed.returncode,0,failed.stdout+failed.stderr)
+            case.assertEqual(before,snapshot())
+            print('MIGRATION_ORIGIN_NATIVE_BASELINE_FAIL '+json.dumps(dict(rc=failed.returncode,stderr=failed.stderr)),flush=True)
         before=snapshot();ok=run(args);case.assertEqual(ok.returncode,0,ok.stdout+ok.stderr)
         proof=json.loads(ok.stdout);case.assertEqual(proof['phase'],'UNISSUED_STOP_BOOT_ENDED_VERIFIED')
         for k in ['serviceStopped','platformReady','signalsAuthorized','mutationAuthorized']:case.assertFalse(proof[k])
@@ -81,7 +87,7 @@ def resume(home,root,up,command):
         for boundary in ['before-retire','after-retire']:
             traced=PublicStopTrace(case,call,env)
             try:
-                pred=(lambda a: a and a[0].rsplit(b'/',1)[-1]==b'mv' and any(x.endswith(b'/retired-lock') for x in a)) if boundary=='before-retire' else (lambda a:len(a)>1 and a[1]==b'replacement-service-current')
+                pred=(lambda a: a and a[0].rsplit(b'/',1)[-1]==b'mv' and any(x.endswith(b'/retired-lock') for x in a)) if boundary=='before-retire' else (lambda a:len(a)>1 and a[1]==(b'service-cycle-current' if s['schemaVersion']==1 else b'replacement-service-current'))
                 traced.wait_exec(pred,time.monotonic()+120)
                 saved=json.loads((op/'state.json').read_bytes());case.assertEqual(saved['state'],'aborted')
                 case.assertEqual(saved['errorCode'],'STOP_INTERRUPTED_BY_REBOOT');case.assertNotIn('generationStop',saved['platformPreflight'])

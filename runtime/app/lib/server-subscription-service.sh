@@ -802,6 +802,17 @@ broray_server_subscription_sync()
     for sync_new_file in "$sync_stage_dir"/*.json; do
         [ -f "$sync_new_file" ] || continue
         sync_new_name="$(basename "$sync_new_file")"
+        # Subscription freshness belongs to its own update record. Rewriting
+        # an otherwise identical node just for that observation timestamp
+        # invalidates exact input snapshots of queued quality checks.
+        if [ -f "$sync_target_dir/$sync_new_name" ] &&
+           [ ! -L "$sync_target_dir/$sync_new_name" ] &&
+           jq -ne --slurpfile old "$sync_target_dir/$sync_new_name" \
+             --slurpfile new "$sync_new_file" '
+             ($old|length)==1 and ($new|length)==1 and
+             (($old[0]|del(.source.updatedAt)) == ($new[0]|del(.source.updatedAt)))' >/dev/null; then
+            continue
+        fi
         sync_temp_target="$sync_target_dir/.${sync_new_name}.new.$$"
         if ! cp "$sync_new_file" "$sync_temp_target" || \
            ! chmod 600 "$sync_temp_target" || \
