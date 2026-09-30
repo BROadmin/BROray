@@ -24,10 +24,16 @@ case "$action" in
         mkdir -p "$SVC_APP/logs" || exit 74
         "$SVC_ASH" "$SVC_DAEMON" >>"$SVC_LOG" 2>&1 </dev/null &
     fi
-    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    # App bootstrap/adoption can take more than10s during a release switch.
+    # Observe the same launch for up to30 waits; a timeout is never readiness.
+    # Probe after the final sleep too, instead of returning its stale view.
+    remaining=30
+    while :; do
         view="$(broray_service_status_json)" || exit 74
         if printf '%s\n' "$view" | jq -e '.complete and .ready' >/dev/null; then printf '%s\n' "$view"; exit 0; fi
+        [ "$remaining" -gt 0 ] || break
         sleep 1
+        remaining=$((remaining-1))
     done
     printf '%s\n' "$view"; exit 75 ;;
   stop)

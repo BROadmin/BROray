@@ -51,6 +51,63 @@ class Services(unittest.TestCase):
         try:os.waitpid(pid,os.WNOHANG)
         except ChildProcessError:pass
     def record(self):return json.loads((self.svc/'identity.json').read_text())
+    def readiness_daemon(self, gate):
+        daemon=self.app/'bin/broray-subscription-scheduler'
+        daemon.write_text('''#!/bin/ash
+. "$BRORAY_ROOT/lib/service-lifecycle.sh"
+if [ "${BRORAY_SERVICE_BOOTSTRAP:-}" = subscriptions ]; then
+'''+gate+'''
+fi
+broray_service_daemon_enter subscriptions || exit $?
+trap 'broray_service_daemon_exit' EXIT
+while ! broray_service_stop_requested; do /bin/sleep 1; done
+''')
+    def test_start_observes_ready_after_last_sleep(self):
+        self.assert_ready_at_sleep(10)
+    def test_start_observes_ready_at_extended_wait_boundary(self):
+        self.assert_ready_at_sleep(30)
+    def assert_ready_at_sleep(self, boundary):
+        self.env['TEST_READY_SLEEP']=str(boundary)
+        self.readiness_daemon('read -r release <"$BRORAY_ROOT/tmp/birth-gate"')
+        os.mkfifo(self.app/'tmp/birth-gate')
+        # Deterministic interleaving: the final old wait publishes a real,
+        # identity-bound daemon before returning to the start controller.
+        sleeper=self.app/'bin/sleep'
+        sleeper.write_text('''#!/bin/ash
+n=0; [ ! -f "$BRORAY_ROOT/tmp/polls" ] || read -r n <"$BRORAY_ROOT/tmp/polls"
+n=$((n+1)); echo "$n" >"$BRORAY_ROOT/tmp/polls"
+if [ "$n" = "$TEST_READY_SLEEP" ]; then
+ echo release >"$BRORAY_ROOT/tmp/birth-gate"
+ for i in $(seq 1 100); do
+  jq -e '.state=="running"' "$BRORAY_STATE_ROOT/services/subscriptions/identity.json" >/dev/null 2>&1 && exit 0
+  /bin/sleep .05
+ done
+ exit 91
+fi
+''');sleeper.chmod(0o755)
+        result=self.call('start',expected=None)
+        self.assertEqual(self.record()['state'],'running')
+        status=json.loads(self.call('status-json').stdout)
+        self.assertTrue(status['complete'] and status['ready'],status)
+        self.assertEqual(result.returncode,0,result.stdout)
+        self.assertTrue(json.loads(result.stdout)['ready'])
+    def test_start_timeout_never_claims_ready_or_relaunches(self):
+        daemon=self.app/'bin/broray-subscription-scheduler'
+        daemon.write_text('#!/bin/ash\necho launch >>"$BRORAY_ROOT/tmp/launches"\nexit 0\n')
+        sleeper=self.app/'bin/sleep'
+        sleeper.write_text('#!/bin/ash\necho wait >>"$BRORAY_ROOT/tmp/waits"\n')
+        sleeper.chmod(0o755)
+        result=self.call('start',expected=75)
+        self.assertFalse(json.loads(result.stdout)['ready'])
+        self.assertEqual((self.app/'tmp/launches').read_text().splitlines(),['launch'])
+        self.assertEqual(len((self.app/'tmp/waits').read_text().splitlines()),30)
+    def test_start_accepts_slow_identity_bound_adoption(self):
+        # Physical KN-2710 evidence: adoption took12-14s during release switch.
+        self.readiness_daemon('/bin/sleep 12')
+        result=self.call('start',expected=None)
+        self.wait_running()
+        self.assertEqual(result.returncode,0,result.stdout)
+        self.assertTrue(json.loads(result.stdout)['ready'])
     def direct(self):
         p=subprocess.Popen(['/bin/ash',str(self.app/'bin/broray-subscription-scheduler')],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         self.children.append(p);return p
