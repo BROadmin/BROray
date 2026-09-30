@@ -4,6 +4,7 @@ broray_routes_ndmc_capture()
 {
     local executable limit wait_limit old_lane runner rc
     executable="$1"; limit="${5:-10}"
+    case "$executable" in ndmc|/bin/ndmc) executable="$BRORAY_ROOT/bin/broray-system-ndmc" ;; esac
     case "$executable" in */*) ;; *) executable="$(command -v "$executable")" || return 127 ;; esac
     [ -x "$executable" ] || return 127
     case "$limit" in ''|*[!0-9]*) return 64 ;; esac

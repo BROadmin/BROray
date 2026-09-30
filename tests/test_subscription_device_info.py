@@ -17,6 +17,8 @@ case "${TEST_DEVICE_MODE:-normal}" in
 esac
 cat "$TEST_VERSION"
 ''');p.chmod(0o755);self.env['BRORAY_INTERFACE_NDMC']=str(p)
+  source=Path(__file__).resolve().parents[1]/'runtime/app/bin/broray-system-ndmc'
+  helper=self.app/'bin/broray-system-ndmc';helper.write_text(source.read_text().replace('/bin/ndmc',str(p)));helper.chmod(0o755)
  def fetch(self,enabled='true',ua='',url='https://provider.example.invalid/sub'):
   p=self.shell('''broray_subscription_resolve_public_ip() { BRORAY_SUB_RESOLVED_IP=93.184.216.34; }
 rc=0; broray_subscription_fetch "$1" "$BRORAY_ROOT/tmp/download" "$2" "$3" "$4" || rc=$?

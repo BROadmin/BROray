@@ -60,18 +60,6 @@ broray_web_request_body_to_file() {
  [ "$(wc -c <"$1" | tr -d ' ')" = "$CONTENT_LENGTH" ]
 }
 '''
-# Exact operation_id predicate from the existing operation-public.jq, not a
-# permissive substitute. The rest of that unchanged projection is out of scope.
-PUBLIC_ID = r'''
-def ascii_digits: type=="string" and length>0 and all(explode[]; .>=48 and .<=57);
-def ascii_hex: type=="string" and length>0 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102));
-def operation_id:
-  if type!="string" then null else . as $value | split("-") |
-    if length==4 and .[0]=="op" and (.[1]|length)==14 and (.[1]|ascii_digits) and
-      (.[2]|length)>0 and (.[2]|length)<=10 and (.[2]|ascii_digits) and
-      (.[2]|tonumber)>1 and (.[2]|tonumber)<=2147483647 and
-      (.[3]|length)==12 and (.[3]|ascii_hex) then $value else null end end;
-'''
 PUBLISH = r'''
 broray_web_publish_status_json() {
  local w name domain
@@ -115,10 +103,14 @@ class OperationsOrigin(unittest.TestCase):
             (self.root / rel).write_text(text.replace('/opt/broray', str(self.root)), encoding='utf-8')
         self.helper = self.root / 'lib/operations-origin.sh'
         for rel, text in [('web-new/api/auth-common.sh', AUTH), ('lib/operation-client.sh', CLIENT),
-                          ('lib/web-request-body.sh', BODY), ('lib/operation-public.jq', PUBLIC_ID),
+                          ('lib/web-request-body.sh', BODY),
+                          ('lib/operation-public.jq', (SOURCE / 'runtime/app/lib/operation-public.jq').read_text(encoding='utf-8')),
                           ('lib/web-publish.sh', PUBLISH), ('bin/ndmc', NDMC)]:
             (self.root / rel).write_text(text, encoding='utf-8')
         (self.root / 'bin/ndmc').chmod(0o700)
+        dispatcher = self.root / 'bin/broray-system-ndmc'
+        dispatcher.write_text((SOURCE / 'runtime/app/bin/broray-system-ndmc').read_text().replace('/bin/ndmc', str(self.root / 'bin/ndmc')))
+        dispatcher.chmod(0o700)
         if os.environ.get('BRORAY_TEST_BUSYBOX_APPLETS') == '1':
             if not BUSYBOX: self.fail('BusyBox is required for its applet matrix')
             for name in ['awk','timeout','mkdir','rm','rmdir','cat','dd','wc','tr']:

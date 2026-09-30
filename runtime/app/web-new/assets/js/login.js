@@ -24,6 +24,8 @@
     function clearError() {
         errorBox.textContent = "";
         errorBox.hidden = true;
+        delete errorBox.dataset.errorCode;
+        delete errorBox.dataset.httpStatus;
     }
 
     passwordToggle.addEventListener("click", function () {
@@ -75,6 +77,15 @@
             );
         } catch (error) {
             passwordInput.value = "";
+
+            // Diagnostic metadata contains only a bounded code/status, never
+            // the response body, credentials or authentication proof.
+            if (typeof error.code === "string" && /^[A-Z0-9_]{1,80}$/.test(error.code)) {
+                errorBox.dataset.errorCode = error.code;
+            }
+            if (Number.isInteger(error.status)) {
+                errorBox.dataset.httpStatus = String(error.status);
+            }
 
             showError(
                 error.message ||

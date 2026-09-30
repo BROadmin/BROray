@@ -1731,9 +1731,10 @@ state_seed_abort_before_switch()
 
 service_call()
 {
-    local action service script state_file state_sha script_sha slot request_id service_root
+    local action service script state_file state_sha script_sha slot request_id service_root service_reply service_rc
     action="$1"
     service="$2"
+    SERVICE_CALL_COMPLETED=false
 
     # Native authenticates the independent host and this exact generation
     # child. App init must never execute inside the updater writer tree.
@@ -1775,13 +1776,21 @@ service_call()
             "$action" "$service" "$slot" "$script_sha" | sha256sum)" || return 75
         request_id="${request_id%% *}"
         service_root="${ROOT_PREFIX:-/}"
-        "$BRORAY_UPDATER_GENERATION_NATIVE" service \
+        service_rc=0
+        service_reply="$("$BRORAY_UPDATER_GENERATION_NATIVE" service \
             "$BRORAY_UPDATER_SERVICE_HOST" "$BRORAY_UPDATER_GENERATION_ROOT" \
             "$BRORAY_UPDATER_GENERATION" "$BRORAY_UPDATER_MANIFEST_SHA256" \
             "$service_root" "$BRORAY_UPDATER_SERVICE_INTERPRETER" \
             "$BRORAY_UPDATER_SERVICE_INTERPRETER_SHA256" \
-            "$action" "$service" "$request_id" "$script_sha" "$slot"
-        return $?
+            "$action" "$service" "$request_id" "$script_sha" "$slot")" || service_rc=$?
+        printf '%s\n' "$service_reply"
+        # A socket/admission error is not a completed init invocation. Native
+        # authenticates this exact persisted reply before returning its code.
+        if printf '%s\n' "$service_reply" | jq -e --arg id "$request_id" --argjson rc "$service_rc" \
+            '.requestId==$id and .exitCode==$rc and .ok==($rc==0)' >/dev/null 2>&1; then
+            SERVICE_CALL_COMPLETED=true
+        fi
+        return "$service_rc"
     fi
 
     if [ -n "$SERVICE_HOOK" ]; then
@@ -1966,6 +1975,38 @@ routes_owner_interface()
     printf '%s\n' "$interface"
 }
 
+# Route commands run after authenticated target staging, including upgrades
+# whose old application has no clean system dispatcher. Never fall back to PATH.
+updater_ndmc_path()
+{
+    local target root helper manifest expected actual line
+    [ -f "$CURRENT_OPERATION_DIR/target" ] && [ ! -L "$CURRENT_OPERATION_DIR/target" ] || return 1
+    [ -f "$CURRENT_OPERATION_DIR/target-slot" ] && [ ! -L "$CURRENT_OPERATION_DIR/target-slot" ] || return 1
+    cmp -s "$CURRENT_OPERATION_DIR/target" "$CURRENT_OPERATION_DIR/target-slot" || return 1
+    [ "$(wc -l <"$CURRENT_OPERATION_DIR/target" | tr -d ' ')" = 1 ] || return 1
+    target="$(sed -n '1p' "$CURRENT_OPERATION_DIR/target")" || return 1
+    valid_id "$target" || return 1
+    if [ "$(current_slot 2>/dev/null || true)" = "$target" ]; then
+        root="$CURRENT_PATH"
+    else
+        root="$RELEASES_ROOT/$target"
+    fi
+    slot_marker_matches "$root" "$target" || return 1
+    [ ! -L "$root/app" ] && [ ! -L "$root/app/bin" ] || return 1
+    helper="$root/app/bin/broray-system-ndmc"
+    manifest="$root/SHA256SUMS"
+    [ -f "$helper" ] && [ ! -L "$helper" ] && [ -x "$helper" ] || return 1
+    [ -s "$manifest" ] && [ ! -L "$manifest" ] || return 1
+    expected="$(awk '$2=="app/bin/broray-system-ndmc" {count++; value=$1; if(NF!=2) bad=1}
+      END {if(count!=1 || bad) exit 1; print value}' "$manifest")" || return 1
+    [ "${#expected}" -eq 64 ] || return 1
+    case "$expected" in *[!0-9a-f]*) return 1 ;; esac
+    line="$(sha256sum "$helper")" || return 1
+    actual="${line%% *}"
+    [ "$actual" = "$expected" ] || return 1
+    printf '%s\n' "$helper"
+}
+
 routes_capture()
 {
     local snapshot interface_file sha_file snapshot_tmp interface_tmp sha_tmp
@@ -1998,7 +2039,7 @@ routes_capture()
         interface="$(routes_owner_interface "$owner" "$config")" || return 1
         printf '%s\n' "$interface" >"$interface_tmp" || return 1
 
-        ndmc="$(command -v ndmc 2>/dev/null || true)"
+        ndmc="$(updater_ndmc_path)" || return 1
         [ -n "$ndmc" ] && [ -x "$ndmc" ] || return 1
         "$ndmc" -c 'show running-config' >"$running" 2>>"$CURRENT_OPERATION_LOG" || return 1
         [ -s "$running" ] || return 1
@@ -2070,15 +2111,16 @@ routes_snapshot_present_in()
     config="$1"
     snapshot="$CURRENT_OPERATION_DIR/managed-routes.before"
     [ -f "$config" ] && [ ! -L "$config" ] && [ -s "$config" ] || return 1
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        grep -Fqx "$line" "$config" || return 1
-    done <"$snapshot"
+    # One exact-line set lookup per route; no process or full config scan
+    # per entry. Prefixing the key also keeps numeric-looking lines textual.
+    awk 'FILENAME==ARGV[1] {present["route:" $0]=1; next}
+      length($0)>0 && !( ("route:" $0) in present ) {missing=1}
+      END {exit missing ? 1 : 0}' "$config" "$snapshot"
 }
 
 routes_restore_captured()
 {
-    local snapshot interface ndmc running startup line changed attempt stable
+    local snapshot interface ndmc running startup line changed attempt stable missing
     snapshot="$CURRENT_OPERATION_DIR/managed-routes.before"
     routes_snapshot_binding_valid || return 1
     [ -e "$snapshot" ] || [ -L "$snapshot" ] || return 0
@@ -2092,19 +2134,21 @@ routes_restore_captured()
         return 0
     fi
 
-    ndmc="$(command -v ndmc 2>/dev/null || true)"
+    ndmc="$(updater_ndmc_path)" || return 1
     [ -n "$ndmc" ] && [ -x "$ndmc" ] || return 1
     running="$CURRENT_OPERATION_DIR/managed-routes.running-restore"
     startup="$CURRENT_OPERATION_DIR/managed-routes.startup-restore"
     "$ndmc" -c 'show running-config' >"$running" 2>>"$CURRENT_OPERATION_LOG" || return 1
+    missing="$(awk 'FILENAME==ARGV[1] {present["route:" $0]=1; next}
+      length($0)>0 && !( ("route:" $0) in present ) {print}' "$running" "$snapshot")" || return 1
     changed=false
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        if ! grep -Fqx "$line" "$running"; then
-            "$ndmc" -c "$line" >>"$CURRENT_OPERATION_LOG" 2>&1 || return 1
-            changed=true
-        fi
-    done <"$snapshot"
+        "$ndmc" -c "$line" >>"$CURRENT_OPERATION_LOG" 2>&1 || return 1
+        changed=true
+    done <<BRORAY_MISSING_ROUTES
+$missing
+BRORAY_MISSING_ROUTES
     if [ "$changed" = true ]; then
         "$ndmc" -c 'system configuration save' >>"$CURRENT_OPERATION_LOG" 2>&1 || return 1
     fi
@@ -2143,7 +2187,7 @@ routes_verify_captured()
         "$ROUTE_HOOK" verify "$snapshot" "$interface"
         return $?
     fi
-    ndmc="$(command -v ndmc 2>/dev/null || true)"
+    ndmc="$(updater_ndmc_path)" || return 1
     [ -n "$ndmc" ] && [ -x "$ndmc" ] || return 1
     running="$CURRENT_OPERATION_DIR/managed-routes.running-verify"
     startup="$CURRENT_OPERATION_DIR/managed-routes.startup-verify"
@@ -2154,7 +2198,7 @@ routes_verify_captured()
 
 services_stop_captured()
 {
-    local services_file service state
+    local services_file service state stop_rc continuation
     services_file="$CURRENT_OPERATION_DIR/services.tsv"
     [ -s "$services_file" ] || return 1
 
@@ -2169,8 +2213,90 @@ services_stop_captured()
         else
             [ "$state" = running ] || continue
         fi
-        service_call stop "$service" >>"$CURRENT_OPERATION_LOG" 2>&1 || return 1
+        continuation=0
+        while :; do
+            if service_call stop "$service" >>"$CURRENT_OPERATION_LOG" 2>&1; then break; else stop_rc=$?; fi
+            printf 'SERVICE_STOP_PENDING service=%s rc=%s completed=%s\n' \
+                "$service" "$stop_rc" "${SERVICE_CALL_COMPLETED:-false}" >>"$CURRENT_OPERATION_LOG"
+            [ "${1:-}" != target ] && [ "$stop_rc" = 75 ] &&
+                [ "${SERVICE_CALL_COMPLETED:-false}" = true ] && [ "$continuation" -lt 2 ] || return 1
+            service_wait_cooperative_stop "$service" >>"$CURRENT_OPERATION_LOG" 2>&1 || return 1
+            continuation=$((continuation+1))
+            service_stop_continue_intent "$service" "$continuation" || return 1
+        done
     done
+}
+
+# A legacy service can return 75 while its bounded cooperative stop is still
+# draining a collector. Observe the existing exact generation; never signal it
+# or infer completion from a deadline/PID absence. The next canonical init stop
+# must still acquire its lifetime lease and confirm all remaining sidecars.
+service_wait_cooperative_stop()
+(
+    local names name view identity current stop_sha deadline found
+    case "$1" in
+        S24broray) names='interface-reconcile home-snapshot' ;;
+        S23broray-monitor) names=connection-monitor ;;
+        S27broray-auto-switch) names=auto-switch ;;
+        S28broray-subscriptions) names=subscriptions ;;
+        *) return 75 ;;
+    esac
+    BRORAY_ROOT="$APP_ROOT"
+    BRORAY_STATE_ROOT="$(root_path /opt/var/lib/broray)" || return 75
+    export BRORAY_ROOT BRORAY_STATE_ROOT
+    [ -f "$APP_ROOT/lib/service-lifecycle.sh" ] && [ ! -L "$APP_ROOT/lib/service-lifecycle.sh" ] || return 75
+    . "$APP_ROOT/lib/service-lifecycle.sh" || return 75
+    deadline=$(( $(epoch) + 60 )); found=false
+    for name in $names; do
+        broray_service_setup "$name" || return 75
+        view="$(broray_service_status_json)" || return 75
+        printf '%s\n' "$view" | jq -e '.complete and (.state=="running" or .state=="stopping" or .state=="stopped")' >/dev/null || return 75
+        [ -e "$SVC_DIR/stop.json" ] || continue
+        broray_service_record && broray_service_stop_valid || return 75
+        jq -e --arg gen "$SVC_GENERATION" '.generation==$gen' "$SVC_DIR/stop.json" >/dev/null || return 75
+        [ "$(printf '%s\n' "$SVC_OWNER" | jq -r '.bootId')" = "$(broray_ops_boot_id)" ] || continue
+        identity="$(printf '%s\n' "$SVC_RECORD" | jq -cS '{service,generation,owner}')" || return 75
+        stop_sha="$(sha256sum "$SVC_DIR/stop.json")" || return 75
+        found=true
+        printf 'COOPERATIVE_DRAIN_BEGIN service=%s generation=%s\n' "$name" "$SVC_GENERATION"
+        while :; do
+            broray_service_record && broray_service_stop_valid || return 75
+            current="$(printf '%s\n' "$SVC_RECORD" | jq -cS '{service,generation,owner}')" || return 75
+            [ "$current" = "$identity" ] && [ "$(sha256sum "$SVC_DIR/stop.json")" = "$stop_sha" ] || return 75
+            view="$(broray_service_status_json)" || return 75
+            printf '%s\n' "$view" | jq -e '.complete' >/dev/null || return 75
+            # The daemon may publish its terminal record while status samples
+            # /proc. Revalidate after that sample, never use the earlier copy.
+            broray_service_record && broray_service_stop_valid || return 75
+            current="$(printf '%s\n' "$SVC_RECORD" | jq -cS '{service,generation,owner}')" || return 75
+            [ "$current" = "$identity" ] && [ "$(sha256sum "$SVC_DIR/stop.json")" = "$stop_sha" ] || return 75
+            if printf '%s\n' "$view" | jq -e '.state=="stopped" and .running==false' >/dev/null; then
+                printf '%s\n' "$SVC_RECORD" | jq -e '.state=="stopped"' >/dev/null || return 75
+                break
+            fi
+            printf '%s\n' "$view" | jq -e '.state=="stopping" and .running==true and .ready==false' >/dev/null || return 75
+            [ "$(epoch)" -lt "$deadline" ] || return 75
+            sleep 1
+        done
+        printf 'COOPERATIVE_DRAIN_COMPLETE service=%s generation=%s\n' "$name" "$SVC_GENERATION"
+    done
+    [ "$found" = true ] || [ "${2:-}" = optional ]
+)
+
+service_stop_continue_intent()
+{
+    local operation
+    operation="$(jq -er --arg id "$CURRENT_OPERATION_ID" '
+        select(.schemaVersion==1 and .operationId==$id and .state=="running" and
+          .stage=="stopping" and .mutationStarted==false and .rollbackPerformed==false and
+          (.operation=="update" or .operation=="reinstall")) | .operation
+    ' "$CURRENT_OPERATION_DIR/state.json")" || return 75
+    # A distinct durable stage snapshot authorizes a distinct service request.
+    # Lost replies to either request retain the native host's exact replay key.
+    status_write "$operation" running stopping 60 \
+        "Подтверждено завершение фоновой службы; продолжается остановка $1 ($2)." '' false false || return 75
+    sync || return 75
+    operation_log "SERVICE_STOP_CONTINUATION service=$1 step=$2"
 }
 
 services_start_captured()
@@ -2891,9 +3017,8 @@ request_process()
         '' false false || return 1
 
     if ! services_stop_captured; then
-        services_start_captured >>"$CURRENT_OPERATION_LOG" 2>&1 || true
-        status_write "$operation" error stopping 100 'Службы не остановлены согласованно; активный релиз не изменялся.' SERVICE_STOP_FAILED false false || true
-        operation_cleanup_terminal
+        state_seed_abort_before_switch "$operation" stopping \
+            'Службы не остановлены согласованно; активный релиз не изменялся.' SERVICE_STOP_FAILED || true
         return 1
     fi
 
@@ -2979,14 +3104,24 @@ request_process()
     return 0
 }
 
-# Resume only a completed layout rollback whose service restoration failed.
-# Unknown layouts, state-seed ownership and other rollback failures stay fenced.
+# Resume only a proven unchanged layout or a completed layout rollback whose
+# service restoration failed. Unknown layouts/other failures stay fenced.
 recover_service_rollback()
 {
-    local path previous_slot target_slot reason operation before state_file
+    local path previous_slot target_slot reason operation before state_file mode required expected_error mutated service
+    mode="${1:-rollback}"
+    case "$mode" in
+        rollback)
+            required='state.json request.json previous-slot target rollback-reason switch.phase mutation.started services.tsv'
+            expected_error=ROLLBACK_SERVICE_FAILED; mutated=true ;;
+        preswitch)
+            required='state.json request.json previous-slot target services.tsv'
+            expected_error=PRE_SWITCH_SERVICE_RESTORE_FAILED; mutated=false ;;
+        *) return 1 ;;
+    esac
     state_file="$CURRENT_OPERATION_DIR/state.json"
     before="$CURRENT_OPERATION_DIR/service-recovery.before.json"
-    for path in state.json request.json previous-slot target rollback-reason switch.phase mutation.started services.tsv
+    for path in $required
     do
         [ -f "$CURRENT_OPERATION_DIR/$path" ] && [ ! -L "$CURRENT_OPERATION_DIR/$path" ] || return 1
     done
@@ -3000,18 +3135,26 @@ recover_service_rollback()
            (.[0].operation == "update" or .[0].operation == "reinstall")
         then .[0].operation else error("unknown request") end
     ' "$CURRENT_OPERATION_DIR/request.json")" || return 1
-    jq -se --arg id "$CURRENT_OPERATION_ID" --arg operation "$operation" '
+    jq -se --arg id "$CURRENT_OPERATION_ID" --arg operation "$operation" \
+        --arg expected "$expected_error" --argjson mutated "$mutated" '
         length == 1 and (.[0] | .schemaVersion == 1 and .operationId == $id and
         .operation == $operation and .state == "error" and .stage == "rollback-failed" and
-        .error == "ROLLBACK_SERVICE_FAILED" and .running == false and
-        .mutationStarted == true and .rollbackPerformed == true)
+        .error == $expected and .running == false and
+        .mutationStarted == $mutated and .rollbackPerformed == $mutated)
     ' "$state_file" >/dev/null || return 1
     previous_slot="$(cat "$CURRENT_OPERATION_DIR/previous-slot")"
     target_slot="$(cat "$CURRENT_OPERATION_DIR/target")"
-    reason="$(cat "$CURRENT_OPERATION_DIR/rollback-reason")"
+    reason="$expected_error"
+    if [ "$mode" = rollback ]; then
+        reason="$(cat "$CURRENT_OPERATION_DIR/rollback-reason")"
+        [ "$(cat "$CURRENT_OPERATION_DIR/switch.phase")" = rollback-previous-active ] || return 1
+    else
+        for path in mutation.started switch.phase rollback-reason; do
+            [ ! -e "$CURRENT_OPERATION_DIR/$path" ] && [ ! -L "$CURRENT_OPERATION_DIR/$path" ] || return 1
+        done
+    fi
     valid_id "$previous_slot" && valid_id "$target_slot" && valid_id "$reason" || return 1
     [ "$previous_slot" != "$target_slot" ] || return 1
-    [ "$(cat "$CURRENT_OPERATION_DIR/switch.phase")" = rollback-previous-active ] || return 1
     [ "$(current_slot)" = "$previous_slot" ] || return 1
     slot_marker_matches "$RELEASES_ROOT/$target_slot" "$target_slot" || return 1
     for path in state-seed.created state-seed-owners
@@ -3032,12 +3175,24 @@ recover_service_rollback()
     fi
     [ -f "$before" ] && [ ! -L "$before" ] && cmp -s "$state_file" "$before" || return 1
     operation_log 'SERVICE_ROLLBACK_RECOVERY_BEGIN'
+    if [ "$mode" = preswitch ] && [ -e "$APP_ROOT/lib/service-lifecycle.sh" ]; then
+        for service in S23broray-monitor S24broray S27broray-auto-switch S28broray-subscriptions; do
+            # No start while a previous cooperative stop is still draining.
+            # Legacy versions without this controller retain their init path.
+            service_wait_cooperative_stop "$service" optional >>"$CURRENT_OPERATION_LOG" 2>&1 || return 1
+        done
+    fi
     services_start_captured >>"$CURRENT_OPERATION_LOG" 2>&1 || return 1
-    slot_health "$previous_slot" || return 1
+    if [ "$mode" = rollback ]; then slot_health "$previous_slot" || return 1
+    else services_health_captured || return 1; fi
     cmp -s "$state_file" "$before" || return 1
-    status_write "$operation" error rolled-back 100 \
-        'Предыдущая версия и её службы восстановлены; откат завершён.' \
-        "$reason" true true || return 1
+    if [ "$mode" = rollback ]; then
+        status_write "$operation" error rolled-back 100 \
+            'Предыдущая версия и её службы восстановлены; откат завершён.' "$reason" true true || return 1
+    else
+        status_write "$operation" error services-restored 100 \
+            'Исходные службы восстановлены; версия не изменялась. Обновление можно повторить.' "$reason" false false || return 1
+    fi
     sync || return 1
     operation_log 'SERVICE_ROLLBACK_RECOVERY=PASS'
     operation_cleanup_terminal
@@ -3088,6 +3243,10 @@ recover_incomplete()
            .error == "ROLLBACK_SERVICE_FAILED" and .running == false and
            .mutationStarted == true and .rollbackPerformed == true
       then "service-rollback"
+      elif .schemaVersion == 1 and .state == "error" and .stage == "rollback-failed" and
+           .error == "PRE_SWITCH_SERVICE_RESTORE_FAILED" and .running == false and
+           .mutationStarted == false and .rollbackPerformed == false
+      then "service-preswitch"
       elif field_text(.stage // "") == "rollback-failed" or
            field_text(.stage // "") == "recovery-ambiguous" or
            field_text(.state // "") == "recovery-required"
@@ -3096,6 +3255,10 @@ recover_incomplete()
     if [ "$running" != true ]; then
         if [ "$running" = service-rollback ]; then
             recover_service_rollback
+            return $?
+        fi
+        if [ "$running" = service-preswitch ]; then
+            recover_service_rollback preswitch
             return $?
         fi
         if [ "$running" = recovery-required ]; then

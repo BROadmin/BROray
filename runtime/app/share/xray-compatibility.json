@@ -1438,6 +1438,27 @@
         "VLESS и VMess: параметры seed и headerType транспорта mKCP (mkcp-legacy)",
         "VLESS, VMess и Trojan: проверенные настройки TCP-фрагментации FinalMask (fragment)"
       ]
+    },
+    {
+      "candidateId": "3.2.0-r01c38",
+      "architecture": "arm64",
+      "xrayTag": "v26.9.30",
+      "archiveSha256": "9886f077f9fd8e6713b84c377c1c7db4e53b9bfa8c276a5bd12561139522b473",
+      "testedAt": "2026-09-30T08:58:42.728809+00:00",
+      "status": "compatible",
+      "evidence": "BROray-3.2.0-release-completion-20260930/xray-26.9.30: physical KN-2710/KeeneticOS5.1.4 ARM64 configuration validation passed 41/41 generated configurations. Exact source components match c38 and the current integration source. Binary and official archive SHA-256 verified. Scope: Xray run -test, not network connectivity or installation lifecycle. Installed Xray PID/startTicks/binary/config unchanged; private RAM test files removed.",
+      "testedSourceSha256": {
+        "lib/server-config-generator.sh": "03c658938cba435d6f0c1364d6aacdd5774a3a2ea280a8d2e2a94d2aec0227c4",
+        "lib/xray.sh": "238b58cab5b31dd31f4d14b27c3435ca201ea8765bb4a2dcef20f3bc96d7f233",
+        "lib/parser-vless.sh": "c6fb5571723ee644255e134f96a5e8500b90d74d6c7bb19578125f22590fcce1"
+      },
+      "configurationGate": {
+        "passed": 41,
+        "failed": 0,
+        "evidenceSha256": "ea8649b74c80ccbd5a55d576228343cd698836e3238b2115136ead2eb8048a98",
+        "rejectedConfigurationSha256": []
+      },
+      "limitations": []
     }
   ]
 }

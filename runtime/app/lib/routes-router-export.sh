@@ -1243,7 +1243,7 @@ broray_routes_router_export_run__shadowed_legacy_1_unused()
     then
         BRORAY_ROUTES_ROUTER_EXPORT_NDMC="$BRORAY_ROUTES_CONFIG_NDMC"
     else
-        BRORAY_ROUTES_ROUTER_EXPORT_NDMC="$(command -v ndmc 2>/dev/null || true)"
+        BRORAY_ROUTES_ROUTER_EXPORT_NDMC="$BRORAY_ROOT/bin/broray-system-ndmc"
     fi
 
     [ -n "$BRORAY_ROUTES_ROUTER_EXPORT_NDMC" ] ||
@@ -2224,7 +2224,7 @@ broray_routes_router_export_run()
     then
         BRORAY_ROUTES_ROUTER_EXPORT_NDMC="$BRORAY_ROUTES_CONFIG_NDMC"
     else
-        BRORAY_ROUTES_ROUTER_EXPORT_NDMC="$(command -v ndmc 2>/dev/null || true)"
+        BRORAY_ROUTES_ROUTER_EXPORT_NDMC="$BRORAY_ROOT/bin/broray-system-ndmc"
     fi
 
     [ -n "$BRORAY_ROUTES_ROUTER_EXPORT_NDMC" ] ||

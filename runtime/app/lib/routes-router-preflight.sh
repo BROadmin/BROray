@@ -374,7 +374,7 @@ broray_routes_preflight_run()
     then
         BRORAY_ROUTES_PREFLIGHT_NDMC="$BRORAY_ROUTES_CONFIG_NDMC"
     else
-        BRORAY_ROUTES_PREFLIGHT_NDMC="$(command -v ndmc 2>/dev/null || true)"
+        BRORAY_ROUTES_PREFLIGHT_NDMC="$BRORAY_ROOT/bin/broray-system-ndmc"
     fi
     [ -n "$BRORAY_ROUTES_PREFLIGHT_NDMC" ] ||
         broray_routes_preflight_error "Команда ndmc недоступна."

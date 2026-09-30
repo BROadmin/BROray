@@ -60,6 +60,17 @@ class CandidateCompatibility(unittest.TestCase):
   if components is not None:context['sourceSha256']=components
   r=subprocess.run(['jq','-nc','-L',str(ROOT/'runtime/app/lib'),'--argjson','records',json.dumps(registry['records'] if records is None else records),'--argjson','context',json.dumps(context),'--argjson','release',json.dumps(release),'include "xray-releases"; $release|compatibility($records;$context)'],capture_output=True,text=True,timeout=5)
   self.assertEqual(r.returncode,0,r.stderr);return json.loads(r.stdout)
+ def test_xray_26_9_30_exact_config_matrix_evidence(self):
+  digest='9886f077f9fd8e6713b84c377c1c7db4e53b9bfa8c276a5bd12561139522b473'
+  result=self.resolve(candidate='3.2.0-r01c999999',tag='v26.9.30',digest=digest)
+  self.assertEqual(result['status'],'compatible',result)
+  self.assertEqual(result['configurationGate']['passed'],41)
+  self.assertEqual(result['configurationGate']['failed'],0)
+  self.assertEqual(result['testedSourceSha256'],self.component_identity())
+  self.assertIn('configuration validation',result['evidence'])
+  self.assertEqual(self.resolve(tag='v26.9.30',digest='0'*64)['status'],'untested')
+  changed=self.component_identity();changed['lib/server-config-generator.sh']='0'*64
+  self.assertEqual(self.resolve(tag='v26.9.30',digest=digest,components=changed)['status'],'untested')
  def test_current_candidate_exposes_proven_xray_result(self):
   record=self.resolve();self.assertEqual(record['status'],'compatible',record)
   self.assertEqual(record['candidateId'],'3.2.0-r01c19')

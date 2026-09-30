@@ -1,5 +1,5 @@
 """Updater field regressions: real shell/jq with isolated network fixtures."""
-import json,os,subprocess,tempfile,unittest
+import hashlib,json,os,subprocess,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 APP=ROOT/'implementation/runtime/app'
@@ -65,6 +65,15 @@ case "$2" in
   *) exit 3 ;;
 esac
 ''');ndmc.chmod(0o755)
+        # The real updater consumes the authenticated staged target dispatcher,
+        # never a PATH ndmc from the old application. Rebase only its endpoint.
+        slot_id='3.2.0-route-fixture--update-test';slot=self.app/'releases'/slot_id
+        (slot/'app/bin').mkdir(parents=True)
+        helper=slot/'app/bin/broray-system-ndmc'
+        helper.write_text((APP/'bin/broray-system-ndmc').read_text().replace('/bin/ndmc',str(ndmc)));helper.chmod(0o755)
+        (slot/'SHA256SUMS').write_text(hashlib.sha256(helper.read_bytes()).hexdigest()+'  app/bin/broray-system-ndmc\n')
+        (slot/'.broray-slot').write_text(slot_id+'\n')
+        for name in ['target','target-slot']:(self.operation/name).write_text(slot_id+'\n')
     def routes_call(self,call):
         script='. "$1"; CURRENT_OPERATION_DIR="$2"; CURRENT_OPERATION_LOG="$2/log"; '+call
         return subprocess.run(['/bin/ash','-c',script,'test',str(self.library),str(self.operation)],env=self.env,capture_output=True,timeout=300)
@@ -74,6 +83,15 @@ esac
         self.assertEqual(set((self.operation/'managed-routes.before').read_text().splitlines()),set(self.routes))
         self.assertFalse(self.commands.exists(),'Unchanged routes should not be rewritten')
         self.assertIn('count=868 changed=false',(self.operation/'log').read_text())
+    def check_small_route_count(self,count):
+        self.route_fixture(count=count);before=self.running.read_bytes()
+        p=self.routes_call('routes_capture && routes_restore_captured && routes_verify_captured')
+        self.assertEqual(p.returncode,0,(p.stdout,p.stderr))
+        self.assertEqual(set((self.operation/'managed-routes.before').read_text().splitlines()),set(self.routes))
+        self.assertEqual(self.running.read_bytes(),before);self.assertEqual(self.startup.read_bytes(),before)
+        self.assertFalse(self.commands.exists())
+    def test_capture_and_verify_1_route(self):self.check_small_route_count(1)
+    def test_capture_and_verify_42_routes(self):self.check_small_route_count(42)
     def test_restore_only_missing_captured_route_preserves_foreign(self):
         self.route_fixture(count=3);p=self.routes_call('routes_capture');self.assertEqual(p.returncode,0,p.stderr)
         self.running.write_text('\n'.join(self.routes[1:])+'\n'+self.foreign)

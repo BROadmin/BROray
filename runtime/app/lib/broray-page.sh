@@ -318,6 +318,7 @@ broray_system_architecture() {
 }
 
 broray_system_component_json() {
+    local healthy reason publication service
     id="$1"
     name="$2"
     path="$3"
@@ -327,6 +328,28 @@ broray_system_component_json() {
     installed=false
     [ -e "$path" ] && installed=true
 
+    healthy="$installed"
+    reason=''
+    publication=null
+    if [ "$id" = webui ]; then
+        healthy=false
+        reason=WEBUI_RUNTIME_UNHEALTHY
+        service="${BRORAY_INIT_ROOT:-/opt/etc/init.d}/S25broray-web"
+        # S25 status checks the private executable, NUL argv, config and local
+        # HTTP. Do not call start/recovery from a GET/info request.
+        if [ "$installed" = true ] && [ -f "$service" ] && [ ! -L "$service" ] &&
+           timeout -k 2 12 "$service" status >/dev/null 2>&1; then
+            healthy=true
+            reason=WEBUI_LOCAL_HEALTHY
+        fi
+        publication="$(
+            [ -f "$BRORAY_BASE/lib/web-publish.sh" ] && [ ! -L "$BRORAY_BASE/lib/web-publish.sh" ] || exit 1
+            . "$BRORAY_BASE/lib/web-publish.sh" || exit 1
+            broray_web_publish_status_json
+        )" || publication='{"state":"unknown","consistent":false,"reason":{"code":"WEB_PUBLISH_STATUS_UNAVAILABLE"}}'
+        printf '%s' "$publication" | jq -e 'type=="object"' >/dev/null 2>&1 || publication=null
+    fi
+
     jq -nc \
         --arg id "$id" \
         --arg name "$name" \
@@ -334,6 +357,9 @@ broray_system_component_json() {
         --arg version "$version" \
         --argjson installed "$installed" \
         --argjson required "$required" \
+        --argjson healthy "$healthy" \
+        --arg reason "$reason" \
+        --argjson publication "$publication" \
         '{
             id:$id,
             name:$name,
@@ -341,8 +367,8 @@ broray_system_component_json() {
             version:$version,
             installed:$installed,
             required:$required,
-            healthy:$installed
-        }'
+            healthy:$healthy
+        } + (if $id == "webui" then {reasonCode:$reason,publication:$publication} else {} end)'
 }
 
 broray_system_parser_available() {

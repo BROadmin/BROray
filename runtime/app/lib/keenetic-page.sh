@@ -136,7 +136,7 @@ broray_keenetic_read_actual_json__shadowed_legacy_1_unused()
     local admin_only interface_name
 
     output="$(
-        ndmc -c "show interface $BRORAY_KEENETIC_INTERFACE_NAME" \
+        "$BRORAY_ROOT/bin/broray-system-ndmc" -c "show interface $BRORAY_KEENETIC_INTERFACE_NAME" \
             2>/dev/null || true
     )"
 

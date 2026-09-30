@@ -912,7 +912,7 @@ broray_routes_router_delete_run()
     then
         BRORAY_ROUTES_DELETE_NDMC="$BRORAY_ROUTES_CONFIG_NDMC"
     else
-        BRORAY_ROUTES_DELETE_NDMC="$(command -v ndmc 2>/dev/null || true)"
+        BRORAY_ROUTES_DELETE_NDMC="$BRORAY_ROOT/bin/broray-system-ndmc"
     fi
     [ -n "$BRORAY_ROUTES_DELETE_NDMC" ] || {
         broray_routes_delete_error "Команда ndmc недоступна."

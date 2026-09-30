@@ -7,7 +7,7 @@ broray_subscription_device_snapshot() (
     if command -v broray_interface_ndmc_path >/dev/null 2>&1; then
         device_ndmc="$(broray_interface_ndmc_path 2>/dev/null)" || device_ndmc=''
     else
-        device_ndmc="$(command -v ndmc 2>/dev/null)" || device_ndmc=''
+        device_ndmc="${BRORAY_BASE:-/opt/broray}/bin/broray-system-ndmc"
     fi
     [ -n "$device_ndmc" ] && [ -x "$device_ndmc" ] || { printf '{}\n'; exit 0; }
     device_tmp="$(mktemp -d "$BRORAY_SUB_TMP/device-info.XXXXXX" 2>/dev/null)" || { printf '{}\n'; exit 0; }

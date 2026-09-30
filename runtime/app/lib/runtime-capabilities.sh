@@ -229,7 +229,7 @@ broray_runtime_probe_evidence_prepare()
             if [ "${BRORAY_TX_TEST_MODE:-0}" = 1 ] && [ -n "${BRORAY_TX_TEST_KEENETIC_STATE:-}" ]; then
                 broray_runtime_argv_add cat "$BRORAY_TX_TEST_KEENETIC_STATE" || return 1
             else
-                broray_runtime_argv_add ndmc -c 'show running-config' || return 1
+                broray_runtime_argv_add "${BRORAY_TX_APP_ROOT:-/opt/broray}/bin/broray-system-ndmc" -c 'show running-config' || return 1
             fi
             broray_runtime_stream_select "$BRORAY_RUNTIME_CAPABILITY_PROBE/ndmc-running-config" "$BRORAY_RUNTIME_CAPABILITY_PROBE/ndmc-running-config.stderr"
             ;;
@@ -914,9 +914,9 @@ broray_runtime_probe_full()
             2>"$BRORAY_RUNTIME_CAPABILITY_PROBE/ndmc-running-config.stderr"
         broray_runtime_probe_rc=$?
     else
-        broray_runtime_probe_path="$(broray_runtime_command_path ndmc 2>/dev/null || printf '')"
+        broray_runtime_probe_path="$(broray_runtime_command_path "${BRORAY_TX_APP_ROOT:-/opt/broray}/bin/broray-system-ndmc" 2>/dev/null || printf '')"
         if [ -n "$broray_runtime_probe_path" ]; then
-            ndmc -c 'show running-config' >"$BRORAY_RUNTIME_CAPABILITY_PROBE/ndmc-running-config" \
+            "$broray_runtime_probe_path" -c 'show running-config' >"$BRORAY_RUNTIME_CAPABILITY_PROBE/ndmc-running-config" \
                 2>"$BRORAY_RUNTIME_CAPABILITY_PROBE/ndmc-running-config.stderr"
             broray_runtime_probe_rc=$?
         else

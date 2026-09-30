@@ -5842,8 +5842,8 @@ broray_tx_external_capture()
     if [ "${BRORAY_TX_TEST_MODE:-0}" = 1 ] && [ -n "${BRORAY_TX_TEST_KEENETIC_STATE:-}" ]; then
         cp -p "$BRORAY_TX_TEST_KEENETIC_STATE" "$broray_tx_external_part" || return 1
     else
-        command -v ndmc >/dev/null 2>&1 || return 1
-        ndmc -c 'show running-config' >"$broray_tx_external_part" \
+        [ -x "$BRORAY_TX_APP_ROOT/bin/broray-system-ndmc" ] || return 1
+        "$BRORAY_TX_APP_ROOT/bin/broray-system-ndmc" -c 'show running-config' >"$broray_tx_external_part" \
             2>"$BRORAY_TX_WORK/evidence/keenetic-capture.stderr" || {
                 rm -f "$broray_tx_external_part"
                 return 1
@@ -9715,7 +9715,7 @@ broray_tx_external_postcheck()
     [ -f "$broray_tx_external_before" ] || return 1
     [ -s "$broray_tx_external_before" ] || return 1
     [ "$(sed -n '1p' "$broray_tx_external_before")" != UNAVAILABLE ] || return 1
-    if [ "${BRORAY_TX_TEST_MODE:-0}" = 1 ] && [ -n "${BRORAY_TX_TEST_KEENETIC_STATE:-}" ]; then cp -p "$BRORAY_TX_TEST_KEENETIC_STATE" "$BRORAY_TX_WORK/evidence/keenetic-running-after.txt"; else command -v ndmc >/dev/null 2>&1 && ndmc -c 'show running-config' >"$BRORAY_TX_WORK/evidence/keenetic-running-after.txt" 2>/dev/null || return 1; fi
+    if [ "${BRORAY_TX_TEST_MODE:-0}" = 1 ] && [ -n "${BRORAY_TX_TEST_KEENETIC_STATE:-}" ]; then cp -p "$BRORAY_TX_TEST_KEENETIC_STATE" "$BRORAY_TX_WORK/evidence/keenetic-running-after.txt"; else [ -x "$BRORAY_TX_APP_ROOT/bin/broray-system-ndmc" ] && "$BRORAY_TX_APP_ROOT/bin/broray-system-ndmc" -c 'show running-config' >"$BRORAY_TX_WORK/evidence/keenetic-running-after.txt" 2>/dev/null || return 1; fi
     grep -E 'Proxy[0-9]+|ip http proxy broray|dns-proxy (tls|https) upstream|^[[:space:]]*ip route .*Proxy[0-9]+' "$broray_tx_external_before" | LC_ALL=C sort >"$BRORAY_TX_WORK/evidence/keenetic-protected-before.txt" || true
     grep -E 'Proxy[0-9]+|ip http proxy broray|dns-proxy (tls|https) upstream|^[[:space:]]*ip route .*Proxy[0-9]+' "$BRORAY_TX_WORK/evidence/keenetic-running-after.txt" | LC_ALL=C sort >"$BRORAY_TX_WORK/evidence/keenetic-protected-after.txt" || true
     broray_tx_files_equal "$BRORAY_TX_WORK/evidence/keenetic-protected-before.txt" "$BRORAY_TX_WORK/evidence/keenetic-protected-after.txt"
@@ -9758,8 +9758,8 @@ broray_tx_postcheck_application()
         broray_tx_service_state_postcheck || broray_tx_fail postcheck-service-semantic-state || return 1
         broray_tx_lan="$(broray_tx_web_lan_ip)"
         [ -n "$broray_tx_lan" ] && broray_tx_local_http_probe "$broray_tx_lan" 8 >/dev/null 2>&1 || broray_tx_fail postcheck-webui-http || return 1
-        ndmc -c 'show running-config' 2>/dev/null | grep -Eq 'Proxy[0-9]+' || broray_tx_fail postcheck-managed-proxy || return 1
-        ndmc -c 'show running-config' 2>/dev/null | grep -Eq 'ip http proxy broray' || broray_tx_fail postcheck-http-proxy || return 1
+        "$BRORAY_TX_APP_ROOT/bin/broray-system-ndmc" -c 'show running-config' 2>/dev/null | grep -Eq 'Proxy[0-9]+' || broray_tx_fail postcheck-managed-proxy || return 1
+        "$BRORAY_TX_APP_ROOT/bin/broray-system-ndmc" -c 'show running-config' 2>/dev/null | grep -Eq 'ip http proxy broray' || broray_tx_fail postcheck-http-proxy || return 1
     fi
     broray_tx_event postcheck-application-pass || return 1
     broray_tx_status running ''

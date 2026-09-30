@@ -32,21 +32,23 @@
             payload = null;
         }
 
-        if (!response.ok) {
-            const errorPayload = payload && payload.error
-                ? payload.error
-                : payload;
+        if (!response.ok || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+            // Auth endpoints use {error: CODE, message}; operation endpoints
+            // use {error: {code, message, details}}. Preserve both contracts.
+            const errorPayload = payload && payload.error && typeof payload.error === "object"
+                ? payload.error : payload;
             const requestError = new Error(
-                errorPayload && errorPayload.message
+                errorPayload && typeof errorPayload.message === "string" && errorPayload.message
                     ? errorPayload.message
-                    : "Ошибка запроса."
+                    : (response.ok ? "Некорректный ответ сервера" : "Ошибка запроса") +
+                        " (HTTP " + response.status + ")."
             );
 
             requestError.status = response.status;
             requestError.payload = payload;
-            requestError.code = errorPayload && errorPayload.code
-                ? errorPayload.code
-                : null;
+            requestError.code = errorPayload && typeof errorPayload.code === "string"
+                ? errorPayload.code : payload && typeof payload.error === "string"
+                    ? payload.error : "HTTP_RESPONSE_INVALID";
             requestError.details = errorPayload && errorPayload.details
                 ? errorPayload.details
                 : null;

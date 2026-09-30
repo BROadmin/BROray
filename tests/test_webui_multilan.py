@@ -1,5 +1,5 @@
 """Actual S25 function flow; daemon/HTTP/process identity mocked; no router writes."""
-import json,os,subprocess,unittest
+import hashlib,json,os,shutil,subprocess,unittest
 from pathlib import Path
 from test_network_multilan import Lan,ROOT
 class Web(unittest.TestCase):
@@ -43,6 +43,18 @@ echo started >"$BRORAY_ROOT/launches"
   self.assertEqual((self.app/'prepared').read_text(),'prepared\n');self.assertEqual((self.app/'launches').read_text(),'started\n')
  def test_start_two_private_keeps_saved_bind(self):
   before=self.settings.read_bytes();r=self.shell();self.assertEqual(r.returncode,0,(r.stdout,r.stderr));self.assertEqual((self.app/'run/lan-ip').read_text(),'192.168.2.1\n');self.assertIn('server.bind = "192.168.2.1"',self.conf.read_text());self.assertEqual(self.settings.read_bytes(),before)
+ def test_boot_empty_config_and_pid_recovers_without_touching_settings(self):
+  seed=self.app/'current/state-seed/config/lighttpd.conf';seed.parent.mkdir(parents=True)
+  seed.write_bytes(self.conf.read_bytes());(self.app/'current/SHA256SUMS').write_text(hashlib.sha256(seed.read_bytes()).hexdigest()+'  state-seed/config/lighttpd.conf\n')
+  shutil.copy(ROOT/'runtime/app/lib/operation-owner.sh',self.app/'lib/operation-owner.sh')
+  self.conf.write_bytes(b'');(self.app/'run/lighttpd.pid').write_bytes(b'');before=self.settings.read_bytes()
+  p=self.shell();self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(self.settings.read_bytes(),before)
+  self.assertTrue((self.app/'launches').exists());self.assertIn('192.168.2.1',self.conf.read_text())
+  self.assertEqual(len(list((self.app/'logs/webui-recovery').glob('*/before'))),2)
+ def test_publication_failure_keeps_local_service_started(self):
+  p=self.shell(extra='broray_web_reconcile_owned_publish(){ return 1; }')
+  self.assertEqual(p.returncode,0,p.stderr);self.assertTrue((self.app/'launches').exists())
+  self.assertIn(b'WEBUI_LOCAL_READY_PUBLICATION_NOT_CONFIRMED',p.stderr)
  def test_start_explicit_web_pin_keeps_socks(self):
   self.settings.write_text('{"listenAddress":"192.168.2.1","webuiLanAddress":"192.168.3.1"}');before=self.settings.read_bytes();r=self.shell();self.assertEqual(r.returncode,0,(r.stdout,r.stderr));self.assertIn('server.bind = "192.168.3.1"',self.conf.read_text());self.assertEqual(self.settings.read_bytes(),before)
  def test_failed_config_test_preserves_old_conf(self):
