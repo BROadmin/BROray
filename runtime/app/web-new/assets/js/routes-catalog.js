@@ -1183,9 +1183,10 @@
     }
 
     function refreshAllStatesAfterOperation() {
-        return loadAllStates().then(function () {
-            renderAll();
-        });
+        // A shared read may have sampled the state before this mutation.
+        // Let it settle, then start a read which can include the committed result.
+        var pending = summaryRequest || Promise.resolve(null);
+        return pending.catch(function () { return null; }).then(loadAllStates);
     }
 
     function renderSummary() {
@@ -1272,8 +1273,6 @@
         }).then(function (summary) {
             var nextStates = Object.create(null);
             latestSummary = summary || null;
-            operationRunning = false;
-            busyBundles = Object.create(null);
             (summary && Array.isArray(summary.bundles) ? summary.bundles : []).forEach(function (state) {
                 if (state && state.id) nextStates[state.id] = state;
             });
@@ -1451,12 +1450,16 @@
             }
             showPreparationFeedback(error, action === "verify" ? "verify" : "mutation");
         }).then(function () {
-            delete busyBundles[bundle.id];
-            if (operationRunning === bundle.id) operationRunning = false;
             globalOperation = null;
-            buttonNode.removeAttribute("aria-busy");
             if (window.BROrayRoutesOperationUI) window.BROrayRoutesOperationUI.clearPending(true);
-            return refreshAllStatesAfterOperation();
+            return refreshAllStatesAfterOperation().catch(function (error) {
+                showPreparationFeedback(error, "mutation");
+            }).then(function () {
+                delete busyBundles[bundle.id];
+                if (operationRunning === bundle.id) operationRunning = false;
+                buttonNode.removeAttribute("aria-busy");
+                renderAll();
+            });
         });
     }
 
@@ -1497,12 +1500,16 @@
             }
             window.BROrayUI.toast(error && error.message ? error.message : "Не удалось скачать маршруты.", "error");
         }).then(function () {
-            delete busyBundles[bundle.id];
-            if (operationRunning === bundle.id) operationRunning = false;
             globalOperation = null;
-            buttonNode.removeAttribute("aria-busy");
             if (window.BROrayRoutesOperationUI) window.BROrayRoutesOperationUI.clearPending(true);
-            return refreshAllStatesAfterOperation();
+            return refreshAllStatesAfterOperation().catch(function (error) {
+                showPreparationFeedback(error, "mutation");
+            }).then(function () {
+                delete busyBundles[bundle.id];
+                if (operationRunning === bundle.id) operationRunning = false;
+                buttonNode.removeAttribute("aria-busy");
+                renderAll();
+            });
         });
     }
 
