@@ -108,6 +108,79 @@ fi
         self.wait_running()
         self.assertEqual(result.returncode,0,result.stdout)
         self.assertTrue(json.loads(result.stdout)['ready'])
+    def test_stop_waits_for_cooperative_foreground_job(self):
+        # KN-2710/1101routes: the exact home-snapshot generation needed17s
+        # after its stop request to finish the current foreground refresh.
+        daemon=self.app/'bin/broray-subscription-scheduler'
+        daemon.write_text('''#!/bin/ash
+. "$BRORAY_ROOT/lib/service-lifecycle.sh"
+broray_service_daemon_enter subscriptions || exit $?
+trap 'broray_service_daemon_exit' EXIT
+while ! broray_service_stop_requested; do /bin/sleep 1; done
+/bin/sleep 17
+''')
+        p=self.direct();owner=self.wait_running(p)
+        started=time.monotonic();result=self.call('stop',expected=None)
+        elapsed=time.monotonic()-started
+        # Drain the same owned fixture before asserting the original failure.
+        # There is no second stop request or signal/restart in this test.
+        p.communicate(timeout=25)
+        self.assertEqual(result.returncode,0,(result.stdout,result.stderr))
+        self.assertFalse(json.loads(result.stdout)['running'])
+        self.assertEqual(self.record()['generation'],owner['generation'])
+        self.assertEqual(self.record()['state'],'stopped')
+        self.assertLess(elapsed,28,'Do not wait out the maximum after completion')
+    def test_stop_accepts_completion_after_twenty_observations(self):
+        self.assert_stop_after_observations(20)
+    def test_stop_rechecks_after_final_observation(self):
+        self.assert_stop_after_observations(120)
+    def test_stop_timeout_preserves_unfinished_generation(self):
+        self.assert_stop_after_observations(121)
+    def assert_stop_after_observations(self,boundary):
+        gate=self.app/'tmp/foreground-gate';os.mkfifo(gate)
+        daemon=self.app/'bin/broray-subscription-scheduler'
+        daemon.write_text('''#!/bin/ash
+. "$BRORAY_ROOT/lib/service-lifecycle.sh"
+broray_service_daemon_enter subscriptions || exit $?
+trap 'broray_service_daemon_exit' EXIT
+while ! broray_service_stop_requested; do /bin/sleep 1; done
+read -r completion <"$BRORAY_ROOT/tmp/foreground-gate"
+''')
+        sleeper=self.app/'bin/sleep'
+        sleeper.write_text('''#!/bin/ash
+echo wait >>"$BRORAY_ROOT/tmp/stop-waits"
+if [ "$(wc -l <"$BRORAY_ROOT/tmp/stop-waits")" = "$TEST_STOP_BOUNDARY" ]; then
+ echo complete >"$BRORAY_ROOT/tmp/foreground-gate"
+ echo released >"$BRORAY_ROOT/tmp/foreground-released"
+ for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  jq -e '.state=="stopped"' "$BRORAY_STATE_ROOT/services/subscriptions/identity.json" >/dev/null && exit 0
+  /bin/sleep 1
+ done
+ exit 1
+fi
+''');sleeper.chmod(0o755);self.env['TEST_STOP_BOUNDARY']=str(boundary)
+        p=self.direct();owner=self.wait_running(p)
+        try:
+            #120 real identity probes are slower under QEMU than on Keenetic;
+            # this outer fixture budget must outlast the tested controller.
+            result=self.call('stop',expected=None,timeout=300)
+            at_return=self.record();waits=(self.app/'tmp/stop-waits').read_text().splitlines()
+        finally:
+            if not (self.app/'tmp/foreground-released').exists():
+                with gate.open('w') as f:f.write('fixture cleanup\n')
+            p.communicate(timeout=15)
+        if boundary==121:
+            self.assertEqual(result.returncode,75,(result.stdout,result.stderr))
+            self.assertTrue(json.loads(result.stdout)['running'])
+            self.assertEqual(at_return['state'],'running')
+            self.assertEqual(at_return['generation'],owner['generation'])
+            self.assertEqual(len(waits),120)
+            return
+        self.assertEqual(result.returncode,0,(result.stdout,result.stderr))
+        self.assertFalse(json.loads(result.stdout)['running'])
+        self.assertEqual(at_return['state'],'stopped')
+        self.assertEqual(at_return['generation'],owner['generation'])
+        self.assertEqual(len(waits),boundary,'Return after verified completion without waiting the remaining maximum')
     def direct(self):
         p=subprocess.Popen(['/bin/ash',str(self.app/'bin/broray-subscription-scheduler')],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         self.children.append(p);return p

@@ -61,10 +61,14 @@ class HomeSnapshot(Sidecar,unittest.TestCase):
         self.assertNotEqual(record['generation'],'0'*32);time.sleep(2)
         self.assertIsNone(p.poll());self.assertTrue(json.loads(self.call('status-json').stdout)['ready'])
     def test_busy_snapshot_reports_pending_until_completion(self):
-        self.fixture('fixture-refresh','echo ready >"$BRORAY_ROOT/tmp/busy.ready"\nfor n in $(seq 1 50); do [ ! -e "$BRORAY_ROOT/tmp/busy.release" ] || exit 0; sleep 1; done\nexit 1\n')
+        # Keep the real foreground job pending beyond every stop observation.
+        # Only the controller pacing is accelerated; release remains explicit.
+        self.fixture('fixture-refresh','echo ready >"$BRORAY_ROOT/tmp/busy.ready"\nwhile [ ! -e "$BRORAY_ROOT/tmp/busy.release" ]; do /bin/sleep 1; done\n')
+        self.fixture('sleep','echo wait >>"$BRORAY_ROOT/tmp/stop-waits"\n')
         p=self.direct();self.wait_running(p);self.wait_file('busy.ready')
         try:
-            self.call('stop',expected=75)
+            self.call('stop',expected=75,timeout=300)
+            self.assertEqual(len((self.app/'tmp/stop-waits').read_text().splitlines()),120)
             data=json.loads(self.call('status-json').stdout)
             self.assertTrue(data['running']);self.assertEqual(data['state'],'stopping');self.assertIsNone(p.poll())
         finally:(self.app/'tmp/busy.release').touch()

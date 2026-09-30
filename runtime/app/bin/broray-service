@@ -38,7 +38,11 @@ case "$action" in
     printf '%s\n' "$view"; exit 75 ;;
   stop)
     broray_service_control stop || exit $?
-    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    # A cooperative snapshot can still be finishing a large configuration
+    # read. Observe the same stop request; return as soon as its lifetime is
+    # drained, including a fresh probe after the final one-second wait.
+    remaining=120
+    while :; do
         view="$(broray_service_status_json)" || exit 74
         if printf '%s\n' "$view" | jq -e '.complete and .running==false' >/dev/null; then
             # Wait for inherited short-lived writers too. No success while an
@@ -46,7 +50,9 @@ case "$action" in
             "$SVC_GUARD" "$SVC_DIR/lifetime.guard" "$SVC_ASH" "$SVC_APP/bin/broray-service" "$SVC_NAME" retire-dead || exit 75
             printf '%s\n' "$view"; exit 0
         fi
+        [ "$remaining" -gt 0 ] || break
         sleep 1
+        remaining=$((remaining-1))
     done
     printf '%s\n' "$view"; exit 75 ;;
   retire-dead)
