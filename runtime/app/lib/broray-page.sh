@@ -318,7 +318,7 @@ broray_system_architecture() {
 }
 
 broray_system_component_json() {
-    local healthy reason publication service
+    local healthy reason publication service target_service
     id="$1"
     name="$2"
     path="$3"
@@ -335,6 +335,18 @@ broray_system_component_json() {
         healthy=false
         reason=WEBUI_RUNTIME_UNHEALTHY
         service="${BRORAY_INIT_ROOT:-/opt/etc/init.d}/S25broray-web"
+        if [ -L "$service" ]; then
+            # Compact installs register this exact link. Follow only the owned
+            # current-slot entry, not a foreign or chained init symlink.
+            target_service="$BRORAY_BASE/current/init/S25broray-web"
+            if [ "$(readlink "$service" 2>/dev/null)" = "$target_service" ] &&
+               [ ! -L "$BRORAY_BASE/current" ] && [ ! -L "$BRORAY_BASE/current/init" ] &&
+               [ -f "$target_service" ] && [ ! -L "$target_service" ]; then
+                service="$target_service"
+            else
+                service=''
+            fi
+        fi
         # S25 status checks the private executable, NUL argv, config and local
         # HTTP. Do not call start/recovery from a GET/info request.
         if [ "$installed" = true ] && [ -f "$service" ] && [ ! -L "$service" ] &&

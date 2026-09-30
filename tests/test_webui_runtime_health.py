@@ -20,4 +20,24 @@ class Health(unittest.TestCase):
         data=self.query(0);self.assertTrue(data['healthy']);self.assertFalse(data['publication']['consistent'])
     def test_service_missing_unhealthy(self):
         (self.app/'init/S25broray-web').unlink();self.assertFalse(self.query(0)['healthy'])
+    def canonical_link(self):
+        service=self.app/'init/S25broray-web'
+        target=self.app/'current/init/S25broray-web';target.parent.mkdir(parents=True)
+        service.rename(target);service.symlink_to(target)
+        return service,target
+    def test_canonical_compact_init_symlink_proves_health(self):
+        self.canonical_link();self.assertTrue(self.query(0)['healthy'])
+    def test_canonical_compact_init_symlink_keeps_runtime_failure(self):
+        self.canonical_link();self.assertFalse(self.query(1)['healthy'])
+    def test_foreign_init_symlink_never_executes(self):
+        service=self.app/'init/S25broray-web';target=self.app/'foreign'
+        target.write_text('#!/bin/ash\ntouch "$BRORAY_BASE/foreign-executed"\nexit 0\n');target.chmod(0o755)
+        service.unlink();service.symlink_to(target)
+        self.assertFalse(self.query(0)['healthy']);self.assertFalse((self.app/'foreign-executed').exists())
+    def test_canonical_target_cannot_be_symlink(self):
+        service,target=self.canonical_link();other=self.app/'other';target.rename(other);target.symlink_to(other)
+        self.assertFalse(self.query(0)['healthy'])
+    def test_canonical_parent_cannot_be_symlink(self):
+        self.canonical_link();parent=self.app/'current/init';other=self.app/'elsewhere';parent.rename(other);parent.symlink_to(other)
+        self.assertFalse(self.query(0)['healthy'])
 if __name__=='__main__':unittest.main(verbosity=2,failfast=True)

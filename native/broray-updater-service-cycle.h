@@ -24,6 +24,8 @@ static int rs_initial_boot_ready(char **argv,struct sc_node *n);
 static int rs_prior_history(void);
 static int rs_history_member(const char *family,const char *id);
 static int sc_stopped_seal(struct sc_node *n,int publish);
+static int sc_natural_record(struct sc_node *n,int publish,char nonce[65]);
+static int sc_natural_retire(struct sc_node *n);
 static void terminal_compact_installation(const char *up,const char *current);
 struct gb_record;
 static int sc_boot_proof(struct sc_node *n,struct gb_record *b,char sha[65]);
@@ -517,7 +519,7 @@ static int sc_create_seal(char **argv){
      * ended kernel boot. The latter explicitly grants no live readiness. */
     if(sc_call(argv,"recovery-commit-check",reply,sizeof reply)||
        !((strstr(reply,"\"phase\":\"COMMIT_VERIFIED\"")&&strstr(reply,"\"platformReady\":true"))||
-         (sc.replacement&&strstr(reply,"\"phase\":\"COMMITTED_BOOT_ENDED\"")&&strstr(reply,"\"platformReady\":false")))||
+         (sc.replacement&&(strstr(reply,"\"phase\":\"COMMITTED_BOOT_ENDED\"")||strstr(reply,"\"phase\":\"COMMITTED_STOPPED\""))&&strstr(reply,"\"platformReady\":false")))||
        sc_field(reply,"generationId",sc.initial,sizeof sc.initial)||
        sc_tree_hash(sc.op,sc.tree)||sc_join(parent,sc.uppath,"starts"))goto done;
     starts=checked_directory(parent);if(starts<0)goto done;DIR *dir=directory_stream(starts);if(!dir)goto done;
@@ -563,6 +565,12 @@ static int sc_terminal(struct sc_node *n,char retired_sha[65],char host_sha[65])
     char name[64],*body=NULL,expected[512];size_t size=0;
     if(domain<0||host<0||flock(host,LOCK_EX|LOCK_NB)||retirement_valid(domain,pl.domain,&r)||strcmp(r.gen,n->id)||strcmp(r.sha,sc.input.manifest)||
        sc_file(domain,"retirement.receipt",&end))goto done;
+    /* Ordinary service stops have their own operation. Natural retirement of
+     * the committed initial node or a successor binds to this origin and its
+     * immutable intent. Absence of that intent cannot become valid history. */
+    if(!strcmp(r.op,sc.origin)&&(n->index||!strcmp(n->id,sc.initial))){
+        char nonce[65];if(sc_natural_record(n,0,nonce)||strcmp(r.nonce,nonce))goto done;
+    }
     record_name(r.total,name);if(safe_bytes_at(domain,name,&body,&size)||size>=sizeof snapshot||memchr(body,0,size))goto done;
     memcpy(snapshot,body,size);snapshot[size]=0;char born[64];if(sc_field(snapshot,"bootId",born,sizeof born)||strcmp(born,n->born))goto done;
     int en=snprintf(expected,sizeof expected,"\"startIntentSha256\":\"%s\"",n->launch);if(en<0||en>=(int)sizeof expected||!strstr(snapshot,expected))goto done;
@@ -691,6 +699,16 @@ static int sc_cycle_names(unsigned cycles){
         int allowed=!strcmp(name,"origin.record")||!strcmp(name,"origin.anchor")||!strcmp(name,"transition.lock");char want[128];
         for(unsigned i=1;!allowed&&i<=cycles;i++){snprintf(want,sizeof want,"cycle-%020u.record",i);allowed=!strcmp(name,want);}
         for(unsigned i=0;!allowed&&i<sc.count;i++){snprintf(want,sizeof want,"ready-%s.record",sc.nodes[i].id);allowed=!strcmp(name,want);if(!allowed){snprintf(want,sizeof want,"stopped-%s.record",sc.nodes[i].id);allowed=!strcmp(name,want);}}
+        if(!allowed){
+            for(unsigned i=0;i<sc.count;i++){
+                snprintf(want,sizeof want,"natural-stop-%s.record",sc.nodes[i].id);
+                if(!strcmp(name,want)){
+                    char nonce[65];if(sc_natural_record(&sc.nodes[i],0,nonce)){bad=1;break;}
+                    allowed=1;break;
+                }
+            }
+            if(bad)break;
+        }
         if(!allowed){
             for(unsigned i=0;i<sc.count;i++){
                 snprintf(want,sizeof want,"boot-residue-%s.record",sc.nodes[i].id);
@@ -905,6 +923,62 @@ static int sc_stopped_seal(struct sc_node *n,int publish){
     if(len<0||len>=(int)sizeof record||nn<0||nn>=(int)sizeof name)return -1;
     return publish?sc_publish(sc.cycles,name,record,(size_t)len,1):sc_publish(sc.cycles,name,record,(size_t)len,0);
 }
+/* A natural daemon exit has already drained its entire writer domain. Preserve
+ * that exact witnessed checkpoint BEFORE binding a retirement request. This is
+ * lifecycle evidence, not a new stop authorization for a running process. */
+static int sc_natural_record(struct sc_node *n,int publish,char nonce[65]){
+    char name[128],prefix[768],ready[65],record[64],id[65],born[64],digest[65];
+    char *text=NULL;size_t size=0;struct migration_file saved={0};int domain=-1,result=-1;
+    int nn=snprintf(name,sizeof name,"natural-stop-%s.record",n->id);
+    int pn=snprintf(prefix,sizeof prefix,"BROray-service-natural-stop/1\n%s\n%s\n%s\n%s\n%s\n%s\n",sc.seal,n->id,n->born,n->launch,n->transaction,n->host);
+    if(nn<0||nn>=(int)sizeof name||pn<0||pn>=(int)sizeof prefix||sc_load_node(n)||sc_host_record(n))goto done;
+    int present=sc_record_exists(sc.cycles,name);if(present<0||(!present&&!publish))goto done;
+    if(!present){
+        if(strcmp(n->born,boot)||!strstr(snapshot,"\"state\":\"STOPPED\"")||
+           !strstr(snapshot,"\"stopOperationId\":\"\",\"stopNonce\":\"\"")||
+           !strstr(snapshot,"\"children\":[],\"awaitingBirth\":[],\"exitedUnreaped\":[]")||
+           !strstr(snapshot,"\"platformReady\":false")||sc_ready(n,0,ready))goto done;
+        FILE *f=open_memstream(&text,&size);if(!f)goto done;
+        fputs(prefix,f);fputs(snapshot,f);if(fclose(f)||sc_publish(sc.cycles,name,text,size,1))goto done;
+    }
+    if(sc_service_file(sc.cycles,name,&saved,NULL)||saved.size<=(size_t)pn||memcmp(saved.bytes,prefix,(size_t)pn))goto done;
+    const char *checkpoint=saved.bytes+pn;unsigned long rev=0;const char *r=strstr(checkpoint,",\"revision\":");
+    if(!r||sscanf(r,",\"revision\":%lu,",&rev)!=1||!rev||rev>1000000||
+       sc_field(checkpoint,"generationId",id,sizeof id)||strcmp(id,n->id)||
+       sc_field(checkpoint,"bootId",born,sizeof born)||strcmp(born,n->born)||
+       !strstr(checkpoint,"\"state\":\"STOPPED\"")||!strstr(checkpoint,"\"platformReady\":false")||
+       !strstr(checkpoint,"\"stopOperationId\":\"\",\"stopNonce\":\"\"")||
+       !strstr(checkpoint,"\"children\":[],\"awaitingBirth\":[],\"exitedUnreaped\":[]"))goto done;
+    domain=checked_directory(pl.domain);record_name(rev,record);
+    if(domain<0||bg_record_exact(domain,record,checkpoint,saved.size-(size_t)pn)||sc_publish(sc.cycles,name,saved.bytes,saved.size,0))goto done;
+    digest_bytes(saved.bytes,saved.size,digest);memcpy(nonce,digest,32);nonce[32]=0;result=0;
+done:if(domain>=0)close(domain);free(text);free(saved.bytes);return result;
+}
+static int sc_natural_retire(struct sc_node *n){
+    char nonce[65],retired[65],host[65],ready[65],field[192];
+    if(strcmp(n->born,boot)||sc_load_node(n)||sc_host_record(n)||pl_exact())return -1;
+    if(!sc_terminal(n,retired,host)){
+        if(sc_natural_record(n,0,nonce))return -1;
+    }else{
+        char *status[]={pl.nativepath,"control",pl.domain,"STATUS",n->id,sc.input.manifest,sc.origin,sc.nonce,NULL};
+        if(control_exchange(8,status,0)||!strstr(snapshot,"\"state\":\"STOPPED\"")||
+           !strstr(snapshot,"\"children\":[],\"awaitingBirth\":[],\"exitedUnreaped\":[]")||
+           !strstr(snapshot,"\"platformReady\":false")||sc_ready(n,0,ready)||sc_natural_record(n,1,nonce))return -1;
+        int k=snprintf(field,sizeof field,"\"stopOperationId\":\"%s\",\"stopNonce\":\"%s\"",sc.origin,nonce);
+        if(k<0||k>=(int)sizeof field||(!strstr(snapshot,"\"stopOperationId\":\"\",\"stopNonce\":\"\"")&&!strstr(snapshot,field)))return -1;
+        char *stop[]={pl.nativepath,"control",pl.domain,"STOP",n->id,sc.input.manifest,sc.origin,nonce,NULL};
+        /* STOP on authenticated terminal state only records this durable
+         * request. The supervisor's existing terminal branch sends no signal. */
+        if(control_exchange(8,stop,0)||!strstr(snapshot,"\"state\":\"STOPPED\"")||!strstr(snapshot,field))return -1;
+        stop[3]="RETIRE";if(control_exchange(8,stop,0))return -1;
+    }
+    unsigned long long until=millis()+2000;
+    while(sc_terminal(n,retired,host)){
+        if(millis()>=until)return -1;struct timespec pause={0,20000000L};nanosleep(&pause,NULL);
+    }
+    int k=snprintf(field,sizeof field,"\"stopOperationId\":\"%s\",\"stopNonce\":\"%s\"",sc.origin,nonce);
+    return k<0||k>=(int)sizeof field||!strstr(snapshot,field)||sc_stopped_seal(n,1)||pl_exact()?-1:0;
+}
 static int sc_log(int dir,const char *name){
     int fd=openat(dir,name,O_WRONLY|O_APPEND|O_CREAT|O_NOFOLLOW|O_CLOEXEC,0600);struct stat st;
     if(fd<0)return -1;if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_uid!=geteuid()||st.st_nlink!=1||(st.st_mode&07777)!=0600||fsync(fd)||fsync(dir)){close(fd);return -1;}return fd;
@@ -1074,7 +1148,7 @@ static int service_cycle_main(int argc,char **argv,int action){
     if(sc.transition<0){why="SERVICE_TRANSITION_BUSY";goto done;}
     why="SERVICE_CYCLE_HISTORY_UNCONFIRMED";
     if(sc.replacement&&sc.count==sc.baseline&&!strcmp(sc.nodes[sc.current].id,sc.initial)&&
-       strcmp(sc.nodes[sc.current].born,boot)&&rs_initial_boot_ready(argv,&sc.nodes[sc.current]))goto done;
+       (strcmp(sc.nodes[sc.current].born,boot)||sc_live(&sc.nodes[sc.current]))&&rs_initial_boot_ready(argv,&sc.nodes[sc.current]))goto done;
     if(sc_collect())goto done;
     struct sc_node *current=&sc.nodes[sc.current];
     if(action==SC_CURRENT){
@@ -1101,6 +1175,21 @@ static int service_cycle_main(int argc,char **argv,int action){
             if(sc_ready(current,1,ready))goto done;
         }else{
             char retired[65],host[65];
+            /* A natural root exit needs terminal bookkeeping, not a signal to
+             * a presumed PID. An existing managed STOP keeps its original path. */
+            char natural_name[128];int nk=snprintf(natural_name,sizeof natural_name,"natural-stop-%s.record",current->id);
+            if(nk<0||nk>=(int)sizeof natural_name)goto done;
+            int natural=sc_record_exists(sc.cycles,natural_name);if(natural<0)goto done;
+            int ended=0;
+            if(!natural&&!strcmp(current->born,boot)&&!sc_load_node(current)){
+                char *status[]={pl.nativepath,"control",pl.domain,"STATUS",current->id,sc.input.manifest,sc.origin,sc.nonce,NULL};
+                ended=!control_exchange(8,status,0)&&strstr(snapshot,"\"state\":\"STOPPED\"")&&
+                    strstr(snapshot,"\"stopOperationId\":\"\",\"stopNonce\":\"\"");
+            }
+            if(!strcmp(current->born,boot)&&(natural||ended)){
+                why="SERVICE_TERMINAL_EXIT_UNCONFIRMED";
+                if(sc_natural_retire(current))goto done;
+            }
             if(!sc_terminal(current,retired,host)){
                 /* A stop-reply may have been lost before the ordinary-lifecycle
                  * seal. Settle only through the existing authenticated stop. */
@@ -1306,8 +1395,8 @@ static int terminal_copy(int from,int to,const char *name){
     result=0;
 done:free(file.bytes);return result;
 }
-static int terminal_ready_pin(int source,int to,int directory,const char *id){
-    char name[128],record[64];if(snprintf(name,sizeof name,"ready-%s.record",id)>=(int)sizeof name)return -1;
+static int terminal_ready_pin(int source,int to,int directory,const char *id,const char *kind){
+    char name[128],record[64];if(snprintf(name,sizeof name,"%s-%s.record",kind,id)>=(int)sizeof name)return -1;
     int present=bg_exists(directory,name);if(present<=0)return present;
     struct migration_file f;memset(&f,0,sizeof f);int result=-1;
     if(sc_file(directory,name,&f))goto done;
@@ -1325,7 +1414,7 @@ static int terminal_ready_copies(int source,int to,const char *up,const char *id
     while((e=readdir(dir))){
         if(strcmp(e->d_name,"cycles")&&strncmp(e->d_name,"cycles-op-",10))continue;
         char path[PATH_MAX];if(sc_join(path,up,e->d_name)){bad=1;break;}
-        int fd=checked_directory(path);bad=fd<0||terminal_ready_pin(source,to,fd,id);
+        int fd=checked_directory(path);bad=fd<0||terminal_ready_pin(source,to,fd,id,"ready")||terminal_ready_pin(source,to,fd,id,"natural-stop");
         if(fd>=0)close(fd);if(bad)break;errno=0;
     }
     if(!e&&errno)bad=1;closedir(dir);close(parent);return bad?-1:0;
@@ -1386,7 +1475,7 @@ static int terminal_start_compact(int generation_fd,int retained_fd,const char *
     int nn=snprintf(path,sizeof path,"%s/opt/var/lib/broray/operations/%s/platform-replacement-start",strcmp(rows[1],"/")?rows[1]:"",rows[8]);
     if(nn<0||nn>=(int)sizeof path)goto done;
     int origin=checked_directory(path);
-    if(origin>=0){int bad=terminal_ready_pin(generation_fd,retained_fd,origin,r->gen);close(origin);if(bad)goto done;}
+    if(origin>=0){int bad=terminal_ready_pin(generation_fd,retained_fd,origin,r->gen,"ready");close(origin);if(bad)goto done;}
     else if(errno!=ENOENT)goto done;
     int compact=terminal_summary_read(start,startpath,tree,inventory);if(compact<0)goto done;
     if(compact){if(strcmp(inventory,r->inventory))goto done;result=0;goto done;}
@@ -2010,6 +2099,17 @@ static int replacement_start_main(int argc,char **argv){
 historical_done:
         if(domain>=0)close(domain);free(pinned.bytes);if(!bad)result=0;goto done;
     }
+    if(origin_check&&!strcmp(n->born,boot)){
+        char *status[]={pl.nativepath,"control",pl.domain,"STATUS",n->id,sc.input.manifest,sc.origin,sc.nonce,NULL};
+        if(!control_exchange(8,status,0)&&strstr(snapshot,"\"state\":\"STOPPED\"")&&
+           strstr(snapshot,"\"children\":[],\"awaitingBirth\":[],\"exitedUnreaped\":[]")&&
+           strstr(snapshot,"\"platformReady\":false")){
+            char commit_sha[65];
+            if(sc_field(snapshot,"serviceHostRecordSha256",n->host,sizeof n->host)||!hex64(n->host)||
+               sc_host_record(n)||sc_ready(n,0,ready)||rs_commit_record(n,ready,rows[12],rows[10],0,commit_sha)||pl_exact()||rs_fence_check(argv[6],1))goto done;
+            printf("{\"ok\":true,\"phase\":\"COMMITTED_STOPPED\",\"generationId\":\"%s\",\"commitReceiptSha256\":\"%s\",\"platformReady\":false,\"activationAllowed\":false}\n",n->id,commit_sha);result=0;goto done;
+        }
+    }
     int replay=!sc_live(n);
     if(!replay&&(!starting||sc_start(n)))goto done;
     if(sc_live(n)||sc_ready(n,starting,ready)||rs_fence_check(argv[6],checking)||
@@ -2039,7 +2139,7 @@ static int rs_initial_boot_ready(char **argv,struct sc_node *n){
     int sn=snprintf(source,sizeof source,"platform-replacement-start/%s",name);
     int pn=snprintf(prefix,sizeof prefix,"BROray-service-ready/1\n%s\n%s\n%s\n%s\n",sc.migration,n->launch,n->transaction,n->host);
     if(nn<0||nn>=(int)sizeof name||sn<0||sn>=(int)sizeof source||pn<0||pn>=(int)sizeof prefix||
-       !strcmp(n->born,boot)||sc_file(sc.op,source,&original)||original.size<=(size_t)pn||memcmp(original.bytes,prefix,(size_t)pn))goto done;
+       sc_file(sc.op,source,&original)||original.size<=(size_t)pn||memcmp(original.bytes,prefix,(size_t)pn))goto done;
     FILE *f=open_memstream(&text,&size);if(!f)goto done;
     fprintf(f,"BROray-service-ready/1\n%s\n%s\n%s\n%s\n",sc.seal,n->launch,n->transaction,n->host);
     fwrite(original.bytes+pn,1,original.size-(size_t)pn,f);if(fclose(f))goto done;
@@ -2047,7 +2147,7 @@ static int rs_initial_boot_ready(char **argv,struct sc_node *n){
     if(exists){result=sc_publish(sc.cycles,name,text,size,0);goto done;}
     if(!sc.may_publish||sc_record_exists(sc.cycles,"cycle-00000000000000000001.record")!=0||
        sc_call(argv,"recovery-commit-check",reply,sizeof reply)||
-       !strstr(reply,"\"phase\":\"COMMITTED_BOOT_ENDED\"")||!strstr(reply,"\"platformReady\":false")||
+       !(strstr(reply,"\"phase\":\"COMMITTED_BOOT_ENDED\"")||strstr(reply,"\"phase\":\"COMMITTED_STOPPED\""))||!strstr(reply,"\"platformReady\":false")||
        sc_field(reply,"generationId",id,sizeof id)||strcmp(id,n->id)||
        sc_publish(sc.cycles,name,text,size,1))goto done;
     result=0;
