@@ -56,6 +56,21 @@ esac
   self.assertEqual(self.calls(),['status S25broray-web'])
  def test_target_start_error_propagates(self):
   (self.home/'fail-start').touch();self.assertNotEqual(self.run_flow('services_start_captured target').returncode,0)
+ def test_failed_service_retains_its_name_and_rc(self):
+  (self.home/'fail-start').touch()
+  p=self.run_flow('services_start_captured target; rc=$?; printf "code=%s\\n" "${SERVICE_START_ERROR_CODE:-unset}"; exit "$rc"')
+  self.assertNotEqual(p.returncode,0);self.assertIn('code=SERVICE_START_FAILED',p.stdout)
+  self.assertIn('service=S25broray-web rc=74',(self.home/'operation.log').read_text())
+ def test_reconcile_failure_is_distinct_and_does_not_restore(self):
+  p=self.run_flow('routes_reconcile_wait(){ return 73; }; routes_restore_captured(){ touch "$TEST_HOME/unexpected-restore"; }; services_start_captured target; rc=$?; printf "code=%s\\n" "${SERVICE_START_ERROR_CODE:-unset}"; exit "$rc"')
+  self.assertNotEqual(p.returncode,0);self.assertIn('code=ROUTE_RECONCILE_FAILED',p.stdout)
+  self.assertFalse((self.home/'unexpected-restore').exists())
+ def test_route_restore_failure_has_distinct_identity(self):
+  p=self.run_flow('routes_restore_captured(){ return 74; }; services_start_captured target; rc=$?; printf "code=%s\\n" "${SERVICE_START_ERROR_CODE:-unset}"; exit "$rc"')
+  self.assertNotEqual(p.returncode,0);self.assertIn('code=ROUTE_RESTORE_FAILED',p.stdout)
+ def test_success_clears_previous_failure_identity(self):
+  p=self.run_flow('SERVICE_START_ERROR_CODE=OLD_ERROR; services_start_captured target; printf "code=%s\\n" "$SERVICE_START_ERROR_CODE"')
+  self.assertEqual(p.returncode,0,p.stderr);self.assertIn('code=\n',p.stdout)
  def test_restore_preserves_all_previously_stopped_services(self):
   p=self.run_flow('services_start_captured && services_health_captured');self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(self.calls(),[])
  def test_rollback_stops_target_web_without_starting_old_stopped_web(self):

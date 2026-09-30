@@ -2175,7 +2175,8 @@ services_stop_captured()
 
 services_start_captured()
 {
-    local services_file service state
+    local services_file service state start_rc
+    SERVICE_START_ERROR_CODE=SERVICE_START_FAILED
     services_file="$CURRENT_OPERATION_DIR/services.tsv"
     [ -s "$services_file" ] || return 1
 
@@ -2190,10 +2191,25 @@ services_start_captured()
         else
             [ "$state" = running ] || continue
         fi
-        service_call start "$service" >>"$CURRENT_OPERATION_LOG" 2>&1 || return 1
+        service_call start "$service" >>"$CURRENT_OPERATION_LOG" 2>&1 || {
+            start_rc=$?
+            printf 'SERVICE_START_FAILED service=%s rc=%s\n' "$service" "$start_rc" >>"$CURRENT_OPERATION_LOG"
+            return 1
+        }
     done
-    routes_reconcile_wait || return 1
-    routes_restore_captured || return 1
+    routes_reconcile_wait || {
+        start_rc=$?
+        SERVICE_START_ERROR_CODE=ROUTE_RECONCILE_FAILED
+        printf 'ROUTE_RECONCILE_FAILED rc=%s\n' "$start_rc" >>"$CURRENT_OPERATION_LOG"
+        return 1
+    }
+    routes_restore_captured || {
+        start_rc=$?
+        SERVICE_START_ERROR_CODE=ROUTE_RESTORE_FAILED
+        printf 'ROUTE_RESTORE_FAILED rc=%s\n' "$start_rc" >>"$CURRENT_OPERATION_LOG"
+        return 1
+    }
+    SERVICE_START_ERROR_CODE=''
 }
 
 services_health_captured()
@@ -2937,7 +2953,7 @@ request_process()
         '' true false || return 1
 
     if ! services_start_captured target; then
-        rollback_after_switch "$operation" SERVICE_START_FAILED
+        rollback_after_switch "$operation" "${SERVICE_START_ERROR_CODE:-SERVICE_START_FAILED}"
         return 1
     fi
 

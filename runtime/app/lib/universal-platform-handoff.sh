@@ -738,7 +738,14 @@ schedule()
     }
     worker_running && return 0
     existing_phase="$(sed -n '1p' "$PHASE_FILE" 2>/dev/null || true)"
-    # Protected preflight settles obsolete preparation BEFORE app services run.
+    # An old app can leave a preparing request after protected boot migration.
+    # Preparing has not installed any platform files. If every installed byte
+    # already matches this payload, service startup needs no legacy handoff.
+    # Do not rewrite its request/status/phase or remove its worker fence: they
+    # remain recovery evidence. Installing/restarting still require recovery.
+    if [ "$existing_phase" = preparing ] && platform_current; then
+        return 0
+    fi
     # Never call native readiness here: the independent service host can be
     # waiting for this S25 child and cannot answer its own STATUS request.
     case "$existing_phase" in
