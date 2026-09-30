@@ -83,7 +83,12 @@ case "${FIXTURE_NDMC_MODE:-ok}" in
 esac
 case "$2" in
  'show ndns') cat "$FIXTURE_ROOT/ndns.txt" ;;
- 'show running-config') printf '%s\n' 'ip http proxy broray' ' upstream http 192.168.1.1 8080' '!' ;;
+ 'show running-config')
+  case "${FIXTURE_NDMC_MODE:-ok}" in
+   slow-running) sleep 12 ;;
+   hang-running) exec sleep 60 ;;
+  esac
+  printf '%s\n' 'ip http proxy broray' ' upstream http 192.168.1.1 8080' '!' ;;
  *) exit 126 ;;
 esac
 '''
@@ -142,7 +147,7 @@ class OperationsOrigin(unittest.TestCase):
         p = self.root / name
         return p.read_text().splitlines() if p.exists() else []
 
-    def request(self, verb='automation', body=None, method='POST', env=None, expected=200):
+    def request(self, verb='automation', body=None, method='POST', env=None, expected=200, timeout=12):
         if body is None and method == 'POST':
             body = {'paused': False}
         raw = '' if body is None else body if isinstance(body, str) else json.dumps(body)
@@ -151,7 +156,7 @@ class OperationsOrigin(unittest.TestCase):
             'COMMON': str(self.root / 'web-new/api/operations/common.sh'),
             'METHOD': 'GET' if verb in ['status', 'report', 'journal'] else 'POST',
             'VERB': verb, 'REQUEST_METHOD': method,
-            'CONTENT_LENGTH': str(len(raw.encode())), **(env or {})}, raw)
+            'CONTENT_LENGTH': str(len(raw.encode())), **(env or {})}, raw, timeout=timeout)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
         self.assertEqual(result.stderr, b'', result.stderr.decode(errors='replace'))
         headers, payload = result.stdout.split(b'\r\n\r\n', 1)
@@ -165,6 +170,15 @@ class OperationsOrigin(unittest.TestCase):
         self.request()
         self.assertEqual(self.calls(), ['resume'])
         self.assertEqual(self.calls('ndmc-calls'), ['-c show ndns', '-c show running-config'])
+
+    def test_large_running_config_completes_before_origin_decision(self):
+        self.request(env={'FIXTURE_NDMC_MODE':'slow-running'}, timeout=25)
+        self.assertEqual(self.calls(), ['resume'])
+        self.assertEqual(self.calls('ndmc-calls'), ['-c show ndns', '-c show running-config'])
+
+    def test_hung_running_config_is_bounded_without_dispatch(self):
+        self.request(env={'FIXTURE_NDMC_MODE':'hang-running'}, expected=403, timeout=45)
+        self.assertEqual(self.calls(), [])
 
     def test_proxy_stripped_origin_uses_explicit_page_origin_and_live_proof(self):
         self.request(env={'HTTP_ORIGIN': '', 'HTTP_X_BRORAY_ORIGIN': ORIGIN})
