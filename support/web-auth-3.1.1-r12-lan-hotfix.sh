@@ -6,10 +6,7 @@ export PATH
 BRORAY_BASE="${BRORAY_BASE:-/opt/broray}"
 BRORAY_SESSION_DIR="$BRORAY_BASE/run/web-new/sessions"
 BRORAY_SESSION_TTL=1800
-BRORAY_NATIVE_AUTH_LIBRARY="${BRORAY_NATIVE_AUTH_LIBRARY:-$BRORAY_BASE/lib/web-auth-native.sh}"
-if [ -f "$BRORAY_NATIVE_AUTH_LIBRARY" ] && [ ! -L "$BRORAY_NATIVE_AUTH_LIBRARY" ]; then
-    . "$BRORAY_NATIVE_AUTH_LIBRARY"
-fi
+# Temporary support build: direct LAN auth; native auth bridge intentionally not sourced.
 
 broray_json_escape() {
     jq -Rn --arg value "$1" '$value' |
@@ -283,27 +280,13 @@ broray_keenetic_authenticate() {
 
     umask 077
     rm -rf "$auth_dir" 2>/dev/null || true
-    mkdir -p "$auth_dir" || {
-        password=""
-        return 2
-    }
-    chmod 700 "$auth_dir" || {
-        rm -rf "$auth_dir"
-        password=""
-        return 2
-    }
+    mkdir -p "$auth_dir" || { password=""; return 2; }
+    chmod 700 "$auth_dir" || { rm -rf "$auth_dir"; password=""; return 2; }
 
     auth_url="http://$lan"
     tls_arg=""
-
-    broray_keenetic_curl \
-        --silent \
-        --show-error \
-        --connect-timeout 5 \
-        --max-time 10 \
-        --dump-header "$headers" \
-        --output "$body" \
-        --cookie-jar "$cookies" \
+    broray_keenetic_curl --silent --show-error --connect-timeout 5 --max-time 10 \
+        --dump-header "$headers" --output "$body" --cookie-jar "$cookies" \
         "$auth_url/auth" >/dev/null 2>&1 || true
 
     realm="$(sed -n 's/^[Xx]-[Nn][Dd][Mm]-[Rr]ealm:[[:space:]]*//p' "$headers" 2>/dev/null | tr -d '\r' | head -n 1)"
@@ -313,18 +296,9 @@ broray_keenetic_authenticate() {
         rm -f "$headers" "$body" "$cookies" "$post_headers"
         auth_url="https://$lan"
         tls_arg="--insecure"
-
-        broray_keenetic_curl \
-            $tls_arg \
-            --silent \
-            --show-error \
-            --connect-timeout 5 \
-            --max-time 10 \
-            --dump-header "$headers" \
-            --output "$body" \
-            --cookie-jar "$cookies" \
+        broray_keenetic_curl $tls_arg --silent --show-error --connect-timeout 5 --max-time 10 \
+            --dump-header "$headers" --output "$body" --cookie-jar "$cookies" \
             "$auth_url/auth" >/dev/null 2>&1 || true
-
         realm="$(sed -n 's/^[Xx]-[Nn][Dd][Mm]-[Rr]ealm:[[:space:]]*//p' "$headers" 2>/dev/null | tr -d '\r' | head -n 1)"
         challenge="$(sed -n 's/^[Xx]-[Nn][Dd][Mm]-[Cc]hallenge:[[:space:]]*//p' "$headers" 2>/dev/null | tr -d '\r' | head -n 1)"
     fi
@@ -338,9 +312,7 @@ broray_keenetic_authenticate() {
     md5_hash="$(printf '%s' "$login:$realm:$password" | md5sum | awk '{print $1}')"
     response_hash="$(printf '%s' "$challenge$md5_hash" | sha256sum | awk '{print $1}')"
 
-    jq -n \
-        --arg login "$login" \
-        --arg password "$response_hash" \
+    jq -n --arg login "$login" --arg password "$response_hash" \
         '{login: $login, password: $password}' >"$post_body" || {
         rm -rf "$auth_dir"
         password=""
@@ -349,21 +321,11 @@ broray_keenetic_authenticate() {
         return 2
     }
 
-    http_code="$(broray_keenetic_curl \
-        $tls_arg \
-        --silent \
-        --show-error \
-        --connect-timeout 5 \
-        --max-time 10 \
-        --cookie "$cookies" \
-        --cookie-jar "$cookies" \
-        --header 'Content-Type: application/json' \
-        --request POST \
-        --data-binary "@$post_body" \
-        --dump-header "$post_headers" \
-        --output "$body" \
-        --write-out '%{http_code}' \
-        "$auth_url/auth" 2>/dev/null || printf '000')"
+    http_code="$(broray_keenetic_curl $tls_arg --silent --show-error --connect-timeout 5 --max-time 10 \
+        --cookie "$cookies" --cookie-jar "$cookies" \
+        --header 'Content-Type: application/json' --request POST \
+        --data-binary "@$post_body" --dump-header "$post_headers" --output "$body" \
+        --write-out '%{http_code}' "$auth_url/auth" 2>/dev/null || printf '000')"
 
     password=""
     md5_hash=""
