@@ -18,7 +18,7 @@ broray_api_release_operation_lock() {
         broray_job_finish "${1:-failed}" || return $?
     fi
     if command -v broray_routes_api_lock_release >/dev/null 2>&1; then
-        broray_routes_api_lock_release || true
+        broray_routes_api_lock_release "${1:-failed}" || return $?
     fi
 }
 

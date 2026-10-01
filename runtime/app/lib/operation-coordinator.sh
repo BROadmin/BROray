@@ -785,7 +785,7 @@ ops_begin()
         cancelability=protected
     fi
     case "$scope" in routes|system) ;; *) ops_error INVALID_SCOPE 1 ;; esac
-    case "$action" in system:platform-preflight|auto-switch|subscriptions:*|servers:*|xray:*|keenetic:*|dot:*|custom:*|preflight:*|check|download|build-export|verify|plan|export|delete|resume) ;; *) ops_error INVALID_ACTION 1 ;; esac
+    case "$action" in system:platform-preflight|system:cleanup|auto-switch|subscriptions:*|servers:*|xray:*|keenetic:*|dot:*|custom:*|preflight:*|check|download|build-export|verify|plan|export|delete|resume) ;; *) ops_error INVALID_ACTION 1 ;; esac
     case "$action:$bundle" in *[!A-Za-z0-9._:-]*) ops_error INVALID_ACTION 1 ;; esac
     [ "${#action}" -le 64 ] && [ "${#bundle}" -le 64 ] || ops_error INVALID_ACTION 1
     case "$source" in USER|SCHEDULER|SUBSCRIPTION_AUTO|SERVER_CHECK_AUTO|AUTO_SWITCH|UPDATER|SYSTEM_RECOVERY) ;; *) ops_error INVALID_SOURCE 1 ;; esac

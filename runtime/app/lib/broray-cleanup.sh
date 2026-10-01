@@ -395,43 +395,35 @@ broray_cleanup_routes_resumable_pending()
 
 broray_cleanup_global_lock_acquire()
 {
-    local owner
     broray_cleanup_routes_resumable_pending && return 2
     { [ ! -e "$BRORAY_CLEANUP_UPDATER_LOCK" ] && [ ! -L "$BRORAY_CLEANUP_UPDATER_LOCK" ]; } || return 2
     { [ ! -e "$BRORAY_CLEANUP_SYSTEM_LOCK" ] && [ ! -L "$BRORAY_CLEANUP_SYSTEM_LOCK" ]; } || return 2
-    mkdir -p "$(dirname "$BRORAY_CLEANUP_GLOBAL_LOCK")" || return 1
-    mkdir "$BRORAY_CLEANUP_GLOBAL_LOCK" 2>/dev/null || return 2
-    {
-        printf '%s\n' "$$" >"$BRORAY_CLEANUP_GLOBAL_LOCK/pid" &&
-        printf '%s\n' system >"$BRORAY_CLEANUP_GLOBAL_LOCK/scope" &&
-        printf '%s\n' cleanup >"$BRORAY_CLEANUP_GLOBAL_LOCK/action" &&
-        : >"$BRORAY_CLEANUP_GLOBAL_LOCK/bundle" &&
-        printf '%s\n' "$(broray_cleanup_now_iso)" >"$BRORAY_CLEANUP_GLOBAL_LOCK/startedAt"
-    } || {
-        rm -rf "$BRORAY_CLEANUP_GLOBAL_LOCK" 2>/dev/null || true
-        return 1
-    }
-    if [ -e "$BRORAY_CLEANUP_UPDATER_LOCK" ] || [ -L "$BRORAY_CLEANUP_UPDATER_LOCK" ] ||
-       [ -e "$BRORAY_CLEANUP_SYSTEM_LOCK" ] || [ -L "$BRORAY_CLEANUP_SYSTEM_LOCK" ] ||
-       broray_cleanup_routes_resumable_pending
-    then
-        rm -rf "$BRORAY_CLEANUP_GLOBAL_LOCK" 2>/dev/null || true
-        return 2
-    fi
+    [ -z "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || return 73
+    . "${BRORAY_OPS_CODE_ROOT:-${BRORAY_ROOT:-$BRORAY_BASE}}/lib/operation-client.sh" || return 1
+    # Pass the exact cleanup installation's paths to every coordinator call.
+    BRORAY_ROUTES_API_LOCK="$BRORAY_CLEANUP_GLOBAL_LOCK"
+    BRORAY_LEGACY_GLOBAL_LOCK="$BRORAY_CLEANUP_SYSTEM_LOCK"
+    export BRORAY_ROUTES_API_LOCK BRORAY_LEGACY_GLOBAL_LOCK
+    broray_ops_begin system system:cleanup cleanup USER protected || return $?
+    BRORAY_CLEANUP_OPERATION_ID="$BRORAY_BACKGROUND_OPERATION_ID"
     BRORAY_CLEANUP_LOCK_HELD=true
     return 0
 }
 
 broray_cleanup_global_lock_release()
 {
-    local owner action
+    local release_pid release_rest
     [ "$BRORAY_CLEANUP_LOCK_HELD" = true ] || return 0
-    owner="$(sed -n '1p' "$BRORAY_CLEANUP_GLOBAL_LOCK/pid" 2>/dev/null || true)"
-    action="$(sed -n '1p' "$BRORAY_CLEANUP_GLOBAL_LOCK/action" 2>/dev/null || true)"
-    if [ "$owner" = "$$" ] && [ "$action" = cleanup ]; then
-        rm -rf "$BRORAY_CLEANUP_GLOBAL_LOCK" 2>/dev/null || true
-    fi
+    [ -n "${BRORAY_CLEANUP_OPERATION_ID:-}" ] &&
+      [ "${BRORAY_BACKGROUND_OPERATION_ID:-}" = "$BRORAY_CLEANUP_OPERATION_ID" ] || return 73
+    IFS=' ' read -r release_pid release_rest </proc/self/stat || return 73
+    case "${1:-completed}" in
+        completed) broray_ops_finish completed '' "$release_pid" || return $? ;;
+        failed) broray_ops_finish failed OPERATION_FAILED "$release_pid" || return $? ;;
+        *) return 64 ;;
+    esac
     BRORAY_CLEANUP_LOCK_HELD=false
+    unset BRORAY_CLEANUP_OPERATION_ID
 }
 
 broray_cleanup_plan_create()
@@ -591,7 +583,7 @@ broray_cleanup_path_allowed()
 
 broray_cleanup_execute()
 {
-    local token plan list now expires include_temp include_backups include_route_backups include_logs expected_digest current current_digest lock_rc deleted bytes failed tab category kind size relative path result_output result_temp
+    local token plan list now expires include_temp include_backups include_route_backups include_logs expected_digest current current_digest lock_rc deleted bytes failed tab category kind size relative path result_output result_temp release_state
     token="$1"
     result_output="${2:-}"
     result_temp=""
@@ -687,7 +679,11 @@ broray_cleanup_execute()
         bytes=$((bytes + size))
     done <"$list"
 
-    broray_cleanup_global_lock_release
+    if [ -n "$failed" ]; then release_state=failed; else release_state=completed; fi
+    broray_cleanup_global_lock_release "$release_state" || {
+        broray_cleanup_error CLEANUP_FINALIZATION_FAILED 'Завершение очистки не подтверждено; блокировка сохранена.'
+        return 1
+    }
     if [ -n "$failed" ]; then
         rm -f "$plan" "$list"
         broray_cleanup_error CLEANUP_DELETE_FAILED "Очистка остановлена на объекте: $failed"

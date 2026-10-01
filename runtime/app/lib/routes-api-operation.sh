@@ -108,16 +108,8 @@ broray_routes_api_pending_action_allowed()
 
 broray_routes_api_lock_write()
 {
-    local action bundle
-    action="${1:-unknown}"
-    bundle="${2:-}"
-
-    printf '%s\n' "$$" >"$BRORAY_ROUTES_API_LOCK/pid" || return 1
-    printf '%s\n' routes >"$BRORAY_ROUTES_API_LOCK/scope" || return 1
-    printf '%s\n' "$action" >"$BRORAY_ROUTES_API_LOCK/action" || return 1
-    printf '%s\n' "$bundle" >"$BRORAY_ROUTES_API_LOCK/bundle" || return 1
-    printf '%s\n' "$(broray_routes_api_now)" >"$BRORAY_ROUTES_API_LOCK/startedAt" || return 1
-    return 0
+    # Only the coordinator may publish complete owner evidence.
+    return 73
 }
 
 broray_routes_api_stale_action_known()
@@ -171,38 +163,28 @@ broray_routes_api_lock_acquire()
         broray_routes_api_pending_action_allowed "$action" "$bundle" || return 2
     fi
 
-    mkdir -p "$(dirname "$BRORAY_ROUTES_API_LOCK")" || return 1
-    if mkdir "$BRORAY_ROUTES_API_LOCK" 2>/dev/null; then
-        if [ -e "$BRORAY_UPDATER_REQUEST_LOCK" ] || [ -L "$BRORAY_UPDATER_REQUEST_LOCK" ] ||
-           [ -e "$BRORAY_LEGACY_GLOBAL_LOCK" ] || [ -L "$BRORAY_LEGACY_GLOBAL_LOCK" ]
-        then
-            rmdir "$BRORAY_ROUTES_API_LOCK" 2>/dev/null || true
-            return 2
-        fi
-        broray_routes_api_lock_write "$action" "$bundle" || {
-            rm -rf "$BRORAY_ROUTES_API_LOCK" 2>/dev/null || true
-            return 1
-        }
-        BRORAY_ROUTES_API_LOCK_HELD=true
-        return 0
-    fi
-
-    # A present fence without our already-published identity is foreign or
-    # ambiguous.  Never reclaim it here: the owner may be between atomic
-    # mkdir and publication of its pid/scope files.
-    return 2
+    [ -z "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || return 73
+    . "${BRORAY_OPS_CODE_ROOT:-$BRORAY_ROOT}/lib/operation-client.sh" || return 1
+    broray_ops_begin system "$action" "$bundle" USER protected || return $?
+    BRORAY_ROUTES_API_OPERATION_ID="$BRORAY_BACKGROUND_OPERATION_ID"
+    BRORAY_ROUTES_API_LOCK_HELD=true
+    return 0
 }
 
 broray_routes_api_lock_release()
 {
-    local owner scope
+    local release_pid release_rest
     [ "$BRORAY_ROUTES_API_LOCK_HELD" = true ] || return 0
-    owner="$(sed -n '1p' "$BRORAY_ROUTES_API_LOCK/pid" 2>/dev/null || true)"
-    scope="$(sed -n '1p' "$BRORAY_ROUTES_API_LOCK/scope" 2>/dev/null || true)"
-    if [ "$owner" = "$$" ] && [ "$scope" = routes ]; then
-        rm -rf "$BRORAY_ROUTES_API_LOCK" 2>/dev/null || true
-    fi
+    [ -n "${BRORAY_ROUTES_API_OPERATION_ID:-}" ] &&
+      [ "${BRORAY_BACKGROUND_OPERATION_ID:-}" = "$BRORAY_ROUTES_API_OPERATION_ID" ] || return 73
+    IFS=' ' read -r release_pid release_rest </proc/self/stat || return 73
+    case "${1:-failed}" in
+        completed) broray_ops_finish completed '' "$release_pid" || return $? ;;
+        failed) broray_ops_finish failed OPERATION_FAILED "$release_pid" || return $? ;;
+        *) return 64 ;;
+    esac
     BRORAY_ROUTES_API_LOCK_HELD=false
+    unset BRORAY_ROUTES_API_OPERATION_ID
 }
 
 broray_routes_api_lock_read_json()
