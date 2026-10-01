@@ -590,6 +590,8 @@ pre {
 .servers-live-status,
 .xray-live-status {
     display: inline-flex;
+    min-width: 0;
+    max-width: 100%;
     min-height: 30px;
     align-items: center;
     gap: 7px;
@@ -601,7 +603,8 @@ pre {
     font-size: 12px;
     font-weight: 760;
     line-height: 1.2;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .status-success,
@@ -5546,6 +5549,7 @@ body.modal-open {
 
 .page-broray .section-heading {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
@@ -7041,6 +7045,16 @@ body.modal-open {
 
 .routes-operation-float-heading {
     justify-content: space-between;
+}
+
+.routes-operation-float-heading > div:first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.routes-operation-float-heading-actions {
+    flex-shrink: 0;
+    max-width: 100%;
 }
 
 .routes-operation-float-heading h2 {
