@@ -1061,7 +1061,7 @@ static int sc_start(struct sc_node *n){
         if(bg_empty(domain))goto done;log=sc_log(start,"supervisor.log");if(log<0||sc_fork_service(n,log,0,hostsha))goto done;close(log);log=-1;
     }
     uint64_t wait_begin=millis(),poll_ms=0;unsigned polls=0;
-    until=wait_begin+60000;verified=0;
+    until=wait_begin+180000;verified=0;
     sc_live_reason="readiness-not-observed";
     do{
         int hint=sc_ready_wakeup(domain,n);if(hint<0)goto done;

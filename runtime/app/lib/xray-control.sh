@@ -19,16 +19,16 @@ broray_xray_is_running() {
 }
 
 broray_xray_wait_running() {
-    broray_xray_wait_counter=0
-    broray_xray_wait_limit=12
-
-    while [ "$broray_xray_wait_counter" -lt "$broray_xray_wait_limit" ]; do
+    local started now unused deadline
+    read -r started unused < /proc/uptime || return 1
+    deadline=$(( ${started%%.*} + 180 ))
+    while :; do
         if broray_xray_is_running; then
             return 0
         fi
-
+        read -r now unused < /proc/uptime || return 1
+        [ "${now%%.*}" -lt "$deadline" ] || break
         sleep 1
-        broray_xray_wait_counter=$((broray_xray_wait_counter + 1))
     done
 
     return 1

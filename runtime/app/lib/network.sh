@@ -14,8 +14,11 @@ broray_network_diagnostic() {
 broray_network_read() (
  # Bounds apply to command output as well as runtime. No raw configuration logs.
  ulimit -f 2048 || exit 1
- if command -v timeout >/dev/null 2>&1; then timeout -k 2 8 "$@"
- elif command -v busybox >/dev/null 2>&1; then busybox timeout -k 2 8 "$@"
+ # Full configuration is heavier than the local IPv4 snapshot.
+ limit=30
+ [ "${2:-}" != -c ] || [ "${3:-}" != 'show running-config' ] || limit=120
+ if command -v timeout >/dev/null 2>&1; then timeout -k 2 "$limit" "$@"
+ elif command -v busybox >/dev/null 2>&1; then busybox timeout -k 2 "$limit" "$@"
  else exit 127; fi
 )
 broray_network_safe_file() {

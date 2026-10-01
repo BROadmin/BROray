@@ -24,16 +24,16 @@ case "$action" in
         mkdir -p "$SVC_APP/logs" || exit 74
         "$SVC_ASH" "$SVC_DAEMON" >>"$SVC_LOG" 2>&1 </dev/null &
     fi
-    # App bootstrap/adoption can take more than10s during a release switch.
-    # Observe the same launch for up to30 waits; a timeout is never readiness.
-    # Probe after the final sleep too, instead of returning its stale view.
-    remaining=30
+    # One launch, elapsed uptime budget including status probes, fresh final
+    # readiness observation. Wall-clock/NTP adjustments cannot extend it.
+    read -r started unused < /proc/uptime || exit 74
+    deadline=$(( ${started%%.*} + 180 ))
     while :; do
         view="$(broray_service_status_json)" || exit 74
         if printf '%s\n' "$view" | jq -e '.complete and .ready' >/dev/null; then printf '%s\n' "$view"; exit 0; fi
-        [ "$remaining" -gt 0 ] || break
+        read -r now unused < /proc/uptime || exit 74
+        [ "${now%%.*}" -lt "$deadline" ] || break
         sleep 1
-        remaining=$((remaining-1))
     done
     printf '%s\n' "$view"; exit 75 ;;
   stop)

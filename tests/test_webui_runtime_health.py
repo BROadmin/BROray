@@ -16,6 +16,17 @@ class Health(unittest.TestCase):
         self.assertEqual(p.returncode,0,p.stderr);return json.loads(p.stdout)
     def test_file_present_service_down_unhealthy(self):self.assertFalse(self.query(1)['healthy'])
     def test_status_proves_local_health(self):self.assertTrue(self.query(0)['healthy'])
+    def test_outer_budget_contains_local_http_and_completion_reserve(self):
+        # Emulate a service needing the approved30s HTTP budget plus20s for
+        # identity/config/completion. No real network or long wall-clock wait.
+        self.script='''timeout() {
+ [ "$1" = -k ] && [ "$2" = 2 ] || return 99
+ [ "$3" -ge 50 ] || return 124
+ shift 3
+ "$@"
+}
+'''+self.script
+        self.assertTrue(self.query(0)['healthy'])
     def test_publication_failure_does_not_hide_local_health(self):
         data=self.query(0);self.assertTrue(data['healthy']);self.assertFalse(data['publication']['consistent'])
     def test_service_missing_unhealthy(self):

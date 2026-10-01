@@ -349,8 +349,9 @@ broray_system_component_json() {
         fi
         # S25 status checks the private executable, NUL argv, config and local
         # HTTP. Do not call start/recovery from a GET/info request.
+        # 30s HTTP plus20s reserve for identity/config and completion.
         if [ "$installed" = true ] && [ -f "$service" ] && [ ! -L "$service" ] &&
-           timeout -k 2 12 "$service" status >/dev/null 2>&1; then
+           timeout -k 2 "$((30 + 20))" "$service" status >/dev/null 2>&1; then
             healthy=true
             reason=WEBUI_LOCAL_HEALTHY
         fi

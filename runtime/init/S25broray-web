@@ -101,7 +101,7 @@ broray_web_http_healthy()
     code="$(
         unset http_proxy https_proxy all_proxy \
             HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY no_proxy
-        "$CURL_BINARY" -q -sS --noproxy '*' --max-time 5 \
+        "$CURL_BINARY" -q -sS --noproxy '*' --max-time 30 \
             -o /dev/null -w '%{http_code}' "http://$lan:8080/"
     )" || return 1
     [ "$code" = 200 ]

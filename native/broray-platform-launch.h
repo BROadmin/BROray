@@ -631,7 +631,7 @@ static int platform_start_apply(char **argv,int op,const char *op_path,const str
         close(log);log=-1;
         /* Poll only authenticated readiness of this already-created generation.
          * Timeout grants no stop/cleanup authority and never causes a relaunch. */
-        wait_begin=millis();uint64_t until=wait_begin+60000;int ready=0;stage="readiness-wait";
+        wait_begin=millis();uint64_t until=wait_begin+180000;int ready=0;stage="readiness-wait";
         char *status_args[]={ps.runtime,"control",ps.domain,"STATUS",ps.id,(char*)input->manifest,(char*)input->operation,(char*)input->nonce};
         while(millis()<until){
             int status;pid_t got=waitpid(child,&status,WNOHANG);if(got==child||got<0){stage="supervisor-exit";goto done;}

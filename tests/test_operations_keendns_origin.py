@@ -177,8 +177,18 @@ class OperationsOrigin(unittest.TestCase):
         self.assertEqual(self.calls('ndmc-calls'), ['-c show ndns', '-c show running-config'])
 
     def test_hung_running_config_is_bounded_without_dispatch(self):
+        self.accelerate_read_deadline()
         self.request(env={'FIXTURE_NDMC_MODE':'hang-running'}, expected=403, timeout=45)
         self.assertEqual(self.calls(), [])
+        self.assertTrue(self.calls('timeout-calls')[-1].startswith('-k 1 120 '))
+
+    def accelerate_read_deadline(self):
+        # Observe the exact production budget, then shorten only the fixture's
+        # real timeout. Keep hung-command rejection and no-dispatch assertions.
+        wrapper = self.root / 'bin/timeout'
+        wrapper.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >>"$FIXTURE_ROOT/timeout-calls"\n'
+                           'shift 3\nexec '+shlex.quote(REAL_TIMEOUT)+' -k 1 1 "$@"\n')
+        wrapper.chmod(0o700)
 
     def test_proxy_stripped_origin_uses_explicit_page_origin_and_live_proof(self):
         self.request(env={'HTTP_ORIGIN': '', 'HTTP_X_BRORAY_ORIGIN': ORIGIN})
@@ -312,10 +322,12 @@ class OperationsOrigin(unittest.TestCase):
         self.request(body='{}', env={'CONTENT_LENGTH':'4'}, expected=400)
 
     def test_timeout_is_bounded_and_leaves_no_workspace(self):
+        self.accelerate_read_deadline()
         start=time.monotonic()
         self.request(env={'FIXTURE_NDMC_MODE':'hang'}, expected=403)
         self.assertLess(time.monotonic()-start, 6)
         self.assertEqual(self.calls(), [])
+        self.assertTrue(self.calls('timeout-calls')[0].startswith('-k 1 30 '))
 
     def test_timeout_uses_busybox_applet_too(self):
         if not BUSYBOX: self.fail('BusyBox required for this test')

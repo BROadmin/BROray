@@ -13,7 +13,7 @@ broray_subscription_device_snapshot() (
     device_tmp="$(mktemp -d "$BRORAY_SUB_TMP/device-info.XXXXXX" 2>/dev/null)" || { printf '{}\n'; exit 0; }
     trap 'rm -rf "$device_tmp"' EXIT
     # File-size limit and timeout are scoped to this read-only child, not the owner.
-    if ! (ulimit -f 16 || exit 1; timeout -k 1 2 "$device_ndmc" -c 'show version' >"$device_tmp/raw" 2>/dev/null) 2>/dev/null; then
+    if ! (ulimit -f 16 || exit 1; timeout -k 1 30 "$device_ndmc" -c 'show version' >"$device_tmp/raw" 2>/dev/null) 2>/dev/null; then
         printf '{}\n'; exit 0
     fi
     device_bytes="$(wc -c <"$device_tmp/raw" | tr -d ' ')"

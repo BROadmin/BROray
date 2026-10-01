@@ -1,5 +1,5 @@
 """Actual ash, jq, timeout and file limits; synthetic ndmc, curl and DNS."""
-import json,os,subprocess,unittest,time
+import json,os,subprocess,unittest,time,shutil,shlex
 from pathlib import Path
 from test_subscription_http_metadata import Transport, HWID
 VERSION={'vendor':'Keenetic','manufacturer':'Keenetic Ltd.','model':'Peak (KN-2710)','hw_id':'KN-2710','title':'5.1.1','release':'5.01.C.1.0-0','serial':'PRIVATE_CANARY','mac':'PRIVATE_CANARY','serviceTag':'PRIVATE_CANARY','ndw':{'version':'WRONG'}}
@@ -53,7 +53,13 @@ jq -nc --argjson rc "$rc" --arg code "$BRORAY_SUB_ERROR_CODE" '{rc:$rc,code:$cod
  def test_failed_ndmc_does_not_block(self):
   self.env['TEST_DEVICE_MODE']='fail';self.assertEqual(self.fetch()['rc'],0);self.assertNotIn('x-device-os',self.headers())
  def test_timeout_is_bounded(self):
+  # Record the approved30s command budget; exercise real timeout/kill locally
+  # in2s without relaxing the existing no-leak/no-header/time assertions.
+  timeout=shutil.which('timeout');self.assertTrue(timeout)
+  wrapper=self.app/'bin/timeout'
+  wrapper.write_text('#!/bin/ash\nprintf "%s\\n" "$*" >"$BRORAY_ROOT/tmp/device-timeout"\nshift 3\nexec '+shlex.quote(timeout)+' -k 1 1 "$@"\n');wrapper.chmod(0o755)
   self.env['TEST_DEVICE_MODE']='wait';start=time.monotonic();self.assertEqual(self.fetch()['rc'],0);self.assertLess(time.monotonic()-start,12);self.assertNotIn('x-device-os',self.headers())
+  self.assertTrue((self.app/'tmp/device-timeout').read_text().startswith('-k 1 30 '))
  def test_excessive_output_is_not_kept(self):
   self.env['TEST_DEVICE_MODE']='huge';self.assertEqual(self.snapshot(),{'appVersion':'3.1.1'})
  def test_text_show_version(self):

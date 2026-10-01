@@ -648,16 +648,23 @@ broray_setup_local_http_probe()
 
 validate_webui()
 {
-    local attempt web_lan
+    local started now unused deadline remaining probe_limit web_lan
     [ "$BRORAY_SETUP_SKIP_SERVICES" = 1 ] && return 0
     web_lan="$(broray_setup_web_lan_ip)" || fail "Не удалось определить адрес WebUI"
-    attempt=1
-    while [ "$attempt" -le 15 ]; do
-        if broray_setup_local_http_probe "$web_lan" 5 >/dev/null 2>&1; then
+    read -r started unused < /proc/uptime || return 1
+    deadline=$(( ${started%%.*} + 180 ))
+    while :; do
+        read -r now unused < /proc/uptime || return 1
+        remaining=$(( deadline - ${now%%.*} ))
+        [ "$remaining" -gt 0 ] || break
+        probe_limit=30
+        [ "$remaining" -ge "$probe_limit" ] || probe_limit="$remaining"
+        if broray_setup_local_http_probe "$web_lan" "$probe_limit" >/dev/null 2>&1; then
             return 0
         fi
+        read -r now unused < /proc/uptime || return 1
+        [ "${now%%.*}" -lt "$deadline" ] || break
         sleep 1
-        attempt=$((attempt + 1))
     done
     fail "WebUI не отвечает по адресу http://$web_lan:8080/"
 }

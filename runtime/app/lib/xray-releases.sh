@@ -201,10 +201,14 @@ broray_xray_selected_runtime_ready() (
     # The CLI loads xray-control.sh; the WebUI status helpers live separately.
     # Import them only here, without replacing the caller's lifecycle helpers.
     . "$BRORAY_BASE/lib/xray.sh" || return 1
-    local attempt address port
+    local started now unused deadline address port
     address="$(broray_xray_socks_address)"; port="$(broray_xray_socks_port)"
-    for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    read -r started unused < /proc/uptime || return 1
+    deadline=$(( ${started%%.*} + 180 ))
+    while :; do
         if broray_xray_is_running && broray_xray_socks_active "$address" "$port"; then return 0; fi
+        read -r now unused < /proc/uptime || return 1
+        [ "${now%%.*}" -lt "$deadline" ] || break
         sleep 1
     done
     return 1

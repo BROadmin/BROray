@@ -95,12 +95,20 @@ fi
         daemon=self.app/'bin/broray-subscription-scheduler'
         daemon.write_text('#!/bin/ash\necho launch >>"$BRORAY_ROOT/tmp/launches"\nexit 0\n')
         sleeper=self.app/'bin/sleep'
-        sleeper.write_text('#!/bin/ash\necho wait >>"$BRORAY_ROOT/tmp/waits"\n')
+        # Advance uptime, not wall-clock test deadlines. Three 60s steps must
+        # exhaust the approved180s budget with only one daemon launch.
+        clock=self.app/'tmp/test-uptime';clock.write_text('0.00 0.00\n')
+        controller=self.app/'bin/broray-service'
+        controller.write_text(controller.read_text().replace('/proc/uptime',str(clock)))
+        sleeper.write_text('#!/bin/ash\necho wait >>"$BRORAY_ROOT/tmp/waits"\n'
+                          'read -r t unused <"$BRORAY_ROOT/tmp/test-uptime"\n'
+                          'echo "$(( ${t%%.*}+60 )).00 0.00" >"$BRORAY_ROOT/tmp/test-uptime"\n')
         sleeper.chmod(0o755)
         result=self.call('start',expected=75)
         self.assertFalse(json.loads(result.stdout)['ready'])
         self.assertEqual((self.app/'tmp/launches').read_text().splitlines(),['launch'])
-        self.assertEqual(len((self.app/'tmp/waits').read_text().splitlines()),30)
+        self.assertEqual(len((self.app/'tmp/waits').read_text().splitlines()),3)
+        self.assertEqual(clock.read_text(),'180.00 0.00\n')
     def test_start_accepts_slow_identity_bound_adoption(self):
         # Physical KN-2710 evidence: adoption took12-14s during release switch.
         self.readiness_daemon('/bin/sleep 12')
