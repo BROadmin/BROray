@@ -2,7 +2,8 @@
 # Optional show-version reader. Inert on load; never changes router configuration.
 broray_subscription_device_snapshot() (
     umask 077
-    command -v timeout >/dev/null 2>&1 || { printf '{}\n'; exit 0; }
+    device_timeout="${BRORAY_BASE:-/opt/broray}/bin/broray-timeout"
+    [ -x "$device_timeout" ] || { printf '{}\n'; exit 0; }
     device_ndmc=''
     if command -v broray_interface_ndmc_path >/dev/null 2>&1; then
         device_ndmc="$(broray_interface_ndmc_path 2>/dev/null)" || device_ndmc=''
@@ -13,7 +14,7 @@ broray_subscription_device_snapshot() (
     device_tmp="$(mktemp -d "$BRORAY_SUB_TMP/device-info.XXXXXX" 2>/dev/null)" || { printf '{}\n'; exit 0; }
     trap 'rm -rf "$device_tmp"' EXIT
     # File-size limit and timeout are scoped to this read-only child, not the owner.
-    if ! (ulimit -f 16 || exit 1; timeout -k 1 30 "$device_ndmc" -c 'show version' >"$device_tmp/raw" 2>/dev/null) 2>/dev/null; then
+    if ! (ulimit -f 16 || exit 1; "$device_timeout" -k 1 30 "$device_ndmc" -c 'show version' >"$device_tmp/raw" 2>/dev/null) 2>/dev/null; then
         printf '{}\n'; exit 0
     fi
     device_bytes="$(wc -c <"$device_tmp/raw" | tr -d ' ')"

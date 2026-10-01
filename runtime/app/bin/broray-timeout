@@ -1,0 +1,11 @@
+#!/opt/bin/ash
+# Private BROray integer-second timeout. No optional Entware applet required.
+# Only the forms used by BROray are accepted; argv is never evaluated as code.
+grace=2
+if [ "${1:-}" = -k ]; then
+    [ "$#" -ge 4 ] || exit 64
+    grace="$2"; shift 2
+fi
+[ "$#" -ge 2 ] || exit 64
+limit="$1"; shift
+exec "${0%/*}/broray-ndmc-run" --exec "$limit" "$grace" -- "$@"

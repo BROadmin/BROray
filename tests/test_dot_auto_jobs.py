@@ -6,6 +6,8 @@ class Jobs(unittest.TestCase):
  clean_fixture=SubscriptionJobs.clean_fixture;states=SubscriptionJobs.states;shell=SubscriptionJobs.shell
  def setUp(self):
   SubscriptionJobs.setUp(self)
+  from test_bounded_execution import install_bounded_helper
+  install_bounded_helper(self.app)
   self.dot=self.app/'routes/dot';self.dot.mkdir(parents=True,exist_ok=True)
   self.config={'schemaVersion':3,'requestedIds':['google-primary'],'selectedIds':['google-primary'],'effectiveIds':[],'managed':[],'quarantinedReceipts':[]}
   (self.dot/'config.json').write_text(json.dumps(self.config))

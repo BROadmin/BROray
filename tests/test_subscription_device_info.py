@@ -7,6 +7,8 @@ class Device(unittest.TestCase):
  response=Transport.response;shell=Transport.shell;calls=Transport.calls
  def setUp(self):
   Transport.setUp(self);self.version_file=self.app/'tmp/version';self.version_file.write_text(json.dumps(VERSION));self.env['TEST_VERSION']=str(self.version_file);self.env['TEST_DEVICE_CALLS']=str(self.app/'tmp/device-calls')
+  from test_bounded_execution import install_bounded_helper
+  install_bounded_helper(self.app)
   p=self.app/'bin/ndmc';p.write_text('''#!/bin/ash
 [ "$#" = 2 ] && [ "$1" = -c ] && [ "$2" = 'show version' ] || exit 90
 printf 'show version\\n' >> "$TEST_DEVICE_CALLS"
@@ -55,9 +57,8 @@ jq -nc --argjson rc "$rc" --arg code "$BRORAY_SUB_ERROR_CODE" '{rc:$rc,code:$cod
  def test_timeout_is_bounded(self):
   # Record the approved30s command budget; exercise real timeout/kill locally
   # in2s without relaxing the existing no-leak/no-header/time assertions.
-  timeout=shutil.which('timeout');self.assertTrue(timeout)
-  wrapper=self.app/'bin/timeout'
-  wrapper.write_text('#!/bin/ash\nprintf "%s\\n" "$*" >"$BRORAY_ROOT/tmp/device-timeout"\nshift 3\nexec '+shlex.quote(timeout)+' -k 1 1 "$@"\n');wrapper.chmod(0o755)
+  wrapper=self.app/'bin/broray-timeout'
+  wrapper.write_text('#!/bin/ash\nprintf "%s\\n" "$*" >"$BRORAY_ROOT/tmp/device-timeout"\nshift 3\nexec '+shlex.quote(str(self.app/'bin/broray-ndmc-run'))+' --exec 1 1 -- "$@"\n');wrapper.chmod(0o755)
   self.env['TEST_DEVICE_MODE']='wait';start=time.monotonic();self.assertEqual(self.fetch()['rc'],0);self.assertLess(time.monotonic()-start,12);self.assertNotIn('x-device-os',self.headers())
   self.assertTrue((self.app/'tmp/device-timeout').read_text().startswith('-k 1 30 '))
  def test_excessive_output_is_not_kept(self):

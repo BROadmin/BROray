@@ -26,6 +26,8 @@ APP_TREE="$BRORAY_ROOT/bundle";TMP="$BRORAY_ROOT/staging"
 mkdir -p "$APP_TREE/app/lib" "$APP_TREE/app/bin" "$TMP"
 cp "$BRORAY_ROOT/lib/network.sh" "$APP_TREE/app/lib/network.sh"
 cp "$BRORAY_ROOT/bin/broray-system-ndmc" "$APP_TREE/app/bin/broray-system-ndmc"
+cp "$BRORAY_ROOT/bin/broray-timeout" "$APP_TREE/app/bin/broray-timeout"
+cp "$BRORAY_ROOT/bin/broray-ndmc-run" "$APP_TREE/app/bin/broray-ndmc-run"
 '''+text[a:b].replace('/opt/bin/ash','/bin/ash')
     def test_clean_preflight_selection_reaches_setup_without_second_prompt(self):
         original,adapted,m=self.adapted()

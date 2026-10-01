@@ -96,13 +96,15 @@ esac
 
 class OperationsOrigin(unittest.TestCase):
     def setUp(self):
-        if os.name == 'nt' or not REAL_JQ or not REAL_TIMEOUT:
-            self.fail('Requires developer Linux, jq and timeout; do not run on router.')
+        if os.name == 'nt' or not REAL_JQ:
+            self.fail('Requires developer Linux and jq; do not run on router.')
         self.temp = tempfile.TemporaryDirectory(prefix='broray-origin-test-')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         for d in ['lib', 'web-new/api/operations', 'tmp', 'bin']:
             (self.root / d).mkdir(parents=True, exist_ok=True)
+        from test_bounded_execution import install_bounded_helper
+        install_bounded_helper(self.root)
         for rel in ['lib/operations-origin.sh', 'web-new/api/operations/common.sh']:
             text = (SOURCE / 'runtime/app' / rel).read_text(encoding='utf-8')
             (self.root / rel).write_text(text.replace('/opt/broray', str(self.root)), encoding='utf-8')
@@ -185,9 +187,9 @@ class OperationsOrigin(unittest.TestCase):
     def accelerate_read_deadline(self):
         # Observe the exact production budget, then shorten only the fixture's
         # real timeout. Keep hung-command rejection and no-dispatch assertions.
-        wrapper = self.root / 'bin/timeout'
+        wrapper = self.root / 'bin/broray-timeout'
         wrapper.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >>"$FIXTURE_ROOT/timeout-calls"\n'
-                           'shift 3\nexec '+shlex.quote(REAL_TIMEOUT)+' -k 1 1 "$@"\n')
+                           'shift 3\nexec '+shlex.quote(str(self.root/'bin/broray-ndmc-run'))+' --exec 1 1 -- "$@"\n')
         wrapper.chmod(0o700)
 
     def test_proxy_stripped_origin_uses_explicit_page_origin_and_live_proof(self):
@@ -329,10 +331,11 @@ class OperationsOrigin(unittest.TestCase):
         self.assertEqual(self.calls(), [])
         self.assertTrue(self.calls('timeout-calls')[0].startswith('-k 1 30 '))
 
-    def test_timeout_uses_busybox_applet_too(self):
-        if not BUSYBOX: self.fail('BusyBox required for this test')
-        (self.root/'bin/timeout').write_text('#!/bin/sh\nexec '+shlex.quote(BUSYBOX)+' timeout "$@"\n')
-        (self.root/'bin/timeout').chmod(0o700)
+    def test_optional_timeout_and_busybox_are_not_required(self):
+        for name in ['timeout','busybox']:
+            command=self.root/'bin'/name
+            command.write_text('#!/bin/sh\necho OPTIONAL_APPLET_CALLED >&2\nexit 127\n')
+            command.chmod(0o700)
         self.request()
 
     def test_read_commands_are_allowlisted(self):

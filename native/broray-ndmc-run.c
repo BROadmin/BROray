@@ -54,19 +54,31 @@ static int kill_children(void) {
     closedir(d); return 0;
 }
 int main(int argc,char **argv) {
-    if(argc==2 && !strcmp(argv[1],"--version")) { puts("broray-ndmc-run/1"); return 0; }
+    if(argc==2 && !strcmp(argv[1],"--version")) { puts("broray-ndmc-run/2"); return 0; }
     /* lane, old directory, lane wait seconds, command seconds, executable,
      * exact ndmc command. Output redirection belongs to the caller. */
-    if(argc!=7) return 64;
-    int wait_s=seconds(argv[3]),limit=seconds(argv[4]);
-    if(wait_s<0 || limit<0 || argv[1][0]!='/' || argv[2][0]!='/') return 64;
+    /* The same child ownership/drain also supplies bounded read-only commands
+     * when Entware has neither standalone timeout nor the BusyBox applet.
+     * This mode never acquires, removes or bypasses an NDMC writer lane. */
+    int direct=argc>=2 && !strcmp(argv[1],"--exec");
+    int wait_s=0,limit,grace=1,fd=-1;
+    if(direct) {
+        if(argc<6 || strcmp(argv[4],"--")) return 64;
+        limit=seconds(argv[2]);grace=seconds(argv[3]);
+        if(limit<0 || grace<0 || !argv[5][0]) return 64;
+    } else {
+        if(argc!=7) return 64;
+        wait_s=seconds(argv[3]);limit=seconds(argv[4]);
+        if(wait_s<0 || limit<0 || argv[1][0]!='/' || argv[2][0]!='/') return 64;
+    }
     umask(077);
     struct sigaction sa={0}; sa.sa_handler=stopped; sigemptyset(&sa.sa_mask);
     if(sigaction(SIGTERM,&sa,0) || sigaction(SIGINT,&sa,0) || sigaction(SIGHUP,&sa,0)) return 74;
     sa.sa_handler=SIG_DFL; if(sigaction(SIGCHLD,&sa,0)) return 74;
     if(prctl(PR_SET_CHILD_SUBREAPER,1,0,0,0)) return 74;
+    if(!direct) {
     if(!absent(argv[2])) return 125;
-    int fd=open(argv[1],O_RDWR|O_CREAT|O_NOFOLLOW|O_NONBLOCK,0600);
+    fd=open(argv[1],O_RDWR|O_CREAT|O_NOFOLLOW|O_NONBLOCK,0600);
     if(fd<0) return 74;
     struct stat st;
     if(fstat(fd,&st) || !S_ISREG(st.st_mode) || st.st_uid!=geteuid() || st.st_nlink!=1 || st.st_size!=0) return 74;
@@ -79,12 +91,15 @@ int main(int argc,char **argv) {
     }
     if(lstat(argv[1],&st) || !S_ISREG(st.st_mode)) return 74;
     struct stat held; if(fstat(fd,&held) || held.st_dev!=st.st_dev || held.st_ino!=st.st_ino || !absent(argv[2])) return 125;
+    }
     pid_t owner=getpid(),child=fork();
     if(child<0) return 74;
     if(!child) {
         if(prctl(PR_SET_PDEATHSIG,SIGKILL) || getppid()!=owner || setpgid(0,0)) _exit(74);
         signal(SIGTERM,SIG_DFL); signal(SIGINT,SIG_DFL); signal(SIGHUP,SIG_DFL);
-        execl(argv[5],argv[5],"-c",argv[6],(char*)0); _exit(127);
+        if(direct) execvp(argv[5],argv+5);
+        else execl(argv[5],argv[5],"-c",argv[6],(char*)0);
+        _exit(127);
     }
     /* Establish the group from both sides before using its ID. The leader
      * remains unreaped through the final group signal, preventing ID reuse. */
@@ -103,7 +118,7 @@ int main(int argc,char **argv) {
             reason=interrupted ? 128+interrupted : 124; term_at=now_ms();
             if(kill(-child,SIGTERM)<0 && errno!=ESRCH) return 74;
         }
-        if(reason && now_ms()-term_at>=1000) {
+        if(reason && now_ms()-term_at>=grace*1000LL) {
             if(kill(-child,SIGKILL)<0 && errno!=ESRCH) return 74;
         }
         tick();
@@ -117,5 +132,5 @@ int main(int argc,char **argv) {
         if(p<0 && errno!=EINTR) return 74;
         if(!p) tick();
     }
-    close(fd); return result;
+    if(fd>=0) close(fd); return result;
 }

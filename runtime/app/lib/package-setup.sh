@@ -713,7 +713,7 @@ BRORAY_SETUP_STAGE=runtime
 mkdir -p "$BRORAY_SETUP_TARGET/run" "$BRORAY_SETUP_TARGET/logs"
 state_write running runtime "Подготовка установки BROray $BRORAY_SETUP_VERSION."
 
-for required_command in awk curl date find grep ip jq ln mkdir mktemp readlink sed sha256sum sleep tar timeout; do
+for required_command in awk curl date find grep ip jq ln mkdir mktemp readlink sed sha256sum sleep tar; do
     require_command "$required_command"
 done
 [ "$BRORAY_SETUP_SKIP_KEENETIC" = 1 ] || require_command "$BRORAY_SETUP_NDMC"

@@ -6,6 +6,8 @@ class Lan(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory(prefix='broray-lan-');self.addCleanup(self.tmp.cleanup);self.app=Path(self.tmp.name)
   for d in ['lib','bin','tmp','run','config/system']:(self.app/d).mkdir(parents=True,exist_ok=True)
+  from test_bounded_execution import install_bounded_helper
+  install_bounded_helper(self.app)
   shutil.copyfile(ROOT/'runtime/app/lib/network.sh',self.app/'lib/network.sh')
   self.settings=self.app/'config/system/settings.json';self.settings.write_text(json.dumps({'listenAddress':'192.168.2.1','keep':'UNCHANGED'}))
   self.conf=self.app/'config/lighttpd.conf';self.conf.write_text('server.bind = "192.168.2.1"\nserver.port = 8080\n')
@@ -29,6 +31,10 @@ class Lan(unittest.TestCase):
   p=self.run_code('if command -v broray_detect_webui_lan_ip >/dev/null; then broray_detect_webui_lan_ip; else broray_detect_lan_ip; fi' if web else 'broray_detect_lan_ip')
   self.assertEqual(p.returncode,0 if ok else 1,(p.stdout,p.stderr));return p.stdout.decode().strip() if ok else p.stderr.decode()
  def test_regression_two_private_saved_address(self):self.assertEqual(self.detect(),'192.168.2.1')
+ def test_without_standalone_timeout_or_busybox_applet(self):
+  for name in ['timeout','busybox']:
+   p=self.app/'bin'/name;p.write_text('#!/bin/ash\necho OPTIONAL_TIMEOUT_MUST_NOT_EXECUTE >&2\nexit 127\n');p.chmod(0o755)
+  self.assertEqual(self.detect(),'192.168.2.1')
  def test_regression_override_not_private_is_rejected(self):self.fixture(('protected','private'));self.env['BRORAY_LAN_IP_OVERRIDE']='192.168.2.1';self.detect(ok=False)
  def test_three_private_preserves_bind(self):self.fixture(('private',)*3,('192.168.2.1','192.168.3.1','10.2.0.1'));self.assertEqual(self.detect(),'192.168.2.1')
  def test_stored_webui_pin_separate_from_socks(self):

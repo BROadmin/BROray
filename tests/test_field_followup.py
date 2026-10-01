@@ -7,6 +7,8 @@ class ReconcilePreflight(Sidecar,unittest.TestCase):
     service='interface-reconcile'
     def setUp(self):
         super().setUp()
+        from test_bounded_execution import install_bounded_helper
+        install_bounded_helper(self.app)
         self.env['BRORAY_OPS_SUPERVISOR']=str(ROOT/'.local/bin/linux-supervisor')
     def test_invalid_interface_preflight_leaves_no_global_lock(self):
         self.fixture('fixture-interface','echo "$1" >>"$BRORAY_ROOT/tmp/interface.calls"\nexit 1\n')

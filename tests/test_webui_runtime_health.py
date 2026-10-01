@@ -6,6 +6,8 @@ class Health(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.app=Path(self.tmp.name)
         (self.app/'init').mkdir();(self.app/'lib').mkdir();(self.app/'home.html').write_text('installed')
+        from test_bounded_execution import install_bounded_helper
+        install_bounded_helper(self.app)
         service=self.app/'init/S25broray-web';service.write_text('#!/bin/ash\n[ "$1" = status ] || exit 99\nexit "${TEST_SERVICE_RC:-1}"\n');service.chmod(0o755)
         (self.app/'lib/web-publish.sh').write_text('broray_web_publish_status_json(){ printf \'%s\\n\' \'{"enabled":true,"consistent":false,"reason":{"code":"WEB_ACCESS_OWNERSHIP_MISMATCH"}}\'; }\n')
         text=(ROOT/'runtime/app/lib/broray-page.sh').read_text()
@@ -19,13 +21,13 @@ class Health(unittest.TestCase):
     def test_outer_budget_contains_local_http_and_completion_reserve(self):
         # Emulate a service needing the approved30s HTTP budget plus20s for
         # identity/config/completion. No real network or long wall-clock wait.
-        self.script='''timeout() {
- [ "$1" = -k ] && [ "$2" = 2 ] || return 99
- [ "$3" -ge 50 ] || return 124
+        helper=self.app/'bin/broray-timeout'
+        helper.write_text('''#!/bin/ash
+ [ "$1" = -k ] && [ "$2" = 2 ] || exit 99
+ [ "$3" -ge 50 ] || exit 124
  shift 3
  "$@"
-}
-'''+self.script
+''')
         self.assertTrue(self.query(0)['healthy'])
     def test_publication_failure_does_not_hide_local_health(self):
         data=self.query(0);self.assertTrue(data['healthy']);self.assertFalse(data['publication']['consistent'])

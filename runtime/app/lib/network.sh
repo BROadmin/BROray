@@ -17,9 +17,7 @@ broray_network_read() (
  # Full configuration is heavier than the local IPv4 snapshot.
  limit=30
  [ "${2:-}" != -c ] || [ "${3:-}" != 'show running-config' ] || limit=120
- if command -v timeout >/dev/null 2>&1; then timeout -k 2 "$limit" "$@"
- elif command -v busybox >/dev/null 2>&1; then busybox timeout -k 2 "$limit" "$@"
- else exit 127; fi
+ "$BRORAY_NETWORK_ROOT/bin/broray-timeout" -k 2 "$limit" "$@"
 )
 broray_network_safe_file() {
  [ -f "$1" ] && [ ! -L "$1" ] && [ "$(wc -c <"$1")" -le 65536 ]

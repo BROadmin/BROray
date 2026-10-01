@@ -625,7 +625,7 @@ ops_interface_recover()
     # Test substitution is restricted to a private application root.
     if [ "$OPS_APP" != /opt/broray ]; then script="${BRORAY_RECONCILE_INTERFACE:-$script}"; fi
     ops_file_safe "$script" 65536 || return 1
-    BRORAY_BASE="$OPS_APP" timeout 15 "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$script" ownership-check >/dev/null 2>&1
+    BRORAY_BASE="$OPS_APP" "$OPS_CODE/bin/broray-timeout" 15 "${BRORAY_OPS_ASH:-/opt/bin/ash}" "$script" ownership-check >/dev/null 2>&1
 }
 
 # A queued subscription cannot write its live model before the durable

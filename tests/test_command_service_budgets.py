@@ -29,7 +29,7 @@ class Budgets(unittest.TestCase):
             self.assertEqual(f.detect(),'192.168.2.1')
         finally:f.doCleanups()
     def test_network_read_dispatches_separate_budgets_and_preserves_failure(self):
-        self.script('timeout','printf "%s\\n" "$*" >>"$BRORAY_ROOT/limits"; exit 47')
+        self.script('broray-timeout','printf "%s\\n" "$*" >>"$BRORAY_ROOT/limits"; exit 47')
         self.env['BRORAY_NETWORK_ROOT']=str(self.app)
         q=self.app/'lib/network.sh';q.write_text(self.source('runtime/app/lib/network.sh'))
         for args in ['"$BRORAY_ROOT/bin/broray-system-ndmc" -c "show running-config"','ip -4 addr show']:

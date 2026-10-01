@@ -351,7 +351,7 @@ broray_system_component_json() {
         # HTTP. Do not call start/recovery from a GET/info request.
         # 30s HTTP plus20s reserve for identity/config and completion.
         if [ "$installed" = true ] && [ -f "$service" ] && [ ! -L "$service" ] &&
-           timeout -k 2 "$((30 + 20))" "$service" status >/dev/null 2>&1; then
+           "$BRORAY_BASE/bin/broray-timeout" -k 2 "$((30 + 20))" "$service" status >/dev/null 2>&1; then
             healthy=true
             reason=WEBUI_LOCAL_HEALTHY
         fi
