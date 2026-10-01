@@ -1,78 +1,53 @@
 #!/opt/bin/ash
 set -eu
 umask 077
-
 BASE=/opt/broray
 AUTH="$BASE/lib/web-auth.sh"
-NATIVE="$BASE/lib/web-auth-native.sh"
 INIT=/opt/etc/init.d/S25broray-web
-LAN_FILE="$BASE/run/lan-ip"
-
-fail()
-{
-    echo "AUTH_HOTFIX=FAIL REASON=$1" >&2
-    exit 1
-}
-
+fail(){ echo "AUTH_HOTFIX=FAIL REASON=$1" >&2; exit 1; }
 [ -f "$AUTH" ] && [ ! -L "$AUTH" ] || fail web-auth-unsafe
-[ -f "$NATIVE" ] && [ ! -L "$NATIVE" ] || fail native-auth-unsafe
 [ -x "$INIT" ] || fail init-missing
+grep -F 'broray_keenetic_curl()' "$AUTH" >/dev/null 2>&1 || fail curl-helper-missing
+grep -F 'broray_keenetic_authenticate()' "$AUTH" >/dev/null 2>&1 || fail auth-function-missing
+! grep -F '# BEGIN BROray temporary LAN auth fallback v2' "$AUTH" >/dev/null 2>&1 || fail already-applied
+LAN="$(sed -n '1p' "$BASE/run/lan-ip" 2>/dev/null || true)"
+printf '%s\n' "$LAN" | awk -F. 'NF==4{for(i=1;i<=4;i++)if($i!~/^[0-9]+$/||$i<0||$i>255)exit 1;exit 0} {exit 1}' || fail lan-invalid
+P="$BASE/tmp/auth-hotfix-probe.$$"; rm -rf "$P"; mkdir -p "$P" || fail probe-dir
+trap 'rm -rf "$P"' EXIT HUP INT TERM
+broray_probe(){ ( unset http_proxy https_proxy all_proxy no_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY; curl -q --noproxy '*' -sS --connect-timeout 5 --max-time 10 -D "$P/h" -o "$P/b" "http://$LAN/auth" >/dev/null 2>&1 || true; ); }
+broray_probe
+REALM="$(sed -n 's/^[Xx]-[Nn][Dd][Mm]-[Rr]ealm:[[:space:]]*//p' "$P/h" 2>/dev/null | tr -d '\r' | head -n1)"
+CHAL="$(sed -n 's/^[Xx]-[Nn][Dd][Mm]-[Cc]hallenge:[[:space:]]*//p' "$P/h" 2>/dev/null | tr -d '\r' | head -n1)"
+[ -n "$REALM" ] && [ -n "$CHAL" ] || fail lan-auth-unavailable
+B="$BASE/backup/auth-hotfix-$(date +%Y%m%d-%H%M%S)"; mkdir -p "$B" || fail backup-dir; cp -p "$AUTH" "$B/web-auth.sh" || fail backup-auth
+N="$AUTH.new.$$"; cp -p "$AUTH" "$N" || fail stage-copy
+cat >>"$N" <<'EOF_HOTFIX'
 
-lan="$(sed -n '1p' "$LAN_FILE" 2>/dev/null || true)"
-printf '%s\n' "$lan" | awk -F. '
-    NF != 4 {exit 1}
-    {
-        for (i = 1; i <= 4; i++) {
-            if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) exit 1
-        }
-        if ($1 == 0 || $1 == 127 || $1 >= 224) exit 1
-        if ($1 == 169 && $2 == 254) exit 1
-    }
-' || fail lan-invalid
-
-grep -F 'http://127.0.0.1:79|http://127.0.0.1:18079)' "$AUTH" >/dev/null 2>&1 ||
-    grep -F "http://$lan|http://127.0.0.1:79|http://127.0.0.1:18079)" "$AUTH" >/dev/null 2>&1 ||
-    fail web-auth-layout-unknown
-
-grep -F 'BRORAY_NATIVE_AUTH_SYSTEM_URL="${BRORAY_NATIVE_AUTH_SYSTEM_URL:-http://127.0.0.1:79}"' "$NATIVE" >/dev/null 2>&1 ||
-    grep -F "BRORAY_NATIVE_AUTH_SYSTEM_URL=\"\${BRORAY_NATIVE_AUTH_SYSTEM_URL:-http://$lan}\"" "$NATIVE" >/dev/null 2>&1 ||
-    fail native-auth-layout-unknown
-
-backup="$BASE/backup/auth-hotfix-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$backup"
-cp -p "$AUTH" "$backup/web-auth.sh"
-cp -p "$NATIVE" "$backup/web-auth-native.sh"
-
-auth_new="$AUTH.new.$$"
-native_new="$NATIVE.new.$$"
-cp -p "$AUTH" "$auth_new"
-cp -p "$NATIVE" "$native_new"
-
-if grep -F 'http://127.0.0.1:79|http://127.0.0.1:18079)' "$auth_new" >/dev/null 2>&1; then
-    sed -i "s#http://127\\.0\\.0\\.1:79|http://127\\.0\\.0\\.1:18079)#http://$lan|http://127.0.0.1:79|http://127.0.0.1:18079)#" "$auth_new"
-fi
-
-if grep -F 'BRORAY_NATIVE_AUTH_SYSTEM_URL="${BRORAY_NATIVE_AUTH_SYSTEM_URL:-http://127.0.0.1:79}"' "$native_new" >/dev/null 2>&1; then
-    sed -i "s#http://127\\.0\\.0\\.1:79}#http://$lan}#" "$native_new"
-fi
-
-if grep -F '[0-9A-Za-z_-]+[[:space:]\r]*$' "$native_new" >/dev/null 2>&1; then
-    sed -i 's#\[0-9A-Za-z_-\]+#\[^[:space:]\]\[^[:space:]\]*#' "$native_new"
-fi
-
-/opt/bin/ash -n "$auth_new" || fail web-auth-syntax
-/opt/bin/ash -n "$native_new" || fail native-auth-syntax
-
-mv -f "$auth_new" "$AUTH"
-mv -f "$native_new" "$NATIVE"
-
-if LD_LIBRARY_PATH= LD_PRELOAD= "$INIT" restart; then
-    echo "AUTH_HOTFIX=PASS LAN=$lan BACKUP=$backup"
-    exit 0
-fi
-
-cp -p "$backup/web-auth.sh" "$AUTH"
-cp -p "$backup/web-auth-native.sh" "$NATIVE"
+# BEGIN BROray temporary LAN auth fallback v2
+broray_keenetic_authenticate()
+{
+    local login password lan d h b c p realm challenge md5 response code
+    login="$1"; password="$2"
+    lan="$(sed -n '1p' "$BRORAY_BASE/run/lan-ip" 2>/dev/null || true)"
+    printf '%s\n' "$lan" | awk -F. 'NF==4{for(i=1;i<=4;i++)if($i!~/^[0-9]+$/||$i<0||$i>255)exit 1;exit 0} {exit 1}' || { password=''; return 2; }
+    d="$BRORAY_BASE/run/web-new/auth-lan.$$"; h="$d/h"; b="$d/b"; c="$d/c"; p="$d/p"
+    rm -rf "$d" 2>/dev/null || true; mkdir -p "$d" || { password=''; return 2; }; chmod 700 "$d" || { rm -rf "$d"; password=''; return 2; }
+    broray_keenetic_curl --silent --show-error --connect-timeout 5 --max-time 10 --dump-header "$h" --output "$b" --cookie-jar "$c" "http://$lan/auth" >/dev/null 2>&1 || true
+    realm="$(sed -n 's/^[Xx]-[Nn][Dd][Mm]-[Rr]ealm:[[:space:]]*//p' "$h" 2>/dev/null | tr -d '\r' | head -n1)"
+    challenge="$(sed -n 's/^[Xx]-[Nn][Dd][Mm]-[Cc]hallenge:[[:space:]]*//p' "$h" 2>/dev/null | tr -d '\r' | head -n1)"
+    [ -n "$realm" ] && [ -n "$challenge" ] || { rm -rf "$d"; password=''; return 2; }
+    md5="$(printf '%s' "$login:$realm:$password" | md5sum | awk '{print $1}')"
+    response="$(printf '%s' "$challenge$md5" | sha256sum | awk '{print $1}')"
+    jq -n --arg login "$login" --arg password "$response" '{login:$login,password:$password}' >"$p" || { rm -rf "$d"; password=''; return 2; }
+    code="$(broray_keenetic_curl --silent --show-error --connect-timeout 5 --max-time 10 --cookie "$c" --cookie-jar "$c" --header 'Content-Type: application/json' --request POST --data-binary "@$p" --output "$b" --write-out '%{http_code}' "http://$lan/auth" 2>/dev/null || printf '000')"
+    password=''; md5=''; response=''; rm -rf "$d"
+    case "$code" in 200) return 0 ;; 401|403) return 1 ;; *) return 2 ;; esac
+}
+# END BROray temporary LAN auth fallback v2
+EOF_HOTFIX
+/opt/bin/ash -n "$N" || { rm -f "$N"; fail syntax; }
+mv -f "$N" "$AUTH" || { rm -f "$N"; fail install; }
+if LD_LIBRARY_PATH= LD_PRELOAD= "$INIT" restart; then rm -rf "$P"; trap - EXIT HUP INT TERM; echo "AUTH_HOTFIX=PASS LAN=$LAN BACKUP=$B"; exit 0; fi
+cp -p "$B/web-auth.sh" "$AUTH" || fail rollback-copy
 LD_LIBRARY_PATH= LD_PRELOAD= "$INIT" restart >/dev/null 2>&1 || true
-echo "AUTH_HOTFIX=ROLLBACK BACKUP=$backup" >&2
-exit 1
+fail restart-rollback
