@@ -3,7 +3,7 @@
 Only isolated init fixtures; this is not acceptance of the real Xray service.
 """
 from pathlib import Path
-import hashlib,json,os,shlex,signal,subprocess,unittest
+import hashlib,json,os,shlex,signal,subprocess,time,unittest
 from test_updater_generation import Generation,GEN
 
 class ServiceLauncher(Generation):
@@ -51,6 +51,20 @@ class ServiceLauncher(Generation):
  def test_completed_request_is_not_executed_twice(self):
   self.host();self.start(self.command()+'\necho $? >"$TEST_HOME/first.rc.tmp"\nmv "$TEST_HOME/first.rc.tmp" "$TEST_HOME/first.rc"\n'+self.command()+'\necho $? >"$TEST_HOME/client.rc.tmp"\nmv "$TEST_HOME/client.rc.tmp" "$TEST_HOME/client.rc"\nwhile :; do :; done\n')
   self.launched();self.assertEqual((self.home/'first.rc').read_text().strip(),'0');self.assertEqual((self.home/'launches').read_text(),'start\n')
+ def test_slow_completed_action_returns_exact_reply_without_reexecution(self):
+  self.script.write_text('#!/bin/ash\necho start >>'+shlex.quote(str(self.home/'launches'))+'\n/bin/sleep 32\nexit 0\n')
+  self.scriptsha=hashlib.sha256(self.script.read_bytes()).hexdigest()
+  (self.current/'SHA256SUMS').write_text(self.scriptsha+'  init/S24broray\n')
+  self.host();started=time.monotonic()
+  self.start(self.command()+' >"$TEST_HOME/first.reply"\necho $? >"$TEST_HOME/first.rc"\n'+self.command()+' >"$TEST_HOME/second.reply"\necho $? >"$TEST_HOME/second.rc.tmp"\nmv "$TEST_HOME/second.rc.tmp" "$TEST_HOME/second.rc"\nwhile :; do sleep 1; done\n')
+  self.wait(lambda:(self.home/'second.rc').exists(),seconds=60)
+  self.assertEqual((self.home/'first.rc').read_text().strip(),'0')
+  self.assertEqual((self.home/'second.rc').read_text().strip(),'0')
+  first=(self.home/'first.reply').read_bytes();self.assertEqual(first,(self.home/'second.reply').read_bytes())
+  self.assertEqual(first,(self.hostdir/'request-service-one.done').read_bytes())
+  reply=json.loads(first);self.assertTrue(reply['ok']);self.assertEqual(reply['exitCode'],0)
+  self.assertEqual((self.home/'launches').read_text(),'start\n')
+  self.assertLess(time.monotonic()-started,55,'Completed reply must not wait for the maximum or repeat the32s action')
  def test_duplicate_launcher_preserves_evidence(self):
   self.host();before={p.name:p.read_bytes() for p in self.hostdir.iterdir() if p.is_file()}
   r=subprocess.run(self.hostargs(),capture_output=True,text=True,timeout=5);self.assertNotEqual(r.returncode,0)

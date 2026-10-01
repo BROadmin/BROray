@@ -1,0 +1,5 @@
+#!/opt/bin/ash
+# The caller authorizes the command and owns any required transaction lock.
+# Only this child loses the Entware loader environment; the caller keeps it.
+unset LD_LIBRARY_PATH LD_PRELOAD
+exec /bin/ndmc "$@"

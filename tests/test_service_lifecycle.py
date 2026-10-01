@@ -51,6 +51,136 @@ class Services(unittest.TestCase):
         try:os.waitpid(pid,os.WNOHANG)
         except ChildProcessError:pass
     def record(self):return json.loads((self.svc/'identity.json').read_text())
+    def readiness_daemon(self, gate):
+        daemon=self.app/'bin/broray-subscription-scheduler'
+        daemon.write_text('''#!/bin/ash
+. "$BRORAY_ROOT/lib/service-lifecycle.sh"
+if [ "${BRORAY_SERVICE_BOOTSTRAP:-}" = subscriptions ]; then
+'''+gate+'''
+fi
+broray_service_daemon_enter subscriptions || exit $?
+trap 'broray_service_daemon_exit' EXIT
+while ! broray_service_stop_requested; do /bin/sleep 1; done
+''')
+    def test_start_observes_ready_after_last_sleep(self):
+        self.assert_ready_at_sleep(10)
+    def test_start_observes_ready_at_extended_wait_boundary(self):
+        self.assert_ready_at_sleep(30)
+    def assert_ready_at_sleep(self, boundary):
+        self.env['TEST_READY_SLEEP']=str(boundary)
+        self.readiness_daemon('read -r release <"$BRORAY_ROOT/tmp/birth-gate"')
+        os.mkfifo(self.app/'tmp/birth-gate')
+        # Deterministic interleaving: the final old wait publishes a real,
+        # identity-bound daemon before returning to the start controller.
+        sleeper=self.app/'bin/sleep'
+        sleeper.write_text('''#!/bin/ash
+n=0; [ ! -f "$BRORAY_ROOT/tmp/polls" ] || read -r n <"$BRORAY_ROOT/tmp/polls"
+n=$((n+1)); echo "$n" >"$BRORAY_ROOT/tmp/polls"
+if [ "$n" = "$TEST_READY_SLEEP" ]; then
+ echo release >"$BRORAY_ROOT/tmp/birth-gate"
+ for i in $(seq 1 100); do
+  jq -e '.state=="running"' "$BRORAY_STATE_ROOT/services/subscriptions/identity.json" >/dev/null 2>&1 && exit 0
+  /bin/sleep .05
+ done
+ exit 91
+fi
+''');sleeper.chmod(0o755)
+        result=self.call('start',expected=None)
+        self.assertEqual(self.record()['state'],'running')
+        status=json.loads(self.call('status-json').stdout)
+        self.assertTrue(status['complete'] and status['ready'],status)
+        self.assertEqual(result.returncode,0,result.stdout)
+        self.assertTrue(json.loads(result.stdout)['ready'])
+    def test_start_timeout_never_claims_ready_or_relaunches(self):
+        daemon=self.app/'bin/broray-subscription-scheduler'
+        daemon.write_text('#!/bin/ash\necho launch >>"$BRORAY_ROOT/tmp/launches"\nexit 0\n')
+        sleeper=self.app/'bin/sleep'
+        sleeper.write_text('#!/bin/ash\necho wait >>"$BRORAY_ROOT/tmp/waits"\n')
+        sleeper.chmod(0o755)
+        result=self.call('start',expected=75)
+        self.assertFalse(json.loads(result.stdout)['ready'])
+        self.assertEqual((self.app/'tmp/launches').read_text().splitlines(),['launch'])
+        self.assertEqual(len((self.app/'tmp/waits').read_text().splitlines()),30)
+    def test_start_accepts_slow_identity_bound_adoption(self):
+        # Physical KN-2710 evidence: adoption took12-14s during release switch.
+        self.readiness_daemon('/bin/sleep 12')
+        result=self.call('start',expected=None)
+        self.wait_running()
+        self.assertEqual(result.returncode,0,result.stdout)
+        self.assertTrue(json.loads(result.stdout)['ready'])
+    def test_stop_waits_for_cooperative_foreground_job(self):
+        # KN-2710/1101routes: the exact home-snapshot generation needed17s
+        # after its stop request to finish the current foreground refresh.
+        daemon=self.app/'bin/broray-subscription-scheduler'
+        daemon.write_text('''#!/bin/ash
+. "$BRORAY_ROOT/lib/service-lifecycle.sh"
+broray_service_daemon_enter subscriptions || exit $?
+trap 'broray_service_daemon_exit' EXIT
+while ! broray_service_stop_requested; do /bin/sleep 1; done
+/bin/sleep 17
+''')
+        p=self.direct();owner=self.wait_running(p)
+        started=time.monotonic();result=self.call('stop',expected=None)
+        elapsed=time.monotonic()-started
+        # Drain the same owned fixture before asserting the original failure.
+        # There is no second stop request or signal/restart in this test.
+        p.communicate(timeout=25)
+        self.assertEqual(result.returncode,0,(result.stdout,result.stderr))
+        self.assertFalse(json.loads(result.stdout)['running'])
+        self.assertEqual(self.record()['generation'],owner['generation'])
+        self.assertEqual(self.record()['state'],'stopped')
+        self.assertLess(elapsed,28,'Do not wait out the maximum after completion')
+    def test_stop_accepts_completion_after_twenty_observations(self):
+        self.assert_stop_after_observations(20)
+    def test_stop_rechecks_after_final_observation(self):
+        self.assert_stop_after_observations(120)
+    def test_stop_timeout_preserves_unfinished_generation(self):
+        self.assert_stop_after_observations(121)
+    def assert_stop_after_observations(self,boundary):
+        gate=self.app/'tmp/foreground-gate';os.mkfifo(gate)
+        daemon=self.app/'bin/broray-subscription-scheduler'
+        daemon.write_text('''#!/bin/ash
+. "$BRORAY_ROOT/lib/service-lifecycle.sh"
+broray_service_daemon_enter subscriptions || exit $?
+trap 'broray_service_daemon_exit' EXIT
+while ! broray_service_stop_requested; do /bin/sleep 1; done
+read -r completion <"$BRORAY_ROOT/tmp/foreground-gate"
+''')
+        sleeper=self.app/'bin/sleep'
+        sleeper.write_text('''#!/bin/ash
+echo wait >>"$BRORAY_ROOT/tmp/stop-waits"
+if [ "$(wc -l <"$BRORAY_ROOT/tmp/stop-waits")" = "$TEST_STOP_BOUNDARY" ]; then
+ echo complete >"$BRORAY_ROOT/tmp/foreground-gate"
+ echo released >"$BRORAY_ROOT/tmp/foreground-released"
+ for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  jq -e '.state=="stopped"' "$BRORAY_STATE_ROOT/services/subscriptions/identity.json" >/dev/null && exit 0
+  /bin/sleep 1
+ done
+ exit 1
+fi
+''');sleeper.chmod(0o755);self.env['TEST_STOP_BOUNDARY']=str(boundary)
+        p=self.direct();owner=self.wait_running(p)
+        try:
+            #120 real identity probes are slower under QEMU than on Keenetic;
+            # this outer fixture budget must outlast the tested controller.
+            result=self.call('stop',expected=None,timeout=300)
+            at_return=self.record();waits=(self.app/'tmp/stop-waits').read_text().splitlines()
+        finally:
+            if not (self.app/'tmp/foreground-released').exists():
+                with gate.open('w') as f:f.write('fixture cleanup\n')
+            p.communicate(timeout=15)
+        if boundary==121:
+            self.assertEqual(result.returncode,75,(result.stdout,result.stderr))
+            self.assertTrue(json.loads(result.stdout)['running'])
+            self.assertEqual(at_return['state'],'running')
+            self.assertEqual(at_return['generation'],owner['generation'])
+            self.assertEqual(len(waits),120)
+            return
+        self.assertEqual(result.returncode,0,(result.stdout,result.stderr))
+        self.assertFalse(json.loads(result.stdout)['running'])
+        self.assertEqual(at_return['state'],'stopped')
+        self.assertEqual(at_return['generation'],owner['generation'])
+        self.assertEqual(len(waits),boundary,'Return after verified completion without waiting the remaining maximum')
     def direct(self):
         p=subprocess.Popen(['/bin/ash',str(self.app/'bin/broray-subscription-scheduler')],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         self.children.append(p);return p

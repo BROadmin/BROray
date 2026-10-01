@@ -60,18 +60,6 @@ broray_web_request_body_to_file() {
  [ "$(wc -c <"$1" | tr -d ' ')" = "$CONTENT_LENGTH" ]
 }
 '''
-# Exact operation_id predicate from the existing operation-public.jq, not a
-# permissive substitute. The rest of that unchanged projection is out of scope.
-PUBLIC_ID = r'''
-def ascii_digits: type=="string" and length>0 and all(explode[]; .>=48 and .<=57);
-def ascii_hex: type=="string" and length>0 and all(explode[]; (.>=48 and .<=57) or (.>=97 and .<=102));
-def operation_id:
-  if type!="string" then null else . as $value | split("-") |
-    if length==4 and .[0]=="op" and (.[1]|length)==14 and (.[1]|ascii_digits) and
-      (.[2]|length)>0 and (.[2]|length)<=10 and (.[2]|ascii_digits) and
-      (.[2]|tonumber)>1 and (.[2]|tonumber)<=2147483647 and
-      (.[3]|length)==12 and (.[3]|ascii_hex) then $value else null end end;
-'''
 PUBLISH = r'''
 broray_web_publish_status_json() {
  local w name domain
@@ -95,7 +83,12 @@ case "${FIXTURE_NDMC_MODE:-ok}" in
 esac
 case "$2" in
  'show ndns') cat "$FIXTURE_ROOT/ndns.txt" ;;
- 'show running-config') printf '%s\n' 'ip http proxy broray' ' upstream http 192.168.1.1 8080' '!' ;;
+ 'show running-config')
+  case "${FIXTURE_NDMC_MODE:-ok}" in
+   slow-running) sleep 12 ;;
+   hang-running) exec sleep 60 ;;
+  esac
+  printf '%s\n' 'ip http proxy broray' ' upstream http 192.168.1.1 8080' '!' ;;
  *) exit 126 ;;
 esac
 '''
@@ -115,10 +108,14 @@ class OperationsOrigin(unittest.TestCase):
             (self.root / rel).write_text(text.replace('/opt/broray', str(self.root)), encoding='utf-8')
         self.helper = self.root / 'lib/operations-origin.sh'
         for rel, text in [('web-new/api/auth-common.sh', AUTH), ('lib/operation-client.sh', CLIENT),
-                          ('lib/web-request-body.sh', BODY), ('lib/operation-public.jq', PUBLIC_ID),
+                          ('lib/web-request-body.sh', BODY),
+                          ('lib/operation-public.jq', (SOURCE / 'runtime/app/lib/operation-public.jq').read_text(encoding='utf-8')),
                           ('lib/web-publish.sh', PUBLISH), ('bin/ndmc', NDMC)]:
             (self.root / rel).write_text(text, encoding='utf-8')
         (self.root / 'bin/ndmc').chmod(0o700)
+        dispatcher = self.root / 'bin/broray-system-ndmc'
+        dispatcher.write_text((SOURCE / 'runtime/app/bin/broray-system-ndmc').read_text().replace('/bin/ndmc', str(self.root / 'bin/ndmc')))
+        dispatcher.chmod(0o700)
         if os.environ.get('BRORAY_TEST_BUSYBOX_APPLETS') == '1':
             if not BUSYBOX: self.fail('BusyBox is required for its applet matrix')
             for name in ['awk','timeout','mkdir','rm','rmdir','cat','dd','wc','tr']:
@@ -150,7 +147,7 @@ class OperationsOrigin(unittest.TestCase):
         p = self.root / name
         return p.read_text().splitlines() if p.exists() else []
 
-    def request(self, verb='automation', body=None, method='POST', env=None, expected=200):
+    def request(self, verb='automation', body=None, method='POST', env=None, expected=200, timeout=12):
         if body is None and method == 'POST':
             body = {'paused': False}
         raw = '' if body is None else body if isinstance(body, str) else json.dumps(body)
@@ -159,7 +156,7 @@ class OperationsOrigin(unittest.TestCase):
             'COMMON': str(self.root / 'web-new/api/operations/common.sh'),
             'METHOD': 'GET' if verb in ['status', 'report', 'journal'] else 'POST',
             'VERB': verb, 'REQUEST_METHOD': method,
-            'CONTENT_LENGTH': str(len(raw.encode())), **(env or {})}, raw)
+            'CONTENT_LENGTH': str(len(raw.encode())), **(env or {})}, raw, timeout=timeout)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
         self.assertEqual(result.stderr, b'', result.stderr.decode(errors='replace'))
         headers, payload = result.stdout.split(b'\r\n\r\n', 1)
@@ -173,6 +170,15 @@ class OperationsOrigin(unittest.TestCase):
         self.request()
         self.assertEqual(self.calls(), ['resume'])
         self.assertEqual(self.calls('ndmc-calls'), ['-c show ndns', '-c show running-config'])
+
+    def test_large_running_config_completes_before_origin_decision(self):
+        self.request(env={'FIXTURE_NDMC_MODE':'slow-running'}, timeout=25)
+        self.assertEqual(self.calls(), ['resume'])
+        self.assertEqual(self.calls('ndmc-calls'), ['-c show ndns', '-c show running-config'])
+
+    def test_hung_running_config_is_bounded_without_dispatch(self):
+        self.request(env={'FIXTURE_NDMC_MODE':'hang-running'}, expected=403, timeout=45)
+        self.assertEqual(self.calls(), [])
 
     def test_proxy_stripped_origin_uses_explicit_page_origin_and_live_proof(self):
         self.request(env={'HTTP_ORIGIN': '', 'HTTP_X_BRORAY_ORIGIN': ORIGIN})

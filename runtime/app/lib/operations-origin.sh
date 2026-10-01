@@ -62,7 +62,7 @@ broray_operations_read_web_publication()
     [ -f /opt/broray/lib/web-publish.sh ] &&
     [ ! -L /opt/broray/lib/web-publish.sh ] || exit 1
     command -v timeout >/dev/null 2>&1 || exit 1
-    command -v ndmc >/dev/null 2>&1 || exit 1
+    [ -x /opt/broray/bin/broray-system-ndmc ] || exit 1
     command -v jq >/dev/null 2>&1 || exit 1
     BRORAY_WEB_PUBLISH_ROOT=/opt/broray
     BRORAY_WEB_PUBLISH_NAME=broray
@@ -76,8 +76,8 @@ broray_operations_read_web_publication()
         # A large running-config takes longer while supervised workers run.
         # Keep the small identity read bounded separately; trust checks stay exact.
         case "$1" in
-            'show ndns') timeout -k 1 3 ndmc -c "$1" ;;
-            'show running-config') timeout -k 1 10 ndmc -c "$1" ;;
+            'show ndns') timeout -k 1 3 /opt/broray/bin/broray-system-ndmc -c "$1" ;;
+            'show running-config') timeout -k 1 30 /opt/broray/bin/broray-system-ndmc -c "$1" ;;
         esac
     }
     # Duplicate identity fields cannot establish a unique public origin.

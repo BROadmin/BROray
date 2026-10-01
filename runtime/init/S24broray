@@ -40,7 +40,7 @@ broray_reconnect_owned()
 
     name="$(broray_owned_interface_name 2>/dev/null || true)"
     [ -n "$name" ] || return 0
-    ndmc="$(command -v ndmc 2>/dev/null || true)"
+    ndmc=/opt/broray/bin/broray-system-ndmc
     [ -n "$ndmc" ] && [ -x "$ndmc" ] || return 1
     "$ndmc" -c "interface $name proxy connect" >/dev/null 2>&1 || return 1
     "$ndmc" -c "interface $name up" >/dev/null 2>&1

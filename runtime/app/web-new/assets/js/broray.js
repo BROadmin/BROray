@@ -193,7 +193,7 @@
     function applyControlState() {
         var info = state.info;
 
-        byId("check-update").disabled = state.busy;
+        byId("check-update").disabled = state.busy || !info;
         var installUpdateButton = byId("install-update");
         installUpdateButton.disabled = state.busy || !info || !info.updateAvailable;
         var installUpdateLabel = ensureButtonParts(installUpdateButton);
@@ -631,7 +631,7 @@
     async function checkUpdate(event) {
         var button = event.currentTarget;
 
-        if (state.busy) {
+        if (state.busy || !state.info) {
             return;
         }
 
@@ -963,6 +963,7 @@
 
             setText("current-user", session.user || "admin");
             bind();
+            applyControlState();
             loader.hidden = true;
             app.hidden = false;
             placeOperationCard();

@@ -14,6 +14,9 @@ class Lan(unittest.TestCase):
   for name,body in [('ndmc','[ "$*" = "-c show running-config" ] || exit 99\ncat "$BRORAY_ROOT/running"\n[ "${TEST_NDMC_RC:-0}" = 0 ]'),('ip','[ "$*" = "-4 addr show" ] || exit 99\ncat "$BRORAY_ROOT/live"\n[ "${TEST_IP_RC:-0}" = 0 ]')]:
    p=self.app/'bin'/name;p.write_text('#!/bin/ash\n'+body+'\n');p.chmod(0o755)
   self.fixture()
+  helper=self.app/'bin/broray-system-ndmc'
+  helper.write_text((ROOT/'runtime/app/bin/broray-system-ndmc').read_text().replace('/bin/ndmc',str(self.app/'bin/ndmc')))
+  helper.chmod(0o755)
  def fixture(self,roles=('private','private'),addresses=('192.168.2.1','192.168.3.1')):
   self.running=''.join('interface Segment'+str(i)+'\n    security-level '+role+'\n    ip address '+addr+' 255.255.255.0\n!\n' for i,(role,addr) in enumerate(zip(roles,addresses)))
   (self.app/'running').write_text(self.running)

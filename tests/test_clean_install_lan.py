@@ -23,8 +23,9 @@ class CleanLan(unittest.TestCase):
         text=adapted.decode();a=text.index('mkdir -m 700 "$TMP/network"');b=text.index('# The immutable downloads',a)
         return '''\nfail(){ echo "$*" >&2;exit 1; }
 APP_TREE="$BRORAY_ROOT/bundle";TMP="$BRORAY_ROOT/staging"
-mkdir -p "$APP_TREE/app/lib" "$TMP"
+mkdir -p "$APP_TREE/app/lib" "$APP_TREE/app/bin" "$TMP"
 cp "$BRORAY_ROOT/lib/network.sh" "$APP_TREE/app/lib/network.sh"
+cp "$BRORAY_ROOT/bin/broray-system-ndmc" "$APP_TREE/app/bin/broray-system-ndmc"
 '''+text[a:b].replace('/opt/bin/ash','/bin/ash')
     def test_clean_preflight_selection_reaches_setup_without_second_prompt(self):
         original,adapted,m=self.adapted()

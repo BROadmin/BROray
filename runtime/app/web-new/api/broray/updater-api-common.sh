@@ -3,8 +3,8 @@
 # Execute updaterctl completely before emitting CGI headers.  A successful
 # enqueue therefore always returns a non-empty JSON body with HTTP 202.
 
-# Read-only release checks may use the existing local Xray transport. Never
-# start Xray, modify its configuration or pass this environment to queued work.
+# Read-only release checks may fall back to the existing local Xray transport.
+# Never start Xray, modify its configuration or pass this environment to queued work.
 broray_updater_api_check_proxy() (
     local root config endpoint host port addresses
     root="${BRORAY_ROOT:-/opt/broray}"
@@ -91,11 +91,28 @@ broray_updater_api_call()
     updater_rc=0
     api_check_proxy=''
     if [ "$api_command" = check ]; then
-        api_check_proxy="$(broray_updater_api_check_proxy 2>/dev/null)" || api_check_proxy=''
-    fi
-    if [ -n "$api_check_proxy" ]; then
-        HTTPS_PROXY="$api_check_proxy" https_proxy="$api_check_proxy" NO_PROXY= no_proxy= \
-            "$updater_ctl" "$@" >"$api_output" 2>"$api_error" || updater_rc=$?
+        # A live SOCKS listener can still have a blackhole or unavailable
+        # outbound. Try direct delivery before depending on an active VPN.
+        (
+            unset HTTP_PROXY http_proxy HTTPS_PROXY https_proxy ALL_PROXY all_proxy NO_PROXY no_proxy
+            "$updater_ctl" "$@"
+        ) >"$api_output" 2>"$api_error" || updater_rc=$?
+        # Only transport failures permit a second read-only check. Never
+        # bypass signature/schema rejection or replay an enqueue operation.
+        if [ "$updater_rc" -ne 0 ] &&
+           jq -e '.ok==false and (.error.code=="UPDATE_CHECK_FAILED" or .error.code=="UPDATE_SIGNATURE_MISSING")' \
+               "$api_output" >/dev/null 2>&1
+        then
+            api_check_proxy="$(broray_updater_api_check_proxy 2>/dev/null)" || api_check_proxy=''
+            if [ -n "$api_check_proxy" ]; then
+                updater_rc=0
+                (
+                    unset HTTP_PROXY http_proxy HTTPS_PROXY https_proxy ALL_PROXY all_proxy NO_PROXY no_proxy
+                    HTTPS_PROXY="$api_check_proxy" https_proxy="$api_check_proxy" \
+                        "$updater_ctl" "$@"
+                ) >"$api_output" 2>>"$api_error" || updater_rc=$?
+            fi
+        fi
     else
         "$updater_ctl" "$@" >"$api_output" 2>"$api_error" || updater_rc=$?
     fi

@@ -49,8 +49,8 @@ broray_network_select() (
  work="$(mktemp -d "$root/broray-network.XXXXXXXXXX")" || exit 1
  trap 'rm -f "$work/running" "$work/live" "$work/error" "$work/matches" "$work/settings" "$work/menu" "$work/menu-unsorted"; rmdir "$work" 2>/dev/null || true' EXIT
  trap 'exit 129' HUP;trap 'exit 130' INT;trap 'exit 143' TERM
- for tool in ndmc ip jq awk;do command -v "$tool" >/dev/null 2>&1 || { broray_network_diagnostic SNAPSHOT_TOOLS_UNAVAILABLE unknown unknown unknown;exit 1; };done
- broray_network_read ndmc -c 'show running-config' >"$work/running" 2>"$work/error" &&
+ for tool in ip jq awk;do command -v "$tool" >/dev/null 2>&1 || { broray_network_diagnostic SNAPSHOT_TOOLS_UNAVAILABLE unknown unknown unknown;exit 1; };done
+ broray_network_read "$BRORAY_NETWORK_ROOT/bin/broray-system-ndmc" -c 'show running-config' >"$work/running" 2>"$work/error" &&
  [ ! -s "$work/error" ] && [ -s "$work/running" ] || { broray_network_diagnostic RUNNING_SNAPSHOT_FAILED unknown unknown unknown;exit 1; }
  broray_network_read ip -4 addr show >"$work/live" 2>"$work/error" &&
  [ ! -s "$work/error" ] && [ -s "$work/live" ] || { broray_network_diagnostic LIVE_SNAPSHOT_FAILED unknown unknown unknown;exit 1; }

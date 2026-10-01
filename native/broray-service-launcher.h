@@ -259,7 +259,10 @@ static int service_client(int argc,char **argv){
     struct sockaddr_un addr;memset(&addr,0,sizeof addr);addr.sun_family=AF_UNIX;if(snprintf(addr.sun_path,sizeof addr.sun_path,"%s/control",argv[2])>=(int)sizeof addr.sun_path)return 64;
     int fd=socket(AF_UNIX,SOCK_SEQPACKET|SOCK_CLOEXEC,0);if(fd<0)return 75;struct identity before,after;
     if(connect(fd,(void*)&addr,sizeof addr)||service_peer(fd,argv,&before)){close(fd);return 75;}
-    struct timeval bound={30,0};if(setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&bound,sizeof bound)){close(fd);return 75;}
+    /* Mutating init may drain two cooperative sidecars before completing.
+     * This is a reply ceiling, not a delay: recv returns on the exact receipt.
+     * Expiration remains unconfirmed; never resend or infer completion. */
+    struct timeval bound={!strcmp(argv[9],"status")?30:600,0};if(setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&bound,sizeof bound)){close(fd);return 75;}
     char body[512],reply[512],sha[65],expected[256];int n=snprintf(body,sizeof body,"%s %s %s %s %s",argv[9],argv[10],argv[11],argv[12],argv[13]);digest_bytes(body,(size_t)n,sha);
     if(send(fd,body,(size_t)n,MSG_NOSIGNAL)!=n){close(fd);return 75;}ssize_t got=recv(fd,reply,sizeof reply-1,MSG_TRUNC);
     bad=service_peer(fd,argv,&after)||!identity_equal(&before,&after);close(fd);if(bad||got<=0||(size_t)got>=sizeof reply-1)return 75;reply[got]=0;
