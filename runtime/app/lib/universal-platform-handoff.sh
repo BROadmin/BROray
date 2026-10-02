@@ -606,7 +606,7 @@ worker_start()
     do
         worker_running && return 0
         case "$(sed -n '1p' "$PHASE_FILE" 2>/dev/null || true)" in
-            complete|rolled-back|rollback-failed) return 0 ;;
+            complete|rolled-back|rollback-failed|boot-pending) return 0 ;;
         esac
         sleep 1
         start_attempt=$((start_attempt + 1))
@@ -614,6 +614,74 @@ worker_start()
     return 1
 }
 
+# Plain S22 start cannot create a supervised launch origin.
+protected_transition()
+{
+    local expected reply errors rc pf_id boot receipt temporary reboot_command
+    expected="$(request_value '.payloadManifestSha256')" || return 1
+    valid_sha256 "$expected" || return 1
+    reply="$STATE_ROOT/preflight-result.$$.json"
+    errors="$STATE_ROOT/preflight-error.$$"
+    for temporary in "$reply" "$errors"; do
+        [ ! -e "$temporary" ] && [ ! -L "$temporary" ] || return 1
+    done
+    phase_write boot-preparing || return 1
+    status_write running true PREPARING_PLATFORM_BOOT 'Подготавливается защищённый переход updater. При первом переходе роутер перезагрузится один раз.' false false "$operation_id" "$candidate_id" || return 1
+    rc=0
+    BRORAY_OPS_CODE_ROOT="$CURRENT_PATH/app" \
+        "$ASH" "$SELF" preflight "$expected" >"$reply" 2>"$errors" || rc=$?
+    if [ "$rc" = 0 ] && platform_current && daemon_ready; then
+        phase_write complete || return 1
+        status_write success false UNIVERSAL_PLATFORM_READY 'Универсальный updater зарегистрирован и запущен.' true false "$operation_id" "$candidate_id"
+        return $?
+    fi
+    if [ "$rc" != 75 ] || ! jq -es --arg expected "$expected" '
+        length==1 and .[0].ok==false and
+        .[0].errorCode=="UPDATER_LEGACY_REBOOT_REQUIRED" and .[0].phase=="REBOOT_REQUIRED" and
+        .[0].expectedPlatformManifestSha256==$expected and
+        .[0].platformReady==false and .[0].serviceStopped==false and
+        .[0].activationAllowed==false and .[0].signalsAuthorized==false and
+        (.[0].operationId|type=="string" and startswith("op-") and length<=96 and
+          all(explode[]; (.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==95 or .==45))
+    ' "$reply" >/dev/null 2>&1; then
+        phase_write boot-failed || return 1
+        status_write error false PLATFORM_PREFLIGHT_FAILED 'Защищённый переход updater не подготовлен. Перезагрузка не выполнялась; сохранена диагностика.' true false "$operation_id" "$candidate_id" || true
+        return 1
+    fi
+    request_valid || return 1
+    pf_id="$(jq -er .operationId "$reply")" || return 1
+    boot="$(cat "$(root_path /proc/sys/kernel/random/boot_id)")" || return 1
+    case "$boot" in ''|*[!0-9a-f-]*) return 1 ;; esac
+    [ "$(printf '%s' "$boot" | wc -c | tr -d ' ')" = 36 ] || return 1
+    receipt="$STATE_ROOT/reboot-request.json"
+    # One durable intent precedes dispatch. Uncertain dispatch is not replayed.
+    [ ! -e "$receipt" ] && [ ! -L "$receipt" ] || {
+        status_write error false PLATFORM_REBOOT_ALREADY_REQUESTED 'Перезагрузка перехода уже запрошена; повторный запрос не выполнен.' true false "$operation_id" "$candidate_id" || true
+        return 1
+    }
+    temporary="$STATE_ROOT/.reboot-request.$$"
+    [ ! -e "$temporary" ] && [ ! -L "$temporary" ] || return 1
+    jq -nc --arg operationId "$operation_id" --arg candidateId "$candidate_id" \
+      --arg preflightId "$pf_id" --arg bootId "$boot" --arg manifest "$expected" \
+      '{schemaVersion:1,contract:"broray-first-platform-reboot/1",operationId:$operationId,
+        candidateId:$candidateId,preflightOperationId:$preflightId,bootId:$bootId,
+        platformManifestSha256:$manifest}' >"$temporary" || return 1
+    (umask 077; set -C; cat "$temporary" >"$receipt") || return 1
+    cmp -s "$temporary" "$receipt" || return 1
+    rm -f "$temporary" || return 1
+    phase_write boot-pending || return 1
+    status_write running true PLATFORM_REBOOT_PENDING 'Переход подготовлен. Роутер перезагружается; обновление завершится после проверки updater.' true false "$operation_id" "$candidate_id" || return 1
+    sync || return 1
+    reboot_command="$CURRENT_PATH/app/bin/broray-system-ndmc"
+    regular_file "$reboot_command" && [ -x "$reboot_command" ] || return 1
+    rc=0
+    "$ASH" "$reboot_command" -c 'system reboot' >"$STATE_ROOT/reboot-output" 2>"$STATE_ROOT/reboot-error" || rc=$?
+    if [ "$rc" != 0 ]; then
+        status_write error false PLATFORM_REBOOT_COMMAND_FAILED 'Команда перезагрузки завершилась ошибкой; повторного запроса не было.' true false "$operation_id" "$candidate_id" || true
+        return 1
+    fi
+    return 0
+}
 finalize()
 {
     ensure_state_root || return 1
@@ -655,78 +723,14 @@ finalize()
         return 1
     }
     request_valid || return 1
-    platform_current && {
+    platform_current && daemon_ready && {
         status_write success false UNIVERSAL_PLATFORM_READY 'Универсальный updater уже установлен.' false false "$operation_id" "$candidate_id" || return 1
         phase_write complete || return 1
         return 0
     }
 
-    phase_write preparing || return 1
-    backup_prepare || {
-        status_write error false PLATFORM_BACKUP_FAILED 'Не удалось создать точную резервную копию updater platform.' false false "$operation_id" "$candidate_id" || true
-        return 1
-    }
-    backup_valid || return 1
-    daemon_was_running=false
-    init_call status >/dev/null 2>&1 && daemon_was_running=true
-    atomic_text "$DAEMON_STATE_FILE" "$daemon_was_running" || return 1
-    init_call stop >/dev/null 2>&1 || {
-        status_write error false PLATFORM_DAEMON_STOP_FAILED 'Не удалось безопасно остановить прежний updater.' false false "$operation_id" "$candidate_id" || true
-        return 1
-    }
+    protected_transition
 
-    phase_write installing || return 1
-    status_write running true INSTALLING_UNIVERSAL_PLATFORM 'Устанавливается единый updater, не зависящий от OPKG-релиза.' true false "$operation_id" "$candidate_id" || return 1
-    transition_ok=true
-    platform_install || transition_ok=false
-    if [ "$transition_ok" = true ]; then
-        phase_write restarting || transition_ok=false
-    fi
-    if [ "$transition_ok" = true ] && [ "${BRORAY_HANDOFF_FAILPOINT:-}" = crash-after-platform-install ]; then
-        status_write running true INJECTED_POWER_LOSS 'Внедрённый сбой после установки platform.' true false "$operation_id" "$candidate_id" || true
-        exit 99
-    fi
-    if [ "$transition_ok" = true ]; then
-        init_call start >/dev/null 2>&1 || transition_ok=false
-    fi
-    if [ "$transition_ok" = true ]; then
-        ready_attempt=0
-        while [ "$ready_attempt" -lt 20 ]
-        do
-            daemon_ready && break
-            sleep 1
-            ready_attempt=$((ready_attempt + 1))
-        done
-        [ "$ready_attempt" -lt 20 ] || transition_ok=false
-    fi
-    if [ "$transition_ok" = true ]; then
-        platform_current || transition_ok=false
-    fi
-
-    if [ "$transition_ok" != true ]; then
-        init_call stop >/dev/null 2>&1 || true
-        platform_restore_ok=true
-        platform_restore || platform_restore_ok=false
-        if [ "$daemon_was_running" = true ]; then
-            init_call start >/dev/null 2>&1 || platform_restore_ok=false
-        fi
-        app_rollback_ok=true
-        application_rollback || app_rollback_ok=false
-        if [ "$platform_restore_ok" = true ] && [ "$app_rollback_ok" = true ]; then
-            status_write error false PLATFORM_ACTIVATION_ROLLED_BACK 'Универсальный updater не запущен; предыдущая платформа и приложение восстановлены.' true true "$operation_id" "$candidate_id" || true
-            phase_write rolled-back || true
-        else
-            status_write error false PLATFORM_ROLLBACK_FAILED 'Ошибка updater platform; автоматическое восстановление завершилось не полностью.' true true "$operation_id" "$candidate_id" || true
-            phase_write rollback-failed || true
-        fi
-        return 1
-    fi
-
-    rm -rf "$BACKUP_ROOT" || return 1
-    sync || return 1
-    phase_write complete || return 1
-    status_write success false UNIVERSAL_PLATFORM_READY 'Универсальный updater установлен и запущен.' true false "$operation_id" "$candidate_id" || return 1
-    return 0
 }
 
 schedule()
@@ -738,6 +742,20 @@ schedule()
     }
     worker_running && return 0
     existing_phase="$(sed -n '1p' "$PHASE_FILE" 2>/dev/null || true)"
+    # Protected preflight owns recovery. Repeated service starts never replay
+    # an uncertain preflight or dispatch another reboot.
+    case "$existing_phase" in
+        boot-preparing|boot-pending|boot-failed)
+            if platform_current; then
+                # S25 may be a child of the native service host. Never ask
+                # that host for status recursively from service startup.
+                return 0
+            fi
+            request_valid || return 1
+            [ "$existing_phase" = boot-pending ] && regular_file "$STATE_ROOT/reboot-request.json"
+            return $?
+            ;;
+    esac
     # An old app can leave a preparing request after protected boot migration.
     # Preparing has not installed any platform files. If every installed byte
     # already matches this payload, service startup needs no legacy handoff.
@@ -1132,7 +1150,7 @@ preflight_settle_legacy()
     regular_file "$PHASE_FILE" || return 75
     existing_phase="$(sed -n '1p' "$PHASE_FILE")"
     case "$existing_phase" in
-        complete|rolled-back|rollback-failed) return 0 ;;
+        complete|rolled-back|rollback-failed|boot-pending) return 0 ;;
         preparing) ;;
         *) return 75 ;;
     esac
@@ -1161,7 +1179,7 @@ preflight()
 
 status_json()
 {
-    if platform_current; then
+    if platform_current && daemon_ready; then
         candidate_id="$(current_candidate 2>/dev/null || true)"
         jq -nc --arg contract "$CONTRACT" --arg candidateId "$candidate_id" --arg recordedAt "$(now)" '
           {schemaVersion:1,contract:$contract,state:"success",running:false,code:"UNIVERSAL_PLATFORM_READY",message:"Универсальный updater установлен.",mutationStarted:false,rollbackPerformed:false,operationId:null,candidateId:(if $candidateId=="" then null else $candidateId end),recordedAt:$recordedAt}'
@@ -1170,7 +1188,7 @@ status_json()
     if regular_file "$STATUS_FILE" && jq -e --arg contract "$CONTRACT" '
       keys==["candidateId","code","contract","message","mutationStarted","operationId","recordedAt","rollbackPerformed","running","schemaVersion","state"] and
       .schemaVersion==1 and .contract==$contract and
-      (.state=="running" or .state=="success" or .state=="error") and
+      (.state=="running" or .state=="error") and
       (.running|type)=="boolean" and (.code|type)=="string" and
       (.message|type)=="string" and (.mutationStarted|type)=="boolean" and
       (.rollbackPerformed|type)=="boolean"
