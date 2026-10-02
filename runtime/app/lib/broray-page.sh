@@ -2615,6 +2615,15 @@ broray_system_uninstall_start() {
             return 1
         fi
     done
+    # Settlement needs authenticated running readiness. Do it under the same
+    # admission guard before stopping updater or publishing the worker fence.
+    if [ -f /opt/var/lib/broray-platform-handoff/phase ] &&
+       [ "$(cat /opt/var/lib/broray-platform-handoff/phase)" = boot-pending ]; then
+        /opt/bin/ash "$BRORAY_BASE/lib/universal-platform-handoff.sh" settle >/dev/null || {
+            broray_system_error_json PLATFORM_HANDOFF_UNCONFIRMED 'Завершение перехода updater не подтверждено. Удаление не началось.'
+            return 1
+        }
+    fi
     BRORAY_UNINSTALL_UPDATER_WAS_RUNNING=false
     /opt/bin/ash "$BRORAY_INIT_ROOT/S22broray-updater" status >/dev/null 2>&1 &&
         BRORAY_UNINSTALL_UPDATER_WAS_RUNNING=true
@@ -3112,12 +3121,6 @@ EOF_UNINSTALL_LEGACY
     }
 
     broray_system_uninstall_payload_preflight() {
-        # Settle only the completed, authenticated first-boot transition before
-        # services stop. Inventory itself remains read-only during finalization.
-        if [ -f /opt/var/lib/broray-platform-handoff/phase ] &&
-           [ "$(cat /opt/var/lib/broray-platform-handoff/phase)" = boot-pending ]; then
-            /opt/bin/ash "$BRORAY_BASE/lib/universal-platform-handoff.sh" settle >/dev/null || return 1
-        fi
         broray_system_uninstall_artifact_inventory >/dev/null || return 1
         for owned_root in /opt/broray /opt/var/lib/broray /opt/var/lib/broray-updater
         do

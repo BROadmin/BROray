@@ -123,4 +123,41 @@ broray_system_worker_finish "$BRORAY_BASE/nonexistent-worker" "$BRORAY_BASE/none
         self.assertEqual(p.returncode,0,(p.stdout,p.stderr))
         self.assertEqual(self.order.read_text(),'RELEASE\nRESTORE\n')
 
+
+    def install_pending_handoff(self):
+        # Real admission and native kernel guard; settlement is an explicit
+        # boundary double whose readiness becomes invalid as soon as stop runs.
+        self.handoff=Path('/opt/var/lib/broray-platform-handoff')
+        self.assertFalse(self.handoff.exists())
+        self.handoff.mkdir(parents=True)
+        (self.handoff/'phase').write_text('boot-pending\n')
+        (self.app/'lib').mkdir()
+        (self.app/'lib/universal-platform-handoff.sh').write_text("""#!/bin/ash
+[ "$1" = settle ] || exit 93
+"$BRORAY_OPS_GUARD" --assert-held "$BRORAY_STATE_ROOT/operations.guard" || exit 94
+[ ! -f "$ORDER" ] || ! grep -q STOP "$ORDER" || exit 95
+echo SETTLE >>"$ORDER"
+[ "${SETTLE_FAIL:-0}" = 0 ] || exit 75
+""")
+        self.addCleanup(__import__('shutil').rmtree,self.handoff)
+
+    def test_boot_settlement_precedes_updater_stop(self):
+        self.install_pending_handoff()
+        p=self.run_case()
+        self.assertEqual(p.returncode,0,(p.stdout,p.stderr))
+        self.assertEqual(self.order.read_text(),'SETTLE\nSTOP\nADMITTED\n')
+
+    def test_failed_settlement_keeps_updater_running(self):
+        self.install_pending_handoff()
+        p=self.run_case(env={'SETTLE_FAIL':'1'})
+        self.assertNotEqual(p.returncode,0)
+        self.assertEqual(self.order.read_text(),'SETTLE\n')
+
+    def test_existing_fence_prevents_settlement(self):
+        self.install_pending_handoff()
+        (self.base/'legacy').mkdir()
+        p=self.run_case()
+        self.assertNotEqual(p.returncode,0)
+        self.assertFalse(self.order.exists())
+
 if __name__=='__main__':unittest.main(verbosity=2)
