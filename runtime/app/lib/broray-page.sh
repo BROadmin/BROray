@@ -3004,6 +3004,29 @@ broray_system_worker_uninstall() {
         printf 'F\t%s\t%s\t%s\n' "$p" "$(find -P "$p" -maxdepth 0 -printf '%D:%i:%m:%n')" "$expected"
     }
 
+    broray_system_uninstall_artifact_boot() {
+        local root="$1" id manifest record
+        broray_system_uninstall_artifact_regular "$root/reboot-request.json" 600 &&
+        broray_system_uninstall_artifact_regular "$root/request.json" 600 || return 1
+        jq -e --slurpfile request "$root/request.json" '
+          .schemaVersion==1 and .contract=="broray-first-platform-reboot/1" and
+          .operationId==$request[0].operationId and .candidateId==$request[0].candidateId and
+          .platformManifestSha256==$request[0].payloadManifestSha256 and
+          (.platformManifestSha256|type=="string" and length==64 and all(explode[];(.>=48 and .<=57) or (.>=97 and .<=102))) and
+          (.preflightOperationId|type=="string" and startswith("op-") and length<=96 and
+            all(explode[];(.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==45 or .==95))
+        ' "$root/reboot-request.json" >/dev/null || return 1
+        id="$(jq -er .preflightOperationId "$root/reboot-request.json")" || return 1
+        manifest="$(jq -er .platformManifestSha256 "$root/reboot-request.json")" || return 1
+        record="/opt/var/lib/broray/operations/$id/state.json"
+        broray_system_uninstall_artifact_dir /opt/var/lib/broray/operations &&
+        broray_system_uninstall_artifact_dir "${record%/*}" || return 1
+        broray_system_uninstall_artifact_regular "$record" 600 || return 1
+        jq -e --arg sha "$manifest" '.operation=="system:platform-preflight" and
+          .state=="completed" and .running==false and
+          .platformPreflight.expectedPlatformManifestSha256==$sha' "$record" >/dev/null
+    }
+
     broray_system_uninstall_artifact_inventory() {
         local p root rel inventory expected row
         for p in /opt/bin/.broray-pt-* /opt/bin/.broray-bg-* /opt/etc/init.d/.broray-pt-* /opt/etc/init.d/.broray-bg-*; do
@@ -3031,6 +3054,24 @@ broray_system_worker_uninstall() {
                     printf 'D\t%s\t%s\t-\n' "$p" "$(find -P "$p" -maxdepth 0 -printf '%D:%i:%m:%n')"; continue ;;
                 status.json|phase|worker.pid|request.json|daemon-was-running|platform-backup/inventory.tsv)
                     broray_system_uninstall_artifact_regular "$p" 600 || return 1 ;;
+                reboot-request.json|reboot-output|reboot-error)
+                    broray_system_uninstall_artifact_boot "$root" &&
+                    broray_system_uninstall_artifact_regular "$p" 600 || return 1 ;;
+                preflight-result.*.json|preflight-error.*)
+                    case "$rel" in
+                        preflight-result.*.json) expected="${rel#preflight-result.}"; expected="${expected%.json}" ;;
+                        *) expected="${rel#preflight-error.}" ;;
+                    esac
+                    case "$expected" in ''|*[!0-9]*) return 1 ;; esac
+                    broray_system_uninstall_artifact_boot "$root" &&
+                    broray_system_uninstall_artifact_regular "$p" 600 &&
+                    broray_system_uninstall_artifact_regular "$root/preflight-result.$expected.json" 600 || return 1
+                    jq -e --slurpfile receipt "$root/reboot-request.json" '
+                      .ok==false and .errorCode=="UPDATER_LEGACY_REBOOT_REQUIRED" and .phase=="REBOOT_REQUIRED" and
+                      .operationId==$receipt[0].preflightOperationId and
+                      .expectedPlatformManifestSha256==$receipt[0].platformManifestSha256 and
+                      .platformReady==false and .serviceStopped==false and .activationAllowed==false and .signalsAuthorized==false
+                    ' "$root/preflight-result.$expected.json" >/dev/null || return 1 ;;
                 platform-backup/opt/bin/broray-updaterctl|platform-backup/opt/etc/init.d/S22broray-updater|platform-backup/opt/libexec/broray-updater/broray-compat.sh|platform-backup/opt/libexec/broray-updater/broray-migrate-legacy.sh|platform-backup/opt/libexec/broray-updater/minisign|platform-backup/opt/libexec/broray-updater/broray-updater.sh|platform-backup/opt/libexec/broray-updater/xray-wrapper)
                     broray_system_uninstall_artifact_regular "$p" 755 &&
                     broray_system_uninstall_artifact_regular "$root/platform-backup/inventory.tsv" 600 || return 1
@@ -3071,6 +3112,12 @@ EOF_UNINSTALL_LEGACY
     }
 
     broray_system_uninstall_payload_preflight() {
+        # Settle only the completed, authenticated first-boot transition before
+        # services stop. Inventory itself remains read-only during finalization.
+        if [ -f /opt/var/lib/broray-platform-handoff/phase ] &&
+           [ "$(cat /opt/var/lib/broray-platform-handoff/phase)" = boot-pending ]; then
+            /opt/bin/ash "$BRORAY_BASE/lib/universal-platform-handoff.sh" settle >/dev/null || return 1
+        fi
         broray_system_uninstall_artifact_inventory >/dev/null || return 1
         for owned_root in /opt/broray /opt/var/lib/broray /opt/var/lib/broray-updater
         do

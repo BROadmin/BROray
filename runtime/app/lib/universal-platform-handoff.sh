@@ -1150,7 +1150,25 @@ preflight_settle_legacy()
     regular_file "$PHASE_FILE" || return 75
     existing_phase="$(sed -n '1p' "$PHASE_FILE")"
     case "$existing_phase" in
-        complete|rolled-back|rollback-failed|boot-pending) return 0 ;;
+        complete|rolled-back|rollback-failed) return 0 ;;
+        boot-pending)
+            regular_file "$STATE_ROOT/reboot-request.json" && regular_file "$STATE_ROOT/request.json" || return 75
+            boot="$(cat "$(root_path /proc/sys/kernel/random/boot_id)")" || return 75
+            jq -e --arg currentBoot "$boot" --arg manifest "$1" --slurpfile request "$STATE_ROOT/request.json" '
+              .schemaVersion==1 and .contract=="broray-first-platform-reboot/1" and
+              (.bootId|type=="string" and length==36) and .bootId!=$currentBoot and
+              .platformManifestSha256==$manifest and $request[0].payloadManifestSha256==$manifest and
+              .operationId==$request[0].operationId and .candidateId==$request[0].candidateId and
+              (.preflightOperationId|type=="string" and startswith("op-") and length<=96 and
+                all(explode[];(.>=48 and .<=57) or (.>=65 and .<=90) or (.>=97 and .<=122) or .==45 or .==95))
+            ' "$STATE_ROOT/reboot-request.json" >/dev/null || return 75
+            pf_id="$(jq -er .preflightOperationId "$STATE_ROOT/reboot-request.json")" || return 75
+            pf_state="$(root_path /opt/var/lib/broray/operations)/$pf_id/state.json"
+            regular_file "$pf_state" || return 75
+            jq -e --arg sha "$1" '.operation=="system:platform-preflight" and
+              .state=="completed" and .running==false and
+              .platformPreflight.expectedPlatformManifestSha256==$sha' "$pf_state" >/dev/null || return 75
+            ;;
         preparing) ;;
         *) return 75 ;;
     esac
@@ -1163,7 +1181,7 @@ preflight_settle_legacy()
     printf '%s\n' "$self_start" >"$LOCK_DIR/starttime" || return 75
     trap 'lock_release >/dev/null 2>&1 || true' EXIT
     worker_running && return 75
-    [ "$(sed -n '1p' "$PHASE_FILE")" = preparing ] || return 75
+    [ "$(sed -n '1p' "$PHASE_FILE")" = "$existing_phase" ] || return 75
     platform_current && preflight_installed "$1" "$2" >/dev/null || return 75
     [ "$pf_old_manifest" = "$1" ] || return 75
     candidate_id="$(current_candidate)" || return 75
@@ -1237,6 +1255,7 @@ preflight_admission_only()
 case "${1:-}" in
     preflight-admission) preflight_admission_only "${2:-}" ;;
     preflight) preflight "${2:-}" ;;
+    settle) preflight_settle_legacy "$(payload_manifest_sha)" "$CURRENT_PATH/app" ;;
     schedule) schedule ;;
     finalize) finalize ;;
     status) status_json ;;

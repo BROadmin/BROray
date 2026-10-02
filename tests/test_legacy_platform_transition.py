@@ -107,6 +107,53 @@ class LegacyTransition(LegacySchedule):
         self.assertEqual(json.loads((self.state / 'status.json').read_text())['state'], 'error')
 
 
+class BootSettlement(LegacyTransition):
+    def prepare_completed_boot(self):
+        self.transition_fixture()
+        (self.root / self.files[0]).write_bytes((self.payload / self.files[0]).read_bytes())
+        (self.state / 'phase').write_text('boot-pending\n')
+        manifest=__import__('hashlib').sha256((self.payload/'SHA256SUMS').read_bytes()).hexdigest()
+        self.receipt=dict(schemaVersion=1,contract='broray-first-platform-reboot/1',
+            operationId=self.operation,candidateId='new',preflightOperationId='op-fixture-preflight',
+            bootId='00000000-2222-3333-4444-555555555555',platformManifestSha256=manifest)
+        (self.state/'reboot-request.json').write_text(json.dumps(self.receipt))
+        pf=self.root/'opt/var/lib/broray/operations/op-fixture-preflight';pf.mkdir()
+        (pf/'state.json').write_text(json.dumps(dict(operation='system:platform-preflight',
+            state='completed',running=False,platformPreflight=dict(expectedPlatformManifestSha256=manifest))))
+        self.proof_calls=self.root/'native-proof.calls'
+
+    def settle(self, ready='1'):
+        source=Path(os.environ.get('BRORAY_SETTLE_BASELINE',str(HANDOFF))).read_text()
+        source=source.rsplit('case "${1:-}" in',1)[0]
+        # Boundary double only for authenticated native readiness; settlement
+        # state validation and exclusive owner checks are production functions.
+        source+='\npreflight_installed() { echo proof >>"$TEST_PROOF"; pf_old_manifest="$1"; [ "$TEST_READY" = 1 ]; }\n'
+        source+='preflight_settle_legacy "$(payload_manifest_sha)" "$CURRENT_PATH/app"\n'
+        return subprocess.run(['/bin/ash','-c',source],env={**self.env,'TEST_PROOF':str(self.proof_calls),'TEST_READY':ready},capture_output=True,text=True,timeout=15)
+
+    def test_settlement_requires_live_native_proof(self):
+        self.prepare_completed_boot();r=self.settle();self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+        self.assertEqual((self.state/'phase').read_text(),'complete\n')
+        self.assertEqual(self.proof_calls.read_text(),'proof\n')
+        self.assertEqual(json.loads((self.state/'status.json').read_text())['state'],'success')
+        self.assertFalse((self.state/'worker.lock').exists())
+
+    def test_settlement_same_boot_preserves_pending(self):
+        self.prepare_completed_boot();self.receipt['bootId']='11111111-2222-3333-4444-555555555555'
+        (self.state/'reboot-request.json').write_text(json.dumps(self.receipt));before=self.inventory()
+        r=self.settle();self.assertNotEqual(r.returncode,0);self.assertEqual(self.inventory(),before)
+        self.assertFalse(self.proof_calls.exists())
+
+    def test_settlement_existing_fence_is_preserved(self):
+        self.prepare_completed_boot();lock=self.state/'worker.lock';lock.mkdir();(lock/'foreign').write_text('preserve')
+        before=self.inventory();r=self.settle();self.assertNotEqual(r.returncode,0);self.assertEqual(self.inventory(),before)
+
+    def test_settlement_without_native_readiness_stays_pending(self):
+        self.prepare_completed_boot();r=self.settle('0');self.assertNotEqual(r.returncode,0)
+        self.assertEqual((self.state/'phase').read_text(),'boot-pending\n')
+        self.assertEqual(self.proof_calls.read_text(),'proof\n')
+
+
 class RealPreflightTransition(UpdaterPreflight):
     def test_finalize_stages_native_registration_before_single_reboot(self):
         import shutil

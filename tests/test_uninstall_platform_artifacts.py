@@ -93,6 +93,32 @@ class ExternalArtifacts(unittest.TestCase):
  def test_unknown_legacy_child_preserves_all(self):
   p=self.legacy/'unknown';self.put(p,b'foreign')
   r=self.run_finalizer();self.assertNotEqual(r.returncode,0);self.assertTrue(p.exists());self.assertTrue(self.image.exists());self.assertTrue(self.app.exists())
+ def boot_records(self):
+  manifest='a'*64
+  request=dict(operationId='update-source',candidateId='candidate',payloadManifestSha256=manifest)
+  self.put(self.legacy/'request.json',json.dumps(request).encode())
+  reboot=dict(schemaVersion=1,contract='broray-first-platform-reboot/1',operationId='update-source',
+    candidateId='candidate',preflightOperationId=self.op.name,bootId='11111111-2222-3333-4444-555555555555',platformManifestSha256=manifest)
+  self.put(self.legacy/'reboot-request.json',json.dumps(reboot).encode())
+  self.put(self.op/'state.json',json.dumps(dict(operation='system:platform-preflight',state='completed',running=False,
+    platformPreflight=dict(expectedPlatformManifestSha256=manifest))).encode())
+  reply=dict(ok=False,errorCode='UPDATER_LEGACY_REBOOT_REQUIRED',phase='REBOOT_REQUIRED',operationId=self.op.name,
+    expectedPlatformManifestSha256=manifest,platformReady=False,serviceStopped=False,activationAllowed=False,signalsAuthorized=False)
+  self.put(self.legacy/'preflight-result.123.json',json.dumps(reply).encode())
+  for name in ['preflight-error.123','reboot-output','reboot-error']:self.put(self.legacy/name,b'')
+ def test_completed_boot_evidence_removed(self):
+  self.boot_records();r=self.run_finalizer();self.assertEqual(r.returncode,0,r.stderr)
+  self.assertFalse(self.legacy.exists());self.assertFalse(self.app.exists())
+ def test_pending_boot_evidence_preserved(self):
+  self.boot_records();self.put(self.legacy/'phase',b'boot-pending\n')
+  r=self.run_finalizer();self.assertNotEqual(r.returncode,0);self.assertTrue(self.legacy.exists());self.assertTrue(self.app.exists())
+ def test_unbound_boot_evidence_preserved(self):
+  self.boot_records();p=self.legacy/'preflight-result.123.json';v=json.loads(p.read_text());v['operationId']='op-foreign';self.put(p,json.dumps(v).encode())
+  r=self.run_finalizer();self.assertNotEqual(r.returncode,0);self.assertTrue(self.legacy.exists());self.assertTrue(self.app.exists())
+ def test_linked_boot_operation_without_external_images_preserved(self):
+  self.boot_records();self.image.unlink()
+  moved=self.home/'foreign-operation';self.op.rename(moved);self.op.symlink_to(moved,target_is_directory=True)
+  r=self.run_finalizer();self.assertNotEqual(r.returncode,0);self.assertTrue(moved.exists());self.assertTrue(self.app.exists())
  def test_nonterminal_operation_preserved(self):
   self.put(self.op/'state.json',json.dumps(dict(operation='system:platform-preflight',state='running',running=True)).encode())
   r=self.run_finalizer();self.assertNotEqual(r.returncode,0);self.assertTrue(self.image.exists());self.assertTrue(self.app.exists())
