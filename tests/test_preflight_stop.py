@@ -55,7 +55,7 @@ class StopIntent(unittest.TestCase):
         self.fail('Helper gate/marker deadline')
     def ledger(self):
         r=json.loads((self.op/'platform-stop-supervision.json').read_text())
-        return self.home/'ram/supervisors'/self.i/r['supervisorId']/'children.json'
+        return self.home/'ram/supervisors'/self.i/r['supervisorId']/'children.json.current'
     def drain(self):
         end=time.monotonic()+8
         while True:
@@ -123,9 +123,9 @@ class StopIntent(unittest.TestCase):
         self.assertFalse((self.home/'replayed').exists());self.assert_retained()
     def test_missing_ledger_blocks_recovery(self):
         self.prepared();p=self.native_launch(self.running());self.marker(p);ledger=self.ledger()
-        p.kill();p.wait(timeout=5);time.sleep(.05);self.reap();saved=ledger.read_bytes();ledger.unlink()
+        p.kill();p.wait(timeout=5);time.sleep(.05);self.reap();saved=ledger.read_bytes();saved_mode=ledger.stat().st_mode & 0o777;ledger.unlink()
         q=self.api('helpers-drain',self.i,self.t);self.assertNotEqual(q.returncode,0)
-        self.assert_retained();ledger.write_bytes(saved);self.drain()
+        self.assert_retained();ledger.write_bytes(saved);ledger.chmod(saved_mode);self.drain()
     def test_live_foreign_pid_in_ledger_is_not_killed_or_ignored(self):
         self.prepared();p=self.native_launch(self.running());self.marker(p);ledger=self.ledger()
         p.kill();p.wait(timeout=5);time.sleep(.05);self.reap();saved=ledger.read_bytes();data=json.loads(saved)

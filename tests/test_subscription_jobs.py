@@ -75,7 +75,7 @@ printf 200
     def reap_adopted_helpers(self):
         # As a test subreaper we take over init's duty. Reap only adopted
         # children listed by the native supervisor, never the Popen job itself.
-        for f in (self.temp/'ram').rglob('children.json'):
+        for f in (self.temp/'ram').rglob('children.json.current'):
             try:children=json.loads(f.read_text()).get('children',[])
             except FileNotFoundError:continue
             for child in children:
@@ -146,7 +146,7 @@ printf 200
                     if time.monotonic()>until:raise
             if p.returncode!=130:
                 detail={str(f.relative_to(self.temp)):f.read_text() for folder in [self.state,self.temp/'ram'] for f in folder.rglob('*.json') if f.stat().st_size<32768}
-                for f in (self.temp/'ram').rglob('children.json'):
+                for f in (self.temp/'ram').rglob('children.json.current'):
                     for c in json.loads(f.read_text()).get('children',[]):
                         stat=Path('/proc')/str(c['pid'])/'stat'
                         detail['proc/'+str(c['pid'])]=stat.read_text() if stat.exists() else 'absent'

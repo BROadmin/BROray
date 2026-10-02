@@ -341,6 +341,7 @@ ops_supervisor_absent()
     dir="$OPS_RAM/supervisors/$OPS_ID/$id"; ledger="$dir/children.json"
     ops_dir_safe "$OPS_RAM" && ops_dir_safe "$OPS_RAM/supervisors" &&
       ops_dir_safe "$OPS_RAM/supervisors/$OPS_ID" && ops_dir_safe "$dir" && ops_file_safe "$ledger" 65536 || return 1
+    ledger="$(broray_ops_supervisor_ledger_view "$ledger" absent)" || return 1
     boot="$(broray_ops_boot_id)" || return 1
     [ -n "$boot" ] || return 1
     # Validate the complete bounded ledger once, before using any row. The
@@ -403,6 +404,7 @@ ops_supervisors_collect()
             ledger="$OPS_RAM/supervisors/$OPS_ID/$sid/children.json"
             # A previous boot is already proof of absence; its RAM is gone.
             if ops_file_safe "$ledger" 65536; then
+                ledger="$(broray_ops_supervisor_ledger_view "$ledger" absent)" || return 1
                 if [ "$mode" = all-absent ]; then
                     # Publish nothing until every registry entry is proved.
                     jq -e '.termSent==true' "$ledger" >/dev/null && terms="$terms $sid"
@@ -431,7 +433,7 @@ ops_supervisors_collect()
     for sid in $removed; do
         ledger="$OPS_RAM/supervisors/$OPS_ID/$sid/children.json"
         if ops_dir_safe "${ledger%/*}" && ops_file_safe "$ledger" 65536; then
-            rm -f "$ledger" || true
+            rm -f "$ledger" "$ledger.current" "$ledger.terminal" || true
             rmdir "${ledger%/*}" 2>/dev/null || true
         fi
     done
@@ -493,9 +495,8 @@ ops_supervisor_register()
         chmod 700 "$directory" || ops_error UNSAFE_STATE 1
     done
     mkdir -m 700 "$dir" || ops_error STATE_UNAVAILABLE 1
-    record="$(jq -nc --arg id "$OPS_ID" --arg sid "$nonce" --argjson owner "$owner" \
-      '{schemaVersion:1,operationId:$id,supervisorId:$sid,supervisorPid:$owner.pid,supervisorStartTicks:$owner.startTicks,bootId:$owner.bootId,state:"gated",revision:0,children:[]}')" || ops_error STATE_UNAVAILABLE 1
-    ops_write "$dir/children.json" "$record" || ops_error STATE_UNAVAILABLE 1
+    # The native supervisor creates its own write-once anchor before opening
+    # the child execution gate. A registry without that evidence stays blocked.
     records="$(printf '%s\n' "$records" | jq -c --arg sid "$nonce" --argjson owner "$owner" '.supervisors += [{supervisorId:$sid,owner:$owner}]')" || ops_error STATE_UNAVAILABLE 1
     ops_write "$file" "$records" || ops_error STATE_UNAVAILABLE 1
     if [ "$route_mode" = platform ] || [ "$route_mode" = service ]; then
@@ -534,6 +535,7 @@ ops_route_worker_check()
     tracer="$(awk '$1=="TracerPid:"{print $2}' "$OPS_PROC/$pid/status")" || ops_error CHILDREN_UNCONFIRMED
     [ "$tracer" = "$(printf '%s\n' "$supervisor" | jq -r .pid)" ] || ops_error CHILDREN_UNCONFIRMED
     ledger="$OPS_RAM/supervisors/$OPS_ID/$sid/children.json"
+    ledger="$(broray_ops_supervisor_ledger_view "$ledger" live)" || ops_error CHILDREN_UNCONFIRMED
     ops_file_safe "$ledger" 65536 && jq -e --arg id "$OPS_ID" --arg sid "$sid" --argjson owner "$owner" --argjson supervisor "$supervisor" '
       .schemaVersion==1 and .operationId==$id and .supervisorId==$sid and
       .supervisorPid==$supervisor.pid and .supervisorStartTicks==$supervisor.startTicks and .bootId==$supervisor.bootId and
@@ -770,6 +772,32 @@ ops_recover_global()
     if ops_is_queue_step; then ops_queue_step_finish recovered OWNER_DISAPPEARED >/dev/null || return 1; fi
     OPS_RECOVERY_RESULT=recovered
     return 0
+}
+
+ops_admission_recover()
+{
+    local target id
+    # This command runs under the same native guard as begin/finish. Unlike
+    # emergency recovery it never pauses automation or cancels live work.
+    if [ ! -e "$OPS_GLOBAL" ] && [ ! -L "$OPS_GLOBAL" ]; then
+        printf '%s\n' '{"ok":true}'; return 0
+    fi
+    [ -L "$OPS_GLOBAL" ] || ops_error OWNER_UNCONFIRMED
+    target="$(readlink "$OPS_GLOBAL")" || ops_error OWNER_UNCONFIRMED
+    case "$target" in "$OPS_ROOT/"*/fence) ;; *) ops_error OWNER_UNCONFIRMED ;; esac
+    id="${target#"$OPS_ROOT/"}"; id="${id%/fence}"
+    ops_load "$id" && ops_global_matches || ops_error OWNER_UNCONFIRMED
+    # Protected domains require their separate recovery contract. Do not
+    # invoke platform/service recovery as a side effect of an update click.
+    jq -e -L "$OPS_CODE/lib" 'include "operation-public";
+      (route_protected|not) and .cancelability=="cooperative" and
+      (has("platformPreflight")|not) and (has("serviceStop")|not)' \
+      "$OPS_CURRENT/state.json" >/dev/null || ops_error DOMAIN_OPERATION_BUSY
+    broray_ops_classify_owner "$(jq -c '.owner' "$OPS_EXECUTOR")"
+    [ "$OPS_OWNER_STATUS" = STALE ] || ops_error OWNER_UNCONFIRMED
+    ops_recover_global || ops_error RECOVERY_UNCONFIRMED
+    [ ! -e "$OPS_GLOBAL" ] && [ ! -L "$OPS_GLOBAL" ] || ops_error RECOVERY_UNCONFIRMED
+    printf '%s\n' '{"ok":true}'
 }
 
 ops_begin()
@@ -1194,6 +1222,7 @@ case "$verb" in
         printf '%s\n' '{"ok":true}' ;;
     platform-preflight-begin) ops_platform_admission_request "$@" ;;
     platform-service-stop) ops_platform_service_stop "$@" ;;
+    admission-recover) [ "$#" = 0 ] || ops_error INVALID_REQUEST 1; ops_admission_recover ;;
     begin) [ "$#" = 7 ] || ops_error INVALID_REQUEST 1; ops_begin "$@" ;;
     ack) [ "$#" = 3 ] || ops_error INVALID_REQUEST 1; ops_ack "$@" ;;
     owner-check)

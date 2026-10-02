@@ -281,6 +281,7 @@ broray_web_recover_config()
 
 broray_web_reconcile_owned_publish()
 (
+    result=1
     # Local availability is independent of KeenDNS. Never create/adopt a proxy
     # during boot; only an existing receipt can enter the ordinary transaction.
     broray_web_http_healthy || exit 1
@@ -292,11 +293,19 @@ broray_web_reconcile_owned_publish()
     broray_web_publish_owner_record_valid || exit 1
     . "$BASE/lib/routes-api-operation.sh" || exit 1
     broray_routes_api_lock_acquire 'keenetic:web-access-enable' keenetic || exit 1
-    trap 'broray_routes_api_lock_release' EXIT
+    trap 'broray_routes_api_lock_release failed' EXIT
     trap 'exit 1' HUP INT TERM
     # ensure verifies complete live object vs receipt before migrating, then
     # verifies/save/re-reads; its existing exact rollback contract is retained.
-    broray_web_publish_ensure
+    result=0
+    broray_web_publish_ensure || result=$?
+    if [ "$result" = 0 ]; then
+        broray_routes_api_lock_release completed || exit 1
+    else
+        broray_routes_api_lock_release failed || exit 1
+    fi
+    trap - EXIT HUP INT TERM
+    exit "$result"
 )
 
 broray_web_after_local_ready()

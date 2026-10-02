@@ -259,6 +259,7 @@ ops_platform_service_authorize_stop()
     cmd="$(tr '\000' '\n' <"$OPS_PROC/$idle/cmdline")" || ops_error CHILDREN_UNCONFIRMED
     printf '%s\n' "$cmd" | jq -Rse 'split("\n")|.[:-1]|length==2 and (.[0]|split("/")|last)=="sleep" and .[1]=="2"' >/dev/null || ops_error UPDATER_NOT_IDLE
     ledger="$OPS_RAM/supervisors/$OPS_ID/$sid/children.json"
+    ledger="$(broray_ops_supervisor_ledger_view "$ledger" live)" || ops_error CHILDREN_UNCONFIRMED
     ops_file_safe "$ledger" 65536 && jq -e --arg id "$OPS_ID" --arg sid "$sid" \
       --argjson sup "$supervisor" --argjson a "$target_owner" --argjson b "$idle_owner" '
       .operationId==$id and .supervisorId==$sid and .supervisorPid==$sup.pid and

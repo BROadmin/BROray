@@ -133,3 +133,41 @@ broray_api_success '{}'
         self.run_shell(source + acquire + ' || exit 91\nrc=0\n(' + release +
             ' completed) || rc=$?\ntest "$rc" != 0 || exit 92\n'
             'test -L "$BRORAY_ROUTES_API_LOCK" || exit 93\n' + release + ' completed\n')
+
+    def test_subshell_admission_binds_actual_executor_and_can_finish(self):
+        # S25 reconciles an existing KeenDNS receipt inside a (...) function.
+        # ash keeps $$ equal to the parent there; /proc/self is the executor.
+        source, _, release = self.caller('routes')
+        self.run_shell(source + '''
+(
+ broray_routes_api_lock_acquire keenetic:web-access-enable keenetic || exit 91
+ IFS=' ' read -r actual rest </proc/self/stat || exit 92
+ jq -e --argjson pid "$actual" '.owner.pid==$pid' "$BRORAY_ROUTES_API_LOCK/owner.json" || exit 93
+ ''' + release + ''' completed || exit 94
+)
+rc=$?
+test "$rc" = 0 || exit "$rc"
+test ! -L "$BRORAY_ROUTES_API_LOCK" || exit 95
+''')
+
+    def test_boot_reconcile_records_success_and_releases_fence(self):
+        self.boot_reconcile(0, 'completed')
+
+    def test_boot_reconcile_records_failure_and_releases_fence(self):
+        self.boot_reconcile(1, 'failed')
+
+    def boot_reconcile(self, result, state):
+        base=self.root/'app'; (base/'lib').mkdir(parents=True)
+        (base/'config').mkdir(); (base/'config/web-publish.json').write_text('{}')
+        (base/'lib/routes-api-operation.sh').write_bytes((APP/'lib/routes-api-operation.sh').read_bytes())
+        (base/'lib/web-publish.sh').write_text('broray_web_publish_owner_record_valid() { return 0; }\n'
+            f'broray_web_publish_ensure() {{ return {result}; }}\n')
+        source=(APP.parent/'init/S25broray-web').read_text()
+        function=source.split('broray_web_reconcile_owned_publish()\n',1)[1].split('\nbroray_web_after_local_ready()',1)[0]
+        self.env['BRORAY_OPS_CODE_ROOT']=str(APP)
+        self.run_shell('BASE="$TEST_ROOT/app"\nbroray_web_http_healthy() { return 0; }\n'
+            +'broray_web_reconcile_owned_publish()\n'+function+'\nbroray_web_reconcile_owned_publish\n',result)
+        self.assertFalse(self.lock.is_symlink())
+        records=list((self.state/'operations').glob('op-*/state.json'))
+        self.assertEqual(len(records),1)
+        self.assertEqual(json.loads(records[0].read_bytes())['state'],state)

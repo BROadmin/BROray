@@ -41,6 +41,7 @@ broray_server_subscription_validate_id()
 
 broray_server_subscription_acquire_lock()
 {
+    local pending
     broray_job_require_owner || return $?
     if [ -e "$BRORAY_SERVER_SUB_LOCK" ] || [ -L "$BRORAY_SERVER_SUB_LOCK" ]; then
         broray_server_subscription_error \
@@ -48,6 +49,12 @@ broray_server_subscription_acquire_lock()
             "Прежняя синхронизация серверов требует восстановления."
         return 1
     fi
+    for pending in "$BRORAY_SERVER_SUB_TMP"/server-subscription-sync.*/rollback-required; do
+        [ -e "$pending" ] || [ -L "$pending" ] || continue
+        broray_server_subscription_error SERVER_SYNC_RECOVERY_REQUIRED \
+            "Прежнее восстановление серверов не завершено. Резервная копия сохранена."
+        return 1
+    done
     broray_job_checkpoint committing
 }
 
@@ -149,8 +156,9 @@ broray_server_subscription_remap()
         [$exact[] | select(.old == null)] as $remainingNew |
         (($remainingOld + $remainingNew) | map(.continuity) | unique) as $keys |
         if any($keys[]; . as $key |
-            ([$remainingOld[] | select(.continuity == $key)] | length) > 1 or
-            ([$remainingNew[] | select(.continuity == $key)] | length) > 1)
+            ([$remainingOld[] | select(.continuity == $key)] | length) as $oldCount |
+            ([$remainingNew[] | select(.continuity == $key)] | length) as $newCount |
+            $oldCount > 0 and $newCount > 0 and ($oldCount > 1 or $newCount > 1))
         then error("ambiguous continuity identity") else . end |
         [$exact[] as $n |
             ($n.old // ([$remainingOld[] | select(.continuity == $n.continuity)][0])) as $o |
@@ -473,39 +481,67 @@ broray_server_subscription_remove()
 
 broray_server_subscription_restore_backup()
 {
+    local restore_subscription_id restore_backup_dir restore_active_value
+    local restore_side restore_directory restore_file restore_name restore_temp
     restore_subscription_id="$1"
     restore_backup_dir="$2"
     restore_active_value="$3"
 
-    for restore_file in "$BRORAY_SERVER_SUB_LIVE"/*.json; do
-        [ -f "$restore_file" ] || continue
-        broray_server_subscription_file_matches \
-            "$restore_file" "$restore_subscription_id" || continue
-        rm -f "$restore_file"
+    # Prepare every restore copy on its destination filesystem before touching
+    # catalog entries. A failed copy must never erase the current catalog.
+    for restore_side in live disabled; do
+        [ -d "$restore_backup_dir/$restore_side" ] && [ ! -L "$restore_backup_dir/$restore_side" ] || return 1
+        if [ "$restore_side" = live ]; then restore_directory="$BRORAY_SERVER_SUB_LIVE"
+        else restore_directory="$BRORAY_SERVER_SUB_DISABLED/$restore_subscription_id"; fi
+        [ ! -L "$restore_directory" ] && mkdir -p "$restore_directory" || return 1
+        for restore_file in "$restore_backup_dir/$restore_side"/*.json; do
+            [ -e "$restore_file" ] || [ -L "$restore_file" ] || continue
+            [ -f "$restore_file" ] && [ ! -L "$restore_file" ] || return 1
+            restore_name="${restore_file##*/}"
+            restore_temp="$restore_directory/.${restore_name}.restore.$$"
+            [ ! -e "$restore_temp" ] && [ ! -L "$restore_temp" ] || return 1
+            cp "$restore_file" "$restore_temp" && chmod 600 "$restore_temp" &&
+                cmp -s "$restore_file" "$restore_temp" || return 1
+        done
     done
-    rm -rf "$BRORAY_SERVER_SUB_DISABLED/$restore_subscription_id"
-    mkdir -p \
-        "$BRORAY_SERVER_SUB_LIVE" \
-        "$BRORAY_SERVER_SUB_DISABLED/$restore_subscription_id"
-
-    for restore_file in "$restore_backup_dir/live"/*.json; do
-        [ -f "$restore_file" ] || continue
-        cp "$restore_file" "$BRORAY_SERVER_SUB_LIVE/" || return 1
-    done
-    for restore_file in "$restore_backup_dir/disabled"/*.json; do
-        [ -f "$restore_file" ] || continue
-        cp "$restore_file" \
-            "$BRORAY_SERVER_SUB_DISABLED/$restore_subscription_id/" || return 1
+    for restore_side in live disabled; do
+        if [ "$restore_side" = live ]; then restore_directory="$BRORAY_SERVER_SUB_LIVE"
+        else restore_directory="$BRORAY_SERVER_SUB_DISABLED/$restore_subscription_id"; fi
+        for restore_file in "$restore_backup_dir/$restore_side"/*.json; do
+            [ -f "$restore_file" ] || continue
+            restore_name="${restore_file##*/}"
+            mv "$restore_directory/.${restore_name}.restore.$$" "$restore_directory/$restore_name" &&
+                cmp -s "$restore_file" "$restore_directory/$restore_name" || return 1
+        done
+        # Remove only new members of this subscription, after restoring all
+        # prior members. Other subscriptions/manual nodes remain untouched.
+        for restore_file in "$restore_directory"/*.json; do
+            [ -f "$restore_file" ] || continue
+            broray_server_subscription_file_matches "$restore_file" "$restore_subscription_id" || continue
+            [ -f "$restore_backup_dir/$restore_side/${restore_file##*/}" ] || rm -f "$restore_file" || return 1
+        done
     done
     rmdir "$BRORAY_SERVER_SUB_DISABLED/$restore_subscription_id" \
         2>/dev/null || true
 
     if [ -n "$restore_active_value" ]; then
-        printf '%s\n' "$restore_active_value" > "$BRORAY_ACTIVE_SERVER_FILE"
+        restore_temp="${BRORAY_ACTIVE_SERVER_FILE}.restore.$$"
+        [ ! -e "$restore_temp" ] && [ ! -L "$restore_temp" ] || return 1
+        printf '%s\n' "$restore_active_value" > "$restore_temp" &&
+            chmod 600 "$restore_temp" && mv "$restore_temp" "$BRORAY_ACTIVE_SERVER_FILE" || return 1
     else
-        rm -f "$BRORAY_ACTIVE_SERVER_FILE"
+        rm -f "$BRORAY_ACTIVE_SERVER_FILE" || return 1
     fi
     return 0
+}
+
+broray_server_subscription_rollback_or_preserve()
+{
+    broray_server_subscription_restore_backup "$@" && return 0
+    broray_server_subscription_release_lock
+    broray_server_subscription_error SERVER_SYNC_ROLLBACK_FAILED \
+        "Восстановление серверов не завершено. Резервная копия сохранена: $2"
+    return 1
 }
 
 # Merge only in private sync work, before any live catalog write.
@@ -798,6 +834,15 @@ broray_server_subscription_sync()
     fi
     mkdir -p "$sync_target_dir"
 
+    # This marker survives any failed rollback and blocks the next writer.
+    # Save the old active ID alongside the already completed node backup.
+    if ! printf '%s\n' "$sync_active_before" > "$sync_backup/active-server" ||
+       ! printf '%s\n' "$sync_subscription_id" > "$sync_work/rollback-required"; then
+        rm -rf "$sync_work"
+        broray_server_subscription_release_lock
+        broray_server_subscription_error SERVER_SYNC_ERROR "Не удалось подготовить восстановление серверов."
+        return 1
+    fi
     sync_commit_failed=false
     for sync_new_file in "$sync_stage_dir"/*.json; do
         [ -f "$sync_new_file" ] || continue
@@ -824,8 +869,8 @@ broray_server_subscription_sync()
     done
 
     if [ "$sync_commit_failed" = "true" ]; then
-        broray_server_subscription_restore_backup \
-            "$sync_subscription_id" "$sync_backup" "$sync_active_before" || true
+        broray_server_subscription_rollback_or_preserve \
+            "$sync_subscription_id" "$sync_backup" "$sync_active_before" || return 1
         rm -rf "$sync_work"
         broray_server_subscription_release_lock
         broray_server_subscription_error \
@@ -836,8 +881,8 @@ broray_server_subscription_sync()
 
     if [ -n "$sync_active_old_file" ]; then
         if [ "$sync_enabled" != "true" ]; then
-            broray_server_subscription_restore_backup \
-                "$sync_subscription_id" "$sync_backup" "$sync_active_before" || true
+            broray_server_subscription_rollback_or_preserve \
+                "$sync_subscription_id" "$sync_backup" "$sync_active_before" || return 1
             rm -rf "$sync_work"
             broray_server_subscription_release_lock
             broray_server_subscription_error \
@@ -849,8 +894,8 @@ broray_server_subscription_sync()
             if ! (
                 broray_xray_apply_server "$sync_active_new_id"
             ) >/dev/null 2>&1; then
-                broray_server_subscription_restore_backup \
-                    "$sync_subscription_id" "$sync_backup" "$sync_active_before" || true
+                broray_server_subscription_rollback_or_preserve \
+                    "$sync_subscription_id" "$sync_backup" "$sync_active_before" || return 1
                 rm -rf "$sync_work"
                 broray_server_subscription_release_lock
                 broray_server_subscription_error \
@@ -861,8 +906,8 @@ broray_server_subscription_sync()
         elif [ "$sync_active_new_id" != "$sync_active_before" ]; then
             if ! printf '%s\n' "$sync_active_new_id" \
                 > "$BRORAY_ACTIVE_SERVER_FILE"; then
-                broray_server_subscription_restore_backup \
-                    "$sync_subscription_id" "$sync_backup" "$sync_active_before" || true
+                broray_server_subscription_rollback_or_preserve \
+                    "$sync_subscription_id" "$sync_backup" "$sync_active_before" || return 1
                 rm -rf "$sync_work"
                 broray_server_subscription_release_lock
                 broray_server_subscription_error \
@@ -874,8 +919,8 @@ broray_server_subscription_sync()
         if [ "$sync_active_name_changed" = "true" ] &&
            [ "$sync_active_config_changed" != "true" ]; then
             if ! broray_interface_sync_description >/dev/null 2>&1; then
-                broray_server_subscription_restore_backup \
-                    "$sync_subscription_id" "$sync_backup" "$sync_active_before" || true
+                broray_server_subscription_rollback_or_preserve \
+                    "$sync_subscription_id" "$sync_backup" "$sync_active_before" || return 1
                 rm -rf "$sync_work"
                 broray_server_subscription_release_lock
                 broray_server_subscription_error \

@@ -31,6 +31,13 @@ static char ledger[PATH_MAX],boot[128],nonce[33],operation[97];
 static pid_t owner_pid,root_pid;
 static unsigned long long owner_ticks,supervisor_ticks;
 static volatile sig_atomic_t interrupted=0;
+/* Only the current projection is replaceable. The two boundary records are
+ * write-once and remain authoritative after the tracer exits. Three RAM files
+ * per supervisor, independent of the number of forks or revisions. */
+static char *ledger_anchor=NULL,*ledger_previous=NULL;
+static size_t ledger_anchor_size=0,ledger_previous_size=0;
+static int ledger_failed=0,ledger_terminal=0;
+static char current_path[PATH_MAX],terminal_path[PATH_MAX];
 static void on_signal(int sig){(void)sig;interrupted=1;}
 static uint64_t milliseconds(void){struct timespec t;if(clock_gettime(CLOCK_MONOTONIC,&t))_exit(74);return (uint64_t)t.tv_sec*1000+t.tv_nsec/1000000;}
 static int safe_text(const char *s,size_t max){
@@ -48,19 +55,55 @@ static unsigned long long start_ticks(pid_t pid){
     char *end;unsigned long long n=strtoull(p,&end,10);
     return end==p||(*end!=' '&&*end!='\n')?0:n;
 }
+static int ledger_matches(const char *path,const char *data,size_t size){
+    struct stat st;char buffer[4096];size_t at=0;
+    int fd=open(path,O_RDONLY|O_NONBLOCK|O_NOFOLLOW|O_CLOEXEC);if(fd<0)return -1;
+    int rc=-1;
+    if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_uid!=geteuid()||st.st_nlink!=1||
+       (st.st_mode&0077)||st.st_size!=(off_t)size)goto done;
+    while(at<size){size_t want=size-at;if(want>sizeof buffer)want=sizeof buffer;
+        ssize_t n=read(fd,buffer,want);if(n<0&&errno==EINTR)continue;
+        if(n<=0||memcmp(buffer,data+at,(size_t)n))goto done;at+=(size_t)n;}
+    rc=0;
+done:close(fd);return rc;
+}
+static int ledger_create(const char *path,const char *data,size_t size){
+    int fd=open(path,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600);if(fd<0)return -1;
+    size_t at=0;int rc=-1;
+    while(at<size){ssize_t n=write(fd,data+at,size-at);if(n<0&&errno==EINTR)continue;if(n<=0)goto done;at+=(size_t)n;}
+    rc=fsync(fd);
+done:if(close(fd))rc=-1;return rc;
+}
 static int write_ledger(const char *state){
-    char temporary[PATH_MAX];struct stat st;
-    if(snprintf(temporary,sizeof temporary,"%s.tmp.%d",ledger,getpid())>=(int)sizeof temporary)return -1;
-    if(lstat(ledger,&st)==0&&(!S_ISREG(st.st_mode)||st.st_uid!=geteuid()||st.st_nlink!=1))return -1;
-    int fd=open(temporary,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW,0600);if(fd<0)return -1;
-    FILE *f=fdopen(fd,"w");if(!f){close(fd);return -1;}
-    int rc=fprintf(f,"{\"schemaVersion\":1,\"operationId\":\"%s\",\"supervisorId\":\"%s\",\"supervisorPid\":%d,\"supervisorStartTicks\":\"%llu\",\"bootId\":\"%s\",\"revision\":%lu,\"state\":\"%s\",\"termSent\":%s,\"killTriggered\":%s,\"children\":[",
+    char temporary[PATH_MAX];struct stat st;char *data=NULL;size_t size=0;
+    if(ledger_failed)return -1;
+    if(snprintf(temporary,sizeof temporary,"%s.tmp.%d",ledger,getpid())>=(int)sizeof temporary||
+       snprintf(current_path,sizeof current_path,"%s.current",ledger)>=(int)sizeof current_path||
+       snprintf(terminal_path,sizeof terminal_path,"%s.terminal",ledger)>=(int)sizeof terminal_path)goto failed;
+    if(lstat(terminal_path,&st)==0||errno!=ENOENT)goto failed;
+    if(ledger_anchor){
+        if(ledger_matches(ledger,ledger_anchor,ledger_anchor_size)||
+           ledger_matches(current_path,ledger_previous,ledger_previous_size))goto failed;
+    }else if(lstat(ledger,&st)==0||errno!=ENOENT)goto failed;
+    FILE *f=open_memstream(&data,&size);if(!f)goto failed;
+    int rc=fprintf(f,"{\"schemaVersion\":1,\"ledgerPolicy\":\"sealed-boundaries/2\",\"operationId\":\"%s\",\"supervisorId\":\"%s\",\"supervisorPid\":%d,\"supervisorStartTicks\":\"%llu\",\"bootId\":\"%s\",\"revision\":%lu,\"state\":\"%s\",\"termSent\":%s,\"killTriggered\":%s,\"children\":[",
         operation,nonce,getpid(),supervisor_ticks,boot,++revision,state,term_sent?"true":"false",kill_triggered?"true":"false");
     for(int i=0;i<count&&rc>=0;i++)rc=fprintf(f,"%s{\"pid\":%d,\"startTicks\":\"%llu\",\"bootId\":\"%s\"}",i?",":"",children[i].pid,children[i].ticks,boot);
     if(rc>=0)rc=fprintf(f,"]}\n");
-    if(fclose(f)||rc<0){unlink(temporary);return -1;}
-    if(rename(temporary,ledger)){unlink(temporary);return -1;}
+    if(fclose(f)||rc<0||size>65536)goto failed;
+    if(!ledger_anchor){
+        if(ledger_create(ledger,data,size)||ledger_create(current_path,data,size))goto failed;
+        ledger_anchor=malloc(size);if(!ledger_anchor)goto failed;
+        memcpy(ledger_anchor,data,size);ledger_anchor_size=size;
+    }else{
+        if(ledger_create(temporary,data,size)||rename(temporary,current_path))goto failed;
+    }
+    if(ledger_matches(ledger,ledger_anchor,ledger_anchor_size)||ledger_matches(current_path,data,size))goto failed;
+    if(ledger_terminal&&ledger_create(terminal_path,data,size))goto failed;
+    if(ledger_matches(ledger,ledger_anchor,ledger_anchor_size))goto failed;
+    free(ledger_previous);ledger_previous=data;ledger_previous_size=size;
     return 0;
+failed:free(data);ledger_failed=1;return -1;
 }
 static int index_of(pid_t pid){for(int i=0;i<count;i++)if(children[i].pid==pid)return i;return -1;}
 static void remove_child(pid_t pid){int i=index_of(pid);if(i>=0)children[i]=children[--count];}
@@ -103,7 +146,8 @@ static int owner_absent(void){
 static int cancellation(const char *file){struct stat st;return lstat(file,&st)==0;}
 static int end_supervisor(int result,const char *state,int killing){
     if(killing)kill_triggered=1;
-    write_ledger(state);
+    ledger_terminal=1;
+    if(write_ledger(state))return 74;
     /* Exiting activates EXITKILL for every surviving tracee, including escaped
        sessions and threads. The coordinator still verifies their disappearance. */
     return result;

@@ -455,15 +455,15 @@ broray_routes_delete_restore_local()
     plan="$5"
     result="$6"
 
-    cp -p "$original/routes.json" "$registry" 2>/dev/null || true
-    cp -p "$original/bundle.json" "$bundle_registry" 2>/dev/null || true
-    cp -p "$original/state.json" "$state" 2>/dev/null || true
-    cp -p "$original/export-plan.json" "$plan" 2>/dev/null || true
+    broray_route_restore_file "$original/routes.json" "$registry" || return 1
+    broray_route_restore_file "$original/bundle.json" "$bundle_registry" || return 1
+    broray_route_restore_file "$original/state.json" "$state" || return 1
+    broray_route_restore_file "$original/export-plan.json" "$plan" || return 1
 
     if [ -f "$original/router-delete-result.did-not-exist" ]; then
-        rm -f "$result" 2>/dev/null || true
+        rm -f "$result" || return 1
     elif [ -f "$original/router-delete-result.json" ]; then
-        cp -p "$original/router-delete-result.json" "$result" 2>/dev/null || true
+        broray_route_restore_file "$original/router-delete-result.json" "$result" || return 1
     fi
 }
 
@@ -807,10 +807,11 @@ broray_routes_delete_route_failure()
 
 broray_routes_delete_cleanup()
 {
-    local rolled_back progress_error
+    local rolled_back progress_error rollback_failed
 
     trap - EXIT HUP INT TERM
     rolled_back=false
+    rollback_failed=false
 
     broray_routes_delete_kill_active
 
@@ -821,6 +822,7 @@ broray_routes_delete_cleanup()
         if broray_routes_delete_rollback_routes; then
             rolled_back=true
         else
+            rollback_failed=true
             broray_routes_delete_error \
                 "Откат удаления не подтверждён running/startup-config."
         fi
@@ -828,10 +830,21 @@ broray_routes_delete_cleanup()
         if [ -n "$BRORAY_ROUTES_DELETE_ORIGINAL" ] &&
            [ -d "$BRORAY_ROUTES_DELETE_ORIGINAL" ]
         then
-            broray_routes_delete_restore_local                 "$BRORAY_ROUTES_DELETE_ORIGINAL"                 "$BRORAY_ROUTES_DELETE_ROUTES/installed/routes.json"                 "$BRORAY_ROUTES_DELETE_ROUTES/installed/bundles/$BRORAY_ROUTES_DELETE_BUNDLE_ID.json"                 "$BRORAY_ROUTES_DELETE_ROUTES/state/$BRORAY_ROUTES_DELETE_BUNDLE_ID.json"                 "$BRORAY_ROUTES_DELETE_ROUTES/catalog/$BRORAY_ROUTES_DELETE_BUNDLE_ID/export-plan.json"                 "$BRORAY_ROUTES_DELETE_ROUTES/catalog/$BRORAY_ROUTES_DELETE_BUNDLE_ID/router-delete-result.json"
+            broray_routes_delete_restore_local "$BRORAY_ROUTES_DELETE_ORIGINAL" \
+                "$BRORAY_ROUTES_DELETE_ROUTES/installed/routes.json" \
+                "$BRORAY_ROUTES_DELETE_ROUTES/installed/bundles/$BRORAY_ROUTES_DELETE_BUNDLE_ID.json" \
+                "$BRORAY_ROUTES_DELETE_ROUTES/state/$BRORAY_ROUTES_DELETE_BUNDLE_ID.json" \
+                "$BRORAY_ROUTES_DELETE_ROUTES/catalog/$BRORAY_ROUTES_DELETE_BUNDLE_ID/export-plan.json" \
+                "$BRORAY_ROUTES_DELETE_ROUTES/catalog/$BRORAY_ROUTES_DELETE_BUNDLE_ID/router-delete-result.json" || rollback_failed=true
+        else
+            rollback_failed=true
         fi
     fi
 
+    if [ "$rollback_failed" = true ]; then
+        rolled_back=false
+        BRORAY_ROUTES_DELETE_LAST_ERROR='Восстановление не завершено; резервные копии сохранены.'
+    fi
     if [ "$BRORAY_ROUTES_DELETE_PAUSED" != true ] &&
        [ "$BRORAY_ROUTES_DELETE_COMMITTED" != true ]; then
         progress_error="${BRORAY_ROUTES_DELETE_LAST_ERROR:-Операция удаления прервана.}"
@@ -841,6 +854,11 @@ broray_routes_delete_cleanup()
         broray_routes_delete_progress_fail             "$progress_error" "$rolled_back" >/dev/null 2>&1 || true
     fi
 
+    if [ "$rollback_failed" = true ]; then
+        broray_route_rollback_required "$BRORAY_ROUTES_DELETE_ROUTES" "$BRORAY_ROUTES_DELETE_WORK" "$BRORAY_ROUTES_DELETE_LAST_ERROR" || return 1
+        broray_routes_delete_lock_release
+        return 1
+    fi
     broray_routes_delete_lock_release
 
     if [ -n "$BRORAY_ROUTES_DELETE_WORK" ]; then

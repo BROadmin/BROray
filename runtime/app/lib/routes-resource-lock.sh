@@ -1,6 +1,29 @@
 #!/opt/bin/ash
 # Conservative compatibility lease for the shared route resource. This does
 # not recover a crashed route transaction or replace global job admission.
+broray_route_restore_file()
+{
+    local source target temporary
+    source="$1"; target="$2"
+    [ -f "$source" ] && [ ! -L "$source" ] && [ ! -L "$target" ] || return 1
+    temporary="$(mktemp "$target.restore.XXXXXX")" || return 1
+    if ! cp -p "$source" "$temporary" || ! cmp -s "$source" "$temporary" ||
+       ! mv -f "$temporary" "$target"; then
+        rm -f "$temporary"
+        return 1
+    fi
+}
+
+broray_route_rollback_required()
+{
+    local marker
+    marker="$1/rollback-required.json"
+    # Existing unknown evidence is itself a stop condition; never replace it.
+    [ ! -e "$marker" ] && [ ! -L "$marker" ] || return 0
+    (umask 077; set -C; jq -n --arg work "$2" --arg message "$3" \
+      '{schemaVersion:1,kind:"routes-rollback-required",blocksNewMutations:true,work:$work,message:$message}' >"$marker")
+}
+
 broray_route_resource_request()
 {
     local lock parent guard ash pid rest rc job

@@ -11,6 +11,9 @@ class Supervisor(unittest.TestCase):
         self.control=self.temp/'control.sh';self.control.write_text('printf "%s\\t%s\\t%s\\t%s\\n" "$TEST_OWNER_PID" "$TEST_OWNER_TICKS" "$TEST_BOOT" "$TEST_LEDGER"\n')
         self.env={**os.environ,'BRORAY_BACKGROUND_OPERATION_ID':'op-20260915123400-3456-012345abcdef',
           'TEST_OWNER_PID':str(os.getpid()),'TEST_OWNER_TICKS':ticks(os.getpid()),'TEST_BOOT':Path('/proc/sys/kernel/random/boot_id').read_text().strip(),'TEST_LEDGER':str(self.ledger)}
+        # The registration path is write-once evidence; process assertions use
+        # the current projection. Keep all child/exit assertions unchanged.
+        self.authority=self.ledger;self.ledger=Path(str(self.authority)+'.current')
         self.processes=[]
     def tearDown(self):
         for p in self.processes:

@@ -46,6 +46,13 @@ broray_uri_component_decode() {
     local rest pair prefix
     [ "$#" = 1 ] || return 1
     # Validate the whole component before emitting any decoded bytes.
+    # Shell strings cannot retain NUL; command substitution drops trailing LF.
+    # Reject unrepresentable results before emitting bytes. Internal whitespace
+    # must remain valid for formatted JSON components such as extra and fm.
+    case "$1" in
+        *'
+') echo 'Ошибка: завершающий перевод строки в URI не поддерживается' >&2; return 1 ;;
+    esac
     rest="$1"
     while :; do
         case "$rest" in
@@ -53,6 +60,8 @@ broray_uri_component_decode() {
             *) break ;;
         esac
         case "$rest" in
+            00*|0[aA])
+                echo 'Ошибка: NUL или завершающий перевод строки в URI не поддерживается' >&2; return 1 ;;
             [0-9a-fA-F][0-9a-fA-F]*) rest="${rest#??}" ;;
             *) echo 'Ошибка: некорректное percent-кодирование URI' >&2; return 1 ;;
         esac

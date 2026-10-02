@@ -36,7 +36,7 @@ class Integration(unittest.TestCase):
         self.wait_ready(p,marker)
         records=json.loads((self.op/'supervisors.json').read_text())['supervisors']
         self.assertEqual(len(records),1)
-        self.ledger=self.ram/'supervisors'/self.id/records[0]['supervisorId']/'children.json'
+        self.ledger=self.ram/'supervisors'/self.id/records[0]['supervisorId']/'children.json.current'
         return records[0]
     def drain(self):
         until=time.monotonic()+6
@@ -65,7 +65,7 @@ class Integration(unittest.TestCase):
         self.assertEqual(marker.read_text(),'entered')
         records=json.loads((self.op/'supervisors.json').read_text())['supervisors']
         self.assertEqual(len(records),1)
-        self.ledger=self.ram/'supervisors'/self.id/records[0]['supervisorId']/'children.json'
+        self.ledger=self.ram/'supervisors'/self.id/records[0]['supervisorId']/'children.json.current'
         self.verify_gone();self.drain();self.finish()
     def test_live_helper_blocks_commit_finish_and_drain(self):
         self.begin();marker=self.temp/'ready';p=self.launch(f'echo yes >"{marker}"; sleep 60')
@@ -94,9 +94,9 @@ class Integration(unittest.TestCase):
     def test_missing_ledger_does_not_release_fence(self):
         self.begin();marker=self.temp/'ready';p=self.launch(f'echo yes >"{marker}"; sleep 60')
         self.ready(p,marker);p.kill();p.communicate(timeout=5);self.verify_gone()
-        saved=self.ledger.read_bytes();self.ledger.unlink()
+        saved=self.ledger.read_bytes();saved_mode=self.ledger.stat().st_mode & 0o777;self.ledger.unlink()
         self.assertEqual(self.call('helpers-drain',self.id,self.token,expected=2)['errorCode'],'CHILDREN_UNCONFIRMED')
-        self.assertTrue((self.temp/'global.lock').exists());self.ledger.write_bytes(saved)
+        self.assertTrue((self.temp/'global.lock').exists());self.ledger.write_bytes(saved);self.ledger.chmod(saved_mode)
         self.drain();self.finish('failed','OPERATION_FAILED')
     def test_live_recorded_child_blocks_even_after_native_exit(self):
         self.begin();marker=self.temp/'ready';p=self.launch(f'echo yes >"{marker}"; sleep 60')

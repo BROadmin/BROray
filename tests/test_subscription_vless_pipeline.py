@@ -57,6 +57,31 @@ jq -nc --argjson rc "$rc" --arg code "${BRORAY_SUB_ERROR_CODE:-}" \
         result=json.loads(p.stdout)
         nodes=[json.loads(f.read_bytes()) for f in sorted((self.app/'stage').glob('*.json'))]
         return result,nodes
+
+    def test_uri_control_credentials_are_rejected_before_save(self):
+        for encoded in ['abc%0A','a%00b','abc%0a','abc%0A%0a']:
+            with self.subTest(encoded=encoded):
+                result,nodes=self.extract(('trojan://'+encoded+'@vpn.example.invalid:443?security=tls').encode())
+                self.assertEqual(result['accepted'],0,(result,nodes))
+                self.assertEqual(nodes,[])
+
+    def test_uri_decoder_preserves_printable_components(self):
+        for encoded,expected in [('a+b','a+b'),('a%2Bb','a+b'),('a%20b','a b'),('a%250Ab','a%0Ab'),('a%5Cb','a\\b')]:
+            result,nodes=self.extract(('trojan://'+encoded+'@vpn.example.invalid:443?security=tls').encode())
+            self.assertEqual(result['accepted'],1,result)
+            self.assertEqual(nodes[0]['password'],expected)
+    def test_uri_decoder_preserves_formatted_json(self):
+        extra={'noSSEHeader':True}
+        n,c=self.one(self.trojan_uri('type=xhttp&extra='+quote(json.dumps(extra,indent=2))))
+        self.assertEqual(n['transport']['extra'],extra)
+        self.assertEqual(c['streamSettings']['xhttpSettings']['extra'],extra)
+    def test_uri_decoder_rejects_loss_before_output(self):
+        for encoded in ['abc%00def','abc%0A','abc\n','a%GG']:
+            p=self.shell('. "$BRORAY_ROOT/lib/util.sh"; broray_uri_component_decode "$1"',encoded)
+            self.assertNotEqual(p.returncode,0);self.assertEqual(p.stdout,b'')
+        for encoded,expected in [('a%0Ab',b'a\nb'),('a%09b',b'a\tb')]:
+            p=self.shell('. "$BRORAY_ROOT/lib/util.sh"; value="$(broray_uri_component_decode "$1")" || exit 1; printf "%s" "$value"',encoded)
+            self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(p.stdout,expected)
     def generate(self,node):
         (self.app/'servers'/f"{node['id']}.json").write_text(json.dumps(node),encoding='utf-8')
         p=self.shell('. "$BRORAY_ROOT/lib/server-config-generator.sh"; broray_generate_server_config "$1"',node['id'])

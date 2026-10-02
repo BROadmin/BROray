@@ -34,7 +34,7 @@ class ActualHandoff(unittest.TestCase):
         while time.monotonic()<until:
             try:return p.communicate(timeout=.1)
             except subprocess.TimeoutExpired:pass
-            for ledger in self.ram.glob('supervisors/*/*/children.json'):
+            for ledger in self.ram.glob('supervisors/*/*/children.json.current'):
                 try:data=json.loads(ledger.read_text())
                 except (FileNotFoundError,json.JSONDecodeError):continue
                 for child in data['children']:

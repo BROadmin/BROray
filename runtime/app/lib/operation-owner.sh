@@ -1,6 +1,53 @@
 #!/opt/bin/ash
 # Identity snapshots only. This module never sends process signals.
 
+broray_ops_supervisor_ledger_view()
+(
+    ledger="$1"; mode="${2:-live}"
+    case "$mode" in live|finished|absent) ;; *) exit 1 ;; esac
+    [ -f "$ledger" ] && [ ! -L "$ledger" ] || exit 1
+    policy="$(jq -er '.ledgerPolicy // "legacy"' "$ledger")" || exit 1
+    if [ "$policy" = legacy ]; then
+        [ ! -e "$ledger.anchor" ] && [ ! -L "$ledger.anchor" ] &&
+          [ ! -e "$ledger.current" ] && [ ! -L "$ledger.current" ] &&
+          [ ! -e "$ledger.terminal" ] && [ ! -L "$ledger.terminal" ] || exit 1
+        printf '%s\n' "$ledger"; exit 0
+    fi
+    [ "$policy" = sealed-boundaries/2 ] || exit 1
+    for record in "$ledger" "$ledger.current"; do
+        [ -f "$record" ] && [ ! -L "$record" ] || exit 1
+        [ "$(broray_ops_file_stat -c '%u:%a:%h' "$record")" = '0:600:1' ] || exit 1
+        [ "$(wc -c <"$record")" -le 65536 ] || exit 1
+    done
+    jq -e --slurpfile anchor "$ledger" '
+      . as $current | ($anchor|length)==1 and
+      $anchor[0]==({schemaVersion:1,ledgerPolicy:"sealed-boundaries/2",
+        operationId:$current.operationId,supervisorId:$current.supervisorId,
+        supervisorPid:$current.supervisorPid,supervisorStartTicks:$current.supervisorStartTicks,
+        bootId:$current.bootId,revision:1,state:"gated",termSent:false,killTriggered:false,children:[]}) and
+      .schemaVersion==1 and .ledgerPolicy=="sealed-boundaries/2" and (.revision|type)=="number" and .revision>=1
+    ' "$ledger.current" >/dev/null || exit 1
+    # An interrupted tracer may leave a valid nonterminal projection. It is
+    # evidence for the caller's fresh /proc absence proof, never successful
+    # completion. Requiring a completion record after SIGKILL would strand
+    # every such operation. Final states always require their sealed record.
+    if [ "$mode" = absent ]; then
+        case "$(jq -er .state "$ledger.current")" in
+            gated|running|stopping|armed) mode=live ;;
+            *) mode=finished ;;
+        esac
+    fi
+    if [ "$mode" = finished ]; then
+        [ -f "$ledger.terminal" ] && [ ! -L "$ledger.terminal" ] || exit 1
+        [ "$(broray_ops_file_stat -c '%u:%a:%h' "$ledger.terminal")" = '0:600:1' ] || exit 1
+        [ "$(wc -c <"$ledger.terminal")" -le 65536 ] || exit 1
+        cmp -s "$ledger.current" "$ledger.terminal" || exit 1
+        printf '%s\n' "$ledger.terminal"
+    else
+        printf '%s\n' "$ledger.current"
+    fi
+)
+
 broray_ops_owner_valid()
 {
     jq -e 'type=="object" and (.pid|type)=="number" and .pid>1 and

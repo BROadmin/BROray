@@ -37,7 +37,11 @@ if [ "${QA_FAIL_COMMIT:-0}" = 1 ]; then
    if [ "${QA_FAIL_SECOND:-0}" = 1 ] && [ ! -f "$BRORAY_ROOT/fault-first-written" ]; then
      : > "$BRORAY_ROOT/fault-first-written"; command cp "$@"; return $?
    fi
-   return 1 ;; *) command cp "$@" ;; esac; }
+   return 1 ;; *)
+   if [ "${QA_FAIL_RESTORE:-0}" = 1 ]; then
+     case "$1" in */backup/live/*.json|*/backup/disabled/*.json) return 1 ;; esac
+   fi
+   command cp "$@" ;; esac; }
 fi
 BRORAY_ACTIVE_SERVER_FILE="$BRORAY_ROOT/active"
 broray_server_subscription_sync test "$BRORAY_ROOT/stage" "$1" qa-update "$2"
@@ -120,6 +124,29 @@ broray_server_subscription_sync test "$BRORAY_ROOT/stage" "$1" qa-update "$2"
   manual=node('manual',id='collision');manual['source']={'type':'manual'};self.store(manual);self.store(node('new',id='collision'),'stage');before=self.catalog();self.sync(ok=False);self.assertEqual(before,self.catalog())
  def test_commit_failure_restores_exact_catalog(self):
   self.store(node('old'));self.store(node('new'),'stage');before=self.catalog();self.env['QA_FAIL_COMMIT']='1';self.sync(ok=False);self.assertEqual(before,self.catalog());self.assertFalse(list((self.app/'tmp').glob('server-subscription-sync.*')))
+ def test_failed_rollback_preserves_backup_and_existing_nodes(self):
+  originals={}
+  for k in ['aa','bb']:
+   f=self.store(node(k,id=k,password='credential-A'));originals[f.name]=f.read_bytes()
+   self.store(node(k,id=k,password='credential-B'),'stage')
+  self.env.update(QA_FAIL_COMMIT='1',QA_FAIL_SECOND='1',QA_FAIL_RESTORE='1')
+  error=self.sync('replace',ok=False)
+  self.assertIn('SERVER_SYNC_ROLLBACK_FAILED',error)
+  self.assertEqual(len(list((self.app/'servers').glob('*.json'))),2)
+  work=list((self.app/'tmp').glob('server-subscription-sync.*'));self.assertEqual(len(work),1)
+  self.assertEqual({p.name:p.read_bytes() for p in (work[0]/'backup/live').glob('*.json')},originals)
+  self.assertTrue((work[0]/'rollback-required').exists())
+  before=self.catalog();self.env.pop('QA_FAIL_COMMIT');self.env.pop('QA_FAIL_SECOND');self.env.pop('QA_FAIL_RESTORE')
+  self.assertIn('SERVER_SYNC_RECOVERY_REQUIRED',self.sync('replace',ok=False));self.assertEqual(self.catalog(),before)
+ def test_initial_same_topology_distinct_credentials(self):
+  for key,credential in [('a','credential-A'),('b','credential-B')]:self.store(node('same',id=key,password=credential),'stage')
+  r=self.sync('replace');self.assertEqual(r['added'],2)
+  self.assertEqual({json.loads(p.read_bytes())['uuid'] for p in (self.app/'servers').glob('*.json')},{'credential-A','credential-B'})
+  r=self.sync('replace');self.assertEqual(r['unchanged'],2)
+ def test_removed_topology_variants_are_not_rotation_ambiguity(self):
+  for key,credential in [('a','credential-A'),('b','credential-B')]:self.store(node('same',id=key,password=credential))
+  self.store(node('other'),'stage');r=self.sync('replace')
+  self.assertEqual(r['removed'],2);self.assertEqual(r['added'],1)
  def test_private_work_removed_after_success(self):
   self.store(node('old'));self.store(node('new'),'stage');self.sync();self.assertFalse(list((self.app/'tmp').glob('server-subscription-sync.*')))
  def test_second_commit_failure_restores_already_changed_node(self):

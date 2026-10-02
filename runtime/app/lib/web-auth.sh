@@ -99,7 +99,40 @@ broray_session_file() {
     printf '%s/%s\n' "$BRORAY_SESSION_DIR" "$token"
 }
 
-broray_session_create() {
+broray_session_serialized() {
+    # Reuse the bundled kernel flock guard. A crashed request releases its
+    # descriptor automatically; this file must never be unlinked by cleanup.
+    "$BRORAY_BASE/bin/broray-ops-guard" "$BRORAY_SESSION_DIR.guard" /opt/bin/ash -c '
+        . "$1" || exit 1
+        case "$2" in
+            create) broray_session_create_locked "$3" ;;
+            delete) broray_session_delete_locked "$3" ;;
+            cleanup) broray_sessions_cleanup_locked ;;
+            validate)
+                broray_session_validate_locked "$3" || exit 1
+                jq -nc --arg username "$BRORAY_SESSION_USERNAME" --argjson expires "$BRORAY_SESSION_EXPIRES" \
+                    "{username:\$username,expires:\$expires}" ;;
+            *) exit 1 ;;
+        esac
+    ' session "$BRORAY_BASE/lib/web-auth.sh" "$1" "${2:-}"
+}
+
+broray_session_create() { broray_session_serialized create "$1"; }
+broray_sessions_cleanup() { broray_session_serialized cleanup; }
+broray_session_delete() {
+    broray_valid_token "$1" || return 0
+    broray_session_serialized delete "$1"
+}
+broray_session_validate() {
+    local result
+    broray_valid_token "$1" || return 1
+    result="$(broray_session_serialized validate "$1")" || return 1
+    BRORAY_SESSION_USERNAME="$(printf '%s\n' "$result" | jq -er .username)" || return 1
+    BRORAY_SESSION_EXPIRES="$(printf '%s\n' "$result" | jq -er .expires)" || return 1
+    export BRORAY_SESSION_USERNAME BRORAY_SESSION_EXPIRES
+}
+
+broray_session_create_locked() {
     username="$1"
     token="$(broray_random_token)"
 
@@ -128,13 +161,15 @@ broray_session_create() {
             return 1
         }
 
-    chmod 600 "$temporary"
-    mv "$temporary" "$session_file"
+    chmod 600 "$temporary" && mv "$temporary" "$session_file" || {
+        rm -f "$temporary"
+        return 1
+    }
 
     printf '%s\n' "$token"
 }
 
-broray_session_validate() {
+broray_session_validate_locked() {
     session_token="$1"
 
     broray_valid_token "$session_token" || return 1
@@ -188,8 +223,10 @@ broray_session_validate() {
             return 1
         }
 
-    chmod 600 "$temporary"
-    mv "$temporary" "$session_file"
+    chmod 600 "$temporary" && mv "$temporary" "$session_file" || {
+        rm -f "$temporary"
+        return 1
+    }
 
     BRORAY_SESSION_USERNAME="$username"
     BRORAY_SESSION_EXPIRES="$new_expires"
@@ -214,7 +251,7 @@ broray_session_require() {
     export BRORAY_SESSION_TOKEN
 }
 
-broray_session_delete() {
+broray_session_delete_locked() {
     token="$1"
 
     broray_valid_token "$token" || return 0
@@ -223,10 +260,12 @@ broray_session_delete() {
     rm -f "$session_file"
 }
 
-broray_sessions_cleanup() {
+broray_sessions_cleanup_locked() {
     now="$(date +%s)"
 
     for session_file in "$BRORAY_SESSION_DIR"/*; do
+        broray_valid_token "${session_file##*/}" || continue
+        [ ! -L "$session_file" ] || continue
         [ -f "$session_file" ] || continue
 
         expires="$(

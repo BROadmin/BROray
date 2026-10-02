@@ -10,7 +10,11 @@ if [ "${REQUEST_METHOD:-}" != "POST" ]; then
 fi
 
 token="$(broray_cookie_value BRORAY_SESSION)"
-broray_session_delete "$token"
+if ! broray_session_delete "$token"; then
+    broray_json_response "503 Service Unavailable" \
+        '{"ok":false,"error":"SESSION_REVOKE_FAILED","message":"Не удалось завершить сессию. Повторите выход."}'
+    exit 0
+fi
 
 printf 'Status: 200 OK\r\n'
 printf 'Content-Type: application/json; charset=utf-8\r\n'

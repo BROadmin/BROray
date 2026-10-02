@@ -60,7 +60,7 @@ class BoundStop(ServiceBinding):
   self.assertNotEqual(r.returncode,0);self.assertIsNone(service.poll());self.assertFalse(self.events.exists())
  def assert_bound_tree_quiet(self):
   marker=self.native_marker();op=self.operation()
-  ledger=self.home/'ram/supervisors'/op.name/marker['supervisorId']/'children.json'
+  ledger=self.home/'ram/supervisors'/op.name/marker['supervisorId']/'children.json.current'
   children=json.loads(ledger.read_text())['children'];deadline=time.monotonic()+6
   while True:
    live=[]

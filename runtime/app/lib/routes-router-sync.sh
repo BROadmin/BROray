@@ -14,6 +14,8 @@ BRORAY_SYNC_NDMC="${BRORAY_SYNC_NDMC:-ndmc}"
 case "$BRORAY_SYNC_NDMC" in ndmc|/bin/ndmc) BRORAY_SYNC_NDMC="$BRORAY_ROOT/bin/broray-system-ndmc" ;; esac
 BRORAY_SYNC_ACTIVE_PID=""
 BRORAY_SYNC_WORK=""
+BRORAY_SYNC_KEEP_WORK=false
+BRORAY_SYNC_KEEP_LOCK=false
 BRORAY_SYNC_ADDED_FILE=""
 BRORAY_SYNC_DELETED_FILE=""
 BRORAY_SYNC_LOCAL_BACKUP=""
@@ -184,21 +186,21 @@ broray_routes_sync_restore_local()
 {
     local registry bundle state plan result
 
-    [ -d "$BRORAY_SYNC_LOCAL_BACKUP" ] || return 0
+    [ -d "$BRORAY_SYNC_LOCAL_BACKUP" ] || return 1
     registry="$BRORAY_SYNC_ROUTES/installed/routes.json"
     bundle="$BRORAY_SYNC_ROUTES/installed/bundles/$BRORAY_SYNC_BUNDLE.json"
     state="$BRORAY_SYNC_ROUTES/state/$BRORAY_SYNC_BUNDLE.json"
     plan="$BRORAY_SYNC_ROUTES/catalog/$BRORAY_SYNC_BUNDLE/export-plan.json"
     result="$BRORAY_SYNC_ROUTES/catalog/$BRORAY_SYNC_BUNDLE/router-export-result.json"
 
-    cp -p "$BRORAY_SYNC_LOCAL_BACKUP/routes.json" "$registry" 2>/dev/null || true
-    cp -p "$BRORAY_SYNC_LOCAL_BACKUP/bundle.json" "$bundle" 2>/dev/null || true
-    cp -p "$BRORAY_SYNC_LOCAL_BACKUP/state.json" "$state" 2>/dev/null || true
-    cp -p "$BRORAY_SYNC_LOCAL_BACKUP/export-plan.json" "$plan" 2>/dev/null || true
+    broray_route_restore_file "$BRORAY_SYNC_LOCAL_BACKUP/routes.json" "$registry" || return 1
+    broray_route_restore_file "$BRORAY_SYNC_LOCAL_BACKUP/bundle.json" "$bundle" || return 1
+    broray_route_restore_file "$BRORAY_SYNC_LOCAL_BACKUP/state.json" "$state" || return 1
+    broray_route_restore_file "$BRORAY_SYNC_LOCAL_BACKUP/export-plan.json" "$plan" || return 1
     if [ -f "$BRORAY_SYNC_LOCAL_BACKUP/result.missing" ]; then
-        rm -f "$result" 2>/dev/null || true
+        rm -f "$result" || return 1
     elif [ -f "$BRORAY_SYNC_LOCAL_BACKUP/router-export-result.json" ]; then
-        cp -p "$BRORAY_SYNC_LOCAL_BACKUP/router-export-result.json" "$result" 2>/dev/null || true
+        broray_route_restore_file "$BRORAY_SYNC_LOCAL_BACKUP/router-export-result.json" "$result" || return 1
     fi
 }
 
@@ -580,7 +582,8 @@ broray_routes_sync_rollback_router()
 broray_routes_sync_cleanup()
 {
     broray_routes_sync_kill_active
-    broray_routes_sync_lock_release
+    [ "$BRORAY_SYNC_KEEP_LOCK" = true ] || broray_routes_sync_lock_release
+    [ "$BRORAY_SYNC_KEEP_WORK" != true ] || return 0
     [ -n "$BRORAY_SYNC_WORK" ] && rm -rf "$BRORAY_SYNC_WORK" 2>/dev/null || true
     BRORAY_SYNC_WORK=""
 }
@@ -906,11 +909,13 @@ broray_routes_sync_abort()
     trap - EXIT HUP INT TERM
     if [ "$BRORAY_SYNC_ROLLING_BACK" = false ]; then
         BRORAY_SYNC_ROLLING_BACK=true
-        [ -n "$BRORAY_SYNC_LOCAL_BACKUP" ] && [ -d "$BRORAY_SYNC_LOCAL_BACKUP" ] && broray_routes_sync_restore_local
-        rollback_ok=false
-        if broray_routes_sync_rollback_router; then
-            rollback_ok=true
-        else
+        rollback_ok=true
+        if [ -n "$BRORAY_SYNC_LOCAL_BACKUP" ] && ! broray_routes_sync_restore_local; then
+            rollback_ok=false
+            message="$message Локальные данные не восстановлены; резервная копия сохранена."
+        fi
+        if ! broray_routes_sync_rollback_router; then
+            rollback_ok=false
             message="$message Откат маршрутов не подтверждён running/startup-config."
         fi
         if [ "$rollback_ok" = true ] && [ "$BRORAY_SYNC_RESUMED" = true ]; then
@@ -929,8 +934,9 @@ broray_routes_sync_abort()
                 "$message Изменения операции отменены." true >/dev/null 2>&1 || true
         fi
         if [ "$rollback_ok" != true ]; then
+            BRORAY_SYNC_KEEP_WORK=true
             broray_routes_sync_transaction_write "rollback_failed" "$message" >/dev/null 2>&1 || true
-            broray_routes_sync_rollback_marker_write "$message" >/dev/null 2>&1 || true
+            broray_route_rollback_required "$BRORAY_SYNC_ROUTES" "$BRORAY_SYNC_WORK" "$message" || BRORAY_SYNC_KEEP_LOCK=true
             broray_routes_sync_progress_fail \
                 "$message Требуется восстановление; новые изменения маршрутов заблокированы." false >/dev/null 2>&1 || true
         fi

@@ -49,6 +49,7 @@ if [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ]; then
     case "$sid" in ''|*[!0-9a-f]*) exit 73 ;; esac
     [ "${#sid}" = 32 ] || exit 73
     ledger="${BRORAY_OPS_RAM_ROOT:-/tmp/broray-operations}/supervisors/$id/$sid/children.json"
+    ledger="$(broray_ops_supervisor_ledger_view "$ledger" live)" || exit 73
     [ -f "$ledger" ] && [ ! -L "$ledger" ] && [ "$(wc -c <"$ledger")" -le 65536 ] || exit 73
     # Both the lease owner and this publisher must be members of the same
     # traced tree. A copied token/context or caller PID cannot create a lease.
@@ -64,6 +65,7 @@ fi
 case "$action" in
   acquire)
     [ "$#" = 2 ] || exit 64
+    [ ! -e "$parent/../rollback-required.json" ] && [ ! -L "$parent/../rollback-required.json" ] || exit 74
     operation="$1"; bundle="$2"
     case "$operation" in check|download|build-export|preflight|sync|export|delete|user-import) ;; *) exit 64 ;; esac
     case "$bundle" in *[!a-z0-9_-]*) exit 64 ;; esac

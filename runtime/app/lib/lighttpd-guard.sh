@@ -464,7 +464,10 @@ broray_lighttpd_guard_adopt_transient()
        ! broray_lighttpd_guard_stop_default ||
        ! broray_lighttpd_guard_wait_port80
     then
-        broray_lighttpd_guard_restore_original >/dev/null 2>&1 || true
+        if ! broray_lighttpd_guard_restore_original; then
+            broray_lighttpd_guard_log 'LIGHTTPD_GUARD_RESTORE=FAIL original-preserved'
+            return 1
+        fi
         rm -rf "$BRORAY_LIGHTTPD_GUARD_ROOT" 2>/dev/null || true
         return 1
     fi

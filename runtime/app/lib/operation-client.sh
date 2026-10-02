@@ -134,7 +134,10 @@ broray_ops_call()
 
 broray_ops_begin()
 {
-    local response rc attempt id token
+    local response rc attempt id token pid rest
+    # ash retains its parent's $$ in (...) functions. Bind admission and ack
+    # to the actual executor, as owner-bound finish already does.
+    IFS=' ' read -r pid rest </proc/self/stat || return 73
     # Keep this private nonce until finish. Retrying a lost response must recover
     # the same launch, including across a date boundary, without another claim.
     if [ -z "${BRORAY_BACKGROUND_LAUNCH_NONCE:-}" ]; then
@@ -143,7 +146,7 @@ broray_ops_begin()
     attempt=0
     while [ "$attempt" -lt 3 ]; do
         attempt=$((attempt+1)); rc=0
-        response="$(broray_ops_call begin "$1" "$2" "${3:-}" "${4:-USER}" "$$" "${5:-protected}" "$BRORAY_BACKGROUND_LAUNCH_NONCE")" || rc=$?
+        response="$(broray_ops_call begin "$1" "$2" "${3:-}" "${4:-USER}" "$pid" "${5:-protected}" "$BRORAY_BACKGROUND_LAUNCH_NONCE")" || rc=$?
         if [ "$rc" = 0 ] && printf '%s\n' "$response" | broray_ops_response_valid token; then break; fi
         # A structured rejection is final. Retry only unavailable responses.
         [ "$rc" != 0 ] || rc=1
@@ -158,7 +161,7 @@ broray_ops_begin()
     attempt=0
     while [ "$attempt" -lt 3 ]; do
         attempt=$((attempt+1))
-        broray_ops_call ack "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "$$" >/dev/null && return 0
+        broray_ops_call ack "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "$pid" >/dev/null && return 0
     done
     # The caller must exit on failure; it has no permission to execute its job.
     return 1
@@ -256,12 +259,13 @@ broray_ops_run_helper()
 
 broray_ops_handoff_to()
 {
-    local attempt response rc
+    local attempt response rc pid rest
     [ "$#" = 2 ] && [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || return 64
+    IFS=' ' read -r pid rest </proc/self/stat || return 73
     attempt=0
     while [ "$attempt" -lt 3 ]; do
         attempt=$((attempt+1)); rc=0
-        response="$(broray_ops_call handoff "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "$$" "$1" "$2")" || rc=$?
+        response="$(broray_ops_call handoff "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "$pid" "$1" "$2")" || rc=$?
         if [ "$rc" = 0 ] && printf '%s\n' "$response" | broray_ops_response_valid transfer; then
             unset BRORAY_BACKGROUND_OPERATION_ID BRORAY_BACKGROUND_OPERATION_TOKEN BRORAY_BACKGROUND_LAUNCH_NONCE
             return 0
@@ -274,12 +278,13 @@ broray_ops_handoff_to()
 
 broray_ops_accept_handoff()
 {
-    local attempt response rc token
+    local attempt response rc token pid rest
     [ "$#" = 1 ] && [ -n "${BRORAY_BACKGROUND_OPERATION_ID:-}" ] || return 64
+    IFS=' ' read -r pid rest </proc/self/stat || return 73
     attempt=0
     while [ "$attempt" -lt 10 ]; do
         attempt=$((attempt+1)); rc=0
-        response="$(broray_ops_call accept-handoff "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "$$" "$1")" || rc=$?
+        response="$(broray_ops_call accept-handoff "$BRORAY_BACKGROUND_OPERATION_ID" "$BRORAY_BACKGROUND_OPERATION_TOKEN" "$pid" "$1")" || rc=$?
         if [ "$rc" = 0 ] && printf '%s\n' "$response" | broray_ops_response_valid token; then
             token="$(printf '%s\n' "$response" | jq -er '.token')" || return 1
             BRORAY_BACKGROUND_OPERATION_TOKEN="$token"; export BRORAY_BACKGROUND_OPERATION_TOKEN
@@ -295,8 +300,9 @@ broray_ops_accept_handoff()
 # Maintenance admission only: does not stop/install/start a platform or enqueue.
 broray_ops_preflight_admit()
 {
-    local expected app code guard live_guard protocol response rc attempt id token
+    local expected app code guard live_guard protocol response rc attempt id token pid rest
     [ "$#" = 1 ] || return 64
+    IFS=' ' read -r pid rest </proc/self/stat || return 73
     expected="$1"
     case "$expected" in ''|*[!0-9a-f]*) return 64 ;; esac
     [ "${#expected}" -eq 64 ] || return 64
@@ -324,7 +330,7 @@ broray_ops_preflight_admit()
     attempt=0
     while [ "$attempt" -lt 3 ]; do
         attempt=$((attempt+1)); rc=0
-        response="$(broray_ops_call platform-preflight-begin "$expected" "$$" "$BRORAY_BACKGROUND_LAUNCH_NONCE")" || rc=$?
+        response="$(broray_ops_call platform-preflight-begin "$expected" "$pid" "$BRORAY_BACKGROUND_LAUNCH_NONCE")" || rc=$?
         if [ "$rc" = 0 ] && printf '%s\n' "$response" | broray_ops_response_valid token; then break; fi
         [ "$rc" != 0 ] || rc=1
         if printf '%s\n' "$response" | jq -e '.ok==false' >/dev/null 2>&1; then rc=2; break; fi
@@ -338,7 +344,7 @@ broray_ops_preflight_admit()
     attempt=0
     while [ "$attempt" -lt 3 ]; do
         attempt=$((attempt+1)); rc=0
-        response="$(broray_ops_call ack "$id" "$token" "$$")" || rc=$?
+        response="$(broray_ops_call ack "$id" "$token" "$pid")" || rc=$?
         if [ "$rc" = 0 ] && printf '%s\n' "$response" | jq -es \
           'length==1 and .[0].ok==true and .[0].acknowledged==true' >/dev/null 2>&1; then return 0; fi
         printf '%s\n' "$response" | jq -e '.ok==false' >/dev/null 2>&1 && break

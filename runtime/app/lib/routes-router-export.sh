@@ -919,21 +919,21 @@ broray_routes_router_export_restore_local()
     result="$5"
     original="$6"
 
-    [ -d "$original" ] || return 0
+    [ -d "$original" ] || return 1
 
-    cp -p "$original/routes.json" "$registry" 2>/dev/null || true
-    cp -p "$original/bundle.json" "$bundle_registry" 2>/dev/null || true
-    cp -p "$original/state.json" "$state" 2>/dev/null || true
-    cp -p "$original/export-plan.json" "$plan" 2>/dev/null || true
+    broray_route_restore_file "$original/routes.json" "$registry" || return 1
+    broray_route_restore_file "$original/bundle.json" "$bundle_registry" || return 1
+    broray_route_restore_file "$original/state.json" "$state" || return 1
+    broray_route_restore_file "$original/export-plan.json" "$plan" || return 1
 
     if [ -f "$original/result-did-not-exist" ]; then
-        rm -f "$result" 2>/dev/null || true
+        rm -f "$result" || return 1
     elif [ -f "$original/router-export-result.json" ]; then
-        cp -p \
+        broray_route_restore_file \
             "$original/router-export-result.json" \
             "$result" \
             2>/dev/null ||
-            true
+            return 1
     fi
 
     BRORAY_ROUTES_ROUTER_EXPORT_LOCAL_COMMITTED=false
@@ -1022,6 +1022,8 @@ broray_routes_router_export_rollback_created()
 
 broray_routes_router_export_cleanup()
 {
+    local rollback_failed
+    rollback_failed=false
     trap - EXIT HUP INT TERM
 
     broray_routes_router_export_kill_active
@@ -1034,14 +1036,21 @@ broray_routes_router_export_cleanup()
                 "$BRORAY_ROUTES_ROUTER_EXPORT_STATE" \
                 "$BRORAY_ROUTES_ROUTER_EXPORT_PLAN" \
                 "$BRORAY_ROUTES_ROUTER_EXPORT_RESULT_PATH" \
-                "$BRORAY_ROUTES_ROUTER_EXPORT_ORIGINAL_DIR"
+                "$BRORAY_ROUTES_ROUTER_EXPORT_ORIGINAL_DIR" || rollback_failed=true
         fi
 
         if ! broray_routes_router_export_rollback_created; then
+            rollback_failed=true
             echo "ОШИБКА: откат маршрутов не подтверждён running/startup-config." >&2
         fi
     fi
 
+    if [ "$rollback_failed" = true ]; then
+        echo 'ОШИБКА: восстановление не завершено; резервные копии сохранены.' >&2
+        broray_route_rollback_required "$BRORAY_ROUTES_ROOT" "$BRORAY_ROUTES_ROUTER_EXPORT_ACTIVE_WORK" 'Откат экспорта не завершён.' || return 1
+        broray_routes_router_export_lock_release
+        return 1
+    fi
     if [ -n "$BRORAY_ROUTES_ROUTER_EXPORT_ACTIVE_WORK" ]; then
         rm -rf \
             "$BRORAY_ROUTES_ROUTER_EXPORT_ACTIVE_WORK" \

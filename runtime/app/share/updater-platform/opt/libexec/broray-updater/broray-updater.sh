@@ -938,12 +938,43 @@ routes_resumable_pending()
 # malformed, oversized, non-directory and symlink objects are ambiguous and
 # therefore fail closed for the updater.  Only the owning coordinator may
 # recover or delete this namespace.
+global_operation_recover_admission()
+(
+    # Installed older apps may lack this command: retain their original
+    # refusal. Only the owning coordinator may retire a managed fence.
+    [ -f "$APP_ROOT/lib/operation-client.sh" ] &&
+    [ ! -L "$APP_ROOT/lib/operation-client.sh" ] || exit 1
+    BRORAY_ROOT="$APP_ROOT"
+    BRORAY_OPS_CODE_ROOT="$APP_ROOT"
+    BRORAY_STATE_ROOT="${OPERATION_ROOT%/operations}"
+    [ "$BRORAY_STATE_ROOT/operations" = "$OPERATION_ROOT" ] || exit 1
+    BRORAY_ROUTES_API_LOCK="$GLOBAL_OPERATION_LOCK"
+    BRORAY_OPS_UPDATER_ROOT="$STATE_ROOT"
+    BRORAY_LEGACY_GLOBAL_LOCK="$LEGACY_GLOBAL_OPERATION_LOCK"
+    export BRORAY_ROOT BRORAY_OPS_CODE_ROOT BRORAY_STATE_ROOT
+    export BRORAY_ROUTES_API_LOCK BRORAY_OPS_UPDATER_ROOT BRORAY_LEGACY_GLOBAL_LOCK
+    . "$APP_ROOT/lib/operation-client.sh"
+    response="$(broray_ops_call admission-recover)" || exit 1
+    printf '%s\n' "$response" | jq -es 'length==1 and .[0].ok==true' >/dev/null
+)
+
 global_operation_lock_classify()
 {
     local owner owner_bytes owner_lines
     GLOBAL_OPERATION_LOCK_STATE=absent
     if [ ! -e "$GLOBAL_OPERATION_LOCK" ] && [ ! -L "$GLOBAL_OPERATION_LOCK" ]; then
         return 0
+    fi
+    if [ -L "$GLOBAL_OPERATION_LOCK" ]; then
+        global_operation_recover_admission || {
+            GLOBAL_OPERATION_LOCK_STATE=coordinator-recovery-unconfirmed
+            return 1
+        }
+        # Recovery is not a reservation. A new owner may have acquired the
+        # fence after the guard was released; never treat that as admission.
+        if [ ! -e "$GLOBAL_OPERATION_LOCK" ] && [ ! -L "$GLOBAL_OPERATION_LOCK" ]; then
+            return 0
+        fi
     fi
     if [ ! -d "$GLOBAL_OPERATION_LOCK" ] || [ -L "$GLOBAL_OPERATION_LOCK" ]; then
         GLOBAL_OPERATION_LOCK_STATE=unsafe-object
