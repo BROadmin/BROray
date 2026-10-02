@@ -416,13 +416,17 @@ broray_server_summary()
        [ "$socks_active" = true ] &&
        [ "$connection_available" = true ] &&
        [ "$connection_up" = true ] &&
-       [ "$connection_current" = true ] &&
-       [ "$keenetic_healthy" = true ] &&
-       [ "$keenetic_current" = true ]
+       [ "$connection_current" = true ]
     then
+        # The current SOCKS HTTPS probe confirms the server connection.
+        # Router integration freshness remains an independent health warning.
         connection_state=connected
-        health_operational=true
-        health_consistent="$keenetic_consistent"
+        health_operational=false
+        health_consistent=false
+        if [ "$keenetic_healthy" = true ] && [ "$keenetic_current" = true ]; then
+            health_operational=true
+            health_consistent="$keenetic_consistent"
+        fi
     elif [ "$active_present" != true ]; then
         connection_state=disabled
         health_operational=false
