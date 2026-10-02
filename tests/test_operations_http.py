@@ -2,7 +2,7 @@
 
 Runs in the disposable Linux VM only. No router, HTTP server or network access.
 """
-import json, os, subprocess, time, unittest, uuid
+import json, os, shutil, subprocess, time, unittest, uuid
 from pathlib import Path
 from test_operations import Operations, APP, BB, WORKSPACE
 
@@ -12,6 +12,12 @@ class HTTP(unittest.TestCase):
         self.ops.call('pause');self.ops.call('resume')
         self.token='c'*64
         self.base=self.ops.temp/'auth'
+        # Current session validation executes under the real native guard.
+        # Match the private Sessions fixture; do not bypass authentication.
+        shutil.copytree(APP/'lib',self.base/'lib')
+        (self.base/'bin').mkdir()
+        shutil.copyfile(WORKSPACE/'.local/bin/linux-guard',self.base/'bin/broray-ops-guard')
+        (self.base/'bin/broray-ops-guard').chmod(0o755)
         sessions=self.base/'run/web-new/sessions';sessions.mkdir(parents=True)
         (sessions/self.token).write_text(json.dumps({'username':'fixture','expiresAt':int(time.time())+300,'lastActivity':int(time.time())}))
         self.env={**self.ops.env,'BRORAY_BASE':str(self.base),'HTTP_COOKIE':'BRORAY_SESSION='+self.token,

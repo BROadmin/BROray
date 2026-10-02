@@ -88,6 +88,14 @@ broray_routes_export_build_run()
     version_file="$catalog/version.json"
     state_file="$BRORAY_ROUTES_ROOT/state/$bundle_id.json"
 
+    case "$bundle_id" in
+        telegram|whatsapp|youtube|chatgpt|facebook|instagram|meta|tiktok|speedtest|wikipedia)
+            . "$BRORAY_ROOT/lib/routes-runtime-repair.sh" || return 1
+            broray_routes_runtime_catalog_valid "$bundle_id" ||
+                broray_routes_export_error "ROUTES_CATALOG_INVALID: локальный каталог повреждён или не скачан. Проверить обновления / Скачать заново."
+            ;;
+    esac
+
     [ -r "$bundles" ] ||
         broray_routes_export_error "Реестр разрешённых наборов недоступен."
 
