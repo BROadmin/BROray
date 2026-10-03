@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Решение проблем BROray</title>
-<meta name="description" content="Диагностика BROray по симптомам: WebUI, вход, серверы, подписки, маршруты, DNS-over-TLS, Xray и обновление.">
+<title>Проблемы и восстановление BROray</title>
+<meta name="description" content="Известные ошибки BROray: затронутые версии, причины, безопасные действия и проверка результата. Блокировка обновления, откат, WebUI и диагностика.">
 <link rel="canonical" href="https://docs.brovibe.cloud/broray/troubleshooting/">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -13,6 +13,7 @@
 <link rel="manifest" href="/site-manifest.json">
 <meta name="theme-color" content="#0d1213">
 <link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+<style>.recovery-guide :not(pre) > code { overflow-wrap: anywhere; } .recovery-command > .copy { float: none; margin: 0; } .recovery-guide .page-hero > div { min-width: 0; } @media (max-width: 560px) { .recovery-guide h1 { font-size: clamp(32px, 10vw, 43px); } .recovery-guide section, .recovery-guide details { scroll-margin-top: 200px; } }</style>
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
@@ -29,8 +30,95 @@
   </div>
 </header>
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/troubleshooting/" aria-current="page">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
-<main class="content" id="content">
-<section class="page-hero"><div><p class="eyebrow">Помощь</p><h1>Решение проблем</h1><p class="lead">Выберите то, что вы видите. Сначала выполняются безопасные проверки через WebUI; команды находятся ниже как расширенная диагностика.</p></div></section>
+<main class="content recovery-guide" id="content">
+<section class="page-hero"><div><p class="eyebrow">Помощь</p><h1>Проблемы и восстановление</h1><p class="lead">Найдите точное сообщение или выберите симптом. Для известных ошибок указаны затронутые версии, причина, доступные действия и способ проверки результата.</p></div></section>
+<section id="known-issues">
+<h2>Известные ошибки обновления</h2>
+<p>Проверено <time datetime="2026-10-01">1 октября 2026 года</time>. «Подтверждена» означает, что причина отказа установлена. Это не означает, что восстановление уже доступно. Для незакрытых случаев статус указан отдельно.</p>
+<div class="symptom-grid">
+<a href="#owner-publication-incomplete" class="symptom-card"><strong>Обновление не начинается</strong><span><code>owner-publication-incomplete</code> · восстановление пока не опубликовано.</span></a>
+<a href="#running-snapshot-failed" class="symptom-card"><strong>Обновление откатывается</strong><span><code>RUNNING_SNAPSHOT_FAILED</code> · требуется уточнить причину отказа запуска.</span></a>
+</div>
+</section>
+<section id="owner-publication-incomplete">
+<h2>Обновление не начинается: <code>owner-publication-incomplete</code></h2>
+<div class="note warning"><span class="note-title">Подтверждена · готового восстановителя пока нет</span><p>Повторное нажатие «Обновить» не исправляет повреждённую блокировку. Обычная перезагрузка сама по себе также не является проверенным способом её восстановления.</p></div>
+<p><strong>Где встречается:</strong> пользовательские случаи на <code>3.1.0-r09c02</code> и <code>3.1.1-r12c01</code>. Содержимое повреждённой блокировки получено с роутера на <code>3.1.0-r09c02</code>. Другие версии нельзя считать проверенными по этим двум случаям.</p>
+<p><strong>Сообщение:</strong> «Другая операция BROray активна или её блокировка неоднозначна: <code>owner-publication-incomplete</code>. [updater rc=1]».</p>
+<p><strong>Причина:</strong> каталог общей блокировки сохранился, а сведения о владельце отсутствуют. В подтверждённом случае остались только пустые файлы <code>action</code> и <code>bundle</code>. Старый updater отказывает до скачивания новой версии, поэтому исправление внутри нового архива не может попасть на уже заблокированную установку этим путём.</p>
+<h3>Что сделать сейчас</h3>
+<ol class="steps">
+<li>Сохраните точное сообщение, номер кандидата и журнал обновления со страницы BROray.</li>
+<li>Если доступен SSH Entware, сохраните результат <a href="#lock-readonly">проверки блокировки ниже</a>. Она только читает данные.</li>
+<li>Передайте сведения через <a href="https://github.com/BROadmin/BROray/issues" target="_blank" rel="noopener noreferrer">обращение об ошибке</a>, предварительно удалив секреты. Следите за статусом восстановления на этой странице.</li>
+</ol>
+<p><strong>Данные и перезагрузка:</strong> приведённая проверка не изменяет серверы, подписки, маршруты, DoT и настройки, не останавливает службы и не требует перезагрузки. Условия будущего восстановителя будут опубликованы после его проверки.</p>
+<p><strong>Не удаляйте блокировку вручную.</strong> Отсутствие PID не доказывает отсутствие работающей операции. Сообщение о действительно живом владельце требует другого разбора.</p>
+<p><strong>Как будет проверяться исправление:</strong> запрос обновления принимается, операция завершается успешно, WebUI показывает ожидаемый кандидат, пользовательские данные сохранены. Успех на незаблокированном роутере не закрывает этот случай. Сейчас такого результата для описанной установки нет.</p>
+<details class="advanced" id="lock-readonly"><summary>Проверка по SSH: версия и содержимое блокировки</summary>
+<p>Выполните в оболочке Entware. Команды не удаляют файлы и не запускают обновление. Сообщение «No such file or directory» означает, что соответствующий объект отсутствует; это само по себе не разрешение на ремонт.</p>
+<div class="light-code-block recovery-command"><button class="copy" type="button" aria-label="Копировать проверку блокировки">Копировать</button><pre><code>/opt/bin/ash &lt;&lt;'BRORAY_READ_ONLY'
+export PATH=/opt/bin:/opt/sbin:/bin:/sbin:/usr/bin:/usr/sbin
+export LC_ALL=C
+date -u
+uname -a
+cat /opt/broray/current/release.json
+for lock in /opt/var/lock/broray/global-operation.lock /tmp/broray-global-operation.lock /opt/var/lib/broray-updater/request.lock; do
+    printf '\nLOCK=%s\n' "$lock"
+    if [ -L "$lock" ]; then
+        ls -ld "$lock"
+        continue
+    fi
+    if [ -d "$lock" ]; then
+        ls -la "$lock"
+        for name in pid scope action bundle startedAt owner-identity.tsv; do
+            file="$lock/$name"
+            [ -f "$file" ] &amp;&amp; [ ! -L "$file" ] || continue
+            wc -c "$file"
+            sha256sum "$file"
+        done
+    else
+        ls -ld "$lock" 2&gt;&amp;1
+    fi
+done
+BRORAY_READ_ONLY</code></pre></div>
+</details>
+</section>
+<section id="running-snapshot-failed">
+<h2>Откат обновления: <code>RUNNING_SNAPSHOT_FAILED</code></h2>
+<div class="note warning"><span class="note-title">Подтверждён один из источников ошибки · проверка исправления продолжается</span><p>Общее сообщение <code>SERVICE_START_FAILED</code> обозначает отказ запуска службы. Причину нужно искать в строках перед ним.</p></div>
+<p><strong>Где встречается:</strong> при обновлении с 3.1.0 и 3.1.1 до ранних сборок 3.2.0, включая <code>3.2.0-r02c01</code> и <code>3.2.0-r03c01</code>. В журналах после <code>RUNNING_SNAPSHOT_FAILED</code> выполняется откат.</p>
+<p><strong>Подтверждённая причина:</strong> прежний код чтения конфигурации зависел от утилиты <code>timeout</code>, которой на части установок Entware нет. BusyBox может быть установлен без этого модуля. Увеличение времени ожидания не добавляет отсутствующую утилиту. Само сообщение <code>RUNNING_SNAPSHOT_FAILED</code> не доказывает именно эту причину: чтение конфигурации может завершиться другой ошибкой.</p>
+<h3>Что сделать сейчас</h3>
+<ol class="steps">
+<li>Сохраните журнал целиком, включая строки перед <code>SERVICE_START_FAILED</code> и итог отката.</li>
+<li>После <code>ROLLBACK=PASS</code> проверьте, что открывается прежний WebUI, работает VPN и доступны ваши серверы, подписки, маршруты и DoT. Если откат не завершился, передайте журнал в поддержку до новых изменений.</li>
+<li>При наличии SSH проверьте доступность утилиты командой ниже. Если она отсутствует, приложите результат к обращению.</li>
+</ol>
+<details class="advanced" id="timeout-readonly"><summary>Проверка по SSH: есть ли timeout</summary>
+<p>Проверка выводит доступные возможности и ничего не устанавливает.</p>
+<div class="light-code-block recovery-command"><button class="copy" type="button" aria-label="Копировать проверку timeout">Копировать</button><pre><code>/opt/bin/ash &lt;&lt;'BRORAY_TIMEOUT_CHECK'
+export PATH=/opt/bin:/opt/sbin:/bin:/sbin:/usr/bin:/usr/sbin
+if command -v timeout; then
+    printf 'standalone timeout: found\n'
+else
+    printf 'standalone timeout: not found\n'
+fi
+if [ -x /opt/bin/busybox ]; then
+    if /opt/bin/busybox --list | grep -x timeout; then
+        printf 'BusyBox timeout: found\n'
+    else
+        printf 'BusyBox timeout: not found\n'
+    fi
+else
+    printf '/opt/bin/busybox: not found\n'
+fi
+BRORAY_TIMEOUT_CHECK</code></pre></div>
+</details>
+<p><strong>Статус решения:</strong> в тестовых кандидатах зависимость заменена поставляемым исполнителем; проверка на стенде без внешнего <code>timeout</code> прошла. Повторное обновление на исходном проблемном роутере ещё не подтверждено. Это не рекомендация самостоятельно устанавливать тестовый кандидат.</p>
+<p><strong>Данные и перезагрузка:</strong> диагностика не меняет настройки и не требует перезагрузки. При самом обновлении и откате службы перезапускаются, поэтому возможен перерыв VPN.</p>
+<p><strong>Как проверить исправление:</strong> на установке без внешнего <code>timeout</code> обновление заканчивается успешно без отката, WebUI и VPN работают, пользовательские данные сохранены. Одного изменения номера версии или увеличения ожидания недостаточно.</p>
+</section>
 <section><h2>Выберите симптом</h2><div class="symptom-grid">
 <a href="#webui-down" class="symptom-card"><strong>WebUI не открывается</strong><span>Страница не загружается по LAN или KeenDNS.</span></a>
 <a href="#login" class="symptom-card"><strong>Не удаётся войти</strong><span>Ошибка авторизации или сессии.</span></a>
@@ -48,40 +136,40 @@
 <section id="subscription-fail"><h2>Подписка не обновляется</h2><p>Запустите обновление на странице «Подписки» и сохраните точный текст ошибки. Ссылка подписки является секретом: не публикуйте её в Issues, Telegram или скриншотах.</p></section>
 <section id="route-fail"><h2>Маршрут не работает</h2><ol class="steps"><li>Откройте нужный набор и выполните проверку локального состояния и фактического Keenetic.</li><li>Если интерфейс предлагает восстановление или продолжение операции, используйте штатное действие.</li><li>Не удаляйте чужие или общие маршруты вручную.</li></ol></section>
 <section id="dot-fail"><h2>Проблема с DNS-over-TLS</h2><p>Сначала выполните свежую TLS/SNI-проверку выбранных серверов, затем повторите применение. BROray удаляет только подтверждённые управляемые записи и сохраняет внешние DoT/DoH.</p></section>
-<section id="update-fail"><h2>Ошибка обновления</h2><ol class="steps"><li>Откройте страницу BROray и журнал текущей операции.</li><li>Не удаляйте lock-файлы вручную и не запускайте новую конфликтующую операцию.</li><li>При необходимости используйте штатное восстановление блокировки только после проверки владельца и процессов.</li></ol></section>
+<section id="update-fail"><h2>Ошибка обновления</h2><ol class="steps"><li>Откройте страницу BROray и сохраните журнал текущей операции.</li><li>Сопоставьте точное сообщение с <a href="#known-issues">известными ошибками выше</a>.</li><li>Если выполняется другая операция, дождитесь её результата. Не удаляйте lock-файлы вручную.</li><li>Используйте штатное восстановление только для поддерживаемого им случая. Для <a href="#owner-publication-incomplete">owner-publication-incomplete в старых версиях</a> готового восстановления пока нет.</li></ol></section>
 <details class="advanced" open><summary>Расширенная диагностика и данные для поддержки</summary>
 <section id="diagnostics">
     <h2>Проверка и диагностика</h2>
     <p>На странице BROray доступны фоновые операции, журнал и скачивание диагностического отчёта. Можно остановить отменяемые задачи и поставить автоматические запуски на паузу. Защищённые этапы маршрутов не прерываются.</p>
     <p>Восстановление освобождает блокировку только после проверки владельца и дочерних процессов. Если операция активна или её состояние неоднозначно, блокировка сохраняется. Восстановление самих маршрутов выполняется на страницах маршрутов.</p>
-    <pre><button class="copy" type="button" aria-label="Копировать команды диагностики">Копировать</button><code>/opt/broray/bin/broray-system info
+    <div class="light-code-block recovery-command"><button class="copy" type="button" aria-label="Копировать команды диагностики">Копировать</button><pre><code>/opt/broray/bin/broray-system info
 /opt/bin/broray-updaterctl version
 /opt/bin/broray-updaterctl check
 /opt/bin/broray-updaterctl status
 /opt/etc/init.d/S22broray-updater status
 /opt/etc/init.d/S23broray-monitor status
 /opt/etc/init.d/S24broray status
-/opt/etc/init.d/S25broray-web status</code></pre>
+/opt/etc/init.d/S25broray-web status</code></pre></div>
     <p>
-        Для текущего Stable ожидаются release <code>3.2.0-r01</code>, кандидат
-        <code>3.2.0-r01c37</code>, WebUI <code>WebUI-3.2.0-r01c37</code>, пакет
+        Для текущего Stable ожидаются release <code>3.2.0-r12</code>, кандидат
+        <code>3.2.0-r12c01</code>, WebUI <code>WebUI-3.2.0-r12c01</code>, пакет
         <code>3.0.0-r14</code>, <code>broray-updater/5</code>, канал Stable и
         отсутствие доступного обновления.
     </p>
 </section><section id="help">
-    <h2>7. Если что-то не получилось</h2>
+    <h2>Если что-то не получилось</h2>
     <h3>WebUI не открывается</h3>
     <ul>
-        <li>проверьте адрес <code>http://192.168.1.1:8080/</code>;</li>
+        <li>проверьте адрес <code>http://&lt;локальный-IP-роутера&gt;:8080/</code>; адрес <code>192.168.1.1</code> подходит только при такой настройке вашей сети;</li>
         <li>убедитесь, что устройство подключено к домашнему Keenetic;</li>
         <li>временно отключите мобильный интернет на телефоне;</li>
         <li>очистите кэш сайта или откройте страницу в другом браузере.</li>
     </ul>
 
     <h3>Проверьте службы</h3>
-    <pre><button class="copy" type="button" aria-label="Копировать команды диагностики">Копировать</button><code>/opt/etc/init.d/S24broray status
+    <div class="light-code-block recovery-command"><button class="copy" type="button" aria-label="Копировать команды диагностики">Копировать</button><pre><code>/opt/etc/init.d/S24broray status
 /opt/etc/init.d/S25broray-web status
-/opt/broray/bin/broray-system info</code></pre>
+/opt/broray/bin/broray-system info</code></pre></div>
 
     <h3>Что отправить в поддержку</h3>
     <p>Можно отправить модель Keenetic, версию KeeneticOS, версию BROray, текст ошибки и результат проверки служб.</p>
@@ -97,8 +185,8 @@
 </section></details>
 </main></div>
 <footer class="site-footer"><div class="footer-inner">
-<span>BROvibe Docs · BROray · Решение проблем</span>
+<span>BROvibe Docs · BROray · Проблемы и восстановление</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20260920-docs-r2"></script>
+<script src="/site.js?v=20261001-recovery"></script>
 </body></html>

@@ -6,6 +6,6 @@ for c in curl jq mktemp sha256sum awk; do
 done
 t="$(mktemp /tmp/broray-public-install.XXXXXXXX)"
 trap 'rm -f "$t"' EXIT
-curl -q -fL --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 'https://api.brovibe.cloud/releases/stable/broray/3.2.0-r01/INSTALL-ON-ROUTER.sh' -o "$t"
-[ "$(sha256sum "$t" | awk '{print $1}')" = 'f2301073a0a1e44b900593275dfd6922880e4a1a24c5efefbd96d564f9b8b8d8' ]
+curl -q -fL --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 'https://api.brovibe.cloud/releases/stable/broray/3.2.0-r12/INSTALL-ON-ROUTER.sh' -o "$t"
+[ "$(sha256sum "$t" | awk '{print $1}')" = '708ef201c6f8eab48fbb0896a7b464a64e16227b201bd5762b196e4574bdb35c' ]
 /opt/bin/ash "$t"

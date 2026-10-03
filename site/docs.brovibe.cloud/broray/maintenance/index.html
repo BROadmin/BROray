@@ -30,10 +30,11 @@
 </header>
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/" aria-current="page">Обслуживание</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
 <main class="content" id="content">
+<div class="note"><span class="note-title">Первый переход на новую платформу</span>При обновлении со старой платформы через WebUI выполняется одна автоматическая перезагрузка роутера. Дождитесь возвращения сети и WebUI. При чистой или терминальной установке сообщение <code>REBOOT_REQUIRED=YES</code> означает: перезагрузите Keenetic через его панель и повторите ту же установочную команду для завершения.</div>
 <section class="page-hero"><div><p class="eyebrow">Жизненный цикл</p><h1>Обслуживание BROray</h1><p class="lead">Обновление, переустановка, восстановление и удаление. Сначала — штатные действия WebUI; shell оставлен как аварийный путь.</p></div></section><section id="update">
     <h2>4. Обновление BROray</h2>
     <p><strong>Обновление BROray не заменяет установленный Xray.</strong> Для отдельного перехода на 26.9.9 откройте <strong>Xray → Проверить версии</strong>, выберите <strong>26.9.9</strong>, нажмите <strong>Установить</strong> и дождитесь результата. Если эта версия уже установлена, ничего делать не нужно.</p>
-    <p>Статус рядом с версией показывает совместимость с текущей сборкой BROray, без привязки к модели роутера. Непроверенная или предварительная версия требует подтверждения; понижение подтверждается отдельно. <strong>26.2.6 несовместима — установить её нельзя.</strong></p>
+    <p>Статус рядом с версией показывает совместимость с текущей сборкой BROray, без привязки к модели роутера. Непроверенная или предварительная версия требует подтверждения; понижение подтверждается отдельно. Для частично совместимой версии перед установкой показаны ограничения и запрашивается подтверждение.</p>
     <p>Обновление поддерживается с любой исправной версии BROray, начиная с <code>3.0.0-r1</code>. Серверы, подписки, маршруты, DNS-over-TLS, управляемый интерфейс и установленный Xray сохраняются.</p>
 
     <h3>Рекомендуемый способ через WebUI</h3>
@@ -52,8 +53,8 @@
     <p>Для уже актуального Stable нормальный результат выглядит так:</p>
     <pre><code>UPDATE_DECISION=already-current
 BRORAY_INSTALL=PASS
-CANDIDATE=3.2.0-r01c37
-RELEASE=3.2.0-r01</code></pre>
+CANDIDATE=3.2.0-r12c01
+RELEASE=3.2.0-r12</code></pre>
 </section><section id="reinstall">
     <h2>5. Переустановка текущей версии</h2>
     <ol class="steps">
@@ -149,5 +150,5 @@ ndmc -c 'system configuration save'</code></pre>
 <span>BROvibe Docs · BROray · Обслуживание</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20260920-docs-r2"></script>
+<script src="/site.js?v=20261001-recovery"></script>
 </body></html>

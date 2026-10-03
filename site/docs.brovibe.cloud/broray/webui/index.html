@@ -34,9 +34,9 @@
   <div>
     <p class="eyebrow">Проверено по релизным байтам</p>
     <h1>WebUI BROray 3.2.0</h1>
-    <p class="lead">Фактический интерфейс Stable 3.2.0-r01. Описание ниже собрано из HTML, JavaScript и CGI точного опубликованного app-bundle, а не из планов или исходников соседних кандидатов.</p>
+    <p class="lead">Фактический интерфейс Stable 3.2.0-r12. Описание ниже собрано из HTML, JavaScript и CGI точного опубликованного app-bundle, а не из планов или исходников соседних кандидатов.</p>
   </div>
-  <div class="release-state"><span class="status-dot" aria-hidden="true"></span>WebUI-3.2.0-r01c37</div>
+  <div class="release-state"><span class="status-dot" aria-hidden="true"></span>WebUI-3.2.0-r12c01</div>
 </section>
 
 <section id="navigation">
@@ -46,7 +46,7 @@
 <thead><tr><th>Экран</th><th>Что находится внутри</th></tr></thead>
 <tbody>
 <tr><td><strong>Вход</strong></td><td>Логин, пароль, показать/скрыть пароль, вход через сессионный API.</td></tr>
-<tr><td><strong>Главная</strong></td><td>Сводные карточки: Серверы, Подписки, DNS-over-TLS, Маршруты, Keenetic, Xray и BROray.</td></tr>
+<tr><td><strong>Главная</strong></td><td>Сводные карточки: Серверы, Подписки, Маршруты, Keenetic, Xray и BROray.</td></tr>
 <tr><td><strong>Серверы</strong></td><td>Импорт URI, проверка и подключение серверов, отключение VPN, качество, массовая проверка, автоматическое переключение.</td></tr>
 <tr><td><strong>Подписки</strong></td><td>Создание и изменение подписок, ручное и автоматическое обновление, просмотр полученных серверов, включение/отключение и удаление.</td></tr>
 <tr><td><strong>DNS-over-TLS</strong></td><td>Выбор DoT, TLS/SNI-проверка, применение в Keenetic, чтение фактических записей и контролируемое удаление.</td></tr>
@@ -82,7 +82,8 @@
 <div class="feature-grid">
 <article class="feature"><h3>Серверы</h3><p>Активный сервер, общее число серверов и качество.</p></article>
 <article class="feature"><h3>Подписки</h3><p>Состояние подписок, число включённых и количество полученных серверов.</p></article>
-<article class="feature"><h3>Маршруты</h3><p>Число установленных наборов, состояние обновления и DNS-over-TLS.</p></article>
+<article class="feature"><h3>DNS-over-TLS</h3><p>Выбранные серверы DNS, состояние проверки и применения.</p></article>
+<article class="feature"><h3>Маршруты</h3><p>Число установленных наборов и состояние обновления.</p></article>
 <article class="feature"><h3>Keenetic</h3><p>Состояние управляемого прокси-интерфейса, связь и рабочее состояние.</p></article>
 <article class="feature"><h3>Xray</h3><p>Состояние процесса, версия и конфигурация.</p></article>
 <article class="feature"><h3>BROray</h3><p>Версия приложения и состояние обновления.</p></article>
@@ -217,7 +218,8 @@
 <li><strong>Проверить версии</strong> получает официальный каталог;</li>
 <li>пользователь выбирает <strong>Версию для установки</strong>;</li>
 <li>переключатель <strong>Показать предварительные версии</strong> расширяет список;</li>
-<li>показывается статус совместимости конкретной версии; частичную совместимость можно подтвердить после чтения ограничений;</li>
+<li>показывается статус: <strong>Совместима с BROray</strong>, <strong>Частично совместима с BROray</strong> или <strong>Совместимость не проверялась</strong>;</li>
+<li>совместимость определяется результатами проверок компонентов BROray и конфигураций Xray; частично совместимая версия доступна после подтверждения показанных ограничений;</li>
 <li>кнопка динамически становится <strong>Установить VERSION</strong> или <strong>Переустановить VERSION</strong>;</li>
 <li>отдельно есть <strong>Переустановить текущую версию</strong>;</li>
 <li>непроверенная, предварительная версия и понижение требуют отдельных подтверждений.</li>
@@ -245,7 +247,7 @@
 <li>старые журналы — только архивы/ротации старше семи дней.</li>
 </ul>
 
-<h3>Фоновые операции</h3><p>Список операций и журнал можно свернуть. История завершённых операций ограничена; проверка активного подключения получает приоритет перед фоновой работой.</p>
+<h3>Фоновые операции</h3>
 <div class="link-list">
 <span class="card-link">Аварийное восстановление</span><span class="card-link">Обновить состояние</span><span class="card-link">Остановить фоновые операции</span><span class="card-link">Возобновить автоматику</span><span class="card-link">Обновить журнал</span><span class="card-link">Скопировать диагностику</span><span class="card-link">Скачать диагностический отчёт</span>
 </div>
@@ -262,5 +264,5 @@
 <span>BROvibe Docs · BROray · WebUI</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20260920-docs-r2"></script>
+<script src="/site.js?v=20261001-recovery"></script>
 </body></html>

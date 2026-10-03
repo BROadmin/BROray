@@ -8,7 +8,7 @@ TARGET_CANDIDATE=''
 TARGET_RELEASE=''
 TARGET_PACKAGE=''
 TARGET_WEBUI=''
-TARGET_RELEASE_INDEX_URL="${BRORAY_INSTALLER_RELEASE_INDEX_URL:-https://api.brovibe.cloud/releases/stable/broray/3.2.0-r01/release.json}"
+TARGET_RELEASE_INDEX_URL="${BRORAY_INSTALLER_RELEASE_INDEX_URL:-https://api.brovibe.cloud/releases/stable/broray/release.json}"
 RELEASE_PUBLIC_KEY="${BRORAY_INSTALLER_RELEASE_PUBLIC_KEY:-RWTlNQ0uUR+MmbfELjB7v4VVML2xgK4Ri1ZmR8ZqDqomMQ0GJPMpYO/O}"
 MINISIGN_ARCHIVE_URL='https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz'
 MINISIGN_ARCHIVE_SHA256='9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73'
@@ -356,7 +356,7 @@ run_clean_bootstrap()
 # Public transport only; authenticated coordinator owns lifecycle and recovery.
 prepare_exact_target()
 {
-    [ "$TARGET_CANDIDATE" = '3.2.0-r01c37' ] || fail 'download the installer for the selected release'
+    [ "$TARGET_CANDIDATE" = '3.2.0-r12c01' ] || fail 'download the installer for the selected release'
     [ "$(readlink -f /tmp)" = /tmp ] && [ ! -L /tmp ] || fail 'unsafe RAM workspace'
     awk '$2=="/tmp" && ($3=="tmpfs" || $3=="ramfs"){ok=1} END{exit !ok}' /proc/mounts || fail '/tmp must be RAM-backed'
     APP_STAGE="$("$BB" mktemp -d /tmp/broray-public-preflight.XXXXXXXX)" || fail 'cannot create RAM workspace'
@@ -365,15 +365,15 @@ prepare_exact_target()
     APP_SHA="$(jq -r '.candidate.bundle.sha256' "$SIGNED_INDEX")"
     app_bytes="$(jq -r '.candidate.bundle.sizeBytes' "$SIGNED_INDEX")"
     app_url="$(jq -r '.candidate.bundle.url' "$SIGNED_INDEX")"
-    [ "$APP_SHA" = '7472222ccf81598860c70ebb2abc7eb01611d71f91dd8e48dbbb6d98418f66d4' ] && [ "$app_bytes" = 1587784 ] || fail 'accepted c37 archive identity differs'
+    [ "$APP_SHA" = 'c8fc8b5478178bf9eb0f07db1f67453722a32a940b664ce91ed448029829399f' ] && [ "$app_bytes" = 1609274 ] || fail 'accepted r12 archive identity differs'
     installer_fetch "$app_url" "$APP_STAGE/app.tar.gz" "$app_bytes" || fail 'application download failed'
     [ "$(wc -c <"$APP_STAGE/app.tar.gz" | tr -d ' ')" = "$app_bytes" ] && [ "$(sha256sum "$APP_STAGE/app.tar.gz" | awk '{print $1}')" = "$APP_SHA" ] || fail 'application bytes differ'
     # This exact authenticated archive passed path/type/mode acceptance.
     /opt/bin/tar -xzf "$APP_STAGE/app.tar.gz" -C "$APP_SLOT" || fail 'application extraction failed'
-    RUNTIME_SHA='9548d3c42cf6104cc94aafd819149c5d03bcf4855fe3c6666b044c1b6846922a'
-    PLATFORM_MANIFEST_SHA='2de9647270b6b3ff5d87f65ea215e02a2c84da3a832c3674f220a036dd13c334'
+    RUNTIME_SHA='edc344fb703d9e739b74bae345f5e485e2fd7cd0c3e629330fd1bedfba2791ed'
+    PLATFORM_MANIFEST_SHA='ac4593ef182aff4b568fafcc339016ce585f6d558d964e63cd2aa7a2bfd93033'
     PREFLIGHT_HELPER="$APP_STAGE/prepare-persistent-updater.sh"
-    installer_fetch 'https://api.brovibe.cloud/releases/stable/broray/3.2.0-r01/prepare-persistent-updater.sh' "$PREFLIGHT_HELPER" 3002 || fail 'preflight helper download failed'
+    installer_fetch 'https://api.brovibe.cloud/releases/staging/broray/3.2.0-r12c01-delivery-v1/prepare-persistent-updater.sh' "$PREFLIGHT_HELPER" 3002 || fail 'preflight helper download failed'
     [ "$(sha256sum "$PREFLIGHT_HELPER" | awk '{print $1}')" = '2896e85cfa355eab3c92e0ec02e76994f9de934c46b329eadd62c9cc2283fa9e' ] || fail 'preflight helper differs'
 }
 
