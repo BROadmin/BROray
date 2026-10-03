@@ -1,10 +1,9 @@
 # Пошаговая установка BROray для начинающих
 
+> [!WARNING]
+> BROray 3.2.0-r01 и 3.2.0-r02 сняты с публикации из-за ошибок обновления. Текущий Stable — 3.1.1-r12. Документация и команды установки относятся к 3.1.1. Автоматическое понижение уже установленной версии не выполняется.
 
 Эта инструкция предназначена для пользователей, которые раньше не работали с Entware, SSH и командной строкой.
-
-
-При первом переходе со старой платформы через WebUI роутер автоматически перезагрузится один раз. При чистой или терминальной установке следуйте сообщению `REBOOT_REQUIRED=YES`: перезагрузите роутер через панель Keenetic и повторите ту же команду установки.
 
 ## Что потребуется
 
@@ -156,11 +155,11 @@ curl -q \
   -fsSL \
   -H 'Cache-Control: no-cache, no-store' \
   -H 'Accept-Encoding: identity' \
-  'https://api.brovibe.cloud/releases/stable/broray/3.2.0-r12/INSTALL-ON-ROUTER.sh' \
+  'https://api.brovibe.cloud/releases/stable/broray/3.1.1-r12/INSTALL-ON-ROUTER.sh' \
   -o "$T"
 
 [ "$(sha256sum "$T" | awk 'NR==1{print $1}')" = \
-  '708ef201c6f8eab48fbb0896a7b464a64e16227b201bd5762b196e4574bdb35c' ]
+  'ac334c4f3ce16e9119dcc3b84e21bd076ba5fce5252cf0f6aef2df5510edba1a' ]
 
 sh "$T"
 )
@@ -174,8 +173,8 @@ sh "$T"
 
 ```text
 BRORAY_INSTALL=PASS
-CANDIDATE=3.2.0-r12c01
-RELEASE=3.2.0-r12
+CANDIDATE=3.1.1-r12c01
+STABLE=YES
 ```
 
 Если появилась строка `FAIL`, скопируйте текст ошибки, но не публикуйте пароль, ссылки подписок, UUID и приватные ключи.
@@ -241,9 +240,10 @@ https://broray.<KeenDNS-домен-роутера>/
 
 ```text
 UPDATE_DECISION=already-current
-BRORAY_INSTALL=PASS
-CANDIDATE=3.2.0-r12c01
-RELEASE=3.2.0-r12
+INSTALLED_RELEASE=3.1.1-r12
+CURRENT_RELEASE=3.1.1-r12
+RELEASE_MUTATION=NONE
+ENVIRONMENT_RECONCILED=YES
 ```
 
 ## 5. Переустановка текущей версии

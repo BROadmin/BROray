@@ -33,15 +33,15 @@
 <section class="page-hero">
   <div>
     <p class="eyebrow">Проверено по релизным байтам</p>
-    <h1>WebUI BROray 3.2.0</h1>
-    <p class="lead">Фактический интерфейс Stable 3.2.0-r12. Описание ниже собрано из HTML, JavaScript и CGI точного опубликованного app-bundle, а не из планов или исходников соседних кандидатов.</p>
+    <h1>WebUI BROray 3.1.1</h1>
+    <p class="lead">Фактический интерфейс Stable 3.1.1-r12. Описание ниже собрано из HTML, JavaScript и CGI точного опубликованного app-bundle, а не из планов или исходников соседних кандидатов.</p>
   </div>
-  <div class="release-state"><span class="status-dot" aria-hidden="true"></span>WebUI-3.2.0-r12c01</div>
+  <div class="release-state"><span class="status-dot" aria-hidden="true"></span>WebUI-3.1.1-r12c01</div>
 </section>
 
 <section id="navigation">
 <h2>Что реально есть в WebUI</h2>
-<div class="table-wrap" tabindex="0" aria-label="Страницы WebUI BROray 3.2.0">
+<div class="table-wrap" tabindex="0" aria-label="Страницы WebUI BROray 3.1.1">
 <table>
 <thead><tr><th>Экран</th><th>Что находится внутри</th></tr></thead>
 <tbody>
@@ -57,7 +57,7 @@
 </tbody>
 </table>
 </div>
-<p class="muted"><code>modules.html</code> присутствует в архиве как служебный compatibility/redirect-файл, но отдельного пункта «Совместимость» в пользовательском меню Stable 3.2.0 нет.</p>
+<p class="muted"><code>modules.html</code> присутствует в архиве как служебный compatibility/redirect-файл, но отдельного пункта «Совместимость» в пользовательском меню Stable 3.1.1 нет.</p>
 </section>
 
 <section id="shell">
@@ -82,8 +82,7 @@
 <div class="feature-grid">
 <article class="feature"><h3>Серверы</h3><p>Активный сервер, общее число серверов и качество.</p></article>
 <article class="feature"><h3>Подписки</h3><p>Состояние подписок, число включённых и количество полученных серверов.</p></article>
-<article class="feature"><h3>DNS-over-TLS</h3><p>Выбранные серверы DNS, состояние проверки и применения.</p></article>
-<article class="feature"><h3>Маршруты</h3><p>Число установленных наборов и состояние обновления.</p></article>
+<article class="feature"><h3>Маршруты</h3><p>Число установленных наборов, состояние обновления и DNS-over-TLS.</p></article>
 <article class="feature"><h3>Keenetic</h3><p>Состояние управляемого прокси-интерфейса, связь и рабочее состояние.</p></article>
 <article class="feature"><h3>Xray</h3><p>Состояние процесса, версия и конфигурация.</p></article>
 <article class="feature"><h3>BROray</h3><p>Версия приложения и состояние обновления.</p></article>
@@ -100,7 +99,7 @@
 <div class="meta">
 <span class="badge accent">VLESS</span><span class="badge">VMess</span><span class="badge">Trojan</span><span class="badge">Hysteria2</span><span class="badge">Shadowsocks / ss://</span>
 </div>
-<p>За одну предварительную проверку принимается до 50 URI. Кнопка формы сначала подписана <strong>Проверить конфигурацию</strong>; после успешной проверки пользователь подтверждает импорт. Это описание именно поведения формы Stable 3.2.0, а не заявление о совместимости каждого возможного сочетания транспорта и сервера.</p>
+<p>За одну предварительную проверку принимается до 50 URI. Кнопка формы сначала подписана <strong>Проверить конфигурацию</strong>; после успешной проверки пользователь подтверждает импорт. Это описание именно поведения формы Stable 3.1.1, а не заявление о совместимости каждого возможного сочетания транспорта и сервера.</p>
 
 <h3>Действия с серверами</h3>
 <ul class="check-list">
@@ -155,7 +154,7 @@
 
 <section id="routes">
 <h2>Маршруты</h2>
-<p>В Stable 3.2.0 это три самостоятельных пользовательских экрана.</p>
+<p>В Stable 3.1.1 это три самостоятельных пользовательских экрана.</p>
 
 <h3>Обзор</h3>
 <p>Показывает управляемый интерфейс, число маршрутов BROray и общих маршрутов, текущую операцию, статистику пользовательских и готовых наборов. Доступна кнопка <strong>Обновить состояние</strong>.</p>
@@ -218,8 +217,7 @@
 <li><strong>Проверить версии</strong> получает официальный каталог;</li>
 <li>пользователь выбирает <strong>Версию для установки</strong>;</li>
 <li>переключатель <strong>Показать предварительные версии</strong> расширяет список;</li>
-<li>показывается статус: <strong>Совместима с BROray</strong>, <strong>Частично совместима с BROray</strong> или <strong>Совместимость не проверялась</strong>;</li>
-<li>совместимость определяется результатами проверок компонентов BROray и конфигураций Xray; частично совместимая версия доступна после подтверждения показанных ограничений;</li>
+<li>показывается статус совместимости конкретной версии;</li>
 <li>кнопка динамически становится <strong>Установить VERSION</strong> или <strong>Переустановить VERSION</strong>;</li>
 <li>отдельно есть <strong>Переустановить текущую версию</strong>;</li>
 <li>непроверенная, предварительная версия и понижение требуют отдельных подтверждений.</li>
@@ -258,7 +256,7 @@
 <p>Опасная зона содержит <strong>Удалить BROray</strong> и <strong>Удалить полностью</strong>. Полное удаление требует точной контрольной фразы и удаляет программу, настройки, подписки, серверы, маршруты, owned ProxyN, KeenDNS HTTP Proxy и служебные данные.</p>
 </section>
 
-<section class="what-next"><div><p class="eyebrow">Нужно выполнить действие?</p><h2>Перейдите к сценариям</h2><p>Там действия собраны по пользовательским задачам, а этот раздел остаётся точным справочником экранов Stable 3.2.0.</p></div><a class="primary-action" href="/broray/scenarios/">Открыть сценарии →</a></section>
+<section class="what-next"><div><p class="eyebrow">Нужно выполнить действие?</p><h2>Перейдите к сценариям</h2><p>Там действия собраны по пользовательским задачам, а этот раздел остаётся точным справочником экранов Stable 3.1.1.</p></div><a class="primary-action" href="/broray/scenarios/">Открыть сценарии →</a></section>
 </main></div>
 <footer class="site-footer"><div class="footer-inner">
 <span>BROvibe Docs · BROray · WebUI</span>
