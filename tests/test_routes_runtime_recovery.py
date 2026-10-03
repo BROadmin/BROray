@@ -248,5 +248,65 @@ class RuntimeRecovery(unittest.TestCase):
         self.assertEqual(r.returncode,0,r.stderr)
         self.assert_recovered(b'')
 
+    def seeded_manifest(self):
+        # Legacy updater state_seed creates the destination as a hardlink to
+        # its rollback owner, not a copy. 3.0.0 lacks this builtin manifest.
+        target=self.routes/'manifests/wikipedia.json'
+        target.unlink()
+        owner=self.root/'seed-owner'
+        owner.write_bytes((self.root/'share/routes/manifests/wikipedia.json').read_bytes())
+        os.link(owner,target)
+        self.assertEqual(target.stat().st_nlink,2)
+        return target,owner,owner.read_bytes()
+
+    def test_R28_legacy_seeded_builtin_preserves_owner(self):
+        target,owner,raw=self.seeded_manifest()
+        result=self.prepare()
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(owner.read_bytes(),raw)
+        self.assertEqual(target.read_bytes(),raw)
+        self.assertNotEqual(target.stat().st_ino,owner.stat().st_ino)
+        self.assertEqual(self.ownership(),self.before)
+        self.assertEqual(self.prepare().returncode,0)
+
+    def test_R29_modified_seeded_builtin_rejected(self):
+        target,owner,_=self.seeded_manifest()
+        data=json.loads(owner.read_bytes());data['name']='untrusted replacement'
+        owner.write_text(json.dumps(data));raw=owner.read_bytes()
+        result=self.prepare()
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual(owner.read_bytes(),raw);self.assertEqual(target.read_bytes(),raw)
+        self.assertEqual(target.stat().st_ino,owner.stat().st_ino)
+        self.assertEqual(self.ownership(),self.before)
+
+    def test_R30_hardlinked_authority_and_custom_not_exempt(self):
+        for relative in ['config.json','state/telegram.json','installed/routes.json',
+                         'installed/bundles/telegram.json','manifests/user-fixture.json']:
+            with self.subTest(path=relative):
+                target=self.routes/relative
+                if not target.exists():
+                    target.write_bytes((self.root/'share/routes/manifests/wikipedia.json').read_bytes())
+                owner=self.root/'foreign-owner';os.link(target,owner);raw=owner.read_bytes()
+                result=self.prepare()
+                self.assertNotEqual(result.returncode,0)
+                self.assertEqual(owner.read_bytes(),raw);self.assertEqual(target.read_bytes(),raw)
+                self.assertEqual(target.stat().st_ino,owner.stat().st_ino)
+                owner.unlink()
+
+    def test_R31_seeded_builtin_symlink_rejected(self):
+        target,owner,raw=self.seeded_manifest()
+        target.unlink();target.symlink_to(owner)
+        result=self.prepare();self.assertNotEqual(result.returncode,0)
+        self.assertTrue(target.is_symlink());self.assertEqual(owner.read_bytes(),raw)
+        self.assertEqual(self.ownership(),self.before)
+
+    def test_R32_seeded_builtin_failed_rename_keeps_owner(self):
+        target,owner,raw=self.seeded_manifest()
+        result=self.prepare('mv() { local target; for target; do :; done; [ "$target" != "$BRORAY_ROOT/routes/manifests/wikipedia.json" ] || return 1; command mv "$@"; }')
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual(owner.read_bytes(),raw);self.assertEqual(target.read_bytes(),raw)
+        self.assertEqual(target.stat().st_ino,owner.stat().st_ino)
+        self.assertEqual(self.ownership(),self.before)
+
 
 if __name__=='__main__':unittest.main()

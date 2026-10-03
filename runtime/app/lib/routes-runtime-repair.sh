@@ -240,7 +240,21 @@ broray_routes_runtime_prepare_locked()
     for file in "$config" "$bundles" "$custom" "$routes/installed/routes.json" \
         "$routes"/state/*.json "$routes"/installed/bundles/*.json "$routes"/manifests/*.json; do
         [ -e "$file" ] || [ -L "$file" ] || continue
-        broray_routes_runtime_regular "$file" || return 1
+        broray_routes_runtime_regular "$file" && continue
+        # Legacy updater seeds missing files as a hardlink to its rollback
+        # owner. Accept only an exact packaged builtin manifest for reading;
+        # the staged atomic replacement below never writes into that inode.
+        # State, ownership and custom manifests retain the single-link rule.
+        case "$file" in "$routes/manifests/"*.json) ;; *) return 1 ;; esac
+        id="${file##*/}"; id="${id%.json}"
+        case "$id" in
+            telegram|whatsapp|youtube|chatgpt|facebook|instagram|meta|tiktok|speedtest|wikipedia) ;;
+            *) return 1 ;;
+        esac
+        broray_routes_runtime_safe_path "$file" && [ -f "$file" ] && [ ! -L "$file" ] &&
+            [ "$(find "$file" -maxdepth 0 -type f -links 2 -print)" = "$file" ] &&
+            [ -f "$share/$id.json" ] && [ ! -L "$share/$id.json" ] &&
+            cmp -s "$file" "$share/$id.json" || return 1
     done
 
     command -v jq >/dev/null 2>&1 ||
