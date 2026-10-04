@@ -4,7 +4,7 @@ umask 077
 PATH=/opt/bin:/opt/sbin:/usr/bin:/bin:/sbin
 export PATH
 
-BASE='https://raw.githubusercontent.com/BROadmin/BROray/test-r12c01-manual-delivery-20261004/test-delivery/3.2.0-r12c01'
+BASE='https://raw.githubusercontent.com/BROadmin/BROray/fe8472e6662f9f2120afae5f216a9148c7268276/test-delivery/3.2.0-r12c01'
 STABLE_INSTALLER='https://api.brovibe.cloud/releases/stable/broray/3.1.1-r12/INSTALL-ON-ROUTER.sh'
 STABLE_INSTALLER_SHA='ac334c4f3ce16e9119dcc3b84e21bd076ba5fce5252cf0f6aef2df5510edba1'
 STABLE_INSTALLER_BYTES='41016'
