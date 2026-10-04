@@ -87,7 +87,7 @@ BRORAY_READ_ONLY</code></pre></div>
 <section id="running-snapshot-failed">
 <h2>Откат обновления: <code>RUNNING_SNAPSHOT_FAILED</code></h2>
 <div class="note warning"><span class="note-title">Подтверждён один из источников ошибки · проверка исправления продолжается</span><p>Общее сообщение <code>SERVICE_START_FAILED</code> обозначает отказ запуска службы. Причину нужно искать в строках перед ним.</p></div>
-<p><strong>Где встречается:</strong> при обновлении с 3.1.0 и 3.1.1 до ранее отозванных экспериментальных сборок. Эти сборки не предлагаются для установки. В журналах после <code>RUNNING_SNAPSHOT_FAILED</code> выполняется откат.</p>
+<p><strong>Где встречается:</strong> при обновлении с 3.1.0 и 3.1.1 до ранних сборок 3.2.0, включая <code>3.2.0-r02c01</code> и <code>3.2.0-r03c01</code>. В журналах после <code>RUNNING_SNAPSHOT_FAILED</code> выполняется откат.</p>
 <p><strong>Подтверждённая причина:</strong> прежний код чтения конфигурации зависел от утилиты <code>timeout</code>, которой на части установок Entware нет. BusyBox может быть установлен без этого модуля. Увеличение времени ожидания не добавляет отсутствующую утилиту. Само сообщение <code>RUNNING_SNAPSHOT_FAILED</code> не доказывает именно эту причину: чтение конфигурации может завершиться другой ошибкой.</p>
 <h3>Что сделать сейчас</h3>
 <ol class="steps">
@@ -151,8 +151,8 @@ BRORAY_TIMEOUT_CHECK</code></pre></div>
 /opt/etc/init.d/S24broray status
 /opt/etc/init.d/S25broray-web status</code></pre></div>
     <p>
-        Для текущего Stable ожидаются release <code>3.1.1-r12</code>, кандидат
-        <code>3.1.1-r12c01</code>, WebUI <code>WebUI-3.1.1-r12c01</code>, пакет
+        Для текущего Stable ожидаются release <code>3.2.0-r12</code>, кандидат
+        <code>3.2.0-r12c01</code>, WebUI <code>WebUI-3.2.0-r12c01</code>, пакет
         <code>3.0.0-r14</code>, <code>broray-updater/5</code>, канал Stable и
         отсутствие доступного обновления.
     </p>
