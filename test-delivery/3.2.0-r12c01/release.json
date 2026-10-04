@@ -1,0 +1,57 @@
+{
+  "candidate": {
+    "appSlot": {
+      "directoryCount": 42,
+      "fileCount": 373,
+      "layout": "broray-compact-app-slot/1",
+      "logicalBytes": 5902072,
+      "maxFileBytes": 687948
+    },
+    "appVersion": "3.2.0",
+    "architecture": "aarch64-3.10",
+    "bundle": {
+      "filename": "broray-app-3.2.0-r12c01.tar.gz",
+      "sha256": "c8fc8b5478178bf9eb0f07db1f67453722a32a940b664ce91ed448029829399f",
+      "sizeBytes": 1609274,
+      "url": "https://api.brovibe.cloud/releases/stable/broray/3.2.0-r12/broray-app-3.2.0-r12c01.tar.gz"
+    },
+    "candidateId": "3.2.0-r12c01",
+    "packageVersion": "3.0.0-r14",
+    "releaseId": "3.2.0-r12",
+    "sharedRuntime": {
+      "xray": {
+        "bundled": false,
+        "mode": "preserve-installed",
+        "path": "/opt/broray/runtime/xray"
+      }
+    },
+    "webUIBuild": "WebUI-3.2.0-r12c01"
+  },
+  "cleanBootstrap": {
+    "candidateId": "3.2.0-r12c01",
+    "kind": "broray-direct-clean-bootstrap/1",
+    "packageVersion": "3.0.0-r14",
+    "releaseId": "3.2.0-r12",
+    "sha256": "3a14d8e5d7b5df90e452043b348cd309710c99dfb21c368eb89f9e33cac9e7b0",
+    "sizeBytes": 1675,
+    "url": "https://api.brovibe.cloud/releases/stable/broray/3.2.0-r12/direct-clean-delivery.sh"
+  },
+  "createdAt": "2026-10-03T09:08:14Z",
+  "immutable": true,
+  "lifecycleContract": "compact-app-rename/1",
+  "minimumUpdaterVersion": 5,
+  "platform": {
+    "bundle": {
+      "filename": "broray-compact-updater-platform-5.tar.gz",
+      "sha256": "b9decb98115fe923eb440186bc2d2dae4a8f0acf64c0a279add74d10aa225707",
+      "sizeBytes": 167620,
+      "url": "https://api.brovibe.cloud/releases/stable/broray/3.2.0-r12/broray-compact-updater-platform-5.tar.gz"
+    },
+    "candidateId": "3.2.0-r09c01",
+    "updaterEngine": "broray-updater/5",
+    "updaterSha256": "004d87905f1968228d147c3f476f4d110b6e5036b12e741e41c26f9d160ae54a"
+  },
+  "purpose": "stable-release/1",
+  "schemaVersion": 1,
+  "stable": true
+}
