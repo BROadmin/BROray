@@ -1,0 +1,1 @@
+export GOTOOLCHAIN=local GOPROXY=off GOFLAGS= GOWORK=off GOSUMDB=off
