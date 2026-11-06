@@ -34,7 +34,7 @@
 <section class="page-hero"><div><p class="eyebrow">BROray · 3.5.0 · Stable</p><h1>Справочник BROray 3.5.0</h1><p class="lead">Требования, архитектуры, версии компонентов и важные особенности выпуска.</p></div></section>
 <h2 id="requirements">Требования</h2>
 
-<ul><li>Keenetic с работающим Entware и подходящей архитектурой.</li><li>Рабочий /opt и не менее 60 МиБ свободного места перед установкой.</li><li>Root-доступ к Entware для установки и администратор Keenetic для WebUI.</li><li>Интернет, корректное время и HTTPS-доступ к GitHub и источникам каталогов.</li><li>Возможности ProxyN и KeenDNS в установленной прошивке: наличие UDP проверяется отдельно.</li></ul>
+<ul><li>Keenetic или Netcraze с работающим Entware и подходящей архитектурой.</li><li>Рабочий /opt и не менее 60 МиБ свободного места перед установкой.</li><li>Root-доступ к Entware для установки и администратор Keenetic для WebUI.</li><li>Интернет, корректное время и HTTPS-доступ к GitHub и источникам каталогов.</li><li>Возможности ProxyN и KeenDNS в установленной прошивке: наличие UDP проверяется отдельно.</li></ul>
 
 <h2 id="go">Что изменил переход на Go</h2>
 
@@ -42,9 +42,9 @@
 
 <h2 id="architectures">Сборки и модели</h2>
 
-<div class="table-wrap"><table><thead><tr><th scope="col">Сборка</th><th scope="col">Модели для выбора команды</th><th scope="col">Испытания BROray</th></tr></thead><tbody><tr><td>aarch64</td><td>KN-1012, KN-1811, KN-1812, KN-2312, KN-2710, KN-3811, KN-3812, KN-4110</td><td>KN-1811 + эмулятор</td></tr><tr><td>mipsel</td><td>KN-1011, KN-1810, KN-1910, KN-1912, KN-2310, KN-2311, KN-2910, KN-3810</td><td>Эмулятор; аппаратная проверка не заявляется</td></tr><tr><td>mips</td><td>KN-2112, KN-2410, KN-3610</td><td>Эмулятор; аппаратная проверка не заявляется</td></tr><tr><td>armv7</td><td>Только при подтверждённом armv7 Entware</td><td>Эмулятор; аппаратная проверка не заявляется</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th scope="col">Сборка</th><th scope="col">Модели для выбора команды</th><th scope="col">Испытания BROray</th></tr></thead><tbody><tr><td>aarch64</td><td>KN-1012, KN-1811, KN-1812, KN-2312, KN-2710, KN-3811, KN-3812, KN-4110, NC-1812</td><td>KN-1811; эмулятор. NC-1812: установка, вход, обновления</td></tr><tr><td>mipsel</td><td>KN-1011, KN-1810, KN-1910, KN-1912, KN-2310, KN-2311, KN-2910, KN-3810</td><td>Эмулятор; аппаратная проверка не заявляется</td></tr><tr><td>mips</td><td>KN-2112, KN-2410, KN-3610</td><td>Эмулятор; аппаратная проверка не заявляется</td></tr><tr><td>armv7</td><td>Только при подтверждённом armv7 Entware</td><td>Эмулятор; аппаратная проверка не заявляется</td></tr></tbody></table></div>
 
-<p>Основание групп моделей — <a href="https://support.keenetic.com/hero/kn-1011/en/69806-installation-of-the-asterisk-ip-pbx-opkg-package.html">таблица архитектур производителя</a>. Проверка номера модели не отменяет требований к свободному месту, Entware и компонентам прошивки. <a href="https://docs.brovibe.cloud/broray/start/#models">Готовые команды по моделям</a>.</p>
+<p>Основание групп KN-моделей — <a href="https://support.keenetic.com/hero/kn-1011/en/69806-installation-of-the-asterisk-ip-pbx-opkg-package.html">таблица архитектур производителя</a>. Для NC-1812 архитектура aarch64 подтверждена непосредственно на устройстве при чистой установке 3.5.0. Проверка номера модели не отменяет требований к свободному месту, Entware и компонентам прошивки. <a href="https://docs.brovibe.cloud/broray/start/#models">Готовые команды по моделям</a>.</p>
 
 <h2 id="xray">Xray и совместимость</h2>
 
@@ -73,5 +73,5 @@
 <span>BROvibe Docs · BROray · Справочник</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20261106-broray350-docs"></script>
+<script src="/site.js?v=20261107-broray350-user-path"></script>
 </body></html>

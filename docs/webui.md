@@ -25,6 +25,9 @@
 | BROray | Версия приложения, обновление, переустановка, восстановление, копии и очистка. |
 
 
+Для входа через внешний адрес сначала [включите публикацию KeenDNS](https://docs.brovibe.cloud/broray/start/#remote-webui). В инструкции также описаны [веб-терминал](https://docs.brovibe.cloud/broray/start/#web-terminal) и [обновление старой страницы в браузере](https://docs.brovibe.cloud/broray/troubleshooting/#stale-cache).
+
+
 <a id="servers"></a>
 ## Серверы и качество
 
