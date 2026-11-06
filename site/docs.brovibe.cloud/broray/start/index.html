@@ -123,8 +123,7 @@ cleanup() {
 trap cleanup EXIT
 curl --proto &#x27;=https&#x27; --proto-redir &#x27;=https&#x27; -fL --connect-timeout 20 --max-time 600 \
   &#x27;https://github.com/BROadmin/BROray/releases/download/v3.5.0/broray-3.5.0-aarch64.tar.gz&#x27; -o &quot;$workdir/broray.tar.gz&quot;
-printf &#x27;%s  %s
-&#x27; &#x27;af28bbec9bb8199280a609b82502d201ce1398be96d78851377acd5c7fa6014c&#x27; &quot;$workdir/broray.tar.gz&quot; | sha256sum -c -
+printf &#x27;%s  %s\n&#x27; &#x27;af28bbec9bb8199280a609b82502d201ce1398be96d78851377acd5c7fa6014c&#x27; &quot;$workdir/broray.tar.gz&quot; | sha256sum -c -
 tar -xzf &quot;$workdir/broray.tar.gz&quot; -C &quot;$workdir&quot;
 &quot;$workdir/broray-3.5.0-aarch64/broray&quot; installer preflight
 &quot;$workdir/broray-3.5.0-aarch64/broray&quot; installer install
@@ -153,8 +152,7 @@ cleanup() {
 trap cleanup EXIT
 curl --proto &#x27;=https&#x27; --proto-redir &#x27;=https&#x27; -fL --connect-timeout 20 --max-time 600 \
   &#x27;https://github.com/BROadmin/BROray/releases/download/v3.5.0/broray-3.5.0-mipsel.tar.gz&#x27; -o &quot;$workdir/broray.tar.gz&quot;
-printf &#x27;%s  %s
-&#x27; &#x27;ac84cdea67b4be27b0e77a927009b0350e472cce891d10d83150285aded663af&#x27; &quot;$workdir/broray.tar.gz&quot; | sha256sum -c -
+printf &#x27;%s  %s\n&#x27; &#x27;ac84cdea67b4be27b0e77a927009b0350e472cce891d10d83150285aded663af&#x27; &quot;$workdir/broray.tar.gz&quot; | sha256sum -c -
 tar -xzf &quot;$workdir/broray.tar.gz&quot; -C &quot;$workdir&quot;
 &quot;$workdir/broray-3.5.0-mipsel/broray&quot; installer preflight
 &quot;$workdir/broray-3.5.0-mipsel/broray&quot; installer install
@@ -183,8 +181,7 @@ cleanup() {
 trap cleanup EXIT
 curl --proto &#x27;=https&#x27; --proto-redir &#x27;=https&#x27; -fL --connect-timeout 20 --max-time 600 \
   &#x27;https://github.com/BROadmin/BROray/releases/download/v3.5.0/broray-3.5.0-mips.tar.gz&#x27; -o &quot;$workdir/broray.tar.gz&quot;
-printf &#x27;%s  %s
-&#x27; &#x27;f2d73a292509022e071924d81135a743574bd8858bc0dcd7fc39a76fd497b30d&#x27; &quot;$workdir/broray.tar.gz&quot; | sha256sum -c -
+printf &#x27;%s  %s\n&#x27; &#x27;f2d73a292509022e071924d81135a743574bd8858bc0dcd7fc39a76fd497b30d&#x27; &quot;$workdir/broray.tar.gz&quot; | sha256sum -c -
 tar -xzf &quot;$workdir/broray.tar.gz&quot; -C &quot;$workdir&quot;
 &quot;$workdir/broray-3.5.0-mips/broray&quot; installer preflight
 &quot;$workdir/broray-3.5.0-mips/broray&quot; installer install
@@ -223,8 +220,7 @@ cleanup() {
 trap cleanup EXIT
 curl --proto &#x27;=https&#x27; --proto-redir &#x27;=https&#x27; -fL --connect-timeout 20 --max-time 600 \
   &#x27;https://github.com/BROadmin/BROray/releases/download/v3.5.0/broray-3.5.0-armv7.tar.gz&#x27; -o &quot;$workdir/broray.tar.gz&quot;
-printf &#x27;%s  %s
-&#x27; &#x27;2247faa66549b9d19f08fdacdc87ed921a53da87dff8dd6beef31bbe55144c48&#x27; &quot;$workdir/broray.tar.gz&quot; | sha256sum -c -
+printf &#x27;%s  %s\n&#x27; &#x27;2247faa66549b9d19f08fdacdc87ed921a53da87dff8dd6beef31bbe55144c48&#x27; &quot;$workdir/broray.tar.gz&quot; | sha256sum -c -
 tar -xzf &quot;$workdir/broray.tar.gz&quot; -C &quot;$workdir&quot;
 &quot;$workdir/broray-3.5.0-armv7/broray&quot; installer preflight
 &quot;$workdir/broray-3.5.0-armv7/broray&quot; installer install
