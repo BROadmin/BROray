@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BROray 3.5.0 — документация</title>
-<meta name="description" content="BROray 3.2.0 для Keenetic: быстрый старт, WebUI, сценарии, обслуживание, решение проблем, история версий и технический справочник.">
+<title>BROray 3.5.0</title>
+<meta name="description" content="Клиент Xray и менеджер сетевых политик для Keenetic. Знакомый BROray продолжает развиваться: серверы, подписки, маршруты и обслуживание в одном WebUI.">
 <link rel="canonical" href="https://docs.brovibe.cloud/broray/">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -30,30 +30,32 @@
 </header>
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/" aria-current="page">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
 <main class="content" id="content">
+<style>.content [id]{scroll-margin-top:6rem}@media(max-width:760px){.content [id]{scroll-margin-top:13rem}}</style>
+<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.0 · Stable</p><h1>BROray 3.5.0</h1><p class="lead">Клиент Xray и менеджер сетевых политик для Keenetic. Знакомый BROray продолжает развиваться: серверы, подписки, маршруты и обслуживание в одном WebUI.</p></div></section>
+<div class="note"><span class="note-title">Обновление BROray 3.5.0</span>Приложение теперь работает на Go. Привычный интерфейс сохранён, добавлены маршруты Claude и Netflix и улучшено обслуживание. Для перехода с 3.2 требуется чистая установка; следующие обновления 3.5 выполняются через WebUI.</div>
 
-<section class="page-hero"><div><p class="eyebrow">BROray · Keenetic · Xray</p><h1>BROray 3.5.0</h1><p class="lead">Полный клиент Xray и менеджер сетевых политик для совместимых маршрутизаторов Keenetic.</p></div><div class="release-state"><span class="status-dot" aria-hidden="true"></span>Новая ветка · 3.5.0</div></section>
-<section><h2>Чистая установка 3.5.0</h2><p>Новая реализация на Go. Обновление поверх 3.2 не поддерживается; используется отдельный подписанный канал.</p><p><a class="primary-action" href="/broray/releases/#install-3-5-0">Установить BROray 3.5.0 →</a></p></section>
-<div class="note"><span class="note-title">Справочники предыдущей ветки</span>Материалы ниже относятся к 3.2. Для установки 3.5 используйте инструкцию выше.</div>
-<section class="task-entry">
-<h2>Справочники ветки 3.2</h2>
-<div class="task-grid">
-<a class="task-card task-card-primary" href="/broray/start/"><span>01</span><strong>Установить впервые</strong><p>Требования, Entware, подключение и чистая установка по порядку.</p></a>
-<a class="task-card" href="/broray/scenarios/"><span>02</span><strong>Настроить BROray</strong><p>Добавить подключение, активировать сервер, маршруты, DNS и Xray.</p></a>
-<a class="task-card" href="/broray/maintenance/"><span>03</span><strong>Обновить или переустановить</strong><p>Штатное обновление, переустановка и удаление с сохранением данных.</p></a>
-<a class="task-card task-card-problem" href="/broray/troubleshooting/"><span>!</span><strong>Что-то не работает</strong><p>Выберите симптом и начните с безопасной проверки через WebUI.</p></a>
-</div>
-</section>
-<section><h2>Что входит в BROray</h2><div class="feature-grid">
-<article class="feature"><h3>Серверы и подписки</h3><p>VLESS, VMess, Trojan, Hysteria2 и Shadowsocks, проверка подключений и автоматический выбор резерва.</p></article>
-<article class="feature"><h3>Маршруты</h3><p>Готовые и пользовательские наборы с предварительной проверкой и контролем владельцев.</p></article>
-<article class="feature"><h3>DNS-over-TLS</h3><p>Проверка выбранных серверов и применение управляемых записей в Keenetic.</p></article>
-<article class="feature"><h3>Xray и Keenetic</h3><p>Управление Xray, ProxyN, KeenDNS и диагностикой из WebUI.</p></article>
-</div></section>
-<section class="what-next"><div><p class="eyebrow">Уже установлен?</p><h2>Для повседневной работы терминал не нужен</h2><p>Обычные действия выполняются через WebUI. Команды shell оставлены только в установке, расширенной диагностике и аварийных административных сценариях.</p></div><a class="primary-action" href="/broray/webui/">Открыть руководство WebUI →</a></section>
+<h2 id="getting-started">С чего начать</h2>
+
+<section class="task-entry"><div class="task-grid"><a class="task-card task-card-primary" href="/broray/start/"><span>01</span><strong>Установить BROray</strong><p>Модели роутеров, подключение к Entware и готовые команды.</p></a><a class="task-card " href="/broray/scenarios/"><span>02</span><strong>Настроить подключение</strong><p>Сервер, подписка, маршруты, DNS и KeenDNS по шагам.</p></a><a class="task-card " href="/broray/maintenance/"><span>03</span><strong>Обслужить приложение</strong><p>Обновление 3.5, резервные копии и восстановление.</p></a><a class="task-card task-card-problem" href="/broray/troubleshooting/"><span>!</span><strong>Решить проблему</strong><p>Найдите симптом и начните с проверки состояния.</p></a></div></section>
+
+<h2 id="changes">Что нового в 3.5.0</h2>
+
+<ul><li><strong>BROray работает на Go.</strong> Демон, WebUI, команды терминала и установщик собраны в один статический исполняемый файл. Go и среду разработки на роутер ставить не нужно. Привычные страницы и основные сценарии BROray сохранены.</li><li><strong>Больше архитектур.</strong> Подготовлены сборки aarch64, ARMv7, MIPS little-endian и MIPS big-endian. Установщик проверяет архитектуру и свободное место перед изменениями.</li><li><strong>Готовые маршруты.</strong> Добавлены Claude и Netflix. Теперь 12 наборов расположены в одном алфавитном списке. Появились настройки плановой проверки каталога и сведения о найденных изменениях.</li><li><strong>Обновление и восстановление.</strong> Обновление внутри 3.5 использует подписанный манифест, журнал этапов, автоматический откат при неудачном запуске и восстановление после прерывания. BROray и Xray обслуживаются отдельно.</li><li><strong>Резервная копия.</strong> Можно выгрузить зашифрованную копию настроек, проверить её перед импортом и отменить импорт с возвратом предыдущего состояния.</li><li><strong>Проверка подключения.</strong> Ручная кнопка «Проверить» у активного сервера обновляет сведения о качестве. Дополнительная проверка качества не подменяет успешный результат проверки самого подключения. Для совместимых прошивок проверена передача UDP через ProxyN.</li><li><strong>DNS-over-TLS.</strong> Исправлено сохранение принадлежности записей: внешние DNS-записи не становятся управляемыми BROray при применении выбранных серверов.</li><li><strong>WebUI и журналы.</strong> Адреса страниц открываются без параметра версии. Исправлены контраст значка ChatGPT, перекрытие кнопок плавающей панели уведомлениями и отображение состояния кнопок обслуживания. Журналы Xray ротируются.</li></ul>
+
+<h2 id="features">Возможности BROray</h2>
+
+<ul><li><strong>Серверы:</strong> импорт подключений пяти протоколов, качество, проверка активного подключения и резерв.</li><li><strong>Подписки:</strong> загрузка списков ссылок и Xray JSON, расписание и сведения провайдера при их наличии.</li><li><strong>Маршруты:</strong> 12 готовых наборов и свои наборы с предварительной проверкой и контролем общих записей.</li><li><strong>DNS-over-TLS:</strong> проверка выбранных DNS и сохранение внешних записей.</li><li><strong>Xray и Keenetic:</strong> версии ядра, совместимость, ProxyN, UDP на поддерживаемой прошивке и KeenDNS.</li><li><strong>Обслуживание:</strong> подписанное обновление, восстановление и резервные копии; повседневная работа через WebUI.</li></ul>
+
+<h2 id="installation">Установка и совместимость</h2>
+
+<p>Для 3.5.0 доступны aarch64, ARMv7, mipsel и mips. На странице установки модели сгруппированы над соответствующими командами. Сборка статическая: Go на роутере не нужен. Физическая приёмка выполнена на KN-1811; остальные архитектуры проверены в эмуляторе. <a href="https://docs.brovibe.cloud/broray/reference/">Требования и ограничения</a>.</p>
+
+<p><a href="https://docs.brovibe.cloud/broray/start/">Установить BROray 3.5.0</a> · <a href="https://github.com/BROadmin/BROray/releases/tag/v3.5.0">Релиз на GitHub</a> · <a href="https://docs.brovibe.cloud/broray/releases/">История всех версий</a>.</p>
+
 </main></div>
 <footer class="site-footer"><div class="footer-inner">
 <span>BROvibe Docs · BROray</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20261001-recovery"></script>
+<script src="/site.js?v=20261106-broray350-docs"></script>
 </body></html>
