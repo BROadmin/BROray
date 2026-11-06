@@ -196,8 +196,10 @@ func TestSourceAndSchemes(t *testing.T) {
 	if err != nil || s.Channel != "stable" || s.URL != DefaultURL("stable") || s.AllowTestKeys {
 		t.Fatalf("%+v %v", s, err)
 	}
-	// the default placeholder host: not configured
-	_, err = check(t, s, testNow)
+	// Explicit placeholder remains fail-closed without contacting the real default host.
+	placeholder := s
+	placeholder.URL = "https://updates.broray.invalid/channels/stable/manifest.json"
+	_, err = check(t, placeholder, testNow)
 	wantCode(t, err, ErrChannelUnavailable)
 	if Message(err) != "Канал обновлений не настроен." {
 		t.Fatal(Message(err))

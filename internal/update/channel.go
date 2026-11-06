@@ -18,10 +18,10 @@ import (
 )
 
 // DefaultBaseURL is the built-in channel location: <base>/<channel>/manifest.json.
-// The host is a placeholder (.invalid never resolves) until hosting is
-// decided (design §10); release builds may set it with
+// The 3.5 channel has its own namespace on the existing publication host;
+// the 3.2 release.json endpoint is independent. Release builds may override it with
 // -ldflags "-X github.com/BROadmin/broray/internal/update.DefaultBaseURL=https://…".
-var DefaultBaseURL = "https://updates.broray.invalid/channels"
+var DefaultBaseURL = "https://api.brovibe.cloud/releases/broray/channels"
 
 // DefaultURL is the built-in manifest URL of channel.
 func DefaultURL(channel string) string {

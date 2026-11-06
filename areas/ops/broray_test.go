@@ -12,6 +12,7 @@ import (
 	"github.com/BROadmin/broray/internal/app"
 	"github.com/BROadmin/broray/internal/compat"
 	"github.com/BROadmin/broray/internal/installer"
+	"github.com/BROadmin/broray/internal/platform"
 )
 
 // installLayout creates the installer layout of the running version.
@@ -100,6 +101,12 @@ func TestUpdaterMutationsRequireOrigin(t *testing.T) {
 
 func TestUpdaterEndpoints(t *testing.T) {
 	a := testArea(t)
+	// This case exercises an explicitly unconfigured channel, never the live default.
+	cfg := platform.DefaultConfig()
+	cfg.Update.ChannelURL = "https://updates.broray.invalid/channels/stable/manifest.json"
+	if err := platform.SaveConfig(a.d.Root, cfg); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		path   string
 		hdr    map[string]string

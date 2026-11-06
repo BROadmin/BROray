@@ -4,8 +4,8 @@ import "sync"
 
 // TrustedKey is a release-signing public key built into the binary.
 //
-// Production keys are generated offline by the owner (tools/release keygen,
-// docs/RELEASE-CHANNEL.md) and only their public half is added here.
+// Production keys are generated under the owner's control (tools/release
+// keygen, docs/RELEASE-CHANNEL.md); only their public half is added here.
 // Channels limits the channels a key may sign (nil: every channel).
 // Test keys are trusted only for the channel "test" and only when
 // config.v1.json selects that channel (update.channel = "test").
@@ -30,10 +30,16 @@ var builtinKeys = []TrustedKey{
 		Channels:  []string{"test"},
 		Test:      true,
 	},
-	// Production (stable/beta) keys: none yet — the owner adds the public
-	// key of the offline release key here (docs/RELEASE-CHANNEL.md). Until
-	// then every stable manifest is refused as signed by an unknown key.
+	{
+		Name:      "BROray 3.5 production 2026-11",
+		PublicKey: production35PublicKey,
+		Channels:  []string{"stable", "beta"},
+	},
 }
+
+// Dedicated 3.5 key; private half stays on the owner's signing server.
+// Key id 16FE8A3DA9ED98DC.
+const production35PublicKey = "RWTcmO2pPYr+FgTRMQHzWjGQeJcTF/iJZQSIQF353UWJUfYEOjaMJgX5"
 
 // Key id 3A5C92992D3BB227.
 const testChannelPublicKey = "RWQnsjstmZJcOgoEeGPUqynErXopQEQxuf2BDLfvcIYi5sQjiX05N2ow"

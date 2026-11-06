@@ -1,0 +1,2 @@
+# A signed message is byte-sensitive even on Windows checkouts.
+/internal/update/testdata/production35-identity.txt -text
