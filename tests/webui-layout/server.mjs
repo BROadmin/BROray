@@ -50,7 +50,8 @@ function json(res, code, value) {
 function fixtureHTML(url) {
     let html = fs.readFileSync(path.join(assets, 'routes-custom.html'), 'utf8');
     html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
-    const theme = url.searchParams.get('theme') === 'dark' ? 'dark' : 'light';
+    const requestedTheme = url.searchParams.get('theme');
+    const theme = ['broray', 'day', 'night'].includes(requestedTheme) ? requestedTheme : requestedTheme === 'light' ? 'day' : requestedTheme === 'dark' ? 'night' : 'broray';
     html = html.replace('</head>', '<script>document.documentElement.setAttribute("data-theme",' + JSON.stringify(theme) + ');</script></head>');
     const scripts = ['common.js', 'icons.js', 'dialogs.js', 'routes-operation.js']
         .map(name => '<script src="/assets/js/' + name + '"></script>').join('');

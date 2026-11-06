@@ -4642,6 +4642,7 @@ body.modal-open {
 
 .page-routes .route-card-logo-light {
     background: #fff;
+    color-scheme: light;
 }
 
 .page-routes .route-card-copy {

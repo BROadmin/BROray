@@ -30,3 +30,6 @@ results separately from a top-level window or physical phone.
 
 Close the fixture with `POST /__fixture__/shutdown`. Read `/__fixture__/info`
 first to confirm its fixture ID; never stop another process merely by port/PID.
+
+
+Logo contrast: evaluate logo-contrast.probe.js in the local fixture, then run runLogoContrast with broray, day and night. Each scene renders actual card logo CSS and SVG in light/dark embedding schemes. Capture actual browser screenshots and count non-white glyph pixels in the returned imageRect (or inspect visually). Do not use canvas drawImage as a paint oracle: Firefox rerasterizes this SVG using a different color scheme. Real theme tokens are broray/day/night; light/dark query aliases map to day/night.
