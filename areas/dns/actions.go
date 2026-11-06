@@ -645,6 +645,24 @@ func (s *service) runApply(ctx context.Context, req map[string]any) (map[string]
 	at := stamp(s.now())
 	var managed []any
 	if failure == "" {
+		// A selected external record may be reused, but selection does not
+		// transfer its ownership. Only our additions and receipts proven
+		// against the unique pre-transaction record may authorize deletion.
+		owned := make(map[string]bool)
+		for _, added := range p.Add {
+			owned[added.ID] = true
+		}
+		for _, rc := range f.receipts {
+			if selectorCount(current.Dot, rc.Address, rc.Port) != 1 {
+				continue
+			}
+			for _, before := range current.Dot {
+				if before.clean() && sameFull(rc.rec(), before) {
+					owned[rc.ID] = true
+					break
+				}
+			}
+		}
 		for _, id := range p.TrackedDesiredIDs {
 			c, _ := findCatalog(id)
 			want := c.endpoint()
@@ -658,7 +676,9 @@ func (s *service) runApply(ctx context.Context, req map[string]any) (map[string]
 				failure = "local-managed-build"
 				break
 			}
-			managed = append(managed, receiptObject(c.ID, c.Provider, matches[0], at))
+			if owned[id] {
+				managed = append(managed, receiptObject(c.ID, c.Provider, matches[0], at))
+			}
 		}
 	}
 	if failure == "" {
