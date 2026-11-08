@@ -50,6 +50,10 @@
 
 <p>При первой установке используется закреплённая версия <strong>26.10.31</strong>. Официальные версии выбираются на странице Xray. Архивы загружаются из XTLS/Xray-core с проверкой SHA-256; перед установкой пользователь видит совместимость с BROray. Для aarch64 на KN-1811 проверены TCP и UDP с 26.10.31 и 26.10.21. Это не означает аппаратную проверку всех протоколов на всех моделях. Для других архитектур смотрите конкретные сведения в реестре испытаний интерфейса.</p>
 
+<h2 id="protocols">Протоколы и импорт в 3.5.2</h2>
+<div class="table-wrap"><table><thead><tr><th>Формат</th><th>Как использовать</th></tr></thead><tbody><tr><td>VLESS, VMess, Trojan, Shadowsocks</td><td>Ссылки сервера или поддержанный Xray JSON из подписки. Для Shadowsocks — без SIP003-плагинов.</td></tr><tr><td>Hysteria2</td><td>hy2:// / hysteria2:// и Xray JSON с protocol: hysteria, version: 2.</td></tr><tr><td>SOCKS5, HTTP/HTTPS-прокси</td><td>socks:// / socks5:// / http:// / https:// или поддержанный Xray JSON. HTTP-прокси — только TCP.</td></tr><tr><td>WireGuard</td><td>Целиком клиентский INI или поддержанный Xray JSON из подписки; userspace Xray, без изменения сетевых интерфейсов ядра Linux.</td></tr><tr><td>AmneziaWG</td><td>vpn://: разбор и сохранение. Подключение, проверка качества и автовыбор не реализованы.</td></tr><tr><td>MASQUE, XDRIVE, TUIC, MTProto</td><td>В BROray 3.5.2 не импортируются и не подключаются.</td></tr></tbody></table></div>
+<p>Наличие протокола в Xray не означает поддержку его импорта в BROray. JSON-профиль не переносится целиком: импортируются поддержанные параметры серверов. <a href="https://github.com/BROadmin/BROray/blob/main/docs/PROTOCOL-SUPPORT.md">Полная матрица и ограничения</a>.</p>
+
 <h2 id="components">Независимое обслуживание</h2>
 
 <div class="table-wrap"><table><thead><tr><th scope="col">Что обслуживается</th><th scope="col">Где</th></tr></thead><tbody><tr><td>BROray и встроенный WebUI</td><td>Страница BROray; отдельный подписанный канал 3.5.</td></tr><tr><td>Ядро Xray</td><td>Страница Xray; официальные релизы XTLS.</td></tr><tr><td>Готовые наборы маршрутов</td><td>Каталог маршрутов и его расписание.</td></tr><tr><td>Подписки</td><td>Страница подписок и её расписание.</td></tr></tbody></table></div>
@@ -73,5 +77,5 @@
 <span>BROvibe Docs · BROray · Справочник</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20261107-broray350-user-path"></script>
+<script src="/site.js?v=20261108-broray352-docs-fix"></script>
 </body></html>
