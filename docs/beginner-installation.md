@@ -1,6 +1,6 @@
-# Установка BROray 3.5.1 — по шагам
+# Установка BROray 3.5.2 — по шагам
 
-## Обновление с 3.5.0 на 3.5.1
+## Обновление с 3.5.0 или 3.5.1 на 3.5.2
 
 Удалять BROray не нужно. Откройте страницу **BROray**, нажмите **«Проверить обновление»**, затем **«Установить обновление»**. Дождитесь завершения и войдите снова. Серверы, подписки и маршруты сохраняются; перезагрузка роутера не требуется. Если страница не открывается, сначала проверьте доступ к основной панели Keenetic и, если вы дома, к адресу роутера на порту 8080.
 
@@ -168,17 +168,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.1-aarch64/broray" "$workdir/broray-3.5.1-aarch64/README.txt"
-  rmdir "$workdir/broray-3.5.1-aarch64" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.2-aarch64/broray" "$workdir/broray-3.5.2-aarch64/README.txt"
+  rmdir "$workdir/broray-3.5.2-aarch64" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.1/broray-3.5.1-aarch64.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' '396de847c6583c199ece540fc6ca8b76914a74b64d246720a94eaf63ba6ef952' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.2/broray-3.5.2-aarch64.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' '2dcdcdfda5ee63e0be38d613148834c879348cae53565c8c2a7cebb588d9302c' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.1-aarch64/broray" installer preflight
-"$workdir/broray-3.5.1-aarch64/broray" installer install
-"$workdir/broray-3.5.1-aarch64/broray" ctl ping
+"$workdir/broray-3.5.2-aarch64/broray" installer preflight
+"$workdir/broray-3.5.2-aarch64/broray" installer install
+"$workdir/broray-3.5.2-aarch64/broray" ctl ping
 echo "BROray установлен. Теперь откройте WebUI по адресу роутера на порту 8080."
 )
 ```
@@ -203,17 +203,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.1-mipsel/broray" "$workdir/broray-3.5.1-mipsel/README.txt"
-  rmdir "$workdir/broray-3.5.1-mipsel" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.2-mipsel/broray" "$workdir/broray-3.5.2-mipsel/README.txt"
+  rmdir "$workdir/broray-3.5.2-mipsel" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.1/broray-3.5.1-mipsel.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' '83369f5a1c7bb5943c8e1e120d347bdb8611027020d814db3c498f7de57e87e4' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.2/broray-3.5.2-mipsel.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' 'c33e9d0ccf9cf610044849189e7c3e7bac034f072f4b9162491eee871429bbd6' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.1-mipsel/broray" installer preflight
-"$workdir/broray-3.5.1-mipsel/broray" installer install
-"$workdir/broray-3.5.1-mipsel/broray" ctl ping
+"$workdir/broray-3.5.2-mipsel/broray" installer preflight
+"$workdir/broray-3.5.2-mipsel/broray" installer install
+"$workdir/broray-3.5.2-mipsel/broray" ctl ping
 echo "BROray установлен. Теперь откройте WebUI по адресу роутера на порту 8080."
 )
 ```
@@ -238,23 +238,23 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.1-mips/broray" "$workdir/broray-3.5.1-mips/README.txt"
-  rmdir "$workdir/broray-3.5.1-mips" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.2-mips/broray" "$workdir/broray-3.5.2-mips/README.txt"
+  rmdir "$workdir/broray-3.5.2-mips" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.1/broray-3.5.1-mips.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' '183d1641f6f46b4bf59fcd1a734e3c981d067166d1c7d60fa0475c473d4193bb' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.2/broray-3.5.2-mips.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' 'f4bef56d91e9c9ae781bfdedc083db97f3f6e9fedf443ad2022f2e64a30ef2d9' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.1-mips/broray" installer preflight
-"$workdir/broray-3.5.1-mips/broray" installer install
-"$workdir/broray-3.5.1-mips/broray" ctl ping
+"$workdir/broray-3.5.2-mips/broray" installer preflight
+"$workdir/broray-3.5.2-mips/broray" installer install
+"$workdir/broray-3.5.2-mips/broray" ctl ping
 echo "BROray установлен. Теперь откройте WebUI по адресу роутера на порту 8080."
 )
 ```
 
 
-Соответствие KN-моделей архитектурам приведено по [данным Keenetic](https://support.keenetic.com/hero/kn-1011/en/69806-installation-of-the-asterisk-ip-pbx-opkg-package.html). NC-1812 добавлена по подтверждённой на устройстве архитектуре aarch64 и успешной чистой установке 3.5.1. Полный аппаратный прогон выполнен на KN-1811; для NC-1812 проверены установка, вход и канал обновлений. Это не обещание полного VPN-тестирования каждой модели. Требование 60 МиБ свободного места действует для всех групп.
+Соответствие KN-моделей архитектурам приведено по [данным Keenetic](https://support.keenetic.com/hero/kn-1011/en/69806-installation-of-the-asterisk-ip-pbx-opkg-package.html). NC-1812 добавлена по подтверждённой на устройстве архитектуре aarch64 и успешной чистой установке 3.5.2. Полный аппаратный прогон выполнен на KN-1811; для NC-1812 проверены установка, вход и канал обновлений. Это не обещание полного VPN-тестирования каждой модели. Требование 60 МиБ свободного места действует для всех групп.
 
 
 <a id="other-models"></a>
@@ -291,17 +291,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.1-armv7/broray" "$workdir/broray-3.5.1-armv7/README.txt"
-  rmdir "$workdir/broray-3.5.1-armv7" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.2-armv7/broray" "$workdir/broray-3.5.2-armv7/README.txt"
+  rmdir "$workdir/broray-3.5.2-armv7" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.1/broray-3.5.1-armv7.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' '31fc68645c1ce07e903b0245d8ec6322f0298dbad0c413163d994370d67b556f' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.2/broray-3.5.2-armv7.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' '2731e77352c8e6d87eb00d565bfcf96305b96ec061142ce832fce3d9f1d71bcb' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.1-armv7/broray" installer preflight
-"$workdir/broray-3.5.1-armv7/broray" installer install
-"$workdir/broray-3.5.1-armv7/broray" ctl ping
+"$workdir/broray-3.5.2-armv7/broray" installer preflight
+"$workdir/broray-3.5.2-armv7/broray" installer install
+"$workdir/broray-3.5.2-armv7/broray" ctl ping
 echo "BROray установлен. Теперь откройте WebUI по адресу роутера на порту 8080."
 )
 ```
@@ -362,7 +362,7 @@ echo "BROray установлен. Теперь откройте WebUI по ад
 
 
 1. Введите имя и пароль **администратора Keenetic или Netcraze**. Здесь нужны данные основной панели роутера, а не root и пароль Entware.
-2. Если открылась старая страница 3.2, выполните принудительное обновление **Ctrl+F5**; в Firefox также доступно **Ctrl+Shift+R**. Затем на странице «BROray» убедитесь, что установлена 3.5.1. При необходимости откройте адрес в новой приватной вкладке.
+2. Если открылась старая страница 3.2, выполните принудительное обновление **Ctrl+F5**; в Firefox также доступно **Ctrl+Shift+R**. Затем на странице «BROray» убедитесь, что установлена 3.5.2. При необходимости откройте адрес в новой приватной вкладке.
 3. Откройте «Серверы», импортируйте свою ссылку и активируйте подключение. Либо добавьте ссылку в «Подписках», обновите подписку и выберите её сервер.
 4. Нажмите «Проверить» у активного сервера. Затем установите нужные наборы на странице «Маршруты → Готовые маршруты». Выбор трафика устройств определяется маршрутами и политиками роутера.
 
@@ -374,7 +374,7 @@ echo "BROray установлен. Теперь откройте WebUI по ад
 ## Если хотите скачать файлы вручную
 
 
-Все архивы, манифест, подпись и открытый ключ доступны в [релизе 3.5.1](https://github.com/BROadmin/BROray/releases/tag/v3.5.1). В готовых командах закреплены SHA-256 из подписанного манифеста. Дополнительная проверка подписи возможна на ПК с minisign:
+Все архивы, манифест, подпись и открытый ключ доступны в [релизе 3.5.2](https://github.com/BROadmin/BROray/releases/tag/v3.5.2). В готовых командах закреплены SHA-256 из подписанного манифеста. Дополнительная проверка подписи возможна на ПК с minisign:
 
 
 ```sh
