@@ -86,7 +86,9 @@
 
         if (response.status === 401) {
             window.BROrayUI.redirectToLogin();
-            throw new Error("Сессия завершена.");
+            error = new Error("Сессия завершена.");
+            error.status = 401;
+            throw error;
         }
 
         if (!payload || typeof payload !== "object" || !response.ok || payload.success === false || payload.ok === false) {
@@ -646,7 +648,6 @@
     async function initialize() {
         var session;
 
-        bindEvents();
         try {
             session = await api("/api/session.cgi", {method: "GET"});
             if (!session || session.ok !== true) {
@@ -658,13 +659,30 @@
             resetForm();
             await loadAll(false);
         } catch (error) {
-            window.BROrayUI.redirectToLogin();
+            if (error.status === 401) return;
+            loader.hidden = false;
+            app.hidden = true;
+            loader.textContent = error.message + " ";
+            var retry = document.createElement("button");
+            retry.type = "button";
+            retry.className = "button button-secondary";
+            retry.textContent = "Повторить";
+            retry.addEventListener("click", function () {
+                retry.disabled = true;
+                initialize();
+            });
+            loader.appendChild(retry);
         }
     }
 
-    if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", initialize, {once: true});
-    } else {
+    function start() {
+        bindEvents();
         initialize();
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", start, {once: true});
+    } else {
+        start();
     }
 })();

@@ -7,13 +7,13 @@ const scripts=path.resolve(__dirname,'../../webui/static/assets/js');
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function harness(fetch) {
   const elements=new Map(), timers=new Map(), redirects=[],toasts=[];
-  let seq=0;
+  let seq=0,bindingCount=0;
   function element(id='') {
     if(elements.has(id))return elements.get(id);
     const handlers={};
     const el={id,hidden:true,disabled:false,value:'',type:'password',textContent:'',dataset:{},childNodes:[],children:[],
       classList:{add(){},remove(){},toggle(){},contains(){return false;}},
-      addEventListener(name,fn){handlers[name]=fn;},dispatch(name){return handlers[name]?.({preventDefault(){},currentTarget:el});},
+      addEventListener(name,fn){bindingCount++;handlers[name]=fn;},dispatch(name){return handlers[name]?.({preventDefault(){},currentTarget:el});},
       querySelector(){return null;},querySelectorAll(){return [];},getAttribute(){return null;},setAttribute(){},
       appendChild(child){el.children.push(child);},append(child){el.children.push(child);},focus(){},remove(){}};
     if(id)elements.set(id,el);return el;
@@ -23,8 +23,9 @@ function harness(fetch) {
     setTimeout(fn,ms){timers.set(++seq,{fn,ms});return seq;},clearTimeout(id){timers.delete(id);},setInterval(){},addEventListener(){}};
   const ctx=vm.createContext({window,document,fetch,AbortController,setTimeout:window.setTimeout,clearTimeout:window.clearTimeout,console,Map,URLSearchParams});
   function load(file){vm.runInContext(fs.readFileSync(path.join(scripts,file),'utf8'),ctx,{filename:file});ctx.BROrayUI=window.BROrayUI;}
+  element('page-loader').hidden=false; // matches the actual protected page HTML
   load('common.js');
-  return {window,document,element,load,timers,redirects,toasts,ctx};
+  return {window,document,element,load,timers,redirects,toasts,ctx,get bindingCount(){return bindingCount;}};
 }
 for(const phase of ['headers','body'])test(`login recovers from hanging ${phase} without replay`,async()=>{
   let logins=0,signal;
@@ -86,3 +87,41 @@ test('BROray page authentication has a deadline too',async()=>{
   await flush();
   assert.deepEqual(h.redirects,[]);
 });
+
+test('Subscriptions initial transport failure preserves session and offers retry',async()=>{
+  const h=harness(async()=>{throw new Error('temporary cloud failure');});
+  h.load('subscriptions.js');await flush();
+  assert.deepEqual(h.redirects,[],'subscriptions transport error redirected to login');
+  assert.equal(h.element('page-loader').hidden,false);
+  assert.ok(h.element('page-loader').children.some(x=>x.textContent==='Повторить'),'missing recovery action');
+});
+
+test('Subscriptions expired session still redirects to login',async()=>{
+  const h=harness(async()=>({ok:false,status:401,json:async()=>({error:'SESSION_REQUIRED'})}));
+  h.load('subscriptions.js');await flush();
+  assert.ok(h.redirects.length>0);
+});
+
+for(const page of ['xray','keenetic','subscriptions','servers','broray']){
+  for(const failure of ['network','503'])test(`${page} initial ${failure} can retry without duplicate actions`,async()=>{
+    const calls=[];
+    const h=harness(async(url,opts)=>{
+      calls.push({url,method:opts.method||'GET'});
+      if(failure==='network')throw new Error('temporary transport failure');
+      return {ok:false,status:503,json:async()=>({error:'TEMPORARY_UNAVAILABLE'})};
+    });
+    h.window.BROrayUI.toast=()=>{};
+    h.load(page+'.js');await flush();
+    assert.deepEqual(h.redirects,[]);
+    assert.equal(h.element('app').hidden,true,'failed initial auth exposed app controls');
+    assert.equal(h.element('page-loader').hidden,false,'missing persistent connection failure');
+    const retry=h.element('page-loader').children.find(x=>x.textContent==='Повторить');
+    assert.ok(retry,'missing explicit retry action');
+    const before=h.bindingCount;
+    retry.dispatch('click');await flush();
+    assert.equal(h.bindingCount,before+1,'page action handlers were rebound during retry');
+    assert.equal(calls.length,2,'retry duplicated request or started unrequested work');
+    assert.ok(calls.every(x=>x.url==='/api/session.cgi'&&x.method==='GET'));
+    assert.deepEqual(h.redirects,[]);
+  });
+}

@@ -976,9 +976,7 @@
         }
     }
 
-    function start() {
-        bindEvents();
-
+    function initialize() {
         request(
             "/api/session.cgi",
             { method: "GET" }
@@ -994,8 +992,26 @@
                 app.hidden = false;
             }
             return loadSummary(false);
-        }).catch(handleError);
+        }).catch(function (error) {
+            if (error && error.status === 401) {
+                handleError(error);
+                return;
+            }
+            loader.hidden = false;
+            app.hidden = true;
+            loader.textContent = (error && error.message ? error.message : "Не удалось связаться с роутером.") + " ";
+            var retry = document.createElement("button");
+            retry.type = "button";
+            retry.className = "button button-secondary";
+            retry.textContent = "Повторить";
+            retry.addEventListener("click", function () {
+                retry.disabled = true;
+                initialize();
+            });
+            loader.appendChild(retry);
+        });
     }
 
-    start();
+    bindEvents();
+    initialize();
 })();

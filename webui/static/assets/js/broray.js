@@ -1438,7 +1438,6 @@
             var session = await request("/api/session.cgi", { method: "GET" });
 
             setText("current-user", session.user || "admin");
-            bind();
             applyControlState();
             loader.hidden = true;
             app.hidden = false;
@@ -1447,9 +1446,18 @@
             await refresh();
         } catch (error) {
             if (error.message !== "Сессия завершена.") {
-                loader.hidden = true;
-                app.hidden = false;
-                showPageError(errorMessage(error));
+                loader.hidden = false;
+                app.hidden = true;
+                loader.textContent = errorMessage(error) + " ";
+                var retry = document.createElement("button");
+                retry.type = "button";
+                retry.className = "button button-secondary";
+                retry.textContent = "Повторить";
+                retry.addEventListener("click", function () {
+                    retry.disabled = true;
+                    initialize();
+                });
+                loader.appendChild(retry);
             }
         }
     }
@@ -1466,9 +1474,14 @@
         }
     });
 
-    if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", initialize, { once: true });
-    } else {
+    function start() {
+        bind();
         initialize();
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", start, { once: true });
+    } else {
+        start();
     }
 })();
