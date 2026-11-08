@@ -78,6 +78,11 @@ func (s *svc) enqueueDue() error {
 	}
 	now := s.now().Unix()
 	active := ActiveID(s.d)
+	if active == "" && ac.enabled {
+		if err := s.enqueueReplacement(state); err != nil {
+			return err
+		}
+	}
 	if active != "" {
 		if context := s.runtimeContext(active); context != "" {
 			ep, okE := num(get(state, "activeHealth", "checkedEpoch"))

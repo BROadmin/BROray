@@ -157,6 +157,11 @@ func (s *svc) checkServer(ctx context.Context, id, source, fingerprint string) (
 	if !RecordExists(s.d, id) {
 		return checkResult{}, opFailed("")
 	}
+	if rec, err := ReadRecord(s.d, id); err == nil {
+		if err := requireConnectionSupport(rec); err != nil {
+			return checkResult{}, err
+		}
+	}
 	path := RecordPath(s.d, id)
 	if fingerprint != "" {
 		if h, err := fileSHA256(path); err != nil || h != fingerprint {

@@ -20,6 +20,7 @@ func setup(d *compat.Deps) error {
 	registerOnce.Do(register)
 	s.defineActions()
 	d.Svc.ServersReapplyActive = s.ReapplyActive
+	d.Svc.ServersWithdrawActive = s.WithdrawActive
 	registerBackup(s)
 	compat.RegisterSnapshot("servers", func(ctx context.Context) (map[string]any, error) { return s.summary(ctx) })
 	if !d.Maintenance {

@@ -110,7 +110,6 @@ func TestXrayJSONConversion(t *testing.T) {
 
 	unsupported := []struct{ name, ob string }{
 		{"hysteria2 outbound", `{"protocol":"hysteria2","settings":{"servers":[{"address":"h.example","port":443}]}}`},
-		{"socks", `{"protocol":"socks","settings":{"servers":[{"address":"h.example","port":1080}]}}`},
 		{"allowInsecure", `{"protocol":"trojan","settings":{"address":"h.example","port":443,"password":"x"},"streamSettings":{"security":"tls","tlsSettings":{"allowInsecure":true}}}`},
 		{"sockopt", `{"protocol":"trojan","settings":{"address":"h.example","port":443,"password":"x"},"streamSettings":{"sockopt":{"mark":1}}}`},
 		{"reality over ws", `{"protocol":"vless","settings":{"address":"h","port":1,"id":"a"},"streamSettings":{"network":"ws","security":"reality","realitySettings":{"serverName":"a","publicKey":"k"}}}`},
@@ -126,7 +125,7 @@ func TestXrayJSONConversion(t *testing.T) {
 	}
 	for _, u := range unsupported {
 		lines, ok := xrayJSONToLinks([]byte(`{"outbounds":[`+u.ob+`]}`), maxNodes)
-		if !ok || len(lines) != 1 || lines[0] != unsupportedMarker {
+		if !ok || len(lines) != 1 || !strings.HasPrefix(lines[0], unsupportedMarker) {
 			t.Errorf("%s: ok=%v %q", u.name, ok, lines)
 		}
 	}

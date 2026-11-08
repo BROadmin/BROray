@@ -17,6 +17,7 @@ type parsed struct {
 	alpn                                   []any
 	password, method, auth                 string
 	hy2Ports, obfs, obfsPassword           string
+	hy2Timeout                             string
 	upMbps, downMbps, pin, finalMask       string
 	// stream extensions (util.sh:167-187, 279-305)
 	rawHeader, ech, pcs, vcn, pqv, streamMask string
@@ -407,6 +408,11 @@ func parseVmess(uri string) (*parsed, *ParseError) {
 	obj, ok := decodeObject(decoded)
 	if !ok {
 		return nil, die("VMess Base64 не содержит корректный JSON")
+	}
+	for k := range obj {
+		if !in(k, "v", "ps", "remarks", "name", "add", "address", "port", "id", "uuid", "aid", "alterId", "scy", "securityCipher", "cipher", "net", "network", "tls", "security", "sni", "serverName", "fp", "fingerprint", "alpn", "host", "path", "serviceName", "service_name", "mode", "type", "headerType", "pbk", "publicKey", "sid", "shortId", "spx", "spiderX", "extra", "ech", "pcs", "vcn", "pqv", "fm", "allowInsecure", "allow_insecure", "insecure", "seed", "mtu", "tti", "uplinkCapacity", "downlinkCapacity", "cwndMultiplier", "maxSendingWindow", "congestion", "readBufferSize", "writeBufferSize") {
+			return nil, die("неподдерживаемое поле VMess JSON: " + safeField(k))
+		}
 	}
 	// insecure / extra / TLS / FinalMask shape (parser-vmess.sh:86-94)
 	shapeOK := true
@@ -1023,6 +1029,12 @@ func parseHysteria2(uri string) (*parsed, *ParseError) {
 		p.finalMask = "{}"
 	}
 	p.network = "hysteria"
+	if p.hy2Timeout, err = get("udpIdleTimeout", badParam); err != nil {
+		return nil, err
+	}
+	if p.hy2Timeout != "" && (!allDigits(p.hy2Timeout) || !nonNegInt32(jqNumber(p.hy2Timeout))) {
+		return nil, die("неправильный Hysteria2 udpIdleTimeout")
+	}
 	if err := parseStreamExtensions(q, p); err != nil {
 		return nil, err
 	}

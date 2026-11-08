@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,6 +92,19 @@ func TestXrayUDPPerProtocol(t *testing.T) {
 				link = "vmess://" + base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(string(raw), sport)))
 			} else {
 				link = strings.Replace(fmt.Sprintf(link, sport), "PIN", pin, 1)
+			}
+			options := map[string]string{
+				"shadowsocks":       `{"sockopt":{"domainStrategy":"UseIPv4","tcpFastOpen":false}}`,
+				"vless-ws":          `{"wsSettings":{"headers":{"X-BROray-Test":"roundtrip"},"heartbeatPeriod":2}}`,
+				"vless-httpupgrade": `{"httpupgradeSettings":{"headers":{"X-BROray-Test":"roundtrip"}}}`,
+				"vless-grpc":        `{"grpcSettings":{"idle_timeout":30,"health_check_timeout":10,"permit_without_stream":false,"initial_windows_size":65536,"user_agent":"BROray-test"},"sockopt":{"tcpFastOpen":false,"tcpKeepAliveIdle":0}}`,
+			}
+			if ext := options[c.name]; ext != "" {
+				separator := "?"
+				if strings.Contains(link, "?") {
+					separator = "&"
+				}
+				link = strings.Replace(link, "#t", separator+"streamOptions="+url.QueryEscape(ext)+"#t", 1)
 			}
 			rec, err := ParseLink(link, "s1", nil)
 			if err != nil {

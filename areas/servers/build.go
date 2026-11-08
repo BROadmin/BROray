@@ -80,7 +80,19 @@ func ParseLink(link, id string, source map[string]any) (Record, error) {
 	return rec, nil
 }
 
-func parseLink(link, id string, source map[string]any) (Record, *ParseError) {
+func parseBaseLink(link, id string, source map[string]any) (Record, *ParseError) {
+	if isWireGuardInput(link) {
+		if source == nil {
+			source = map[string]any{"type": "manual"}
+		}
+		return parseWireGuard(link, id, source)
+	}
+	if strings.HasPrefix(link, "vpn://") {
+		if source == nil {
+			source = map[string]any{"type": "manual"}
+		}
+		return parseAmnezia(link, id, source)
+	}
 	proto, derr := DetectProtocol(link)
 	if derr != nil {
 		return nil, derr.(*ParseError)
@@ -104,9 +116,9 @@ func parseLink(link, id string, source map[string]any) (Record, *ParseError) {
 	case "tuic":
 		return nil, die("парсер TUIC ещё не реализован")
 	case "socks":
-		return nil, die("парсер SOCKS ещё не реализован")
+		return parseProxy(link, id, source)
 	default:
-		return nil, die("парсер HTTP-прокси ещё не реализован")
+		return parseProxy(link, id, source)
 	}
 	if err != nil {
 		return nil, err
@@ -329,6 +341,9 @@ func saveHysteria2(link, id string, source map[string]any, p *parsed) (Record, *
 	rec["tls"] = tls
 	rec["hysteria"] = map[string]any{"version": 2, "ports": p.hy2Ports, "obfs": p.obfs, "obfsPassword": p.obfsPassword,
 		"upMbps": p.upMbps, "downMbps": p.downMbps, "finalMask": fm}
+	if p.hy2Timeout != "" {
+		rec["hysteria"].(map[string]any)["udpIdleTimeout"] = jqNumber(p.hy2Timeout)
+	}
 	return finish(rec, p)
 }
 

@@ -20,7 +20,7 @@ var vlessEncryptionValid = servers.VlessEncryptionValid
 
 const unsupportedMarker = "broray-json-error://unsupported-node"
 
-type jqFail struct{}
+type jqFail struct{ field string }
 
 func need(ok bool) {
 	if !ok {
@@ -51,7 +51,7 @@ func keysOnly(v any, keys ...string) bool {
 			}
 		}
 		if !found {
-			return false
+			panic(jqFail{field: safeJSONField(k)})
 		}
 	}
 	return true
@@ -624,7 +624,7 @@ func rawHeader(h map[string]any) map[string]any {
 	return h
 }
 
-func transport(sv any) []string {
+func basicTransport(sv any) []string {
 	s := obj(sv)
 	switch network(s) {
 	case "grpc":
@@ -854,6 +854,15 @@ func otherEndpoints(protocol string, settings map[string]any) []credEndpoint {
 
 func outboundURIs(profile map[string]any, ov any, index int, multiple bool) []string {
 	out := obj(ov)
+	if out["protocol"] == "wireguard" {
+		return wireGuardOutbound(profile, out, index, multiple)
+	}
+	if out["protocol"] == "hysteria" {
+		return hysteriaOutbound(profile, out, index, multiple)
+	}
+	if out["protocol"] == "socks" || out["protocol"] == "http" {
+		return proxyOutbound(profile, out, index, multiple)
+	}
 	if out["protocol"] == "vless" {
 		return vlessOutbound(profile, out, index, multiple)
 	}
@@ -868,7 +877,9 @@ func outboundURIs(profile map[string]any, ov any, index int, multiple bool) []st
 		need(network(stream) == "tcp" && truthyOr(stream["security"], "none") == "none")
 		t := transport(stream)
 		protection(stream)
-		need(len(t) == 1 && t[0] == pair("type", "tcp") && len(objectField(stream, "finalmask")) == 0)
+		base := basicTransport(without(stream, "sockopt"))
+		need(len(base) == 1 && base[0] == pair("type", "tcp") && len(objectField(stream, "finalmask")) == 0)
+		params = append(params, t[1:]...)
 	} else {
 		params = append(append(transport(stream), protection(stream)...), pair("fm", toJSON(objectField(stream, "finalmask"))))
 	}
@@ -902,6 +913,9 @@ func tryLines(fn func() []string) (lines []string, ok bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			lines, ok = nil, false
+			if e, yes := r.(jqFail); yes && e.field != "" {
+				lines = []string{unsupportedMarker + "#" + e.field}
+			}
 		}
 	}()
 	return fn(), true
@@ -956,7 +970,7 @@ func xrayJSONToLinks(text []byte, maxNodes int) (out []string, ok bool) {
 		}
 		for i, o := range outbounds {
 			lines, good := tryLines(func() []string { return outboundURIs(profile, o, i+1, len(outbounds) > 1) })
-			if !good {
+			if !good && len(lines) == 0 {
 				lines = []string{unsupportedMarker}
 			} else if len(lines) > limit {
 				lines = lines[:limit]

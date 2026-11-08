@@ -92,13 +92,8 @@ func TestSyncContinuityAndRetention(t *testing.T) {
 	}
 	e.ensureErr = nil
 	res, err = e.sync(t, "replace", "trojan://pw2@a.example:443#A2", "trojan://pw@b.example:443#B")
-	if err != nil || res.Impact != "display-name-changed" || e.ensured != 2 {
+	if err != nil || res.Impact != "display-name-changed" || e.ensured != 3 {
 		t.Fatalf("name: %v %+v %d", err, res, e.ensured)
-	}
-	// active server missing → conflict, nothing written
-	_, err = e.sync(t, "replace", "trojan://pw@b.example:443#B")
-	if !errors.As(err, &se) || se.Msg != "Активный сервер исчез из подписки. Обновление отменено, сохранена прежняя рабочая конфигурация." || len(liveIDs(t, e)) != 2 {
-		t.Fatalf("missing active: %v", err)
 	}
 	// disabled source cannot hold the active server
 	_, err = e.s.syncCatalog(context.Background(), subX, stageLinks(t, false, "trojan://pw2@a.example:443#A2"), false, "u2", "replace")

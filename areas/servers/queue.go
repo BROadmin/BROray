@@ -98,6 +98,12 @@ func (s *svc) qualitySnapshot(target string) ([]snapEntry, error) {
 		if err != nil || !st.Mode().IsRegular() {
 			return nil, errors.New("server file is not regular")
 		}
+		if rec, err := ReadRecord(s.d, id); err == nil && requireConnectionSupport(rec) != nil {
+			if target != "all" {
+				return nil, requireConnectionSupport(rec)
+			}
+			continue
+		}
 		h, err := fileSHA256(RecordPath(s.d, id))
 		if err != nil {
 			return nil, err
@@ -139,6 +145,11 @@ func (s *svc) resolveCheck(id string) (string, string, *cgi.APIError) {
 		if st, err := os.Lstat(RecordPath(s.d, id)); err != nil || !st.Mode().IsRegular() {
 			return "", "", cgi.E(404, "SERVER_NOT_FOUND", "Сервер не найден.")
 		}
+		if rec, err := ReadRecord(s.d, id); err == nil {
+			if err := requireConnectionSupport(rec); err != nil {
+				return "", "", cgi.MapError(err)
+			}
+		}
 		if ctx := s.runtimeContext(id); ctx != "" {
 			return actionHealth, ctx, nil
 		}
@@ -151,6 +162,11 @@ func (s *svc) resolveCheck(id string) (string, string, *cgi.APIError) {
 }
 
 func (s *svc) defineActions() {
+	s.d.Queue.Define(compat.ActionSpec{Name: actionReplacement, Type: "server_operation", Priority: map[string]int{"*": 1}, Stages: []compat.Stage{
+		{Name: "verify", Phase: "checking", Global: true, Run: s.replacementVerify},
+		{Name: "probe", Phase: "checking", Run: s.replacementProbe},
+		{Name: "activate", Phase: "switching", Global: true, Protected: true, Run: s.replacementActivate},
+	}})
 	s.d.Queue.Define(compat.ActionSpec{Name: actionHealth, Type: "server_operation", Priority: map[string]int{"*": 0},
 		Stages: []compat.Stage{{Name: "checking", Phase: "checking", Run: s.healthStep}}})
 	s.d.Queue.Define(compat.ActionSpec{Name: actionQuality, Type: "server_operation",

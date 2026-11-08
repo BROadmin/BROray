@@ -185,6 +185,9 @@ func streamSettings(s Record) (map[string]any, error) {
 		st["kcpSettings"] = alt(get(s, "transport", "kcp"), map[string]any{})
 	case "hysteria":
 		st["hysteriaSettings"] = map[string]any{"version": 2, "auth": s["auth"]}
+		if has(s["hysteria"], "udpIdleTimeout") {
+			st["hysteriaSettings"].(map[string]any)["udpIdleTimeout"] = get(s, "hysteria", "udpIdleTimeout")
+		}
 	default:
 		return nil, die("неподдерживаемый транспорт: " + jqRaw(s["network"]))
 	}
@@ -204,6 +207,7 @@ func streamSettings(s Record) (map[string]any, error) {
 	} else if fm := alt(get(s, "transport", "finalMask"), map[string]any{}); lenPositive(fm) {
 		st["finalmask"] = get(s, "transport", "finalMask")
 	}
+	mergeStreamOptions(st, s)
 	return st, nil
 }
 
@@ -213,6 +217,15 @@ func Outbound(s Record) (map[string]any, error) {
 	withStream := true
 	protocol := s["protocol"]
 	switch protocol {
+	case "wireguard":
+		settings, _ = s["wireguard"].(map[string]any)
+		withStream = false
+	case "socks", "http":
+		server := map[string]any{"address": s["address"], "port": s["port"]}
+		if asString(s["username"]) != "" {
+			server["users"] = []any{map[string]any{"user": s["username"], "pass": s["password"]}}
+		}
+		settings = map[string]any{"servers": []any{server}}
 	case "vless":
 		user := map[string]any{"id": s["uuid"], "encryption": alt(s["encryption"], "none")}
 		if lenPositive(alt(s["flow"], "")) {
@@ -226,7 +239,7 @@ func Outbound(s Record) (map[string]any, error) {
 		settings = map[string]any{"servers": []any{map[string]any{"address": s["address"], "port": s["port"], "password": s["password"]}}}
 	case "shadowsocks":
 		settings = map[string]any{"servers": []any{map[string]any{"address": s["address"], "port": s["port"], "method": s["method"], "password": s["password"]}}}
-		withStream = false
+		withStream = lenPositive(s["streamOptions"])
 	case "hysteria2":
 		protocol = "hysteria"
 		settings = map[string]any{"version": 2, "address": s["address"], "port": s["port"]}
@@ -250,6 +263,9 @@ func Outbound(s Record) (map[string]any, error) {
 // XrayConfig is broray_generate_server_config: it validates the record and
 // renders the full Xray configuration (one SOCKS inbound + outbound "proxy").
 func XrayConfig(rec Record, gs GenSettings, label string) ([]byte, error) {
+	if err := requireConnectionSupport(rec); err != nil {
+		return nil, err
+	}
 	s := normalize(rec)
 	if err := validate(s, label); err != nil {
 		return nil, err

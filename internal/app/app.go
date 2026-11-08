@@ -25,7 +25,7 @@ import (
 
 // Version is a var only so host tests can build binaries of other versions
 // (-ldflags -X); release builds never override it.
-var Version = "3.5.1"
+var Version = "3.5.2"
 
 type App struct {
 	Root    platform.Root

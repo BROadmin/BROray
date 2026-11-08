@@ -191,7 +191,7 @@ func NewManualID(d *compat.Deps) (string, error) {
 // shortened.
 func MaskRecord(rec Record) Record {
 	out := normalize(rec)
-	for _, k := range []string{"uri", "uuid", "password", "auth", "privateKey"} {
+	for _, k := range []string{"uri", "uuid", "password", "auth", "privateKey", "amneziawg", "wireguard", "streamOptions"} {
 		delete(out, k)
 	}
 	if c, ok := out["connection"].(map[string]any); ok {
@@ -201,6 +201,10 @@ func MaskRecord(rec Record) Record {
 	}
 	if h, ok := out["hysteria"].(map[string]any); ok {
 		delete(h, "obfsPassword")
+		delete(h, "finalMask")
+	}
+	if transport, ok := out["transport"].(map[string]any); ok {
+		delete(transport, "finalMask")
 	}
 	if r, ok := out["reality"].(map[string]any); ok && truthy(r["publicKey"]) {
 		pk := r["publicKey"]

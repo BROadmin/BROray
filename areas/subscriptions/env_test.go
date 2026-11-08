@@ -22,15 +22,16 @@ import (
 )
 
 type env struct {
-	d          *compat.Deps
-	s          *svc
-	mu         sync.Mutex
-	reapplied  []string
-	reapplyErr error
-	ensured    int
-	ensureErr  error
-	testErr    error
-	dns        map[string][]string
+	d           *compat.Deps
+	s           *svc
+	mu          sync.Mutex
+	reapplied   []string
+	reapplyErr  error
+	rollbackErr error
+	ensured     int
+	ensureErr   error
+	testErr     error
+	dns         map[string][]string
 }
 
 func newEnv(t *testing.T) *env {
@@ -53,13 +54,23 @@ func newEnv(t *testing.T) *env {
 		e.mu.Lock()
 		defer e.mu.Unlock()
 		e.reapplied = append(e.reapplied, reason)
+		if reason == "subscription-rollback" {
+			return e.rollbackErr
+		}
 		return e.reapplyErr
+	}
+	d.Svc.ServersWithdrawActive = func(ctx context.Context) (func(context.Context) error, error) {
+		previous := servers.ActiveID(d)
+		undo := func(context.Context) error { return e.s.writeActive(previous) }
+		return undo, os.Remove(servers.ActiveFile(d))
 	}
 	d.Svc.KeeneticEnsureInterface = func(ctx context.Context) error {
 		e.mu.Lock()
 		defer e.mu.Unlock()
 		e.ensured++
-		return e.ensureErr
+		err := e.ensureErr
+		e.ensureErr = nil // one failed change; rollback uses the restored state
+		return err
 	}
 	oldAllowed, oldLookup, oldTest, oldShow := addrAllowed, lookupIP, testActiveConfig, showVersion
 	addrAllowed = func(netip.Addr) bool { return true }

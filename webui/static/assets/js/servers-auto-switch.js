@@ -224,6 +224,7 @@
         }
 
         summary.servers.forEach(function (server) {
+			if (server.connectionSupport && server.connectionSupport.supported === false) return;
             var option = document.createElement("option");
 
             option.value = server.id;

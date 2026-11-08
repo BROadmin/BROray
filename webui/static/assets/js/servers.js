@@ -426,6 +426,7 @@
     }
 
     function renderServerCard(server) {
+		var unsupported = server.connectionSupport && server.connectionSupport.supported === false;
         var card = create(
             "article",
             "server-card ui-card" + (server.active ? " is-active" : "")
@@ -453,6 +454,10 @@
 
         card.setAttribute("data-server-id", server.id);
         quality.setAttribute("data-icon", "status");
+		if (unsupported) {
+			quality.textContent = "Подключение не поддерживается";
+			quality.className = "status-badge status-badge-warning";
+		}
 
         titleRow.append(title, quality);
         identity.append(
@@ -473,6 +478,9 @@
             tags.appendChild(create("span", "server-tag server-tag-active", "Активен"));
         }
         identity.appendChild(tags);
+		if (server.connectionSupport && server.connectionSupport.message) {
+			identity.appendChild(create("p", "server-card-address", server.connectionSupport.message));
+		}
         // 3.5.0: the same connection added by hand and from a subscription
         // (DEV5_SERVER_MANUAL_SUBSCRIPTION_DUPLICATE) — two cards, each names
         // the other.
@@ -517,6 +525,7 @@
 
         checkButton = create("button", "button button-secondary", "Проверить");
         checkButton.type = "button";
+		checkButton.disabled = Boolean(unsupported);
         checkButton.dataset.checkServer=server.id;
         checkButton.setAttribute("data-icon", "speed");
         checkButton.addEventListener("click", function () {
@@ -527,6 +536,7 @@
         if (!server.active) {
             activateButton = create("button", "button button-primary", "Подключить");
             activateButton.type = "button";
+			activateButton.disabled = Boolean(unsupported);
             activateButton.setAttribute("data-icon", "connection");
             activateButton.addEventListener("click", function () {
                 activateServer(server, activateButton);

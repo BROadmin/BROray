@@ -11,7 +11,7 @@ import (
 
 // Node staging: broray_subscription_stage_nodes (svc:969-1106).
 
-const jsonImportWarning = "Из JSON импортируются отдельные серверы. DNS, маршрутизация, балансировка и фрагментация профиля не применяются."
+const jsonImportWarning = "Из JSON импортируются отдельные серверы. DNS, маршрутизация, балансировка и фрагментация профиля не применяются. Служебные поля email, level=0, REALITY show и gRPC mode=false не переносятся."
 
 // staged is the outcome of the parse step.
 type staged struct {
@@ -72,6 +72,10 @@ func stageNodes(subID string, ex *extracted, enabled bool, progress func(int, in
 			progress(i0, len(ex.Lines))
 		}
 		i := i0 + 1
+		if strings.HasPrefix(line, unsupportedMarker+"#") {
+			reject("Узел %d: неподдерживаемое поле JSON: %s.", i, safeJSONField(strings.TrimPrefix(line, unsupportedMarker+"#")))
+			continue
+		}
 		if line == unsupportedMarker {
 			reject("Узел %d: параметры JSON-конфигурации не поддерживаются.", i)
 			continue
@@ -114,6 +118,16 @@ func stageNodes(subID string, ex *extracted, enabled bool, progress func(int, in
 			continue
 		}
 		seen[stableID] = true
+		if rec["protocol"] == "amneziawg" {
+			st.Warnings = append(st.Warnings, fmt.Sprintf("Узел %d: конфигурация AmneziaWG сохранена. Подключение пока не поддерживается BROray.", i))
+		}
+		if warnings, ok := rec["importWarnings"].([]any); ok {
+			for _, w := range warnings {
+				if text, ok := w.(string); ok {
+					st.Warnings = append(st.Warnings, fmt.Sprintf("Узел %d: %s", i, text))
+				}
+			}
+		}
 		st.Accepted++
 		st.Records = append(st.Records, rec)
 	}

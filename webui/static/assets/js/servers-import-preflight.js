@@ -429,6 +429,10 @@
             );
         }
 
+        // An INI is one profile, including comments and peer sections.
+        if (/^(?:\s*(?:[#;][^\n]*\n))*\s*\[Interface\]/.test(value)) {
+            return [{line:1,raw:value,error:value.length>65536?"Конфигурация WireGuard слишком длинная.":null,duplicate:null,importState:"ready"}];
+        }
         var lines = value
             .split(/\r?\n/)
             .map(trim)
@@ -465,7 +469,7 @@
             }
 
             // Only frame lines here. The installed backend owns URI semantics.
-            if (!/^(vless|vmess|trojan|hysteria2|hy2|ss):\/\//i.test(line)) {
+            if (!/^(vless|vmess|trojan|hysteria2|hy2|ss|vpn|socks|socks5|http|https):\/\//i.test(line)) {
                 item.error = "Неподдерживаемая схема URI.";
             }
 
@@ -686,7 +690,8 @@
                     "vmess://...",
                     "trojan://...",
                     "hysteria2://...",
-                    "ss://..."
+                    "ss://...",
+                    "vpn://... (AmneziaWG — только сохранение)"
                 ].join("\n")
             );
         }
@@ -706,7 +711,7 @@
 
             hint.textContent =
                 "Поддерживаются VLESS, VMess, Trojan, " +
-                "Hysteria2 и Shadowsocks. Несколько конфигураций можно " +
+                "Hysteria2 и Shadowsocks. AmneziaWG (vpn://) можно сохранить без подключения. Несколько конфигураций можно " +
                 "вставить по одной на строку.";
 
             var fieldContainer =
@@ -826,6 +831,10 @@
                 className: "is-duplicate",
                 title: "Дубликат"
             };
+        }
+
+        if (item.connectionSupport && item.connectionSupport.supported === false) {
+            return {className: "is-ready", title: "Только сохранение"};
         }
 
         return {
@@ -1001,6 +1010,18 @@
             });
 
             article.appendChild(tags);
+
+            if (item.connectionSupport && item.connectionSupport.supported === false) {
+                article.appendChild(create("p", "server-form-note",
+                    "Конфигурация будет сохранена без возможности подключения."));
+            }
+
+            if (item.connectionSupport && item.connectionSupport.supported !== false && item.connectionSupport.message) {
+                article.appendChild(create("p", "server-form-note", item.connectionSupport.message));
+            }
+            (item.importWarnings || []).forEach(function (warning) {
+                article.appendChild(create("p", "server-form-note", String(warning)));
+            });
 
             var details = create(
                 "div",

@@ -210,10 +210,10 @@ func Apply(o ApplyOptions) (res ApplyResult) {
 	}
 	e.Stage("stopping", 60, "Служба BROray останавливается командой через управляющий сокет (без остановки по PID).")
 	stopStarted := time.Now()
-	dl, was, err := stopDaemon(o.Root, o.StopTimeout)
+	dl, was, err := stopUpdateDaemon(o.Root, o.StopTimeout)
 	j.DaemonWasRunning = was
 	if err != nil {
-		return abortBeforeSwitch(o, j, nil, err)
+		return abortBeforeSwitch(o, j, dl, err)
 	}
 	if was {
 		e.Log(fmt.Sprintf("Служба BROray остановилась за %d с; блокировка демона получена.", int(time.Since(stopStarted).Round(time.Second)/time.Second)))

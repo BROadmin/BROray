@@ -302,6 +302,7 @@ type oldRow struct {
 
 type newRow struct {
 	key, cont, id, matchKey string
+	previousKeys            []string
 	rec                     servers.Record
 	hash                    string
 }
@@ -390,7 +391,7 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 	liveDir, disDir := servers.ServersDir(s.d), s.disabledDir(subID)
 	work := filepath.Join(s.d.Root.Tmp(), fmt.Sprintf("server-subscription-sync.%d.%s", os.Getpid(), updateID))
 	cleanup := func() { _ = os.RemoveAll(work) }
-	for _, d := range []string{filepath.Join(work, "backup", "live"), filepath.Join(work, "backup", "disabled"), liveDir, disDir, s.d.RunPath("server-quality")} {
+	for _, d := range []string{filepath.Join(work, "backup", "live"), filepath.Join(work, "backup", "disabled"), filepath.Join(work, "backup", "quality"), liveDir, disDir, s.d.RunPath("server-quality")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			cleanup()
 			return nil, fail("SERVER_SYNC_ERROR", "Не удалось создать резервную копию серверов.")
@@ -398,6 +399,7 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 	}
 	activeBefore := servers.ActiveID(s.d)
 	var oldLive, oldDisabled []srvFile
+	oldQuality := map[string][]byte{}
 	var olds []oldRow
 	var activeOld *srvFile
 	for _, side := range []string{"live", "disabled"} {
@@ -406,6 +408,15 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 			dir = disDir
 		}
 		for _, f := range filterBelongs(readDirServers(dir), subID) {
+			qpath := servers.QualityPath(s.d, f.id)
+			if regular(qpath) {
+				b, err := os.ReadFile(qpath)
+				if err != nil || platform.WriteFileAtomic(filepath.Join(work, "backup", "quality", f.id+".json"), b, 0o600) != nil {
+					cleanup()
+					return nil, fail("SERVER_SYNC_ERROR", "Не удалось сохранить результаты качества для отката.")
+				}
+				oldQuality[f.id] = b
+			}
 			if err := platform.WriteFileAtomic(filepath.Join(work, "backup", side, filepath.Base(f.path)), f.raw, 0o600); err != nil {
 				cleanup()
 				if side == "live" {
@@ -455,12 +466,13 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 		}
 	}
 	type finalRow struct {
-		key string
-		rec servers.Record
+		key          string
+		previousKeys []string
+		rec          servers.Record
 	}
 	final := make([]finalRow, 0, len(news))
 	for _, n := range news {
-		final = append(final, finalRow{n.matchKey, n.rec})
+		final = append(final, finalRow{n.matchKey, n.previousKeys, n.rec})
 	}
 	if policy == "retain-unmatched" {
 		mergeFail := func(code string) (*syncResult, error) {
@@ -477,6 +489,9 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 		newKeys, ids := map[string]bool{}, map[string]bool{}
 		for _, f := range final {
 			newKeys[f.key] = true
+			for _, key := range f.previousKeys {
+				newKeys[key] = true
+			}
 			ids[jqRaw(f.rec["id"])] = true
 		}
 		for _, o := range olds {
@@ -492,7 +507,7 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 			if len(stage)+res.Retained > maxNodes {
 				return mergeFail("PARTIAL_UPDATE_LIMIT")
 			}
-			final = append(final, finalRow{o.key, o.file.rec})
+			final = append(final, finalRow{o.key, []string{o.key}, o.file.rec})
 			newKeys[o.key] = true
 		}
 		for id := range ids {
@@ -515,10 +530,10 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 	sort.SliceStable(final, func(i, j int) bool { return jqRaw(final[i].rec["id"]) < jqRaw(final[j].rec["id"]) })
 	finalKeys := map[string]bool{}
 	for _, f := range final {
-		finalKeys[f.key] = true
+		finalKeys[jqRaw(f.rec["id"])] = true
 	}
 	for _, o := range olds {
-		if o.key != "" && !finalKeys[o.key] {
+		if o.key != "" && !finalKeys[jqRaw(o.file.rec["id"])] {
 			res.Removed++
 		}
 	}
@@ -526,30 +541,33 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 	// ---- active server ----
 	var activeNew servers.Record
 	activeNewID, nameChanged, configChanged := "", false, false
+	activeRemoved := false
 	if activeOld != nil {
 		activeKey, _ := servers.CanonicalKey(activeOld.rec)
 		for _, f := range final {
-			if f.key == activeKey {
+			if f.key == activeKey || containsKey(f.previousKeys, activeKey) {
 				activeNew = f.rec
 				break
 			}
 		}
 		if activeNew == nil {
-			cleanup()
-			return nil, fail("ACTIVE_SERVER_CONFLICT", "Активный сервер исчез из подписки. Обновление отменено, сохранена прежняя рабочая конфигурация.")
-		}
-		activeNewID = jqRaw(activeNew["id"])
-		if nameOrID(activeOld.rec) != nameOrID(activeNew) {
-			nameChanged, res.Impact = true, "display-name-changed"
-		}
-		if configHash(activeOld.rec) != configHash(activeNew) {
-			configChanged, res.Impact = true, "configuration-changed"
-			if err := testActiveConfig(ctx, s.d, activeNew); err != nil {
-				cleanup()
-				return nil, fail("ACTIVE_SERVER_CONFLICT", "Новая конфигурация активного сервера не прошла проверку Xray. Обновление отменено.")
+			activeRemoved = true
+			res.Impact = "removed-disconnected"
+			res.Warnings = append(res.Warnings, "Активный сервер удалён из подписки. VPN отключён; если автовыбор включён, он ищет замену по вашим настройкам.")
+		} else {
+			activeNewID = jqRaw(activeNew["id"])
+			if nameOrID(activeOld.rec) != nameOrID(activeNew) {
+				nameChanged, res.Impact = true, "display-name-changed"
 			}
-		} else if activeNewID != activeBefore {
-			res.Impact = "configuration-changed"
+			if configHash(activeOld.rec) != configHash(activeNew) {
+				configChanged, res.Impact = true, "configuration-changed"
+				if err := testActiveConfig(ctx, s.d, activeNew); err != nil {
+					cleanup()
+					return nil, fail("ACTIVE_SERVER_CONFLICT", "Новая конфигурация активного сервера не прошла проверку Xray. Обновление отменено.")
+				}
+			} else if activeNewID != activeBefore {
+				res.Impact = "configuration-changed"
+			}
 		}
 	}
 
@@ -563,9 +581,31 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 		cleanup()
 		return nil, fail("SERVER_SYNC_ERROR", "Не удалось подготовить восстановление серверов.")
 	}
+	var undoWithdrawal func(context.Context) error
+	runtimeTouched, descriptionTouched := false, false
 	rollback := func(code, msg string) (*syncResult, error) {
 		if err := s.restoreBackup(subID, oldLive, oldDisabled, activeBefore); err != nil {
 			return nil, fail("SERVER_SYNC_ROLLBACK_FAILED", "Восстановление серверов не завершено. Резервная копия сохранена: "+filepath.Join(work, "backup"))
+		}
+		for id, b := range oldQuality {
+			if err := platform.WriteFileAtomic(servers.QualityPath(s.d, id), b, 0o600); err != nil {
+				return nil, fail("SERVER_SYNC_ROLLBACK_FAILED", "Не удалось восстановить результаты качества. Резервная копия сохранена: "+filepath.Join(work, "backup"))
+			}
+		}
+		if undoWithdrawal != nil || runtimeTouched || descriptionTouched {
+			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+			var err error
+			if undoWithdrawal != nil {
+				err = undoWithdrawal(rctx)
+			} else if runtimeTouched {
+				err = s.d.Svc.ReapplyActiveServer(rctx, "subscription-rollback")
+			} else {
+				err = s.d.Svc.EnsureInterface(rctx)
+			}
+			cancel()
+			if err != nil {
+				return nil, fail("SERVER_SYNC_ROLLBACK_FAILED", "Не удалось восстановить подключение. Резервная копия сохранена: "+filepath.Join(work, "backup"))
+			}
 		}
 		cleanup()
 		return nil, fail(code, msg)
@@ -588,19 +628,22 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 		if !enabled {
 			return rollback("ACTIVE_SERVER_CONFLICT", "Активный сервер не может быть перенесён в выключенный источник.")
 		}
-		if configChanged {
+		if activeRemoved {
+			var err error
+			undoWithdrawal, err = s.d.Svc.WithdrawActiveServer(ctx)
+			if err != nil {
+				return rollback("ACTIVE_SERVER_CONFLICT", "Не удалось безопасно отключить удалённый сервер. Прежний каталог восстановлен.")
+			}
+		} else if configChanged {
 			if activeNewID != activeBefore {
 				if err := s.writeActive(activeNewID); err != nil {
 					return rollback("SERVER_SYNC_ERROR", "Не удалось обновить идентификатор активного сервера.")
 				}
 			}
+			runtimeTouched = true
 			if err := s.d.Svc.ReapplyActiveServer(ctx, "subscription-update"); err != nil {
 				s.d.Log.Printf("subscriptions: subscription=%s active server reapply failed: %v", subID, err)
-				r, e := rollback("ACTIVE_SERVER_CONFLICT", "Новая версия активного сервера не была применена. Восстановлена прежняя рабочая версия.")
-				if se, ok := e.(*subErr); ok && se.Code == "ACTIVE_SERVER_CONFLICT" {
-					_ = s.d.Svc.ReapplyActiveServer(ctx, "subscription-rollback")
-				}
-				return r, e
+				return rollback("ACTIVE_SERVER_CONFLICT", "Новая версия активного сервера не была применена. Восстановлена прежняя рабочая версия.")
 			}
 		} else if activeNewID != activeBefore {
 			if err := s.writeActive(activeNewID); err != nil {
@@ -608,6 +651,7 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 			}
 		}
 		if nameChanged && !configChanged {
+			descriptionTouched = true
 			ictx, cancel := context.WithTimeout(ctx, interfaceTimeout)
 			err := s.d.Svc.EnsureInterface(ictx)
 			cancel()
@@ -624,7 +668,9 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 	for _, dir := range []string{liveDir, disDir} {
 		for _, f := range filterBelongs(readDirServers(dir), subID) {
 			if dir != target || !keep[jqRaw(f.rec["id"])] {
-				_ = s.removeFile(f)
+				if err := s.removeFile(f); err != nil {
+					return rollback("SERVER_SYNC_ERROR", "Не удалось удалить прежние записи. Каталог восстановлен.")
+				}
 			}
 		}
 	}
@@ -635,120 +681,4 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 		res.Warnings = append(res.Warnings, fmt.Sprintf("Сохранено прежних серверов: %d. Ответ разобран не полностью; отсутствие этих серверов не подтверждено. Их параметры могут быть устаревшими. Удаление отсутствующих серверов возможно после обновления без отклонённых узлов.", res.Retained))
 	}
 	return res, nil
-}
-
-// remap is broray_server_subscription_remap: exact importKey match first,
-// then a unique one-to-one continuity match keeps the old server id.
-// It returns the remapped staged rows or an error code.
-func (s *svc) remap(olds []oldRow, stage []servers.Record) ([]newRow, string) {
-	type entry struct {
-		key, cont, id string
-		rec           servers.Record
-	}
-	var oldE, newE []entry
-	for i := range olds {
-		o := &olds[i]
-		if o.key == "" {
-			continue
-		}
-		id := jqRaw(o.file.rec["id"])
-		if servers.Validate(o.file.rec, o.file.path) != nil || !safeFileID(id) || o.file.id != id {
-			return nil, "SERVER_SYNC_CONFLICT"
-		}
-		cont, err := servers.ContinuityKey(o.file.rec)
-		if err != nil {
-			return nil, "SERVER_SYNC_CONFLICT"
-		}
-		o.cont = cont
-		oldE = append(oldE, entry{o.key, cont, id, o.file.rec})
-	}
-	sorted := append([]servers.Record(nil), stage...)
-	sort.SliceStable(sorted, func(i, j int) bool { return jqRaw(sorted[i]["id"]) < jqRaw(sorted[j]["id"]) })
-	for _, r := range sorted {
-		id, _ := r["id"].(string)
-		src := sourceOf(r)
-		ik, _ := src["importKey"].(string)
-		if !safeFileID(id) || ik == "" {
-			return nil, "SERVER_SYNC_CONFLICT"
-		}
-		key, err1 := servers.CanonicalKey(r)
-		cont, err2 := servers.ContinuityKey(r)
-		if err1 != nil || err2 != nil {
-			return nil, "SERVER_SYNC_CONFLICT"
-		}
-		newE = append(newE, entry{key, cont, id, r})
-	}
-	dupKeys := func(es []entry) bool {
-		seen := map[string]bool{}
-		for _, e := range es {
-			if seen[e.key] {
-				return true
-			}
-			seen[e.key] = true
-		}
-		return false
-	}
-	if dupKeys(oldE) || dupKeys(newE) {
-		return nil, "SERVER_SYNC_AMBIGUOUS_IDENTITY"
-	}
-	exact := make([]*entry, len(newE))
-	matchedOld := map[string]bool{}
-	for i, n := range newE {
-		for j := range oldE {
-			if oldE[j].key == n.key {
-				exact[i] = &oldE[j]
-				matchedOld[oldE[j].id] = true
-				break
-			}
-		}
-	}
-	var remOld []*entry
-	for j := range oldE {
-		if !matchedOld[oldE[j].id] {
-			remOld = append(remOld, &oldE[j])
-		}
-	}
-	oldCount, newCount := map[string]int{}, map[string]int{}
-	for _, o := range remOld {
-		oldCount[o.cont]++
-	}
-	for i, n := range newE {
-		if exact[i] == nil {
-			newCount[n.cont]++
-		}
-	}
-	for c, oc := range oldCount {
-		if nc := newCount[c]; oc > 0 && nc > 0 && (oc > 1 || nc > 1) {
-			return nil, "SERVER_SYNC_AMBIGUOUS_IDENTITY"
-		}
-	}
-	out := make([]newRow, 0, len(newE))
-	used := map[string]bool{}
-	for i, n := range newE {
-		o := exact[i]
-		if o == nil {
-			for _, r := range remOld {
-				if r.cont == n.cont {
-					o = r
-					break
-				}
-			}
-		}
-		row := newRow{key: n.key, cont: n.cont, id: n.id, matchKey: n.key}
-		if o != nil {
-			row.id, row.matchKey = o.id, o.key
-		}
-		if used[row.id] {
-			return nil, "SERVER_SYNC_CONFLICT"
-		}
-		used[row.id] = true
-		rec := deepCopy(n.rec)
-		rec["id"] = row.id
-		if src, ok := rec["source"].(map[string]any); ok {
-			src["importKey"] = n.key
-		}
-		row.rec = rec
-		out = append(out, row)
-	}
-	return out, ""
 }

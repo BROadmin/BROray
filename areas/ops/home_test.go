@@ -61,7 +61,7 @@ func TestHomeSummaryNoSnapshots(t *testing.T) {
 	if ir := d["installedRelease"].(map[string]any); ir["version"] != app.Version || ir["webUIBuild"] != webUIBuild {
 		t.Fatalf("installedRelease %v", ir)
 	}
-	if webUIBuild != "WebUI-3.5.1" {
+	if webUIBuild != "WebUI-3.5.2" {
 		t.Fatalf("webUIBuild %q", webUIBuild)
 	}
 	if fr := h["facts"].(map[string]any); fr["unavailableCount"] != float64(7) || fr["moduleCount"] != float64(7) {

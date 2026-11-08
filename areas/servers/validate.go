@@ -195,6 +195,9 @@ func streamFieldsValid(s map[string]any) bool {
 	security := s["security"]
 	if protocol == "hysteria2" {
 		hy := s["hysteria"]
+		if has(hy, "udpIdleTimeout") && !nonNegInt32(get(hy, "udpIdleTimeout")) {
+			return false
+		}
 		if !isText(s["auth"]) {
 			return false
 		}
@@ -1065,6 +1068,18 @@ func Validate(rec Record, label string) error {
 }
 
 func validate(rec Record, label string) *ParseError {
+	if e := streamOptionsError(rec); e != nil {
+		return e
+	}
+	if rec["protocol"] == "wireguard" {
+		return validateWireGuard(rec)
+	}
+	if in(asString(rec["protocol"]), "http", "socks") {
+		return validateProxy(rec)
+	}
+	if rec["protocol"] == "amneziawg" {
+		return validateAmnezia(rec)
+	}
 	if !streamFieldsValid(rec) {
 		return die("сервер содержит неподдерживаемые параметры TLS/REALITY/FinalMask")
 	}

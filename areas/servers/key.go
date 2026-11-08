@@ -16,6 +16,15 @@ func lower(v any) any {
 // importKeyObject is the object of broray_server_subscription_import_key
 // (server-subscription-service.sh:66-102).
 func importKeyObject(s Record) map[string]any {
+	if s["protocol"] == "wireguard" {
+		return map[string]any{"protocol": "wireguard", "settings": s["wireguard"]}
+	}
+	if in(asString(s["protocol"]), "http", "socks") {
+		return map[string]any{"protocol": s["protocol"], "address": lower(s["address"]), "port": s["port"], "username": s["username"], "password": s["password"], "security": s["security"], "tls": s["tls"]}
+	}
+	if s["protocol"] == "amneziawg" {
+		return map[string]any{"protocol": "amneziawg", "profile": s["amneziawg"]}
+	}
 	var serverName, fingerprint any
 	if s["security"] == "reality" {
 		serverName = alt(get(s, "reality", "serverName"), "")
@@ -70,7 +79,41 @@ func importKeyObject(s Record) map[string]any {
 // record; the name, id, uri and source are excluded. Equal keys = duplicate.
 // The bytes are produced by compat.Canonical (Go is producer and consumer).
 func CanonicalKey(rec Record) (string, error) {
-	return compat.CanonicalSHA256(importKeyObject(normalize(rec)))
+	s := normalize(rec)
+	key := importKeyObject(s)
+	if has(s["hysteria"], "udpIdleTimeout") {
+		key["udpIdleTimeout"] = get(s, "hysteria", "udpIdleTimeout")
+	}
+	if lenPositive(s["streamOptions"]) {
+		key["streamOptions"] = s["streamOptions"]
+	}
+	return compat.CanonicalSHA256(key)
+}
+
+// RotationKey groups exact connection variants differing only in SNI/ShortID.
+// Use only inside one subscription and when the incoming variant is unique.
+// Credentials, transport options and peer verification keys remain significant.
+func RotationKey(rec Record) (string, error) {
+	s := normalize(rec)
+	key := importKeyObject(s)
+	delete(key, "serverName")
+	delete(key, "shortId")
+	if tls, ok := key["tls"].(map[string]any); ok {
+		copy := make(map[string]any, len(tls))
+		for k, v := range tls {
+			if k != "serverName" {
+				copy[k] = v
+			}
+		}
+		key["tls"] = copy
+	}
+	if has(s["hysteria"], "udpIdleTimeout") {
+		key["udpIdleTimeout"] = get(s, "hysteria", "udpIdleTimeout")
+	}
+	if lenPositive(s["streamOptions"]) {
+		key["streamOptions"] = s["streamOptions"]
+	}
+	return compat.CanonicalSHA256(key)
 }
 
 // ContinuityKey is broray_server_subscription_continuity_key
@@ -78,11 +121,8 @@ func CanonicalKey(rec Record) (string, error) {
 // a subscription server id across credential rotation.
 func ContinuityKey(rec Record) (string, error) {
 	s := normalize(rec)
-	var serverName any
-	if s["security"] == "reality" {
-		serverName = alt(get(s, "reality", "serverName"), "")
-	} else {
-		serverName = alt(get(s, "tls", "serverName"), get(s, "reality", "serverName"), s["sni"], "")
+	if s["protocol"] == "amneziawg" || s["protocol"] == "wireguard" {
+		return compat.CanonicalSHA256(map[string]any{"protocol": s["protocol"], "address": lower(s["address"]), "port": s["port"]})
 	}
 	return compat.CanonicalSHA256(map[string]any{
 		"protocol":    alt(s["protocol"], ""),
@@ -90,7 +130,6 @@ func ContinuityKey(rec Record) (string, error) {
 		"port":        alt(s["port"], json.Number("0")),
 		"network":     alt(s["network"], get(s, "transport", "type"), ""),
 		"security":    alt(s["security"], "none"),
-		"serverName":  serverName,
 		"host":        alt(get(s, "transport", "host"), get(s, "grpc", "authority"), get(s, "ws", "host"), get(s, "httpupgrade", "host"), ""),
 		"path":        alt(get(s, "xhttp", "path"), get(s, "ws", "path"), get(s, "httpupgrade", "path"), get(s, "transport", "path"), ""),
 		"serviceName": alt(get(s, "grpc", "serviceName"), get(s, "transport", "serviceName"), ""),

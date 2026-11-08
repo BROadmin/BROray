@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"bytes"
 	"encoding/base64"
+	"github.com/BROadmin/broray/areas/servers"
 	"regexp"
 	"strings"
 )
@@ -10,7 +11,7 @@ import (
 // Payload detection: broray_subscription_extract_nodes (svc:857-936).
 
 var (
-	reURILine  = regexp.MustCompile(`^[ \t\n\v\f\r]*(vless|vmess|trojan|ss|hysteria2|hy2|tuic|socks|socks5|http|https)://`)
+	reURILine  = regexp.MustCompile(`^[ \t\n\v\f\r]*(vless|vmess|trojan|ss|hysteria2|hy2|tuic|socks|socks5|http|https|vpn)://`)
 	reJSONLine = regexp.MustCompile(`^[ \t\n\v\f\r]*(\{|\[)`)
 	reHTML     = regexp.MustCompile(`(?i)<!doctype[ \t\n\v\f\r]+html|<html[ \t\n\v\f\r>]`)
 )
@@ -85,6 +86,13 @@ type extracted struct {
 // JSON (converted to links). Provider metadata lines of the body are
 // collected into md and removed.
 func extractNodes(body []byte, md *metadata) (*extracted, *subErr) {
+	// A WireGuard INI is one node, even though its payload has many lines.
+	trimmed := strings.TrimSpace(strings.TrimPrefix(string(body), "\ufeff"))
+	if strings.HasPrefix(trimmed, "[Interface]") || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
+		if r, err := servers.ParseLink(trimmed, "wg-detect", nil); err == nil && r["protocol"] == "wireguard" {
+			return &extracted{Lines: []string{trimmed}}, nil
+		}
+	}
 	lines := normalizeText(body)
 	md.apply(metaRecordsFromLines(lines))
 	lines = stripMetadata(lines)
@@ -117,7 +125,7 @@ func extractNodes(body []byte, md *metadata) (*extracted, *subErr) {
 	}
 	for _, l := range out {
 		t := strings.TrimLeft(l, spaceChars)
-		if t == "" || strings.HasPrefix(t, "#") {
+		if t == "" || !ex.JSONImport && strings.HasPrefix(t, "#") {
 			continue
 		}
 		ex.Lines = append(ex.Lines, l)

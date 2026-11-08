@@ -32,6 +32,10 @@ type Services struct {
 	// servers area: regenerate and apply the Xray config of the active
 	// server (after its record changed, e.g. by a subscription refresh).
 	ServersReapplyActive func(ctx context.Context, reason string) error
+	// servers area: withdraw an active node removed by its subscription. Caller
+	// holds the global fence. Rollback must restore catalog records first, then
+	// call the returned undo even when withdrawal returned an error.
+	ServersWithdrawActive func(context.Context) (func(context.Context) error, error)
 }
 
 var ErrServiceUnavailable = errors.New("SERVICE_UNAVAILABLE: Модуль BROray недоступен.")
@@ -64,6 +68,13 @@ func (s *Services) ReapplyActiveServer(ctx context.Context, reason string) error
 		return ErrServiceUnavailable
 	}
 	return s.ServersReapplyActive(ctx, reason)
+}
+
+func (s *Services) WithdrawActiveServer(ctx context.Context) (func(context.Context) error, error) {
+	if s.ServersWithdrawActive == nil {
+		return nil, ErrServiceUnavailable
+	}
+	return s.ServersWithdrawActive(ctx)
 }
 
 // IPv6 is the keenetic area's IPv6 fact, or state "unknown" (never a

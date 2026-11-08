@@ -55,6 +55,9 @@ func (s *svc) activate(id string) (any, error) {
 		if err != nil {
 			return nil, opFailed("Ошибка: неправильный JSON: " + RecordPath(s.d, id))
 		}
+		if err := requireConnectionSupport(rec); err != nil {
+			return nil, err
+		}
 		cfg, gerr := XrayConfig(rec, s.genSettings(ctx), RecordPath(s.d, id))
 		if gerr != nil {
 			return nil, opFailed(gerr.Error())
@@ -144,6 +147,9 @@ func (s *svc) deactivate() (any, error) {
 		s.removeRoute(ctx)
 		if err := s.disableAutoSwitch(); err != nil {
 			return nil, opFailed("Ошибка: не удалось выключить автоматическое переключение")
+		}
+		if err := s.clearWithdrawal(); err != nil {
+			return nil, opFailed("Ошибка: не удалось отменить поиск замены")
 		}
 		for _, p := range []string{ActiveFile(s.d), s.d.RunPath("interface-status.json")} {
 			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
@@ -248,7 +254,7 @@ func (s *svc) preview(uri string) (map[string]any, error) {
 		}
 	}
 	return map[string]any{"protocol": rec["protocol"], "name": rec["name"], "host": rec["address"], "port": rec["port"],
-		"transport": rec["network"], "security": rec["security"], "canonical": key, "duplicate": duplicate}, nil
+		"transport": rec["network"], "security": rec["security"], "canonical": key, "duplicate": duplicate, "connectionSupport": connectionSupport(rec), "importWarnings": rec["importWarnings"]}, nil
 }
 
 func (s *svc) importCommit(uri string) (any, error) {

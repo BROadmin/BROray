@@ -91,12 +91,16 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 			return nil, opFailed("Ошибка: не удалось сформировать данные сервера " + id)
 		}
 		q := s.qualityView(id, stale, expired)
+		support := connectionSupport(rec)
+		if support["supported"] == false {
+			q = map[string]any{"status": "unsupported", "freshness": "not-applicable", "method": nil}
+		}
 		row := map[string]any{
 			"id": rec["id"], "name": alt(rec["name"], rec["id"]), "address": rec["address"], "port": rec["port"],
 			"protocol": rec["protocol"], "transport": alt(rec["network"], get(rec, "transport", "type"), "unknown"),
 			"security": alt(rec["security"], "none"), "sourceType": alt(get(rec, "source", "type"), "manual"),
 			"subscriptionId": alt(get(rec, "source", "subscriptionId"), nil), "nodeIndex": alt(get(rec, "source", "nodeIndex"), nil),
-			"active": rec["id"] == active, "quality": q,
+			"active": rec["id"] == active, "quality": q, "connectionSupport": support,
 		}
 		rows = append(rows, row)
 		if k, err := CanonicalKey(rec); err == nil {
@@ -240,6 +244,7 @@ func (s *svc) details(id string) (map[string]any, error) {
 	}
 	stale, expired := s.qualityPolicy()
 	out := MaskRecord(rec)
+	out["connectionSupport"] = connectionSupport(rec)
 	out["active"] = out["id"] == ActiveID(s.d)
 	out["quality"] = s.detailsQuality(id, stale, expired)
 	return out, nil
