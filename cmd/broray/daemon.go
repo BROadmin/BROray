@@ -156,11 +156,7 @@ func runDaemon(root platform.Root) int {
 	// No WriteTimeout: routes export/delete/resume hold one POST open for the
 	// whole operation (3.x contract; the page waits up to 8 h).
 	webSrv := &http.Server{Handler: web.NewServer(a, verifier), ReadHeaderTimeout: 15 * time.Second, ReadTimeout: 120 * time.Second, MaxHeaderBytes: 32 << 10}
-	go func() {
-		if err := webSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
-			logger.Printf("web: %v", err)
-		}
-	}()
+	go serveWeb(ctx, webSrv, ln, logger)
 	logger.Printf("WebUI on http://%s/", addr)
 
 	// dev1 App.Boot/App.Loops are replaced by the areas (Xray start and
@@ -169,6 +165,7 @@ func runDaemon(root platform.Root) int {
 
 	sig := make(chan os.Signal, 2)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	defer signal.Stop(sig)
 	select {
 	case s := <-sig:
 		logger.Printf("signal %v: stopping", s)
@@ -200,4 +197,43 @@ func runDaemon(root platform.Root) int {
 		return 1
 	}
 	return 0
+}
+
+// serveWeb keeps the HTTP listener independent from the VPN lifecycle. A fatal
+// Accept error must not leave a live daemon/control socket with no WebUI. Reuse
+// the handler and its sessions, rebind only the original address, and leave Xray
+// and router configuration alone. Cancellation closes the current listener even
+// after it has been replaced; Shutdown must never trigger a new listener.
+func serveWeb(ctx context.Context, srv *http.Server, first net.Listener, logger *log.Logger) {
+	addr := first.Addr().String()
+	ln := first
+	for {
+		if ctx.Err() != nil {
+			_ = ln.Close()
+			return
+		}
+		current := ln
+		stopClose := context.AfterFunc(ctx, func() { _ = current.Close() })
+		err := srv.Serve(current)
+		stopClose()
+		if ctx.Err() != nil || errors.Is(err, http.ErrServerClosed) {
+			return
+		}
+		logger.Printf("web listener failed: %v; restoring %s", err, addr)
+		for delay := time.Second; ; delay = min(delay*2, 30*time.Second) {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			ln, err = net.Listen("tcp", addr)
+			if err == nil {
+				logger.Printf("web listener restored on %s", addr)
+				break
+			}
+			logger.Printf("web listener restore failed: %v", err)
+		}
+	}
 }

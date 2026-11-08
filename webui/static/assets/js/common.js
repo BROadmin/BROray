@@ -1,7 +1,40 @@
 (function () {
     "use strict";
 
+    // Authentication must release the form even if a cloud connection stalls
+    // after headers. Do not apply this deadline to long route operations.
     async function apiRequest(url, options) {
+        if (url !== "/api/login.cgi" && url !== "/api/session.cgi") {
+            return requestJSON(url, options);
+        }
+        const controller = new AbortController();
+        const upstream = options && options.signal;
+        const cancel = function () { controller.abort(); };
+        let expired = false;
+        if (upstream) {
+            if (upstream.aborted) controller.abort();
+            else upstream.addEventListener("abort", cancel, {once: true});
+        }
+        const timer = setTimeout(function () {
+            expired = true;
+            controller.abort();
+        }, 60000);
+        try {
+            return await requestJSON(url, Object.assign({}, options || {}, {signal: controller.signal}));
+        } catch (error) {
+            if (expired) {
+                const timeout = new Error("Сервер не ответил вовремя. Проверьте доступ к роутеру и повторите попытку.");
+                timeout.code = "REQUEST_TIMEOUT";
+                throw timeout;
+            }
+            throw error;
+        } finally {
+            clearTimeout(timer);
+            if (upstream) upstream.removeEventListener("abort", cancel);
+        }
+    }
+
+    async function requestJSON(url, options) {
         const requestOptions = Object.assign(
             {
                 credentials: "same-origin",

@@ -802,8 +802,6 @@
     }
 
     async function initialize() {
-        bindEvents();
-
         try {
             var session = await request("/api/session.cgi", {method: "GET"});
             currentUser.textContent = session.user || "admin";
@@ -812,10 +810,25 @@
             await loadStatus(false);
             pollOperation(false);
         } catch (error) {
-            window.BROrayUI.redirectToLogin();
+            // request() redirects only on an actual 401. A temporary transport
+            // failure must not masquerade as an expired authenticated session.
+            if (error.status === 401) return;
+            loader.hidden = false;
+            app.hidden = true;
+            loader.textContent = errorMessage(error) + " ";
+            var retry = document.createElement("button");
+            retry.type = "button";
+            retry.className = "button button-secondary";
+            retry.textContent = "Повторить";
+            retry.addEventListener("click", function () {
+                retry.disabled = true;
+                initialize();
+            });
+            loader.appendChild(retry);
         }
     }
 
+    bindEvents();
     initialize();
 
     window.setInterval(function () {

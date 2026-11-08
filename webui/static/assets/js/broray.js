@@ -111,6 +111,17 @@
     }
 
     async function request(path, options) {
+        if (path === "/api/session.cgi") {
+            try {
+                return await window.BROrayUI.apiRequest(path, options);
+            } catch (error) {
+                if (error.status === 401) {
+                    window.location.replace("/");
+                    throw new Error("Сессия завершена.");
+                }
+                throw error;
+            }
+        }
         var settings = Object.assign({
             credentials: "same-origin",
             cache: "no-store"

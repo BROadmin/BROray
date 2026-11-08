@@ -1175,8 +1175,6 @@
     }
 
     function initialize() {
-        bindActions();
-
         request(
             "/api/session.cgi",
             {
@@ -1190,14 +1188,34 @@
                     return loadWebAccessStatus(false);
                 }).then(loadUdpStatus);
             })
-            .catch(function () {
-                BROrayUI.redirectToLogin();
+            .catch(function (error) {
+                if (error && error.status === 401) {
+                    BROrayUI.redirectToLogin();
+                    return;
+                }
+                var loader = document.getElementById("page-loader");
+                loader.hidden = false;
+                loader.textContent = errorMessage(error) + " ";
+                var retry = document.createElement("button");
+                retry.type = "button";
+                retry.className = "button button-secondary";
+                retry.textContent = "Повторить";
+                retry.addEventListener("click", function () {
+                    retry.disabled = true;
+                    initialize();
+                });
+                loader.appendChild(retry);
             });
     }
 
-    if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", initialize, { once: true });
-    } else {
+    function start() {
+        bindActions();
         initialize();
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", start, { once: true });
+    } else {
+        start();
     }
 })();
