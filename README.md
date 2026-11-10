@@ -4,7 +4,7 @@
 **BROray — клиент Xray и менеджер сетевых политик для Keenetic.** Серверы, подписки, маршруты, DNS-over-TLS и обслуживание в знакомом WebUI. Развиваем тот же BROray и делаем его удобнее.
 
 
-**Текущий выпуск: BROray 3.5.2 · Stable · 8 ноября 2026.** [Скачать](https://github.com/BROadmin/BROray/releases/tag/v3.5.2) · [Документация](https://docs.brovibe.cloud/broray/) · [История версий](https://docs.brovibe.cloud/broray/releases/).
+**Текущий выпуск: BROray 3.5.3 · Stable · 10 ноября 2026.** [Скачать](https://github.com/BROadmin/BROray/releases/tag/v3.5.3) · [Документация](https://docs.brovibe.cloud/broray/) · [История версий](https://docs.brovibe.cloud/broray/releases/).
 
 
 > **Перед установкой** BROray теперь работает на Go. Пользователю не нужно устанавливать Go или менять привычные способы работы в WebUI. Для перехода с 3.2 требуется чистая установка; обновитель и резервная копия 3.2 для этого не используются.
@@ -22,21 +22,26 @@
 
 
 <a id="changes"></a>
-## Что нового в 3.5.2
+## Что нового в 3.5.3
 
-Продолжаем развивать BROray на Go с привычным интерфейсом и сохранением настроек.
+- Xray 26.11.9: обновлён реестр совместимости, для KN-1811/aarch64 отражены проверки HTTPS и UDP. BROray и ядро обновляются отдельно.
+- Добавлен импорт VLESS/XDRIVE и MASQUE: вставка JSON, загрузка UTF-8 файла и подписка. Перед сохранением видны требования к ядру и предупреждения.
+- XDRIVE: local, Google Drive, S3 и template, Encryption/Mux/XMUX; раздельные показатели установления туннеля и задержки после подключения. MASQUE: H2/H3, IPv6, remote DNS и готовые WARP-профили.
+- Усилен разбор конфигураций: вложенные FinalMask, TLS, QUIC, сокеты и downloadSettings; конфликты, неизвестные исполняемые поля, неверные типы и повторные JSON-ключи дают понятную ошибку. Исправлены BOM, имена и сохранение нескольких предупреждений.
+- Подключение через KeenDNS выполняется как фоновая операция: WebUI получает номер задания и наблюдает результат без повторного запуска. Служебное поле support-x25519mlkem768 теперь объясняется как настройка Mihomo, а не параметр Xray.
+- Улучшена защита облачных реквизитов в карточках и диагностике. Установщик ядра на MIPS/MIPS LE выбирает официальный xray_softfloat.
 
-- Добавлен импорт SOCKS5, HTTP/HTTPS, WireGuard и поддержанных Hysteria2-конфигураций Xray JSON. Расширены параметры WebSocket, HTTPUpgrade, gRPC и сокетов.
-- AmneziaWG распознаётся и сохраняется с явным предупреждением: подключение пока не поддерживается. MASQUE и XDRIVE не входят в выпуск.
-- Смена SNI/Short ID обновляет один и тот же узел подписки; накопленные варианты объединяются при однозначном соответствии. Разные аккаунты, транспорты и источники сохраняются отдельно.
-- Удалённый провайдером активный сервер удаляется из BROray. При включённом автовыборе программа ищет замену по его настройкам; иначе VPN отключается до ручного выбора.
-- Исправлена гонка при завершении старой версии во время обновления. Поддерживается прямой переход с 3.5.0 и 3.5.1.
+[Все изменения](docs/RELEASE-3.5.3.md) · [Форматы и ограничения](docs/PROTOCOL-SUPPORT.md) · [Матрица параметров](docs/XRAY-26.11.9-PARAMETERS.md).
 
-[Подробности выпуска](docs/RELEASE-3.5.2.md) · [Форматы и ограничения импорта](docs/PROTOCOL-SUPPORT.md).
+## Обновление с 3.5.0, 3.5.1 или 3.5.2 на 3.5.3
 
-## Обновление с 3.5.0 или 3.5.1 на 3.5.2
+Откройте страницу «BROray» → «Проверить обновление» → «Установить обновление». Прямой переход с 3.5.0, 3.5.1 и 3.5.2 сохраняет данные. Дождитесь завершения и войдите снова; перезагрузка роутера не требуется. Xray обновляется отдельно на странице «Xray»: для новых профилей нужен 26.11.9. С версии 3.2 требуется чистая установка с предварительным сохранением ссылок, подписок и своих маршрутов; резервная копия 3.2 не переносится в 3.5. Go на роутер устанавливать не нужно.
 
-Удалять BROray не нужно. Откройте страницу **BROray**, нажмите **«Проверить обновление»**, затем **«Установить обновление»**. Дождитесь завершения и войдите снова. Серверы, подписки и маршруты сохраняются; перезагрузка роутера не требуется. С 3.2 по-прежнему нужна чистая установка по инструкции ниже.
+### Известные ограничения
+
+- WireGuard на MIPS/MIPS LE не прошёл запуск в эмуляции официального Xray. Точная причина и поведение на настоящем MIPS-роутере неизвестны. Импорт и сохранение доступны, работоспособность этого протокола на MIPS не подтверждена.
+- Google Drive/XDRIVE и настоящий WARP без выделенных реквизитов не проверялись. Local/S3/template и MASQUE H2/H3 проверены в изолированной VM с настоящим Xray и собственными тестовыми сервисами; это не проверка публичного провайдера.
+- Аппаратная приёмка 3.5.3 выполнена на KN-1811/aarch64. Для ARMv7/MIPS/MIPS LE приведены результаты эмуляции, а не испытания на физических роутерах.
 
 ### Основа ветки 3.5: изменения выпуска 3.5.0
 
@@ -63,7 +68,7 @@
 
 ## Выберите свой случай
 
-- **Уже установлена 3.5.0 или 3.5.1:** обновите её через WebUI по инструкции выше. Установочные команды ниже не нужны.
+- **Уже установлена 3.5.0, 3.5.1 или 3.5.2:** обновите её через WebUI по инструкции выше. Установочные команды ниже не нужны.
 - **BROray ещё не установлен:** начните с [подготовки роутера](#prepare).
 - **Установлена 3.2:** сначала выполните раздел ниже, затем чистую установку. Не начинайте с установочной команды поверх старой версии.
 
@@ -223,17 +228,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.2-aarch64/broray" "$workdir/broray-3.5.2-aarch64/README.txt"
-  rmdir "$workdir/broray-3.5.2-aarch64" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.3-aarch64/broray" "$workdir/broray-3.5.3-aarch64/README.txt"
+  rmdir "$workdir/broray-3.5.3-aarch64" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.2/broray-3.5.2-aarch64.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' '2dcdcdfda5ee63e0be38d613148834c879348cae53565c8c2a7cebb588d9302c' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.3/broray-3.5.3-aarch64.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' 'e3a94c8a3871453bacb10f4bd6e8e1c1613254c6247d0dfbccc9d1aba31bd253' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.2-aarch64/broray" installer preflight
-"$workdir/broray-3.5.2-aarch64/broray" installer install
-"$workdir/broray-3.5.2-aarch64/broray" ctl ping
+"$workdir/broray-3.5.3-aarch64/broray" installer preflight
+"$workdir/broray-3.5.3-aarch64/broray" installer install
+"$workdir/broray-3.5.3-aarch64/broray" ctl ping
 echo "BROray установлен. Теперь откройте WebUI по адресу роутера на порту 8080."
 )
 ```
@@ -258,17 +263,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.2-mipsel/broray" "$workdir/broray-3.5.2-mipsel/README.txt"
-  rmdir "$workdir/broray-3.5.2-mipsel" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.3-mipsel/broray" "$workdir/broray-3.5.3-mipsel/README.txt"
+  rmdir "$workdir/broray-3.5.3-mipsel" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.2/broray-3.5.2-mipsel.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' 'c33e9d0ccf9cf610044849189e7c3e7bac034f072f4b9162491eee871429bbd6' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.3/broray-3.5.3-mipsel.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' '4fa5754f4c403c8b75c3f0aef46f7de88da000de1231976eae37338b089e6525' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.2-mipsel/broray" installer preflight
-"$workdir/broray-3.5.2-mipsel/broray" installer install
-"$workdir/broray-3.5.2-mipsel/broray" ctl ping
+"$workdir/broray-3.5.3-mipsel/broray" installer preflight
+"$workdir/broray-3.5.3-mipsel/broray" installer install
+"$workdir/broray-3.5.3-mipsel/broray" ctl ping
 echo "BROray установлен. Теперь откройте WebUI по адресу роутера на порту 8080."
 )
 ```
@@ -293,17 +298,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.2-mips/broray" "$workdir/broray-3.5.2-mips/README.txt"
-  rmdir "$workdir/broray-3.5.2-mips" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.3-mips/broray" "$workdir/broray-3.5.3-mips/README.txt"
+  rmdir "$workdir/broray-3.5.3-mips" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.2/broray-3.5.2-mips.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' 'f4bef56d91e9c9ae781bfdedc083db97f3f6e9fedf443ad2022f2e64a30ef2d9' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.3/broray-3.5.3-mips.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' '8f8c414e2788b6307377e229e045ac36c25acbb15b228f62213d3cf95da5b119' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.2-mips/broray" installer preflight
-"$workdir/broray-3.5.2-mips/broray" installer install
-"$workdir/broray-3.5.2-mips/broray" ctl ping
+"$workdir/broray-3.5.3-mips/broray" installer preflight
+"$workdir/broray-3.5.3-mips/broray" installer install
+"$workdir/broray-3.5.3-mips/broray" ctl ping
 echo "BROray установлен. Теперь откройте WebUI по адресу роутера на порту 8080."
 )
 ```
@@ -346,17 +351,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.2-armv7/broray" "$workdir/broray-3.5.2-armv7/README.txt"
-  rmdir "$workdir/broray-3.5.2-armv7" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.3-armv7/broray" "$workdir/broray-3.5.3-armv7/README.txt"
+  rmdir "$workdir/broray-3.5.3-armv7" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.2/broray-3.5.2-armv7.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' '2731e77352c8e6d87eb00d565bfcf96305b96ec061142ce832fce3d9f1d71bcb' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.3/broray-3.5.3-armv7.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' '5c6fc46ed78d7bf7e591ae6f625eebf6246ad9d73742fe567826090d72675b6e' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.2-armv7/broray" installer preflight
-"$workdir/broray-3.5.2-armv7/broray" installer install
-"$workdir/broray-3.5.2-armv7/broray" ctl ping
+"$workdir/broray-3.5.3-armv7/broray" installer preflight
+"$workdir/broray-3.5.3-armv7/broray" installer install
+"$workdir/broray-3.5.3-armv7/broray" ctl ping
 echo "BROray установлен. Теперь откройте WebUI по адресу роутера на порту 8080."
 )
 ```
@@ -417,7 +422,7 @@ echo "BROray установлен. Теперь откройте WebUI по ад
 
 
 1. Введите имя и пароль **администратора Keenetic или Netcraze**. Здесь нужны данные основной панели роутера, а не root и пароль Entware.
-2. Если открылась старая страница 3.2, выполните принудительное обновление **Ctrl+F5**; в Firefox также доступно **Ctrl+Shift+R**. Затем на странице «BROray» убедитесь, что установлена 3.5.2. При необходимости откройте адрес в новой приватной вкладке.
+2. Если открылась старая страница 3.2, выполните принудительное обновление **Ctrl+F5**; в Firefox также доступно **Ctrl+Shift+R**. Затем на странице «BROray» убедитесь, что установлена 3.5.3. При необходимости откройте адрес в новой приватной вкладке.
 3. Откройте «Серверы», импортируйте свою ссылку и активируйте подключение. Либо добавьте ссылку в «Подписках», обновите подписку и выберите её сервер.
 4. Нажмите «Проверить» у активного сервера. Затем установите нужные наборы на странице «Маршруты → Готовые маршруты». Выбор трафика устройств определяется маршрутами и политиками роутера.
 
@@ -429,7 +434,7 @@ echo "BROray установлен. Теперь откройте WebUI по ад
 ## Если хотите скачать файлы вручную
 
 
-Все архивы, манифест, подпись и открытый ключ доступны в [релизе 3.5.2](https://github.com/BROadmin/BROray/releases/tag/v3.5.2). В готовых командах закреплены SHA-256 из подписанного манифеста. Дополнительная проверка подписи возможна на ПК с minisign:
+Все архивы, манифест, подпись и открытый ключ доступны в [релизе 3.5.3](https://github.com/BROadmin/BROray/releases/tag/v3.5.3). В готовых командах закреплены SHA-256 из подписанного манифеста. Дополнительная проверка подписи возможна на ПК с minisign:
 
 
 ```sh
@@ -487,7 +492,7 @@ minisign -Vm manifest.json -P RWTcmO2pPYr+FgTRMQHzWjGQeJcTF/iJZQSIQF353UWJUfYEOj
 
 Укажите URL провайдера, обновите подписку и проверьте её серверы. Поддерживаются списки ссылок, Base64-списки, поддержанные профили Xray JSON и один клиентский WireGuard INI. Сведения о трафике и сроке показываются, если их передал провайдер. Узел, удалённый вами только из BROray, может вернуться при обновлении, пока он остаётся у провайдера.
 
-В 3.5.2 смена SNI/Short ID сохраняет ID одного узла при однозначном соответствии. Совпадающие по прочим параметрам старые варианты внутри одной подписки объединяются; ручные записи и другие подписки остаются отдельными. Если узел удалён провайдером, полный успешно разобранный ответ удалит его из BROray. Для исчезнувшего активного узла VPN отключается; включённый автовыбор ищет замену по своим настройкам. Если подходящей замены нет, поиск повторяется после защитного интервала. При выключенном автовыборе выберите сервер вручную. Ручное отключение VPN отменяет поиск.
+В 3.5.3 смена SNI/Short ID сохраняет ID одного узла при однозначном соответствии. Совпадающие по прочим параметрам старые варианты внутри одной подписки объединяются; ручные записи и другие подписки остаются отдельными. Если узел удалён провайдером, полный успешно разобранный ответ удалит его из BROray. Для исчезнувшего активного узла VPN отключается; включённый автовыбор ищет замену по своим настройкам. Если подходящей замены нет, поиск повторяется после защитного интервала. При выключенном автовыборе выберите сервер вручную. Ручное отключение VPN отменяет поиск.
 
 Пустой, повреждённый или частично разобранный ответ не подтверждает удаление прежних узлов. Прочитайте предупреждения. Валидный AmneziaWG в режиме «Только сохранение» сам по себе не означает ошибку подписки.
 
@@ -526,6 +531,10 @@ minisign -Vm manifest.json -P RWTcmO2pPYr+FgTRMQHzWjGQeJcTF/iJZQSIQF353UWJUfYEOj
 
 
 ## История версий
+
+### 3.5.3 · 10 ноября 2026
+
+Xray 26.11.9, XDRIVE/MASQUE, строгий импорт и очередь активации через KeenDNS. [Описание и известные ограничения](docs/RELEASE-3.5.3.md).
 
 ### 3.5.2 · 8 ноября 2026
 
