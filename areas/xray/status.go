@@ -346,6 +346,10 @@ func (s *service) socksEndpoint() (string, int) {
 }
 
 func (s *service) computeStatus(ctx context.Context) map[string]any {
+	maintenance, maintenanceErr := s.readMaintenance()
+	if maintenanceErr != nil {
+		maintenance.Status = "interrupted"
+	}
 	bin, cfg := s.d.Root.XrayBinary(), s.d.Root.XrayConfig()
 	now := time.Now()
 	st, installed := regular(bin)
@@ -431,6 +435,7 @@ func (s *service) computeStatus(ctx context.Context) map[string]any {
 		"facts": map[string]any{"processRunning": running, "configValid": cfgValid, "socksActive": socksActive, "socksAddress": addr,
 			"socksPort": port}, "lastOperation": nil}
 	return map[string]any{
+		"maintenanceStatus": maintenance.Status, "lastInstalledVersion": nullStr(maintenance.PreviousVersion),
 		"installed": installed, "executable": exe, "running": running, "pid": pid, "version": nullStr(version),
 		"architecture": nullStr(arch), "deviceArchitecture": nullStr(machine()), "binaryPath": bin, "binarySizeBytes": size,
 		"binarySha256": nullStr(sum), "configPath": cfg, "configExists": cfgExists, "configSizeBytes": cfgSize,
@@ -445,27 +450,40 @@ func (s *service) computeStatus(ctx context.Context) map[string]any {
 // statusCached is broray_xray_status_json_cached: reuse a status younger
 // than 15 s while the verified PID is unchanged.
 func (s *service) statusCached(ctx context.Context) map[string]any {
-	pid := ""
-	if n := s.d.App.Xray.PID(); n > 0 {
-		pid = strconv.Itoa(n)
-	}
-	s.cacheMu.Lock()
-	if s.cache != nil && time.Since(s.cacheAt) < statusCacheTTL && s.cachePID == pid {
-		c := s.cache
+	for {
+		pid := ""
+		if n := s.d.App.Xray.PID(); n > 0 {
+			pid = strconv.Itoa(n)
+		}
+		s.cacheMu.Lock()
+		if s.cache != nil && time.Since(s.cacheAt) < statusCacheTTL && s.cachePID == pid {
+			c := s.cache
+			s.cacheMu.Unlock()
+			return c
+		}
+		generation := s.cacheGeneration
 		s.cacheMu.Unlock()
-		return c
+		st := s.computeStatus(ctx)
+		s.cacheMu.Lock()
+		if generation != s.cacheGeneration {
+			s.cacheMu.Unlock()
+			// A completed mutation supersedes any snapshot that started before it.
+			// Never let a slow version/config check repopulate the invalidated cache.
+			if ctx.Err() != nil {
+				return st
+			}
+			continue
+		}
+		s.cache, s.cacheAt, s.cachePID = st, time.Now(), pid
+		s.cacheMu.Unlock()
+		return st
 	}
-	s.cacheMu.Unlock()
-	st := s.computeStatus(ctx)
-	s.cacheMu.Lock()
-	s.cache, s.cacheAt, s.cachePID = st, time.Now(), pid
-	s.cacheMu.Unlock()
-	return st
 }
 
 func (s *service) invalidateStatus() {
 	s.cacheMu.Lock()
 	s.cache = nil
+	s.cacheGeneration++
 	s.cacheMu.Unlock()
 }
 

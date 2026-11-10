@@ -290,6 +290,20 @@ func ReadJSON(path string, v any) error {
 // is answered without trusting a PID.
 type Lock struct{ f *os.File }
 
+// Owns checks the live descriptor against the expected lock inode. Used only
+// while the caller retains the Lock; a pathname or PID is not proof of ownership.
+func (l *Lock) Owns(path string) bool {
+	if l == nil || l.f == nil {
+		return false
+	}
+	a, err := l.f.Stat()
+	if err != nil {
+		return false
+	}
+	b, err := os.Lstat(path)
+	return err == nil && b.Mode().IsRegular() && os.SameFile(a, b)
+}
+
 var ErrLocked = errors.New("LOCK_HELD")
 
 func TryLock(path string) (*Lock, error) {

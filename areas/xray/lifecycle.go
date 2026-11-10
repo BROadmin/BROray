@@ -132,6 +132,9 @@ func (s *service) lifecycle(ctx context.Context, action string) (string, error) 
 	defer s.lifeMu.Unlock()
 	switch action {
 	case "start", "restart":
+		if s.maintenanceBlocksAuto() {
+			return "Xray удалён или требует восстановления. Установите выбранную версию на странице Xray.", errors.New("XRAY_MAINTENANCE_REQUIRED")
+		}
 		v := s.validate(ctx)
 		if !v.Success {
 			out, _ := v.Output.(string)
@@ -178,6 +181,9 @@ func (s *service) ApplyConfig(ctx context.Context, config []byte) error {
 	s.lifeMu.Lock()
 	defer s.lifeMu.Unlock()
 	defer s.invalidateStatus()
+	if s.maintenanceBlocksAuto() {
+		return errors.New("XRAY_MAINTENANCE_REQUIRED: Установите Xray или завершите восстановление ядра.")
+	}
 	bin, path := s.d.Root.XrayBinary(), s.d.Root.XrayConfig()
 	if !executable(bin) {
 		return errors.New("XRAY_NOT_INSTALLED: Исполняемый файл Xray не найден.")

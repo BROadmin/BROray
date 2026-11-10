@@ -21,12 +21,15 @@ type service struct {
 	d      *compat.Deps
 	lifeMu sync.Mutex // start/stop/restart, config apply and the binary swap
 
-	cacheMu  sync.Mutex
-	cache    map[string]any
-	cacheAt  time.Time
-	cachePID string
+	cacheMu         sync.Mutex
+	cache           map[string]any
+	cacheAt         time.Time
+	cachePID        string
+	cacheGeneration uint64
 
-	jobs sync.WaitGroup
+	jobs                   sync.WaitGroup
+	resourceProbe          func() (storageResources, error)
+	archiveHeaderValidator func([]byte) error // synthetic executable fixtures only
 }
 
 var (
@@ -73,6 +76,7 @@ func register() {
 	cgi.RegisterRaw("/api/xray/install.cgi", func(c *cgi.Req) { current.Load().handleLaunch(c, "install") }, cgi.POST(), cgi.Limit(4096), invalid)
 	cgi.RegisterRaw("/api/xray/update.cgi", func(c *cgi.Req) { current.Load().handleLaunch(c, "update") }, cgi.POST())
 	cgi.RegisterRaw("/api/xray/reinstall.cgi", func(c *cgi.Req) { current.Load().handleLaunch(c, "reinstall") }, cgi.POST())
+	cgi.RegisterRaw("/api/xray/uninstall.cgi", func(c *cgi.Req) { current.Load().handleLaunch(c, "uninstall") }, cgi.POST(), cgi.Limit(4096), invalid)
 	cgi.Register("/api/xray/operation-status.cgi", func(c *cgi.Req) (any, error) { return current.Load().handleOperationStatus(c) })
 }
 
@@ -80,6 +84,9 @@ func register() {
 // config exist. Deviation: also requires an active server (config/active-server),
 // so a deactivated BROray stays stopped after a router restart.
 func (s *service) bootStart(ctx context.Context) {
+	if s.maintenanceBlocksAuto() {
+		return
+	}
 	for _, p := range []string{s.d.Root.XrayBinary(), s.d.Root.XrayConfig(), s.d.Path("config", "active-server")} {
 		if _, err := os.Stat(p); err != nil {
 			return

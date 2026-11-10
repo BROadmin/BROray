@@ -154,6 +154,10 @@
     }
 
     function operationCopy(mode) {
+        if (mode === "uninstall") {
+            return {runningTitle: "Удаление Xray…", runningMessage: "Останавливается VPN и удаляется только ядро. Настройки BROray сохраняются.",
+                successMessage: "Xray удалён. Для подключения выберите и установите версию ядра.", successToast: "Xray удалён.", errorToast: "Не удалось завершить удаление Xray."};
+        }
         if (mode === "install") {
             return {runningTitle: "Установка выбранной версии Xray…",
                 runningMessage: "Проверяются архив и текущая конфигурация. Не отключайте питание роутера.",
@@ -194,6 +198,10 @@
         latestUpdate.requiredBytes = Number(data.temporaryStorage && data.temporaryStorage.requiredBytes || 0);
         latestUpdate.freeBytes = Number(data.temporaryStorage && data.temporaryStorage.freeBytes || 0);
         latestUpdate.shortfallBytes = Number(data.temporaryStorage && data.temporaryStorage.shortfallBytes || 0);
+        latestUpdate.lowSpaceAllowed = Boolean(data.temporaryStorage && data.temporaryStorage.lowSpaceAllowed);
+        latestUpdate.lowSpaceRequiredBytes = Number(data.temporaryStorage && data.temporaryStorage.lowSpaceRequiredBytes || 0);
+        latestUpdate.ramVerified = Boolean(data.temporaryStorage && data.temporaryStorage.verified);
+        latestUpdate.memoryReserve = Number(data.temporaryStorage && data.temporaryStorage.reserveBytes || 33554432);
 
         byId("installed-version").textContent = data.currentVersion || "—";
         byId("available-version").textContent = data.latestVersion || "—";
@@ -223,6 +231,7 @@
                 : "Список обновлён. Совместимость указана для текущей сборки BROray";
         }
         renderReleaseChoices();
+        renderStoragePlan();
     }
 
     function selectedRelease() {
@@ -249,9 +258,32 @@
     }
 
     function spaceReady(row) {
-        return latestUpdate.checked && latestUpdate.storageOk && latestUpdate.reinstallAllowed &&
-            latestUpdate.freeBytes >= latestUpdate.requiredBytes &&
-            latestUpdate.optFreeBytes >= Math.max(latestUpdate.optRequiredBytes, Number(row.asset && row.asset.size || 0) + 1048576);
+        var archive = Number(row.asset && row.asset.size || 0);
+        var current = Number(latestStatus && latestStatus.binarySizeBytes || 0);
+        var reserve = Number(latestUpdate.memoryReserve || 33554432);
+        if (!latestUpdate.checked || latestUpdate.ramVerified !== true) return false;
+        if (byId("xray-low-space").checked) {
+            return latestUpdate.optFreeBytes >= 8388608 && latestUpdate.freeBytes >= archive + current + reserve;
+        }
+        return latestUpdate.freeBytes >= archive + reserve && latestUpdate.optFreeBytes >= Math.max(current, archive) + 8388608;
+    }
+
+    function renderStoragePlan() {
+        var note = byId("xray-storage-plan");
+        if (!note) return;
+        var low = byId("xray-low-space").checked;
+        note.textContent = (latestUpdate.checked ? "/opt: свободно " + formatBytes(latestUpdate.optFreeBytes) + "; RAM: доступно " + formatBytes(latestUpdate.freeBytes) + ". " : "") +
+            (low ? "Копия старого ядра хранится в RAM. При отключении питания она пропадёт; может потребоваться повторная установка Xray. " :
+                "Архив загружается в RAM; старое ядро сохраняется в /opt до успешной проверки нового. ") +
+            "Точный размер нового ядра проверяется после загрузки архива, до изменения установленного Xray.";
+        if (latestUpdate.checked) {
+            var row = selectedRelease();
+            byId("update-message").textContent = latestUpdate.ramVerified !== true
+                ? "Не удалось подтвердить RAM-хранилище или доступную память. Установка не будет начата."
+                : row && spaceReady(row)
+                ? "Предварительная проверка ресурсов пройдена для выбранной версии. Точный размер ядра будет проверен после загрузки."
+                : "Для выбранной версии или режима недостаточно свободных ресурсов. Измените режим либо освободите место.";
+        }
     }
 
     function isDowngrade(row) {
@@ -358,14 +390,17 @@
         if (controlsLocked || catalogLoading || !installable(row)) return;
         var body = {tag: row.tagName, currentVersion: catalogCurrentVersion, archiveSha256: row.archiveSha256,
             allowUntested: compatibilityStatus(row) === "untested", allowPrerelease: row.prerelease === true,
-            allowDowngrade: isDowngrade(row), allowPartial: compatibilityStatus(row) === "incompatible"};
+            allowDowngrade: isDowngrade(row), allowPartial: compatibilityStatus(row) === "incompatible",
+            allowLowSpace: byId("xray-low-space").checked === true};
         runAction("install.cgi", button, {
             body: body, busyLabel: "Запуск…", background: true, operation: "install",
             successMessage: "Установка выбранной версии запущена.",
             confirm: {title: (row.installed ? "Переустановить Xray " : "Установить Xray ") + row.version + "?",
-                message: releaseWarnings(row) + " Архив и действующая конфигурация будут проверены. Соединение кратковременно прервётся, если Xray запущен. При ошибке замены будет выполнен откат.",
+                message: releaseWarnings(row) + (body.allowLowSpace
+                    ? " Архив проверяется до остановки VPN. Старая копия Xray будет сохранена в RAM, затем удалена из /opt. Проверка новой конфигурации выполняется после освобождения места. При ошибке будет попытка отката. При отключении питания копия в RAM пропадёт: может потребоваться повторная установка ядра."
+                    : " Архив и действующая конфигурация будут проверены. Соединение кратковременно прервётся, если Xray запущен. Старое ядро сохраняется в /opt до успешной проверки нового; при ошибке выполняется откат."),
                 acceptLabel: body.allowDowngrade ? "Подтвердить понижение" : "Подтвердить установку",
-                danger: body.allowDowngrade || body.allowPrerelease || body.allowUntested || body.allowPartial}
+                danger: body.allowLowSpace || body.allowDowngrade || body.allowPrerelease || body.allowUntested || body.allowPartial}
         }).catch(function (error) { window.BROrayUI.toast(errorMessage(error), "error"); });
     }
 
@@ -394,12 +429,14 @@
     function applyControlState() {
         var running = latestStatus && latestStatus.running === true;
         var startReady = latestStatus && latestStatus.installed === true &&
-            latestStatus.configExists === true && latestStatus.configValid === true;
+            latestStatus.configExists === true && latestStatus.configValid === true && (!latestStatus.maintenanceStatus || latestStatus.maintenanceStatus === "ready");
         var start = byId("xray-start");
         var stop = byId("xray-stop");
         var restart = byId("xray-restart");
         var update = byId("xray-update-install");
         var reinstall = byId("xray-reinstall");
+        var uninstall = byId("xray-uninstall");
+        byId("xray-low-space").disabled = controlsLocked || catalogLoading;
         var configCheck = byId("xray-check-config");
         var updateCheck = byId("xray-update-check");
         var diagnostics = byId("xray-diagnostics");
@@ -416,6 +453,7 @@
                 restart,
                 update,
                 reinstall,
+                uninstall,
                 configCheck,
                 updateCheck,
                 diagnostics
@@ -430,6 +468,8 @@
         start.disabled = running || !startReady;
         stop.disabled = !running;
         restart.disabled = !running || !startReady;
+        uninstall.disabled = !(latestStatus && latestStatus.installed && latestStatus.version) ||
+            Boolean(latestStatus.maintenanceStatus && latestStatus.maintenanceStatus !== "ready");
 
         if (update) {
             update.disabled = !updateEnabled;
@@ -474,6 +514,13 @@
         }[severity] || "status-neutral";
 
         latestStatus = data;
+        var maintenance = byId("xray-maintenance-note");
+        maintenance.hidden = !data.maintenanceStatus || data.maintenanceStatus === "ready";
+        maintenance.textContent = data.maintenanceStatus === "removed"
+            ? "Xray удалён пользователем. Серверы, подписки и настройки сохранены. Автовыбор приостановлен до установки ядра. Нажмите «Проверить версии» и установите выбранную версию."
+            : data.maintenanceStatus === "installing" || data.maintenanceStatus === "removing"
+            ? "Выполняется обслуживание Xray. Дождитесь результата операции; настройки BROray сохраняются."
+            : "Установка или удаление Xray прерваны. Автоматический запуск отключён. Откройте диагностику; при утрате RAM-копии потребуется установка ядра заново.";
 
         live.className = "xray-live-status " + (severity === "ok" ? "is-running" : "is-stopped");
         byId("xray-live-text").textContent = severity === "ok" ? "Xray работает" : running ? "Xray требует проверки" : "Xray остановлен";
@@ -723,7 +770,7 @@
                     ? (data.result.message || copy.successMessage)
                     : (data.result.error || "Не удалось завершить операцию.");
 
-                if (success) {
+                if (success && mode !== "uninstall") {
                     markUpdateInstalled(data.result.result || data.result);
                 }
                 releaseCatalog = [];
@@ -752,9 +799,19 @@
     }
 
     function bindEvents() {
+        byId("xray-low-space").addEventListener("change", function () { renderStoragePlan(); applyControlState(); });
+        byId("xray-uninstall").addEventListener("click", function (event) {
+            if (controlsLocked || !latestStatus || !latestStatus.installed || !latestStatus.version) return;
+            runAction("uninstall.cgi", event.currentTarget, {
+                body: {confirmed: true, currentVersion: latestStatus.version}, busyLabel: "Удаление…", background: true, operation: "uninstall",
+                successMessage: "Удаление Xray запущено.",
+                confirm: {title: "Удалить Xray?", message: "VPN остановится. Будет удалено только ядро Xray. Серверы, подписки, маршруты и настройки BROray сохранятся; WebUI продолжит работать. Автоматической переустановки не будет. Затем можно установить ту же или другую официальную версию.", acceptLabel: "Удалить ядро", danger: true}
+            }).catch(function (error) { window.BROrayUI.toast(errorMessage(error), "error"); });
+        });
         byId("xray-version-select").addEventListener("change", function () {
             selectedTag = this.value;
             renderSelectedRelease();
+            renderStoragePlan();
         });
         byId("xray-show-prereleases").addEventListener("change", renderReleaseChoices);
         byId("xray-check-config").addEventListener("click", checkConfig);

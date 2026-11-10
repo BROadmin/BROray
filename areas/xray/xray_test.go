@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -57,6 +58,12 @@ func newHarness(t *testing.T, withBinary bool) *harness {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := compat.NewDeps(ctx, a)
 	s := newService(d)
+	s.archiveHeaderValidator = func(h []byte) error {
+		if !bytes.HasPrefix(h, []byte("#!/bin/sh\n")) {
+			return fmt.Errorf("invalid synthetic executable")
+		}
+		return nil
+	}
 	current.Store(s)
 	regOnce.Do(register)
 	if withBinary {

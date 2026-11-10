@@ -23,7 +23,7 @@ func TestUpdateCheckDev10Reservation(t *testing.T) {
 			t.Fatal(r.Data)
 		}
 		need := int64(r.Data["storage"].(map[string]any)["requiredBytes"].(float64))
-		if minimum := size + downloadEstimate + 8<<20; need < minimum {
+		if minimum := size + 8<<20; need < minimum {
 			t.Errorf("missing=%v advertised budget %d is below actual install minimum %d", missing, need, minimum)
 		}
 	}

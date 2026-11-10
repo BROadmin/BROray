@@ -21,6 +21,9 @@ var bootstrapRetry = []time.Duration{30 * time.Second, time.Minute, 2 * time.Min
 // installed version to offer updates, so this runs without user action.
 func (s *service) bootstrapInstall(ctx context.Context) {
 	for attempt := 0; ; attempt++ {
+		if s.maintenanceBlocksAuto() {
+			return
+		}
 		wait := bootstrapRetry[min(attempt, len(bootstrapRetry)-1)]
 		if _, err := os.Stat(s.d.Root.XrayBinary()); err == nil {
 			return
@@ -35,6 +38,10 @@ func (s *service) bootstrapInstall(ctx context.Context) {
 			return
 		}
 		if release, ok := s.d.Lock.TryAcquire("xray", "xray:install", "xray"); ok {
+			if s.maintenanceBlocksAuto() {
+				release()
+				return
+			}
 			op := s.d.Queue.StartOperation("", "xray_maintenance", "xray:install", "SYSTEM", "cooperative", "")
 			work := filepath.Join(s.opsDir(), op.ID)
 			if os.MkdirAll(work, 0o700) == nil {

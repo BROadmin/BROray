@@ -96,6 +96,9 @@ func runDaemon(root platform.Root) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	deps := compat.NewDeps(ctx, a)
+	if err := deps.Lock.ReconcileDaemonXray(root, lock); err != nil {
+		logger.Printf("startup ownership check: %v", err)
+	}
 	// Register all area endpoints before opening the listener.
 	if err := compat.StartAreas(deps); err != nil {
 		logger.Printf("startup aborted: %v", err)

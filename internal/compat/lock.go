@@ -26,26 +26,28 @@ import (
 // Detached launcher and installer processes can outlive the daemon and keep
 // their kernel locks; these also block mutations. A pending holder is restored.
 type GlobalLock struct {
-	mu        sync.Mutex
-	cur       *Holder
-	file      string
-	ambiguous bool          // unreadable or invalid ownership record; never clear as pending
-	free      chan struct{} // closed and replaced on every release
-	external  []string      // kernel locks held by a detached updater/installer
-	ownerInfo os.FileInfo
-	ownerHash [sha256.Size]byte
+	mu          sync.Mutex
+	cur         *Holder
+	file        string
+	ambiguous   bool          // unreadable or invalid ownership record; never clear as pending
+	daemonOwned bool          // enabled only while holding this root's daemon kernel lock
+	free        chan struct{} // closed and replaced on every release
+	external    []string      // kernel locks held by a detached updater/installer
+	ownerInfo   os.FileInfo
+	ownerHash   [sha256.Size]byte
 }
 
 // Holder describes the current owner (3.x globalOperation fields).
 type Holder struct {
-	Scope     string    `json:"scope"`  // routes | custom | dot | servers | subscriptions | xray | keenetic | system
-	Action    string    `json:"action"` // e.g. "export", "dot:apply"
-	BundleID  string    `json:"bundleId,omitempty"`
-	Pending   bool      `json:"pending"`   // stopped, waiting for resume
-	Resumable bool      `json:"resumable"` // pending and resumable
-	StartedAt time.Time `json:"startedAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	token     uint64
+	Scope           string    `json:"scope"`  // routes | custom | dot | servers | subscriptions | xray | keenetic | system
+	Action          string    `json:"action"` // e.g. "export", "dot:apply"
+	BundleID        string    `json:"bundleId,omitempty"`
+	Pending         bool      `json:"pending"`   // stopped, waiting for resume
+	Resumable       bool      `json:"resumable"` // pending and resumable
+	StartedAt       time.Time `json:"startedAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+	DaemonOwnedXray bool      `json:"daemonOwnedXray,omitempty"`
+	token           uint64
 }
 
 var lockSeq uint64
@@ -180,6 +182,7 @@ func (g *GlobalLock) takeLocked(scope, action, bundleID string) (Release, error)
 	tok := lockSeq
 	now := time.Now()
 	g.cur = &Holder{Scope: scope, Action: action, BundleID: bundleID, StartedAt: now, UpdatedAt: now, token: tok}
+	g.cur.DaemonOwnedXray = g.daemonOwned && daemonXrayHolder(g.cur)
 	if err := g.persistLocked(); err != nil {
 		g.ambiguous = true
 		return nil, fmt.Errorf("persist global lock owner: %w", err)

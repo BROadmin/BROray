@@ -10,8 +10,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/BROadmin/broray/internal/platform"
@@ -26,6 +24,11 @@ type Installer struct {
 	Tag      string // v26.10.31
 	Client   *http.Client
 	Progress func(stage string, done, total int64)
+	// StagingCreated records the private RAM path before the archive is written.
+	StagingCreated func(*Archive) error
+	// ValidateHeader supplies an executable-format validator to synthetic tests.
+	// Production always uses validateCoreELF; this is not a config/API option.
+	ValidateHeader func([]byte) error
 	// BaseURL is the release host ("https://github.com" when empty; tests).
 	BaseURL string
 	// SHA256 is the confirmed official archive digest of Tag (from the GitHub
@@ -87,45 +90,12 @@ func (i *Installer) CandidatePath() string { return i.Root.XrayBinary() + ".new"
 // touches the installed binary; the caller swaps (and removes the
 // candidate on failure).
 func (i *Installer) Prepare(ctx context.Context) (string, string, error) {
-	asset, want, err := i.Expected()
+	archive, err := i.DownloadArchive(ctx)
 	if err != nil {
 		return "", "", err
 	}
-	if err := os.MkdirAll(i.Root.Tmp(), 0o700); err != nil {
-		return "", "", err
-	}
-	if err := os.MkdirAll(i.Root.Runtime(), 0o755); err != nil {
-		return "", "", err
-	}
-	zipPath := filepath.Join(i.Root.Tmp(), "xray-"+i.Tag+".zip")
-	defer os.Remove(zipPath)
-	base := i.BaseURL
-	if base == "" {
-		base = "https://github.com"
-	}
-	url := base + "/" + i.Repo + "/releases/download/" + i.Tag + "/" + asset.Zip
-	if err := i.download(ctx, url, zipPath, want); err != nil {
-		return "", "", err
-	}
-	i.report("extract", 0, 0)
-	newBin := i.CandidatePath()
-	member := "xray"
-	if runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" {
-		// Keenetic's 32-bit MIPS targets require the official soft-float member.
-		// A missing member is an error; never fall back to the hard-float binary.
-		member = "xray_softfloat"
-	}
-	if err := extractMember(zipPath, member, newBin); err != nil {
-		_ = os.Remove(newBin)
-		return "", "", err
-	}
-	i.report("verify", 0, 0)
-	v, err := Version(ctx, newBin)
-	if err != nil {
-		_ = os.Remove(newBin)
-		return "", "", err
-	}
-	return newBin, v, nil
+	defer archive.Close()
+	return i.ExtractArchive(ctx, archive)
 }
 
 func (i *Installer) download(ctx context.Context, url, dest, wantSHA string) error {
@@ -142,7 +112,15 @@ func (i *Installer) download(ctx context.Context, url, dest, wantSHA string) err
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("XRAY_DOWNLOAD_FAILED: HTTP %d", resp.StatusCode)
 	}
-	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	available, err := RAMAvailable("/tmp")
+	if err != nil {
+		return err
+	}
+	limit := min(ArchiveLimit, available-MemoryReserve)
+	if limit <= 0 || resp.ContentLength > limit {
+		return errors.New("XRAY_RAM_INSUFFICIENT")
+	}
+	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
@@ -151,8 +129,21 @@ func (i *Installer) download(ctx context.Context, url, dest, wantSHA string) err
 	buf := make([]byte, 64<<10)
 	total := resp.ContentLength
 	for {
+		if err := ctx.Err(); err != nil {
+			f.Close()
+			return err
+		}
+		available, err := RAMAvailable("/tmp")
+		if err != nil || available < MemoryReserve+int64(len(buf)) {
+			f.Close()
+			return errors.New("XRAY_RAM_INSUFFICIENT")
+		}
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
+			if done+int64(n) > limit {
+				f.Close()
+				return errors.New("XRAY_DOWNLOAD_TOO_LARGE")
+			}
 			if _, werr := f.Write(buf[:n]); werr != nil {
 				f.Close()
 				return werr
@@ -190,31 +181,39 @@ func extractMember(zipPath, member, dest string) error {
 		return fmt.Errorf("XRAY_ARCHIVE_INVALID: %v", err)
 	}
 	defer zr.Close()
-	for _, f := range zr.File {
-		if f.Name != member {
-			continue
-		}
-		if f.UncompressedSize64 > 256<<20 {
-			return errors.New("XRAY_ARCHIVE_MEMBER_TOO_LARGE")
-		}
+	f, err := archiveMember(zr, member)
+	if err != nil {
+		return err
+	}
+	{
 		rc, err := f.Open()
 		if err != nil {
 			return err
 		}
 		defer rc.Close()
-		out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+		out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o755)
 		if err != nil {
 			return err
 		}
-		if _, err := io.Copy(out, io.LimitReader(rc, 256<<20)); err != nil {
+		success := false
+		defer func() {
+			if !success {
+				_ = os.Remove(dest)
+			}
+		}()
+		n, err := io.Copy(out, io.LimitReader(rc, BinaryLimit+1))
+		if err != nil || n != int64(f.UncompressedSize64) {
 			out.Close()
-			return err
+			return fmt.Errorf("XRAY_ARCHIVE_MEMBER_INVALID: size=%d error=%v", n, err)
 		}
 		if err := out.Sync(); err != nil {
 			out.Close()
 			return err
 		}
-		return out.Close()
+		if err := out.Close(); err != nil {
+			return err
+		}
+		success = true
+		return nil
 	}
-	return fmt.Errorf("XRAY_ARCHIVE_MEMBER_MISSING: %s", member)
 }

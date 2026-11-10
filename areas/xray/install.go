@@ -46,6 +46,7 @@ type installRequest struct {
 	AllowPrerelease bool
 	AllowUntested   bool
 	AllowPartial    bool
+	AllowLowSpace   bool
 }
 
 func parseInstallRequest(body []byte) (installRequest, bool) {
@@ -64,7 +65,7 @@ func parseInstallRequest(body []byte) (installRequest, bool) {
 	}
 	keys := make([]string, 0, len(m))
 	for k := range m {
-		if k != "allowPartial" {
+		if k != "allowPartial" && k != "allowLowSpace" {
 			keys = append(keys, k)
 		}
 	}
@@ -87,6 +88,9 @@ func parseInstallRequest(body []byte) (installRequest, bool) {
 		return r, false
 	}
 	if _, has := m["allowPartial"]; has && !boolean("allowPartial", &r.AllowPartial) {
+		return r, false
+	}
+	if _, has := m["allowLowSpace"]; has && !boolean("allowLowSpace", &r.AllowLowSpace) {
 		return r, false
 	}
 	return r, true
@@ -120,6 +124,23 @@ func (s *service) handleLaunch(c *cgi.Req, mode string) {
 		return
 	}
 	var req installRequest
+	if mode == "uninstall" {
+		var body struct {
+			Confirmed      bool   `json:"confirmed"`
+			CurrentVersion string `json:"currentVersion"`
+		}
+		dec := json.NewDecoder(strings.NewReader(string(c.Body())))
+		dec.DisallowUnknownFields()
+		if dec.Decode(&body) != nil || !body.Confirmed || body.CurrentVersion == "" {
+			abort(cgi.E(400, "XRAY_REMOVE_CONFIRMATION_REQUIRED", "Подтвердите удаление Xray. VPN будет остановлен; данные BROray сохранятся."))
+			return
+		}
+		if _, err := dec.Token(); err != io.EOF {
+			abort(cgi.E(400, "XRAY_REMOVE_CONFIRMATION_REQUIRED", "Некорректное подтверждение удаления Xray."))
+			return
+		}
+		req.CurrentVersion = body.CurrentVersion
+	}
 	if mode == "install" {
 		var ok bool
 		if req, ok = parseInstallRequest(c.Body()); !ok || c.R.ContentLength <= 0 {
@@ -177,7 +198,13 @@ func (s *service) runJob(ctx context.Context, op *compat.Operation, work, mode s
 	log := &jobLog{path: filepath.Join(work, "worker.log")}
 	log.printf("Xray %s: операция %s начата", mode, op.ID)
 	op.Phase("fetching")
-	out, err := s.install(ctx, op, log, mode, req)
+	var out map[string]any
+	var err error
+	if mode == "uninstall" {
+		out, err = s.removeCore(ctx, op, log, req)
+	} else {
+		out, err = s.install(ctx, op, log, mode, req)
+	}
 	cancelled := ctx.Err() != nil && s.d.Ctx.Err() == nil && errors.Is(err, context.Canceled) || op.CancelRequested()
 	var errText any
 	success := err == nil
@@ -311,6 +338,11 @@ func (s *service) selectTarget(ctx context.Context, mode string, req installRequ
 }
 
 func (s *service) install(ctx context.Context, op *compat.Operation, log *jobLog, mode string, req installRequest) (map[string]any, error) {
+	if exists(s.d.Root.XrayBinary()) {
+		if _, ok := coreFileInfo(s.d.Root.XrayBinary()); !ok {
+			return nil, jerr("Принадлежность файла Xray не подтверждена. Замена не начата.")
+		}
+	}
 	tag, sum, err := s.selectTarget(ctx, mode, req)
 	if err != nil {
 		return nil, err
@@ -321,15 +353,14 @@ func (s *service) install(ctx context.Context, op *compat.Operation, log *jobLog
 	if st, ok := regular(bin); ok {
 		curSize = st.Size()
 	}
-	free := freeKB(s.d.Root.Runtime()) * 1024
-	if need := xrayStorageRequired(curSize, 0); free < need {
-		return nil, jerr(fmt.Sprintf("На /opt недостаточно места для атомарной замены Xray: требуется %d байт, доступно %d байт.", need, free))
-	}
 	inst := mxray.NewInstaller(s.d.Root, s.d.App.Cfg.Xray.Repo, tag)
 	if inst.Repo == "" {
 		inst.Repo = "XTLS/Xray-core"
 	}
 	inst.SHA256 = sum
+	inst.ValidateHeader = s.archiveHeaderValidator
+	inst.StagingCreated = s.recordDownload
+	defer s.recoverDownload()
 	inst.BaseURL = DownloadBase
 	if DownloadClient != nil {
 		inst.Client = DownloadClient
@@ -346,103 +377,15 @@ func (s *service) install(ctx context.Context, op *compat.Operation, log *jobLog
 		}
 	}
 	log.printf("Загрузка официального архива %s и проверка SHA-256", tag)
-	candidate, version, err := inst.Prepare(ctx)
+	archive, err := inst.DownloadArchive(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		log.printf("%v", err)
-		msg := "Не удалось загрузить и проверить официальный архив Xray."
-		if strings.HasPrefix(err.Error(), "XRAY_DIGEST_MISMATCH") {
-			msg = "Контрольная сумма загруженного архива Xray не совпадает с официальной."
-		}
-		return nil, &jobError{msg: msg, details: err.Error()}
+		return nil, &jobError{msg: "Не удалось загрузить и проверить официальный архив Xray.", details: err.Error()}
 	}
-	defer os.Remove(candidate)
-	if version != strings.TrimPrefix(tag, "v") {
-		return nil, jerr("Версия загруженного Xray не совпадает с выбранной.")
-	}
-	if cfg := s.d.Root.XrayConfig(); fileExists(cfg) {
-		if out, ok := s.runTest(ctx, candidate, cfg); !ok {
-			return nil, &jobError{msg: "Новая версия Xray несовместима с действующей конфигурацией BROray.", details: tailLines(out, 20)}
-		}
-	}
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	op.Phase("switching")
-	op.SetCancelability("protected")
-	log.printf("Замена исполняемого файла Xray")
-	return s.swap(context.WithoutCancel(ctx), log, mode, candidate, previous, version)
-}
-
-// swap replaces runtime/xray by the verified candidate. The previous binary
-// is kept only for the duration of the swap (runtime/xray.old) and removed
-// once the new one is confirmed; on failure it is moved back.
-func (s *service) swap(ctx context.Context, log *jobLog, mode, candidate, previous, version string) (map[string]any, error) {
-	s.lifeMu.Lock()
-	defer s.lifeMu.Unlock()
-	bin := s.d.Root.XrayBinary()
-	old := bin + ".old"
-	wasRunning := s.d.App.Xray.Running()
-	if wasRunning {
-		if err := s.d.App.Xray.Stop(ctx); err != nil || !s.waitStopped(ctx) {
-			return nil, jerr("Не удалось остановить Xray перед заменой.")
-		}
-	}
-	hadOld := fileExists(bin)
-	if hadOld {
-		_ = os.Remove(old)
-		if err := os.Rename(bin, old); err != nil {
-			s.restartIf(ctx, wasRunning)
-			return nil, jerr("Не удалось подготовить замену Xray.")
-		}
-	}
-	reason := ""
-	if err := os.Chmod(candidate, 0o755); err != nil {
-		reason = "Не удалось подготовить новый Xray."
-	} else if err := os.Rename(candidate, bin); err != nil {
-		reason = "Не удалось установить новый Xray."
-	}
-	if reason == "" && installedVersion(s.versionOutput(ctx, bin)) != version {
-		reason = "Новый Xray не прошёл проверку версии."
-	}
-	if reason == "" && wasRunning {
-		if err := s.d.App.Xray.Start(ctx); err != nil || !s.waitRunning(ctx) || !s.waitSocks(ctx, installStartWait) {
-			reason = "Новый Xray не запустился."
-		}
-	}
-	if reason == "" {
-		_ = os.Remove(old)
-		sum := fileSHA256(bin)
-		msg := "Новая версия Xray безопасно установлена."
-		if mode == "reinstall" {
-			msg = "Текущая версия Xray безопасно переустановлена."
-		}
-		if wasRunning {
-			s.recordDeviceTrial(version, sum, mode)
-		}
-		return map[string]any{"success": true, "installed": true, "mode": mode, "previousVersion": nullStr(previous), "version": version,
-			"sha256": sum, "running": s.d.App.Xray.Running(), "message": msg}, nil
-	}
-	log.printf("%s Откат к предыдущему Xray.", reason)
-	_ = s.d.App.Xray.Stop(ctx)
-	restored := true
-	if hadOld {
-		if err := os.Rename(old, bin); err != nil {
-			restored = false
-		}
-	} else {
-		_ = os.Remove(bin)
-	}
-	if restored && wasRunning {
-		restored = s.d.App.Xray.Start(ctx) == nil && s.waitRunning(ctx)
-	}
-	msg := reason + " Предыдущий Xray восстановлен."
-	if !restored {
-		msg = reason + " Восстановление не подтверждено. Резервный бинарник и блокировка сохранены."
-	}
-	return map[string]any{"success": false, "rolledBack": true, "rollbackSuccess": restored, "error": msg}, jerr(msg)
+	defer archive.Close()
+	return s.installStaged(ctx, op, log, mode, req, inst, archive, tag, previous, curSize)
 }
 
 func (s *service) restartIf(ctx context.Context, running bool) {
@@ -454,14 +397,18 @@ func (s *service) restartIf(ctx context.Context, running bool) {
 // recoverInstall repairs what a daemon stop during an install left behind:
 // a candidate, a swap in progress, a pointer still marked running.
 func (s *service) recoverInstall() {
+	s.recoverDownload()
+	covered := s.recoverRemoval() || s.recoverTransaction()
 	bin := s.d.Root.XrayBinary()
-	_ = os.Remove(bin + ".new")
-	if old := bin + ".old"; fileExists(old) {
-		if !fileExists(bin) || installedVersion(s.versionOutput(context.Background(), bin)) == "" {
-			_ = os.Rename(old, bin)
-			s.d.Log.Printf("xray: restored the previous binary after an interrupted install")
-		} else {
-			_ = os.Remove(old)
+	if !covered {
+		_ = os.Remove(bin + ".new")
+		if old := bin + ".old"; fileExists(old) {
+			if !fileExists(bin) || installedVersion(s.versionOutput(context.Background(), bin)) == "" {
+				_ = os.Rename(old, bin)
+				s.d.Log.Printf("xray: restored the previous binary after an interrupted install")
+			} else {
+				_ = os.Remove(old)
+			}
 		}
 	}
 	if m, ok := compat.ReadObject(s.pointerPath()); ok && m["running"] == true {
@@ -540,7 +487,7 @@ func (s *service) handleOperationStatus(c *cgi.Req) (any, error) {
 	}
 	mode := "reinstall"
 	if ok {
-		if m, _ := pointer["operation"].(string); m == "install" || m == "update" || m == "reinstall" {
+		if m, _ := pointer["operation"].(string); m == "install" || m == "update" || m == "reinstall" || m == "uninstall" {
 			mode = m
 		}
 	}
@@ -551,23 +498,35 @@ func (s *service) handleOperationStatus(c *cgi.Req) (any, error) {
 		}
 	}
 	if pub, isMap := job.(map[string]any); isMap && pub["running"] == false && ok && pointer["running"] == true {
-		r := map[string]any{}
-		for k, v := range pointer {
-			r[k] = v
-		}
-		r["running"], r["operationRunning"], r["success"] = false, false, false
-		if pub["state"] == "aborted" {
-			r["error"] = "Операция Xray отменена."
-		} else {
-			r["error"] = "Операция Xray прервана. Откройте диагностику."
-		}
-		result = r
+		result = s.finishedOperationResult(pointer, pub)
 	}
 	if !complete {
 		return nil, cgi.E(503, "XRAY_OWNER_UNCONFIRMED", "Владелец операции Xray не подтверждён. Откройте диагностику операций.")
 	}
 	return map[string]any{"operation": mode, "operationId": opID, "operationRunning": running, "complete": complete, "pid": nil,
 		"backgroundOperation": job, "result": result, "logTail": logTail}, nil
+}
+
+func (s *service) finishedOperationResult(pointer, pub map[string]any) map[string]any {
+	// The pointer was read before Queue.Public. The worker may have committed
+	// its result between those reads; do not turn that success into an interruption.
+	if fresh, ok := compat.ReadObject(s.pointerPath()); ok &&
+		fresh["backgroundOperationId"] == pointer["backgroundOperationId"] && fresh["running"] == false {
+		if _, valid := fresh["success"].(bool); valid {
+			return fresh
+		}
+	}
+	r := map[string]any{}
+	for k, v := range pointer {
+		r[k] = v
+	}
+	r["running"], r["operationRunning"], r["success"] = false, false, false
+	if pub["state"] == "aborted" {
+		r["error"] = "Операция Xray отменена."
+	} else {
+		r["error"] = "Операция Xray прервана. Откройте диагностику."
+	}
+	return r
 }
 
 func readTail(path string, n int64) ([]byte, error) {

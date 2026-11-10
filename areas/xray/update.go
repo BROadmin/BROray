@@ -2,7 +2,6 @@ package xray
 
 import (
 	"context"
-	"os"
 	"strconv"
 	"strings"
 
@@ -127,15 +126,16 @@ func (s *service) updateCheck(ctx context.Context) (map[string]any, string) {
 	if st, ok := regular(bin); ok {
 		curSize = st.Size()
 	}
-	optFree := freeKB(s.d.Root.Runtime()) * 1024
-	tmpDir := s.d.Root.Tmp()
-	_ = os.MkdirAll(tmpDir, 0o700)
-	tmpFree := freeKB(tmpDir) * 1024
+	resources, resourceErr := s.storageResources()
+	optFree, tmpFree := resources.FlashFree, resources.RAMFree
 	optRequired := xrayStorageRequired(curSize, latest.Zip.Size)
 	storage := map[string]any{"freeBytes": optFree, "requiredBytes": optRequired, "shortfallBytes": maxInt(0, optRequired-optFree), "ok": optFree >= optRequired}
-	tmpRequired := curSize + 1048576
+	tmpRequired := latest.Zip.Size + mxray.MemoryReserve
 	reinstallAllowed := tmpFree >= tmpRequired && optFree >= optRequired
-	temporary := map[string]any{"freeBytes": tmpFree, "requiredBytes": tmpRequired, "shortfallBytes": maxInt(0, tmpRequired-tmpFree), "reinstallAllowed": reinstallAllowed}
+	temporary := map[string]any{"kind": "ram", "reserveBytes": mxray.MemoryReserve, "verified": resourceErr == nil, "freeBytes": tmpFree, "requiredBytes": tmpRequired, "shortfallBytes": maxInt(0, tmpRequired-tmpFree), "reinstallAllowed": reinstallAllowed && resourceErr == nil,
+		"lowSpaceRequiredBytes": tmpRequired + curSize, "lowSpaceAllowed": resourceErr == nil && tmpFree >= tmpRequired+curSize && optFree >= installReserve}
+	storage["estimate"] = true
+	storage["exactAfterDownload"] = true
 	message := "Установлена актуальная версия Xray."
 	switch {
 	case optFree < optRequired:
@@ -161,14 +161,15 @@ func (s *service) updateCheck(ctx context.Context) (map[string]any, string) {
 	}, ""
 }
 
-// downloadEstimate is the room the archive needs on /opt next to the candidate.
+// downloadEstimate is only a conservative unknown-candidate estimate for the
+// catalog. Execution uses the verified ZIP member size, never this estimate.
 const downloadEstimate = 16 << 20
 
 // Keep the catalog preflight at least as conservative as the install guard.
 const installReserve = 8 << 20
 
 func xrayStorageRequired(currentSize, archiveSize int64) int64 {
-	return maxInt(currentSize, archiveSize) + downloadEstimate + installReserve
+	return maxInt(currentSize, archiveSize) + installReserve
 }
 
 func maxInt(a, b int64) int64 {

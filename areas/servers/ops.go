@@ -56,6 +56,9 @@ func (s *svc) activate(id string) (any, error) {
 
 // Both synchronous CLI callers and the queued WebUI hold the global fence.
 func (s *svc) activateUnderFence(ctx context.Context, op *compat.Operation, id string) (any, error) {
+	if s.coreMaintenanceBlocked() {
+		return nil, cgi.E(409, "XRAY_MAINTENANCE_REQUIRED", "Установите Xray или завершите восстановление ядра на странице Xray.")
+	}
 	op.Phase("checking")
 	rec, err := ReadRecord(s.d, id)
 	if err != nil {

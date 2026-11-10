@@ -407,20 +407,38 @@ func (p *Process) launchLocked() error {
 	}
 	cmd := exec.Command(bin, args...)
 	cmd.Env = append(childEnv(), "XRAY_LOCATION_ASSET="+p.root.Runtime())
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
+	guard, err := p.acquireChildGuard()
+	if err != nil {
+		return fmt.Errorf("XRAY_CHILD_OWNER_UNCONFIRMED: %w", err)
+	}
+	cmd.ExtraFiles = []*os.File{guard}
 	var logf *os.File
 	if f, err := os.OpenFile(filepath.Join(p.root.Logs(), "xray.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
 		logf = f
 		cmd.Stdout, cmd.Stderr = logf, logf
 	}
-	if err := cmd.Start(); err != nil {
+	c := &child{cmd: cmd, done: make(chan struct{})}
+	started := make(chan error, 1)
+	go func() {
+		// Linux PDEATHSIG is tied to the creating thread. Retain that thread
+		// until the child is reaped; Go must not retire it while Xray runs.
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		err := cmd.Start()
+		_ = guard.Close()
+		started <- err
+		if err == nil {
+			<-c.done
+		}
+	}()
+	if err := <-started; err != nil {
 		if logf != nil {
 			logf.Close()
 		}
 		p.lastErr = err.Error()
 		return fmt.Errorf("XRAY_START_FAILED: %v", err)
 	}
-	c := &child{cmd: cmd, done: make(chan struct{})}
 	p.cur, p.startedAt, p.lastErr = c, time.Now(), ""
 	go p.wait(c, logf)
 	return nil
@@ -497,7 +515,7 @@ func (p *Process) Stop(ctx context.Context) error {
 	c := p.cur
 	if c == nil {
 		p.mu.Unlock()
-		return nil
+		return p.waitPreviousChild(ctx)
 	}
 	p.signalLocked(c, syscall.SIGTERM)
 	p.mu.Unlock()

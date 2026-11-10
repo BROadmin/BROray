@@ -53,6 +53,9 @@ func (s *svc) enqueueReplacement(state map[string]any) error {
 }
 
 func (s *svc) replacementVerify(t *compat.Task) error {
+	if s.coreMaintenanceBlocked() {
+		return maintenanceRequired(t)
+	}
 	if c, err := s.replacementContext(); err != nil || c != t.Context {
 		return changed(t)
 	}
@@ -78,6 +81,9 @@ func (s *svc) replacementVerify(t *compat.Task) error {
 }
 
 func (s *svc) replacementProbe(t *compat.Task) error {
+	if s.coreMaintenanceBlocked() {
+		return maintenanceRequired(t)
+	}
 	f, ok := t.Get("replacement").(*replacementState)
 	if !ok {
 		return stateInvalid(t)
@@ -118,6 +124,9 @@ func (s *svc) replacementProbe(t *compat.Task) error {
 }
 
 func (s *svc) replacementActivate(t *compat.Task) error {
+	if s.coreMaintenanceBlocked() {
+		return maintenanceRequired(t)
+	}
 	if c, err := s.replacementContext(); err != nil || c != t.Context {
 		return changed(t)
 	}

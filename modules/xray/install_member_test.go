@@ -64,6 +64,12 @@ func TestPrepareSelectsArchitectureBinary(t *testing.T) {
 			defer srv.Close()
 			i := NewInstaller(root, "XTLS/Xray-core", "v26.11.9")
 			i.BaseURL, i.SHA256 = srv.URL, fmt.Sprintf("%x", sha256.Sum256(archive.Bytes()))
+			i.ValidateHeader = func(h []byte) error {
+				if !bytes.HasPrefix(h, []byte("#!/bin/sh\n")) {
+					return fmt.Errorf("invalid fixture")
+				}
+				return nil
+			}
 			path, version, err := i.Prepare(context.Background())
 			unchanged, readErr := os.ReadFile(root.XrayBinary())
 			if readErr != nil || !bytes.Equal(unchanged, old) {

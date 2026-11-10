@@ -62,7 +62,7 @@ func (s *svc) autoSwitchLoop(ctx context.Context) {
 
 // enqueueDue is broray_auto_enqueue_due (active-proxy-health.sh:224-302).
 func (s *svc) enqueueDue() error {
-	if s.d.Queue.Paused() {
+	if s.d.Queue.Paused() || s.coreMaintenanceBlocked() {
 		return nil
 	}
 	ac, ok := s.readAutoConfig()

@@ -229,6 +229,9 @@ func intervalOf(cfg map[string]any) int64 {
 }
 
 func (s *svc) qualityStep(t *compat.Task) error {
+	if s.coreMaintenanceBlocked() {
+		return maintenanceRequired(t)
+	}
 	origin := t.Source
 	if c, err := s.qualityContext(t.Target, origin); err != nil || c != t.Context {
 		return changed(t)
@@ -397,6 +400,9 @@ func (s *svc) failoverPending(state map[string]any, active, context, hash string
 }
 
 func (s *svc) healthStep(t *compat.Task) error {
+	if s.coreMaintenanceBlocked() {
+		return maintenanceRequired(t)
+	}
 	active, context := t.Target, t.Context
 	if s.runtimeContext(active) != context {
 		return changed(t)
@@ -526,6 +532,9 @@ func rankOf(r any) int {
 }
 
 func (s *svc) failoverVerify(t *compat.Task) error {
+	if s.coreMaintenanceBlocked() {
+		return maintenanceRequired(t)
+	}
 	active, context := t.Target, t.Context
 	if s.runtimeContext(active) != context {
 		return changed(t)
@@ -630,6 +639,9 @@ func (s *svc) currentFailoverHealth(f *failState) map[string]any {
 }
 
 func (s *svc) failoverProbe(t *compat.Task) error {
+	if s.coreMaintenanceBlocked() {
+		return maintenanceRequired(t)
+	}
 	if t.Get("done") == true {
 		return nil
 	}
@@ -797,6 +809,9 @@ func chooseCandidate(cands []map[string]any, rule, preferred string) map[string]
 }
 
 func (s *svc) failoverActivate(t *compat.Task) error {
+	if s.coreMaintenanceBlocked() {
+		return maintenanceRequired(t)
+	}
 	if t.Get("done") == true {
 		return nil
 	}
