@@ -191,7 +191,15 @@ func NewManualID(d *compat.Deps) (string, error) {
 // shortened.
 func MaskRecord(rec Record) Record {
 	out := normalize(rec)
-	for _, k := range []string{"uri", "uuid", "password", "auth", "privateKey", "amneziawg", "wireguard", "streamOptions"} {
+	// Refresh presentation of old metadata without migrating saved profiles.
+	if warnings, ok := out["importWarnings"].([]any); ok {
+		for i, warning := range warnings {
+			if text, ok := warning.(string); ok && text == legacyMLKEMMetadataWarning {
+				warnings[i] = mlkemMetadataWarning
+			}
+		}
+	}
+	for _, k := range []string{"uri", "uuid", "password", "auth", "privateKey", "amneziawg", "wireguard", "streamOptions", "xdrive", "masque"} {
 		delete(out, k)
 	}
 	if c, ok := out["connection"].(map[string]any); ok {
@@ -205,6 +213,11 @@ func MaskRecord(rec Record) Record {
 	}
 	if transport, ok := out["transport"].(map[string]any); ok {
 		delete(transport, "finalMask")
+		delete(transport, "extra")
+		delete(transport, "header")
+	}
+	if xhttp, ok := out["xhttp"].(map[string]any); ok {
+		delete(xhttp, "extra")
 	}
 	if r, ok := out["reality"].(map[string]any); ok && truthy(r["publicKey"]) {
 		pk := r["publicKey"]

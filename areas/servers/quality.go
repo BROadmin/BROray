@@ -158,7 +158,7 @@ func (s *svc) checkServer(ctx context.Context, id, source, fingerprint string) (
 		return checkResult{}, opFailed("")
 	}
 	if rec, err := ReadRecord(s.d, id); err == nil {
-		if err := requireConnectionSupport(rec); err != nil {
+		if err := s.requireRuntimeSupport(ctx, rec); err != nil {
 			return checkResult{}, err
 		}
 	}
@@ -201,7 +201,13 @@ var errMeasureTimeout = errors.New("SERVER_CHECK_TIMEOUT: Время прове�
 func (s *svc) measureOnce(ctx context.Context, id, source string) (checkResult, error) {
 	started := s.now()
 	rec, err := ReadRecord(s.d, id)
+	if err == nil {
+		if supportErr := s.requireRuntimeSupport(ctx, rec); supportErr != nil {
+			return checkResult{}, supportErr
+		}
+	}
 	success, stage, checkErr := false, "validation", ""
+	var cloud probeResult
 	address := ""
 	if rec != nil {
 		address = jqRawEmpty(rec["address"])
@@ -220,6 +226,7 @@ func (s *svc) measureOnce(ctx context.Context, id, source string) (checkResult, 
 		} else {
 			stage = "proxy-https"
 			pr := s.measure(ctx, rec, cfg)
+			cloud = pr
 			if pr.Success {
 				success = true
 				stage = orStr(pr.Stage, "proxy-https")
@@ -236,8 +243,19 @@ func (s *svc) measureOnce(ctx context.Context, id, source string) (checkResult, 
 		return checkResult{}, ctx.Err()
 	}
 	var ping, jitter any
-	if success && address != "" {
+	cloudTransport := rec != nil && rec["network"] == "xdrive"
+	if success && cloudTransport {
+		if cloud.LatencyMs != nil {
+			ping = *cloud.LatencyMs
+		}
+		if cloud.JitterMs != nil {
+			jitter = *cloud.JitterMs
+		}
+	} else if success && address != "" {
 		ping, jitter = parsePing(s.ping(ctx, address, 3, 0))
+	}
+	if rec != nil && (cloudTransport || rec["protocol"] == "masque") && checkErr != "" {
+		checkErr = "Проверка соединения не выполнена. Проверьте параметры и доступность сервера; подробный ответ скрыт для защиты реквизитов."
 	}
 	finished := s.now()
 	checkedAt := compat.Stamp(finished)
@@ -253,6 +271,12 @@ func (s *svc) measureOnce(ctx context.Context, id, source string) (checkResult, 
 	succ, failed, disc := counter("successfulChecks"), counter("failedChecks"), counter("disconnects")
 	q := map[string]any{"ping": ping, "jitter": jitter, "disconnects": disc, "lastCheckedAt": checkedAt,
 		"durationMs": (finished.Unix() - started.Unix()) * 1000, "measurementMethod": "https-proxy+icmp", "measurementSource": source}
+	if cloudTransport {
+		q["measurementMethod"] = "https-proxy-warm"
+		if cloud.WarmupMs != nil {
+			q["establishmentMs"] = *cloud.WarmupMs
+		}
+	}
 	if success {
 		q["status"], q["rating"], q["lastSuccessAt"], q["error"] = "available", rating(ping), checkedAt, nil
 		succ++

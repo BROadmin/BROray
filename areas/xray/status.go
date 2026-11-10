@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/BROadmin/broray/areas/servers"
 	"github.com/BROadmin/broray/internal/compat"
 	"golang.org/x/sys/unix"
 )
@@ -288,6 +289,9 @@ func (s *service) runTest(ctx context.Context, bin, config string) (string, bool
 	cmd := exec.CommandContext(cctx, bin, "run", "-test", "-c", config)
 	cmd.Env = childEnv(s.d.Root.Runtime())
 	out, err := cmd.CombinedOutput()
+	if cfg, readErr := os.ReadFile(config); readErr == nil && servers.PrivateTransportConfig(cfg) {
+		return servers.SafeCoreOutput(cfg, string(out), err == nil), err == nil
+	}
 	return strings.TrimRight(string(out), "\n"), err == nil
 }
 

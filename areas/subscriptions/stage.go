@@ -81,7 +81,17 @@ func stageNodes(subID string, ex *extracted, enabled bool, progress func(int, in
 			continue
 		}
 		rawID := fmt.Sprintf("subscription-%s-%04d", subID, i)
-		rec, err := servers.ParseLink(line, rawID, map[string]any{"type": "subscription", "subscriptionId": subID, "nodeIndex": i})
+		source := map[string]any{"type": "subscription", "subscriptionId": subID, "nodeIndex": i}
+		var rec servers.Record
+		var err error
+		if input, native := ex.Native[i0]; native {
+			var node importNode
+			node, err = parseJSONNode(input.Outbound, input.Name, rawID, source)
+			rec = node.Record
+			st.Warnings = append(st.Warnings, node.Warnings...)
+		} else {
+			rec, err = servers.ParseLink(line, rawID, source)
+		}
 		if err != nil {
 			reason := parseReason(err)
 			// 3.x leaves the protocol name empty for unknown schemes; name it

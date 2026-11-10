@@ -164,9 +164,12 @@ func qualityLabel(score float64) string {
 func (s *svc) monitorStep(ctx context.Context) map[string]any {
 	now := s.now().Unix()
 	address := ""
-	if id := ActiveID(s.d); id != "" {
+	id := ActiveID(s.d)
+	cloud := false
+	if id != "" {
 		if rec, err := ReadRecord(s.d, id); err == nil {
 			address = jqRawEmpty(rec["address"])
+			cloud = rec["network"] == "xdrive"
 		}
 	}
 	breaks, previousUp, previousAddress := int64(0), any(nil), ""
@@ -178,6 +181,30 @@ func (s *svc) monitorStep(ctx context.Context) map[string]any {
 			previousUp = u
 		}
 		previousAddress, _ = prev["address"].(string)
+	}
+	if cloud {
+		// XDRIVE's address names the VLESS endpoint, not the storage path.
+		// Reuse the serialized active-health check; this 10s monitor must not
+		// launch another core or turn a formal-endpoint ping into tunnel quality.
+		var health map[string]any
+		if context := s.runtimeContext(id); context != "" {
+			if state, ok := s.readState(); ok {
+				health = freshHealth(now, id, context, state["activeHealth"])
+			}
+		}
+		up, label := false, "Ожидается проверка туннеля"
+		if health != nil {
+			up = health["status"] == "healthy"
+			label = "Нет связи через туннель"
+			if up {
+				label = "Туннель работает"
+			} else if previousAddress == address && previousUp == true {
+				breaks++
+			}
+		}
+		return map[string]any{"available": health != nil, "up": up, "address": address,
+			"ping_ms": nil, "jitter_ms": nil, "packet_loss_percent": nil, "quality_score": nil,
+			"quality": label, "checked_at": now, "breaks": breaks, "measurementMethod": "current-socks-https"}
 	}
 	if address == "" {
 		return map[string]any{"available": false, "up": false, "address": "", "ping_ms": nil, "jitter_ms": nil,

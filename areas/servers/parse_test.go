@@ -44,6 +44,20 @@ func TestParseLinkReference(t *testing.T) {
 	gs := GenSettings{Listen: "192.168.1.1", SocksPort: 2080, LogLevel: "warning",
 		AccessLog: "/tmp/claude-0/ref/app/logs/access.log", ErrorLog: "/tmp/claude-0/ref/app/logs/error.log"}
 	for _, c := range refCases {
+		// 3.5.3 intentionally rejects SNI without TLS/REALITY. The old
+		// reference accepted this value without applying it. Independent
+		// TestURIFieldContext reproduced the loss before the fix.
+		if c.uri == "vless://0f6c1b2a-1111-2222-3333-444455556666@h.example:443?sni=a+b#x+y" {
+			c.ok = false
+			c.err = "Ошибка: поле sni неприменимо к выбранным протоколу, транспорту или защите"
+		}
+		// This legacy reference had ALPN but no TLS, so its generated
+		// outbound discarded ALPN. TestLegacyVMessFieldContext independently
+		// checks the corrected fresh-import contract; stored models still load.
+		if c.uri == "vmess://eyJhZGQiOiAibHcuZXhhbXBsZSIsICJwb3J0IjogNDQzLCAiaWQiOiAiMGY2YzFiMmEtMTExMS0yMjIyLTMzMzMtNDQ0NDU1NTU2NjY2IiwgImFscG4iOiBbImgyIiwgImgzIl19" {
+			c.ok = false
+			c.err = "Ошибка: неприменимое поле VMess JSON: alpn"
+		}
 		rec, err := ParseLink(c.uri, "manual-x", nil)
 		name := c.uri
 		if len(name) > 80 {

@@ -80,6 +80,7 @@ func decodeBase64Body(lines []string) ([]byte, bool) {
 type extracted struct {
 	Lines      []string
 	JSONImport bool
+	Native     map[int]nativeJSONInput
 }
 
 // extractNodes recognises the payload: URI list, Base64 URI list or Xray
@@ -116,7 +117,8 @@ func extractNodes(body []byte, md *metadata) (*extracted, *subErr) {
 			out = trimLines(input)
 		} else {
 			text := strings.Join(input, "\n")
-			conv, ok := xrayJSONToLinks([]byte(text), maxNodes)
+			ex.Native = map[int]nativeJSONInput{}
+			conv, ok := xrayJSONToInputs([]byte(text), maxNodes, ex.Native)
 			if !ok {
 				return nil, fail("PARSE_ERROR", "Содержимое подписки не удалось распознать.")
 			}

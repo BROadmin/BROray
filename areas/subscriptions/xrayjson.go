@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/BROadmin/broray/areas/servers"
+	"github.com/BROadmin/broray/internal/strictjson"
 )
 
 var vlessEncryptionValid = servers.VlessEncryptionValid
@@ -464,7 +465,7 @@ func xhttpExtra(e map[string]any, mode string, depth int) map[string]any {
 		}
 	}
 	if v, ok := m["hKeepAlivePeriod"]; ok {
-		need(isInt(v, 0, 2147483647))
+		need(strictjson.SignedInt64(v))
 	}
 	orZero := func(v any) any {
 		if !truthy(v) {
@@ -740,7 +741,7 @@ func vlessOutbound(profile, out map[string]any, index int, multiple bool) []stri
 			eps = append(eps, endpointOf(e))
 		}
 	} else {
-		need(keysOnly(settings, "address", "port", "id", "encryption", "flow"))
+		need(keysOnly(settings, "address", "port", "id", "encryption", "flow", "level", "email"))
 		eps = append(eps, flatEndpoint(settings))
 	}
 	var lines []string
@@ -748,8 +749,9 @@ func vlessOutbound(profile, out map[string]any, index int, multiple bool) []stri
 		address := addressURI(ep.address)
 		need(isInt(ep.port, 1, 65535))
 		for _, uv := range ep.users {
-			need(keysOnly(uv, "id", "encryption", "flow"))
+			need(keysOnly(uv, "id", "encryption", "flow", "level", "email"))
 			u := uv.(map[string]any)
+			endpointMetadata(u)
 			need(unreservedStr(u["id"]))
 			enc := stringField(u, "encryption", "none")
 			need(vlessEncryptionValid(enc))
@@ -925,17 +927,21 @@ func tryLines(fn func() []string) (lines []string, ok bool) {
 // profiles) into share links; unsupported outbounds become the marker line.
 // ok=false is a document-level failure (PARSE_ERROR).
 func xrayJSONToLinks(text []byte, maxNodes int) (out []string, ok bool) {
+	return xrayJSONToInputs(text, maxNodes, nil)
+}
+
+func xrayJSONToInputs(text []byte, maxNodes int, native map[int]nativeJSONInput) (out []string, ok bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			out, ok = nil, false
 		}
 	}()
-	docs, valid := decodeAll(text)
-	if !valid || len(docs) != 1 {
+	document, err := strictjson.Decode(text)
+	if err != nil {
 		return nil, false
 	}
 	var profiles []any
-	switch x := docs[0].(type) {
+	switch x := document.(type) {
 	case map[string]any:
 		profiles = []any{x}
 	case []any:
@@ -969,6 +975,19 @@ func xrayJSONToLinks(text []byte, maxNodes int) (out []string, ok bool) {
 			}
 		}
 		for i, o := range outbounds {
+			if native != nil && isNativeOutbound(o.(map[string]any)) {
+				names, good := tryLines(func() []string { return []string{outboundName(profile, o.(map[string]any), i+1, len(outbounds) > 1)} })
+				if good {
+					native[len(out)] = nativeJSONInput{Outbound: o.(map[string]any), Name: names[0]}
+					out = append(out, "JSON") // positional slot; never parsed as a URI
+				} else {
+					out = append(out, unsupportedMarker)
+				}
+				if len(out) >= limit {
+					return out, true
+				}
+				continue
+			}
 			lines, good := tryLines(func() []string { return outboundURIs(profile, o, i+1, len(outbounds) > 1) })
 			if !good && len(lines) == 0 {
 				lines = []string{unsupportedMarker}

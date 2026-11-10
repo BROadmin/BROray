@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BROadmin/broray/areas/servers"
 	"github.com/BROadmin/broray/internal/cgi"
 	"github.com/BROadmin/broray/internal/compat"
 	mxray "github.com/BROadmin/broray/modules/xray"
@@ -273,6 +274,15 @@ func (s *service) selectTarget(ctx context.Context, mode string, req installRequ
 	}
 	if current != req.CurrentVersion {
 		return "", "", jerr("Установленная версия изменилась. Обновите список и повторите выбор.")
+	}
+	if id := servers.ActiveID(s.d); id != "" {
+		rec, err := servers.ReadRecord(s.d, id)
+		if err != nil {
+			return "", "", jerr("Не удалось проверить требования активного сервера к версии Xray.")
+		}
+		if err := servers.CheckCoreSupport(rec, req.Tag); err != nil {
+			return "", "", jerr(err.Error())
+		}
 	}
 	rel, err := s.releaseByTag(ctx, req.Tag)
 	if err != nil {

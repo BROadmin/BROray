@@ -18,6 +18,37 @@
         message: "",
         messageType: "neutral"
     };
+    var fileGeneration = 0;
+    var fileReading = false;
+
+    async function importFile(file) {
+        if (!file || state.busy) return;
+        resetPreflight(true);
+        var generation = fileGeneration;
+        var chooser = document.getElementById("server-import-file");
+        state.busy = fileReading = true;
+        if (chooser) chooser.disabled = true;
+        setButton("Чтение файла…", true);
+        try {
+            if (file.size > 65536) throw new Error("Файл превышает 64 КБ.");
+            var bytes = await file.arrayBuffer();
+            if (generation !== fileGeneration) return;
+            var value;
+            try { value = new TextDecoder("utf-8", {fatal: true}).decode(bytes); }
+            catch (_) { throw new Error("Файл должен быть текстом в кодировке UTF-8."); }
+            if (new TextEncoder().encode(JSON.stringify({uri: value, preview: true})).length > 65536) {
+                throw new Error("Конфигурация вместе с оформлением запроса превышает 64 КБ.");
+            }
+            findField().value = value;
+        } catch (error) {
+            if (generation === fileGeneration) BROrayUI.toast(
+                error.message === "Файл превышает 64 КБ." || error.message === "Файл должен быть текстом в кодировке UTF-8." ||
+                error.message === "Конфигурация вместе с оформлением запроса превышает 64 КБ."
+                    ? error.message : "Не удалось прочитать файл конфигурации.", "error");
+        } finally {
+            if (generation === fileGeneration) resetPreflight(true);
+        }
+    }
 
     function trim(value) {
         return String(
@@ -433,6 +464,11 @@
         if (/^(?:\s*(?:[#;][^\n]*\n))*\s*\[Interface\]/.test(value)) {
             return [{line:1,raw:value,error:value.length>65536?"Конфигурация WireGuard слишком длинная.":null,duplicate:null,importState:"ready"}];
         }
+        // Native JSON is one private document. Only the backend validates it;
+        // browser JSON.parse would erase duplicate keys before that check.
+        if (/^\s*\{/.test(value)) {
+            return [{line:1,raw:value,error:null,duplicate:null,importState:"ready"}];
+        }
         var lines = value
             .split(/\r?\n/)
             .map(trim)
@@ -691,7 +727,8 @@
                     "trojan://...",
                     "hysteria2://...",
                     "ss://...",
-                    "vpn://... (AmneziaWG — только сохранение)"
+                    "vpn://... (AmneziaWG — только сохранение)",
+                    '{"protocol":"masque", ...} или JSON VLESS/XDRIVE'
                 ].join("\n")
             );
         }
@@ -711,8 +748,8 @@
 
             hint.textContent =
                 "Поддерживаются VLESS, VMess, Trojan, " +
-                "Hysteria2 и Shadowsocks. AmneziaWG (vpn://) можно сохранить без подключения. Несколько конфигураций можно " +
-                "вставить по одной на строку.";
+                "Hysteria2, Shadowsocks, SOCKS/HTTP и WireGuard. AmneziaWG (vpn://) можно сохранить без подключения. " +
+                "XDRIVE и MASQUE принимаются как один документ Xray JSON. Несколько ссылок можно вставить по одной на строку.";
 
             var fieldContainer =
                 field.closest
@@ -834,7 +871,7 @@
         }
 
         if (item.connectionSupport && item.connectionSupport.supported === false) {
-            return {className: "is-ready", title: "Только сохранение"};
+            return {className: "is-ready", title: item.connectionSupport.mode === "requires-core" ? "Обновите Xray" : "Только сохранение"};
         }
 
         return {
@@ -1011,13 +1048,16 @@
 
             article.appendChild(tags);
 
-            if (item.connectionSupport && item.connectionSupport.supported === false) {
+            if (item.connectionSupport && item.connectionSupport.supported === false && item.connectionSupport.mode !== "requires-core") {
                 article.appendChild(create("p", "server-form-note",
                     "Конфигурация будет сохранена без возможности подключения."));
             }
 
-            if (item.connectionSupport && item.connectionSupport.supported !== false && item.connectionSupport.message) {
+            if (item.connectionSupport && item.connectionSupport.message) {
                 article.appendChild(create("p", "server-form-note", item.connectionSupport.message));
+            }
+            if (item.connectionSupport && item.connectionSupport.notice) {
+                article.appendChild(create("p", "server-form-note", item.connectionSupport.notice));
             }
             (item.importWarnings || []).forEach(function (warning) {
                 article.appendChild(create("p", "server-form-note", String(warning)));
@@ -1072,6 +1112,10 @@
     }
 
     function resetPreflight(hidePreview) {
+        fileGeneration++;
+        fileReading = false;
+        var chooser = document.getElementById("server-import-file");
+        if (chooser) { chooser.value = ""; chooser.disabled = false; }
         state.busy = false;
         state.valid = false;
         state.readyValue = null;
@@ -1513,6 +1557,8 @@
         function (event) {
             var field = findField();
 
+            if (field && event.target === field && fileReading) resetPreflight(true);
+
             if (
                 field &&
                 event.target === field &&
@@ -1523,6 +1569,10 @@
         },
         true
     );
+
+    document.addEventListener("change", function (event) {
+        if (event.target.id === "server-import-file") importFile(event.target.files[0]);
+    });
 
     function initialize() {
         ensureInterface();

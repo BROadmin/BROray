@@ -23,9 +23,12 @@ import (
 
 // probeResult is the bin/broray-server-probe verdict.
 type probeResult struct {
-	Success bool
-	Stage   string
-	Error   string
+	Success   bool
+	Stage     string
+	Error     string
+	WarmupMs  *int64
+	LatencyMs *int64
+	JitterMs  *int64
 }
 
 var qualityProbeURLs = []string{
@@ -137,7 +140,12 @@ func portFree(port int) bool {
 }
 
 func (s *svc) isolatedProbe(ctx context.Context, rec Record, cfg []byte) probeResult {
-	fail := func(stage, msg string) probeResult { return probeResult{Stage: stage, Error: msg} }
+	fail := func(stage, msg string) probeResult {
+		return probeResult{Stage: stage, Error: SafeCoreOutput(cfg, msg, false)}
+	}
+	if err := s.prepareNativeConfig(cfg); err != nil {
+		return fail("probe-workdir", err.Error())
+	}
 	var c map[string]any
 	if err := json.Unmarshal(cfg, &c); err != nil {
 		return fail("probe-config", "Временная конфигурация сервера не найдена.")
@@ -175,6 +183,9 @@ func (s *svc) isolatedProbe(ctx context.Context, rec Record, cfg []byte) probeRe
 		}
 	}
 	c["log"] = map[string]any{"loglevel": "warning"}
+	if PrivateTransportConfig(cfg) {
+		c["log"] = privateCoreLogSettings()
+	}
 	c["inbounds"] = []any{map[string]any{"tag": tag, "listen": "127.0.0.1", "port": port, "protocol": "socks",
 		"settings": map[string]any{"auth": "noauth", "udp": false},
 		"sniffing": map[string]any{"enabled": true, "destOverride": []any{"http", "tls", "quic"}, "routeOnly": true}}}
@@ -232,6 +243,11 @@ func (s *svc) isolatedProbe(ctx context.Context, rec Record, cfg []byte) probeRe
 	}
 	if !ready {
 		return fail("probe-socks-listen", "Тестовый SOCKS-порт не начал принимать соединения.")
+	}
+	if rec["network"] == "xdrive" {
+		return measureCloudPath(ctx, func(c context.Context) (int, error) {
+			return socksGet(c, "127.0.0.1:"+strconv.Itoa(port), qualityProbeURLs[0], 6*time.Second, 16*time.Second, true, 1<<20)
+		})
 	}
 	lastStage, lastError := "proxy-https", "HTTPS-запрос через сервер не выполнен."
 	for _, u := range qualityProbeURLs {

@@ -128,6 +128,9 @@ func TestConfig(ctx context.Context, d *compat.Deps, cfg []byte) error {
 }
 
 func (s *svc) testBytes(ctx context.Context, cfg []byte) error {
+	if err := s.prepareNativeConfig(cfg); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(s.d.Root.Tmp(), 0o700); err != nil {
 		return err
 	}
@@ -142,7 +145,11 @@ func (s *svc) testBytes(ctx context.Context, cfg []byte) error {
 		return err
 	}
 	f.Close()
-	return s.xrayTest(ctx, name)
+	err = s.xrayTest(ctx, name)
+	if err != nil && PrivateTransportConfig(cfg) {
+		return fmt.Errorf("%s", SafeCoreOutput(cfg, err.Error(), false))
+	}
+	return err
 }
 
 func (s *svc) execXrayTest(ctx context.Context, configPath string) error {

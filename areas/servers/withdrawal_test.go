@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/BROadmin/broray/internal/compat"
 )
@@ -63,14 +62,17 @@ func TestWithdrawAutoReplacement(t *testing.T) {
 	if err := e.s.enqueueDue(); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := e.d.Queue.FindLive("servers:replacement", "all"); !ok {
+	r, ok := e.d.Queue.FindLive("servers:replacement", "all")
+	if !ok {
 		t.Fatal("replacement not queued")
 	}
-	go e.d.Queue.Run(e.d.Ctx)
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && ActiveID(e.d) == "" {
-		time.Sleep(20 * time.Millisecond)
-	}
+	ctx, cancel := context.WithCancel(e.d.Ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); e.d.Queue.Run(ctx) }()
+	// The active pointer is written before the worker finishes its journal.
+	// Join the worker before TempDir cleanup, rather than racing its last write.
+	t.Cleanup(func() { cancel(); <-done })
+	waitReq(t, e, r.RequestID, "completed")
 	if ActiveID(e.d) != c {
 		t.Fatalf("preferred replacement not selected: %q", ActiveID(e.d))
 	}

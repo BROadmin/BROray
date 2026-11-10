@@ -13,6 +13,16 @@ function load(apiRequest){
  return {...window.test,root};
 }
 function all(n){return [n,...n.children.flatMap(all)];}
+test('native JSON stays one private input and explains the required core before saving',async()=>{
+ const raw=JSON.stringify({protocol:'masque',settings:{address:'example.test',port:443},streamSettings:{masqueSettings:{pass:'synthetic-private'}}},null,2);
+ const calls=[];
+ const ui=load(async(url,options)=>{calls.push(options.body);return {success:true,data:options.body.preview?{protocol:'masque',name:'Native',transport:'masque',canonical:'a'.repeat(64),connectionSupport:{supported:false,mode:'requires-core',minimumCore:'26.11.9',message:'Обновите Xray до 26.11.9',notice:'Проверенный импорт JSON'}}:{message:'saved'}};});
+ const items=ui.parseInput(raw);assert.equal(items.length,1);assert.equal(items[0].error,null);
+ await ui.previewItems(items);ui.state.items=items;ui.renderPreview();
+ const text=all(ui.root).map(n=>n.textContent).join('\n');
+ assert.match(text,/26\.11\.9/);assert.doesNotMatch(text,/Только сохранение|synthetic-private/);
+ await ui.importNext(0);assert.equal(items[0].importState,'imported');assert.ok(calls.every(c=>c.uri===raw));
+});
 for(const raw of ['socks5://user:secret@example.com:1080','http://example.com:8080','https://example.com',';comment\n[Interface]\nPrivateKey = synthetic\n[Peer]\nPublicKey = synthetic']){
  test('new profile reaches preview and save: '+raw.split(':')[0].slice(0,10),async()=>{
   const calls=[];const ui=load(async(url,options)=>{calls.push(options.body);return {success:true,data:options.body.preview?{protocol:'http',name:'Test',canonical:'a'.repeat(64),importWarnings:['Тестовое предупреждение'],connectionSupport:{supported:true,udp:false,message:'Только TCP'}}:{message:'saved'}};});

@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/BROadmin/broray/internal/strictjson"
 )
 
 // ---------- jq-like accessors over decoded JSON ----------
@@ -526,7 +528,7 @@ func xhttpExtraValid(e map[string]any, mode string, depth int) bool {
 			}
 		}
 	}
-	if has(xm, "hKeepAlivePeriod") && !nonNegInt32(xm["hKeepAlivePeriod"]) {
+	if has(xm, "hKeepAlivePeriod") && !strictjson.SignedInt64(xm["hKeepAlivePeriod"]) {
 		return false
 	}
 	mc, ok1 := rangePair(alt(xm["maxConcurrency"], json.Number("0")))
@@ -1079,6 +1081,12 @@ func validate(rec Record, label string) *ParseError {
 	}
 	if rec["protocol"] == "amneziawg" {
 		return validateAmnezia(rec)
+	}
+	if rec["network"] == "xdrive" {
+		return validateXDrive(rec)
+	}
+	if rec["protocol"] == "masque" {
+		return validateMasque(rec)
 	}
 	if !streamFieldsValid(rec) {
 		return die("сервер содержит неподдерживаемые параметры TLS/REALITY/FinalMask")

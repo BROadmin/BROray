@@ -34,6 +34,21 @@ test('existing supported servers retain working actions',()=>{
   const nodes=all(loadCards()({id:'normal',name:'Normal',protocol:'vless',quality:{}}));
   for(const label of ['Подключить','Проверить','Подробнее'])assert.equal(nodes.find(n=>n.tag==='button'&&n.textContent===label)?.disabled,false,label);
 });
+
+test('cloud quality distinguishes tunnel latency and establishment from ICMP ping',()=>{
+  const nodes=all(loadCards()({id:'drive',name:'Drive',protocol:'vless',transport:'xdrive',quality:{status:'available',measurementMethod:'https-proxy-warm',ping:120,jitter:12,establishmentMs:850}}));
+  const text=nodes.map(n=>n.textContent).join('\n');
+  assert.match(text,/Задержка через туннель/);
+  assert.match(text,/Установление туннеля/);
+  assert.match(text,/850 мс/);
+  assert.doesNotMatch(text,/Пинг|ICMP/);
+});
+test('a core upgrade requirement differs from a stored-only unsupported protocol',()=>{
+ const nodes=all(loadCards()({id:'drive',name:'Drive',protocol:'vless',transport:'xdrive',quality:{},connectionSupport:{supported:false,mode:'requires-core',minimumCore:'26.11.9',message:'Обновите Xray до 26.11.9',notice:'XDRIVE: версии клиента и сервера должны совпадать'}}));
+ assert.ok(nodes.some(n=>n.textContent==='Обновите Xray'));
+ assert.ok(nodes.some(n=>n.textContent.includes('версии клиента и сервера')));
+ assert.equal(nodes.find(n=>n.tag==='button'&&n.textContent==='Подключить')?.disabled,true);
+});
 test('HTTP card keeps TCP-only capability visible without disabling connection',()=>{
   const nodes=all(loadCards()({id:'http',name:'Proxy',protocol:'http',quality:{},connectionSupport:{supported:true,udp:false,message:'Только TCP'}}));
   assert.ok(nodes.some(n=>n.textContent.includes('Только TCP')));

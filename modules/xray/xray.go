@@ -49,9 +49,16 @@ func CurrentAsset() (Asset, error) {
 	return Asset{}, fmt.Errorf("XRAY_ARCH_UNSUPPORTED: %s", runtime.GOARCH)
 }
 
-// Pinned is the release manifest for dev1: SHA-256 of each asset zip as
-// published in the XTLS .dgst files, verified on 2026-11-01.
+// Pinned holds official XTLS archive digests, verified before extraction.
+// 26.11.9 was verified on 2026-11-10. Pinning is not hardware evidence.
 var Pinned = map[string]map[string]string{
+	"v26.11.9": {
+		"Xray-linux-arm64-v8a.zip": "64ed6858982a7f5eb85d88b811089063bd4f17561f4c8f44e0f1dc8e6f6430be",
+		"Xray-linux-arm32-v7a.zip": "19c51e08a6562705fb1cb032a84fd87df21d7e27b194f035be7e754dbe3a97b3",
+		"Xray-linux-mips32le.zip":  "793dc40029283eb9ccead188b05abf0d34b64aab16ad1f6eadd204963a54837b",
+		"Xray-linux-mips32.zip":    "4ceb213ad7cd8c1fc9250bb886e730665cddb9dfe891291b09231a204f8ba6ef",
+		"Xray-linux-64.zip":        "b651f7e1d9966ee2c1b1ee1bf8b52c72771824d3065dce96bbc8bcc19ed95f82", // host/CI
+	},
 	"v26.10.31": {
 		"Xray-linux-arm64-v8a.zip": "1811c8f1da0c3b6dc707ebaf1c8390e987ba39859a8f0a7aadd8526157f2ec8d",
 		"Xray-linux-arm32-v7a.zip": "2387f55239ee7799fd67d5382e79f589c1da07a97d993e86b058f2290b8e456b",

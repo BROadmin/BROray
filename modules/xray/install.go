@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/BROadmin/broray/internal/platform"
@@ -108,7 +109,13 @@ func (i *Installer) Prepare(ctx context.Context) (string, string, error) {
 	}
 	i.report("extract", 0, 0)
 	newBin := i.CandidatePath()
-	if err := extractMember(zipPath, "xray", newBin); err != nil {
+	member := "xray"
+	if runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" {
+		// Keenetic's 32-bit MIPS targets require the official soft-float member.
+		// A missing member is an error; never fall back to the hard-float binary.
+		member = "xray_softfloat"
+	}
+	if err := extractMember(zipPath, member, newBin); err != nil {
 		_ = os.Remove(newBin)
 		return "", "", err
 	}

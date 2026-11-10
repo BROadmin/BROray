@@ -12,11 +12,76 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/BROadmin/broray/internal/udpprobe"
 )
+
+// Normal unavailable-endpoint check: one connection to a local UDP sink,
+// without malformed input, load generation or external network access.
+func TestXrayWireGuardUnavailableEndpoint(t *testing.T) {
+	bin := os.Getenv("BRORAY_XRAY_BIN")
+	if bin == "" {
+		t.Skip("BRORAY_XRAY_BIN not set")
+	}
+	pc, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	var packets atomic.Int32
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		buf := make([]byte, 4096)
+		for {
+			if _, _, err := pc.ReadFrom(buf); err != nil {
+				return
+			}
+			packets.Add(1)
+		}
+	}()
+	defer func() { pc.Close(); <-finished }()
+	private := bytes.Repeat([]byte{3}, 32)
+	peer, _ := ecdh.X25519().NewPrivateKey(bytes.Repeat([]byte{4}, 32))
+	link := fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.10.0.2/32\n[Peer]\nPublicKey = %s\nEndpoint = %s\nAllowedIPs = 0.0.0.0/0\n", base64.StdEncoding.EncodeToString(private), base64.StdEncoding.EncodeToString(peer.PublicKey().Bytes()), pc.LocalAddr())
+	rec, err := ParseLink(link, "synthetic-unavailable-wg", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := freeTCP(t)
+	cfg, err := XrayConfig(rec, GenSettings{Listen: "127.0.0.1", SocksPort: port, LogLevel: "none"}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc := startXray(t, bin, filepath.Join(t.TempDir(), "client.json"), cfg, port, nil)
+	start := time.Now()
+	c, err := dialTestSOCKS(fmt.Sprintf("127.0.0.1:%d", port), "198.18.0.1:443")
+	if err == nil {
+		defer c.Close()
+		c.SetDeadline(time.Now().Add(2 * time.Second))
+		_, err = c.Write([]byte("BROray bounded unavailable endpoint"))
+		if err == nil {
+			_, err = c.Read(make([]byte, 1))
+		}
+	}
+	if err == nil {
+		t.Fatal("unavailable endpoint unexpectedly returned data")
+	}
+	if elapsed := time.Since(start); elapsed > 8*time.Second {
+		t.Fatalf("probe exceeded bound: %s", elapsed)
+	}
+	if packets.Load() == 0 {
+		t.Fatal("no WireGuard handshake reached the local sink")
+	}
+	if err := proc.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatal("core exited during endpoint outage", err)
+	}
+	t.Log("Unavailable WireGuard endpoint: probe bounded, handshake observed, core remains running")
+}
 
 // Real client/server Xray processes, loopback only, no external service.
 func TestXrayAddedProtocols(t *testing.T) {
@@ -158,11 +223,19 @@ func dialTestSOCKS(proxyAddr, target string) (net.Conn, error) {
 	}
 	host, port, _ := net.SplitHostPort(target)
 	p, _ := strconv.Atoi(port)
-	ip := net.ParseIP(host).To4()
-	if ip == nil {
-		return fail(fmt.Errorf("test requires IPv4"))
+	var req []byte
+	if ip := net.ParseIP(host); ip != nil {
+		if v4 := ip.To4(); v4 != nil {
+			req = append([]byte{5, 1, 0, 1}, v4...)
+		} else {
+			req = append([]byte{5, 1, 0, 4}, ip.To16()...)
+		}
+	} else {
+		if len(host) == 0 || len(host) > 255 {
+			return fail(fmt.Errorf("invalid test hostname"))
+		}
+		req = append([]byte{5, 1, 0, 3, byte(len(host))}, []byte(host)...)
 	}
-	req := append([]byte{5, 1, 0, 1}, ip...)
 	req = append(req, byte(p>>8), byte(p))
 	if _, e = c.Write(req); e != nil {
 		return fail(e)

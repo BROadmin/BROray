@@ -5,6 +5,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/BROadmin/broray/internal/strictjson"
 )
 
 // parsed holds the BRORAY_* shell variables a 3.x parser produced.
@@ -405,7 +407,9 @@ func parseVmess(uri string) (*parsed, *ParseError) {
 	if !ok {
 		return nil, die("не удалось декодировать VMess Base64")
 	}
-	obj, ok := decodeObject(decoded)
+	strictValue, strictErr := strictjson.Decode(decoded)
+	obj, ok := strictValue.(map[string]any)
+	ok = ok && strictErr == nil
 	if !ok {
 		return nil, die("VMess Base64 не содержит корректный JSON")
 	}
@@ -415,6 +419,9 @@ func parseVmess(uri string) (*parsed, *ParseError) {
 		}
 	}
 	// insecure / extra / TLS / FinalMask shape (parser-vmess.sh:86-94)
+	if err := validateLegacyAliases(obj); err != nil {
+		return nil, err
+	}
 	shapeOK := true
 	for _, k := range []string{"allowInsecure", "allow_insecure", "insecure"} {
 		if v, has := obj[k]; has {
@@ -588,6 +595,9 @@ func parseVmess(uri string) (*parsed, *ParseError) {
 	}
 	if !allDigits(p.alterID) {
 		return nil, die("VMess alterId должен быть числом")
+	}
+	if err := validateLegacyContext(obj, p); err != nil {
+		return nil, err
 	}
 	if p.address == "" {
 		return nil, die("VMess не содержит адрес сервера")
@@ -1032,8 +1042,11 @@ func parseHysteria2(uri string) (*parsed, *ParseError) {
 	if p.hy2Timeout, err = get("udpIdleTimeout", badParam); err != nil {
 		return nil, err
 	}
-	if p.hy2Timeout != "" && (!allDigits(p.hy2Timeout) || !nonNegInt32(jqNumber(p.hy2Timeout))) {
-		return nil, die("неправильный Hysteria2 udpIdleTimeout")
+	if p.hy2Timeout != "" {
+		n, err := strconv.ParseUint(p.hy2Timeout, 10, 16)
+		if !allDigits(p.hy2Timeout) || err != nil || n == 1 || n > 600 {
+			return nil, die("Hysteria2 udpIdleTimeout должен быть 0 либо целым числом от 2 до 600")
+		}
 	}
 	if err := parseStreamExtensions(q, p); err != nil {
 		return nil, err

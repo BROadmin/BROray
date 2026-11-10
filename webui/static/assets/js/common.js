@@ -117,7 +117,7 @@
             "Результат запроса не подтверждён";
     }
     function submitQueued(url, id) {
-        if (!["/api/servers/check.cgi","/api/subscriptions/refresh.cgi"].includes(url) ||
+        if (!["/api/servers/check.cgi","/api/servers/activate.cgi","/api/subscriptions/refresh.cgi"].includes(url) ||
             typeof id !== "string" || !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,95}$/.test(id)) {
             return Promise.reject(new Error("Некорректное задание."));
         }

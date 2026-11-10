@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-build-id="WebUI-3.5.2">
+<html lang="ru" data-build-id="WebUI-3.5.3">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -7,21 +7,21 @@
     <meta name="theme-color" content="#0b1117">
     <meta name="robots" content="noindex,nofollow">
     <title>BROray — Серверы</title>
-    <link rel="icon" href="/assets/images/branding/favicon.ico?v=WebUI-3.5.2">
-    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png?v=WebUI-3.5.2">
-    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.5.2">
-    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.5.2">
-    <link rel="manifest" href="/manifest.json?v=WebUI-3.5.2">
-    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.2">
-    <script src="/assets/js/theme-init.js?v=WebUI-3.5.2"></script>
+    <link rel="icon" href="/assets/images/branding/favicon.ico?v=WebUI-3.5.3">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png?v=WebUI-3.5.3">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.5.3">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.5.3">
+    <link rel="manifest" href="/manifest.json?v=WebUI-3.5.3">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.3">
+    <script src="/assets/js/theme-init.js?v=WebUI-3.5.3"></script>
 </head>
-<body class="app-body page-servers" data-page="servers" data-webui-build="WebUI-3.5.2">
+<body class="app-body page-servers" data-page="servers" data-webui-build="WebUI-3.5.3">
     <div id="app" class="app-layout" hidden>
         <aside id="sidebar" class="sidebar" aria-label="Основная навигация">
             <div class="sidebar-header">
                 <a class="sidebar-brand" href="/home.html" aria-label="BROray — Главная">
                     <span class="sidebar-brand-mark" aria-hidden="true">
-                        <img class="sidebar-brand-image" src="/assets/images/branding/broray-logo-64.png?v=WebUI-3.5.2" alt="" width="40" height="40">
+                        <img class="sidebar-brand-image" src="/assets/images/branding/broray-logo-64.png?v=WebUI-3.5.3" alt="" width="40" height="40">
                     </span>
                     <span class="sidebar-brand-copy">
                         <strong>BROray</strong>
@@ -172,7 +172,7 @@
             <div>
                 <span class="eyebrow">Добавление</span>
                 <h2 id="servers-import-title">Импорт сервера</h2>
-                <p>Добавьте ссылки серверов (по одной на строку) или одну конфигурацию WireGuard целиком.</p>
+                <p>Добавьте ссылки серверов (по одной на строку), одну конфигурацию WireGuard или JSON сервера XDRIVE/MASQUE целиком.</p>
             </div>
             <button id="toggle-import" class="button button-primary" data-icon="add" type="button" aria-expanded="false" aria-controls="server-import-card">
                 Добавить сервер
@@ -181,9 +181,14 @@
         <article id="server-import-card" class="server-import-card" hidden>
             <form id="server-import-form" novalidate>
                 <div class="field">
+                    <label class="field-label" for="server-import-file">Загрузить конфигурацию из файла</label>
+                    <input id="server-import-file" type="file" accept=".json,.txt,.conf,.ini,application/json,text/plain">
+                    <p class="server-form-note">UTF-8, до 64 КБ вместе с оформлением запроса. Файл попадёт в поле ниже; проверьте его перед сохранением.</p>
+                </div>
+                <div class="field">
                     <label class="field-label" for="server-import-uri">Конфигурации серверов</label>
                     <textarea id="server-import-uri" name="uri" rows="5"
-                              placeholder="vless://, vmess://, trojan://, ss://, hysteria2://, socks5://, http(s)://, WireGuard [Interface] или vpn:// (AmneziaWG — только сохранение)"
+                              placeholder="Ссылки серверов, WireGuard [Interface], JSON XDRIVE/MASQUE или vpn:// (AmneziaWG — только сохранение)"
                               spellcheck="false" autocapitalize="none"></textarea>
                 </div>
                 <p class="server-form-note">
@@ -286,7 +291,7 @@
             <h2 id="support-title">Помочь развитию BROray</h2>
             <div class="support-modal-content">
                 <a class="support-qr-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer" aria-label="Открыть CloudTips для поддержки BROray">
-                    <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=WebUI-3.5.2" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
+                    <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=WebUI-3.5.3" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
                 </a>
                 <div class="support-modal-copy">
                     <p id="support-message">BROray развивается как открытый проект. Поддержка помогает оплачивать инфраструктуру, тестирование и выпуск обновлений.</p>
@@ -318,16 +323,16 @@
         </section>
     </div>
 
-    <script src="/assets/js/common.js?v=WebUI-3.5.2"></script>
-    <script src="/assets/js/icons.js?v=WebUI-3.5.2"></script>
-    <script src="/assets/js/app-shell.js?v=WebUI-3.5.2"></script>
-    <script src="/assets/js/theme.js?v=WebUI-3.5.2"></script>
-    <script src="/assets/js/dialogs.js?v=WebUI-3.5.2"></script>
-    <script src="/assets/js/servers-completion.js?v=WebUI-3.5.2"></script>
-    <script src="/assets/js/servers.js?v=WebUI-3.5.2"></script>
-    <script src="/assets/js/servers-import-preflight.js?v=WebUI-3.5.2"></script>
-    <script src="/assets/js/servers-check-all.js?v=WebUI-3.5.2"></script>
-    <script src="/assets/js/servers-auto-switch.js?v=WebUI-3.5.2"></script>
-    <script src="/assets/js/servers-quality-refresh.js?v=WebUI-3.5.2"></script>
+    <script src="/assets/js/common.js?v=WebUI-3.5.3"></script>
+    <script src="/assets/js/icons.js?v=WebUI-3.5.3"></script>
+    <script src="/assets/js/app-shell.js?v=WebUI-3.5.3"></script>
+    <script src="/assets/js/theme.js?v=WebUI-3.5.3"></script>
+    <script src="/assets/js/dialogs.js?v=WebUI-3.5.3"></script>
+    <script src="/assets/js/servers-completion.js?v=WebUI-3.5.3"></script>
+    <script src="/assets/js/servers.js?v=WebUI-3.5.3"></script>
+    <script src="/assets/js/servers-import-preflight.js?v=WebUI-3.5.3"></script>
+    <script src="/assets/js/servers-check-all.js?v=WebUI-3.5.3"></script>
+    <script src="/assets/js/servers-auto-switch.js?v=WebUI-3.5.3"></script>
+    <script src="/assets/js/servers-quality-refresh.js?v=WebUI-3.5.3"></script>
 </body>
 </html>

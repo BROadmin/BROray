@@ -78,6 +78,7 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 	total, available, unavailable := 0, 0, 0
 	counts := map[string]int{}
 	keys := map[string][]map[string]any{} // CanonicalKey → rows (DEV5_SERVER_MANUAL_SUBSCRIPTION_DUPLICATE)
+	supportView := s.supportViewChecker(ctx)
 	for _, id := range ids {
 		path := RecordPath(s.d, id)
 		if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
@@ -91,7 +92,7 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 			return nil, opFailed("Ошибка: не удалось сформировать данные сервера " + id)
 		}
 		q := s.qualityView(id, stale, expired)
-		support := connectionSupport(rec)
+		support := supportView(rec)
 		if support["supported"] == false {
 			q = map[string]any{"status": "unsupported", "freshness": "not-applicable", "method": nil}
 		}
@@ -244,7 +245,7 @@ func (s *svc) details(id string) (map[string]any, error) {
 	}
 	stale, expired := s.qualityPolicy()
 	out := MaskRecord(rec)
-	out["connectionSupport"] = connectionSupport(rec)
+	out["connectionSupport"] = s.supportViewChecker(s.d.Ctx)(rec)
 	out["active"] = out["id"] == ActiveID(s.d)
 	out["quality"] = s.detailsQuality(id, stale, expired)
 	return out, nil

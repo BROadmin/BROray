@@ -50,41 +50,56 @@ func (s *svc) activate(id string) (any, error) {
 		return nil, opFailed("Ошибка: сервер " + id + " не найден")
 	}
 	return s.job("activate", "USER", func(ctx context.Context, op *compat.Operation) (any, error) {
-		op.Phase("checking")
-		rec, err := ReadRecord(s.d, id)
-		if err != nil {
-			return nil, opFailed("Ошибка: неправильный JSON: " + RecordPath(s.d, id))
-		}
-		if err := requireConnectionSupport(rec); err != nil {
-			return nil, err
-		}
-		cfg, gerr := XrayConfig(rec, s.genSettings(ctx), RecordPath(s.d, id))
-		if gerr != nil {
-			return nil, opFailed(gerr.Error())
-		}
-		if terr := s.testBytes(ctx, cfg); terr != nil {
-			return nil, opFailed(strings.TrimSpace(terr.Error() + "\nОшибка: Xray отклонил конфигурацию сервера"))
-		}
-		op.SetCancelability("protected")
-		op.Phase("committing")
-		if err := s.applyServer(ctx, id, cfg); err != nil {
-			return nil, err
-		}
-		sum, err := s.summary(ctx)
-		if err != nil {
-			return nil, err
-		}
-		pretty, _ := json.MarshalIndent(sum, "", "  ")
-		text := fmt.Sprintf("\nАктивирован сервер:\nНазвание: %s\nID сервера: %s\nПротокол: %s\nАдрес: %s:%s\n%s\n",
-			jqRaw(alt(rec["name"], rec["id"])), id, jqRaw(rec["protocol"]), jqRaw(rec["address"]), jqRaw(rec["port"]), pretty)
-		return map[string]any{"message": text}, nil
+		return s.activateUnderFence(ctx, op, id)
 	})
+}
+
+// Both synchronous CLI callers and the queued WebUI hold the global fence.
+func (s *svc) activateUnderFence(ctx context.Context, op *compat.Operation, id string) (any, error) {
+	op.Phase("checking")
+	rec, err := ReadRecord(s.d, id)
+	if err != nil {
+		return nil, opFailed("Ошибка: неправильный JSON: " + RecordPath(s.d, id))
+	}
+	if err := s.requireRuntimeSupport(ctx, rec); err != nil {
+		return nil, err
+	}
+	cfg, gerr := XrayConfig(rec, s.genSettings(ctx), RecordPath(s.d, id))
+	if gerr != nil {
+		return nil, opFailed(gerr.Error())
+	}
+	if terr := s.testBytes(ctx, cfg); terr != nil {
+		return nil, opFailed(strings.TrimSpace(terr.Error() + "\nОшибка: Xray отклонил конфигурацию сервера"))
+	}
+	op.SetCancelability("protected")
+	op.Phase("committing")
+	if err := s.applyServer(ctx, id, cfg); err != nil {
+		return nil, err
+	}
+	sum, err := s.summary(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pretty, _ := json.MarshalIndent(sum, "", "  ")
+	text := fmt.Sprintf("\nАктивирован сервер:\nНазвание: %s\nID сервера: %s\nПротокол: %s\nАдрес: %s:%s\n%s\n",
+		jqRaw(alt(rec["name"], rec["id"])), id, jqRaw(rec["protocol"]), jqRaw(rec["address"]), jqRaw(rec["port"]), pretty)
+	return map[string]any{"message": text}, nil
 }
 
 // applyServer is broray_xray_apply_prepared_server: install + restart through
 // the xray area (which rolls back itself), then switch the active pointer
 // and resync the Keenetic interface (warning only).
 func (s *svc) applyServer(ctx context.Context, id string, cfg []byte) error {
+	if err := s.prepareNativeConfig(cfg); err != nil {
+		return err
+	}
+	rec, err := ReadRecord(s.d, id)
+	if err != nil {
+		return err
+	}
+	if err := s.requireRuntimeSupport(ctx, rec); err != nil {
+		return err
+	}
 	if err := s.d.Svc.ApplyXrayConfig(ctx, cfg); err != nil {
 		s.logf("SERVER_ACTIVATE=FAIL SERVER=%s ERROR=%v", id, err)
 		return opFailed("Перезапуск завершился ошибкой. Выполняется откат.\nОшибка: не удалось применить сервер")
@@ -106,6 +121,9 @@ func (s *svc) ReapplyActive(ctx context.Context, reason string) error {
 	rec, err := ReadRecord(s.d, id)
 	if err != nil {
 		return errors.New("SERVER_NOT_FOUND: Активный сервер " + id + " не найден.")
+	}
+	if err := s.requireRuntimeSupport(ctx, rec); err != nil {
+		return err
 	}
 	cfg, err := XrayConfig(rec, s.genSettings(ctx), RecordPath(s.d, id))
 	if err != nil {
@@ -254,7 +272,7 @@ func (s *svc) preview(uri string) (map[string]any, error) {
 		}
 	}
 	return map[string]any{"protocol": rec["protocol"], "name": rec["name"], "host": rec["address"], "port": rec["port"],
-		"transport": rec["network"], "security": rec["security"], "canonical": key, "duplicate": duplicate, "connectionSupport": connectionSupport(rec), "importWarnings": rec["importWarnings"]}, nil
+		"transport": rec["network"], "security": rec["security"], "canonical": key, "duplicate": duplicate, "connectionSupport": s.supportViewChecker(s.d.Ctx)(rec), "importWarnings": rec["importWarnings"]}, nil
 }
 
 func (s *svc) importCommit(uri string) (any, error) {

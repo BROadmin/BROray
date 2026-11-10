@@ -20,9 +20,10 @@ var (
 )
 
 const (
-	actionHealth   = "servers:active-health"
-	actionQuality  = "servers:quality"
-	actionFailover = "servers:failover"
+	actionHealth     = "servers:active-health"
+	actionQuality    = "servers:quality"
+	actionFailover   = "servers:failover"
+	actionActivation = "servers:activate"
 )
 
 // stepError fails a queued request with a user-visible message and a code.
@@ -87,6 +88,7 @@ func (s *svc) qualitySnapshot(target string) ([]snapEntry, error) {
 		return nil, err
 	}
 	out := []snapEntry{}
+	checkSupport := s.runtimeSupportChecker(s.d.Ctx)
 	for _, id := range ids {
 		if target != "all" && target != id {
 			continue
@@ -98,11 +100,13 @@ func (s *svc) qualitySnapshot(target string) ([]snapEntry, error) {
 		if err != nil || !st.Mode().IsRegular() {
 			return nil, errors.New("server file is not regular")
 		}
-		if rec, err := ReadRecord(s.d, id); err == nil && requireConnectionSupport(rec) != nil {
-			if target != "all" {
-				return nil, requireConnectionSupport(rec)
+		if rec, err := ReadRecord(s.d, id); err == nil {
+			if supportErr := checkSupport(rec); supportErr != nil {
+				if target != "all" {
+					return nil, supportErr
+				}
+				continue
 			}
-			continue
 		}
 		h, err := fileSHA256(RecordPath(s.d, id))
 		if err != nil {
@@ -146,7 +150,7 @@ func (s *svc) resolveCheck(id string) (string, string, *cgi.APIError) {
 			return "", "", cgi.E(404, "SERVER_NOT_FOUND", "Сервер не найден.")
 		}
 		if rec, err := ReadRecord(s.d, id); err == nil {
-			if err := requireConnectionSupport(rec); err != nil {
+			if err := s.requireRuntimeSupport(s.d.Ctx, rec); err != nil {
 				return "", "", cgi.MapError(err)
 			}
 		}
@@ -162,6 +166,8 @@ func (s *svc) resolveCheck(id string) (string, string, *cgi.APIError) {
 }
 
 func (s *svc) defineActions() {
+	s.d.Queue.Define(compat.ActionSpec{Name: actionActivation, Type: "server_operation", Priority: map[string]int{"*": 1},
+		Stages: []compat.Stage{{Name: "activate", Phase: "switching", Global: true, Protected: true, Run: s.activationStep}}})
 	s.d.Queue.Define(compat.ActionSpec{Name: actionReplacement, Type: "server_operation", Priority: map[string]int{"*": 1}, Stages: []compat.Stage{
 		{Name: "verify", Phase: "checking", Global: true, Run: s.replacementVerify},
 		{Name: "probe", Phase: "checking", Run: s.replacementProbe},
@@ -178,6 +184,37 @@ func (s *svc) defineActions() {
 			{Name: "probe", Phase: "checking", Run: s.failoverProbe},
 			{Name: "activate", Phase: "switching", Protected: true, Global: true, Run: s.failoverActivate},
 		}})
+}
+
+func (s *svc) resolveActivation(id string) (string, string, *cgi.APIError) {
+	if validateID(id) != nil || !RecordExists(s.d, id) {
+		return "", "", cgi.E(404, "SERVER_NOT_FOUND", "Сервер не найден.")
+	}
+	rec, err := ReadRecord(s.d, id)
+	if err != nil {
+		return "", "", cgi.E(503, "STATE_UNAVAILABLE", "Не удалось прочитать сервер.")
+	}
+	if err := s.requireRuntimeSupport(s.d.Ctx, rec); err != nil {
+		return "", "", cgi.MapError(err)
+	}
+	hash, err := fileSHA256(RecordPath(s.d, id))
+	if err != nil {
+		return "", "", cgi.E(503, "STATE_UNAVAILABLE", "Не удалось подтвердить сервер.")
+	}
+	return actionActivation, hash, nil
+}
+
+func (s *svc) activationStep(t *compat.Task) error {
+	// A subscription may replace the selected record while this request waits.
+	if hash, err := fileSHA256(RecordPath(s.d, t.Target)); err != nil || hash != t.Context {
+		return changed(t)
+	}
+	if _, err := s.activateUnderFence(t.Ctx, t.Op, t.Target); err != nil {
+		e := cgi.MapError(err)
+		return stepError(t, e.Code, "Не удалось подключить сервер. Проверьте состояние подключения.")
+	}
+	t.Result("Сервер активирован.", "")
+	return nil
 }
 
 // ---------- servers:quality (broray_quality_step) ----------
@@ -785,6 +822,13 @@ func (s *svc) failoverActivate(t *compat.Task) error {
 		return changed(t)
 	}
 	ctx := t.Ctx
+	rec, readErr := ReadRecord(s.d, id)
+	if readErr != nil {
+		return changed(t)
+	}
+	if err := s.requireRuntimeSupport(ctx, rec); err != nil {
+		return err
+	}
 	switched := false
 	if err := s.d.Svc.ApplyXrayConfig(ctx, f.NewBytes); err == nil {
 		if err := setActiveID(s.d, id); err == nil {

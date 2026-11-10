@@ -157,7 +157,7 @@ func freeTCP(t *testing.T) int {
 	return l.Addr().(*net.TCPAddr).Port
 }
 
-func startXray(t *testing.T, bin, path string, cfg []byte, port int, env []string) {
+func startXray(t *testing.T, bin, path string, cfg []byte, port int, env []string) *exec.Cmd {
 	t.Helper()
 	if err := os.WriteFile(path, cfg, 0o600); err != nil {
 		t.Fatal(err)
@@ -180,16 +180,17 @@ func startXray(t *testing.T, bin, path string, cfg []byte, port int, env []strin
 	})
 	if port == 0 {
 		time.Sleep(500 * time.Millisecond)
-		return
+		return cmd
 	}
 	for i := 0; i < 50; i++ {
 		if c, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port)); err == nil {
 			c.Close()
-			return
+			return cmd
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("xray %s did not listen on %d", filepath.Base(path), port)
+	return cmd
 }
 
 // selfSigned writes a localhost certificate; the BROray-side Xray accepts it

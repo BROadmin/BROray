@@ -70,12 +70,23 @@ func register() {
 		}
 		return cur().importCommit(uri)
 	}, cgi.POST(), cgi.Limit(65536), cgi.TooLarge(tooLarge64))
-	cgi.Register("/api/servers/activate.cgi", func(c *cgi.Req) (any, error) {
+	cgi.RegisterRaw("/api/servers/activate.cgi", func(c *cgi.Req) {
+		if c.Header("X-BROray-Queue") == "1" {
+			sv := cur()
+			sv.d.ServeQueued(c, sv.resolveActivation)
+			return
+		}
 		body, e := readBody(c)
 		if e != nil {
-			return nil, e
+			cgi.WriteErr(c.W, e)
+			return
 		}
-		return cur().activate(bodyField(body, "id"))
+		data, err := cur().activate(bodyField(body, "id"))
+		if err != nil {
+			cgi.WriteErr(c.W, cgi.MapError(err))
+			return
+		}
+		cgi.WriteOK(c.W, data)
 	}, cgi.POST(), cgi.Limit(65536), cgi.TooLarge(tooLarge64))
 	cgi.Register("/api/servers/deactivate.cgi", func(c *cgi.Req) (any, error) { return cur().deactivate() }, cgi.POST())
 	cgi.Register("/api/servers/delete.cgi", func(c *cgi.Req) (any, error) {

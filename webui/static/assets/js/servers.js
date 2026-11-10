@@ -49,11 +49,25 @@
     function qualityMethodLabel(quality) {
         var method = quality && quality.measurementMethod;
 
+        if (method === "https-proxy-warm") return "HTTPS через прогретый туннель";
+
         if (method === "https-proxy+icmp") {
             return "HTTPS через Xray + ICMP ping";
         }
 
         return "Метод не зафиксирован";
+    }
+
+    function qualityLatencyLabel(quality) {
+        return quality && quality.measurementMethod === "https-proxy-warm"
+            ? "Задержка через туннель" : "Пинг";
+    }
+
+    function appendCloudEstablishment(root, quality) {
+        if (!quality || quality.measurementMethod !== "https-proxy-warm") return;
+        appendDefinition(root, "Установление туннеля",
+            quality.establishmentMs !== null && quality.establishmentMs !== undefined
+                ? quality.establishmentMs + " мс" : "Нет данных");
     }
 
     function request(url, options) {
@@ -307,7 +321,7 @@
 
             appendDefinition(
                 meta,
-                "Пинг",
+                qualityLatencyLabel(quality),
                 quality.ping !== null &&
                     quality.ping !== undefined
                     ? quality.ping + " мс"
@@ -340,6 +354,8 @@
                 "Источник проверки",
                 qualitySourceLabel(quality)
             );
+
+            appendCloudEstablishment(meta, quality);
 
             element("check-active-server").disabled = false;
 
@@ -455,7 +471,7 @@
         card.setAttribute("data-server-id", server.id);
         quality.setAttribute("data-icon", "status");
 		if (unsupported) {
-			quality.textContent = "Подключение не поддерживается";
+			quality.textContent = server.connectionSupport.mode === "requires-core" ? "Обновите Xray" : "Подключение не поддерживается";
 			quality.className = "status-badge status-badge-warning";
 		}
 
@@ -481,6 +497,9 @@
 		if (server.connectionSupport && server.connectionSupport.message) {
 			identity.appendChild(create("p", "server-card-address", server.connectionSupport.message));
 		}
+		if (server.connectionSupport && server.connectionSupport.notice) {
+			identity.appendChild(create("p", "server-card-address", server.connectionSupport.notice));
+		}
         // 3.5.0: the same connection added by hand and from a subscription
         // (DEV5_SERVER_MANUAL_SUBSCRIPTION_DUPLICATE) — two cards, each names
         // the other.
@@ -499,7 +518,7 @@
 
         appendDefinition(
             metrics,
-            "Пинг",
+            qualityLatencyLabel(server.quality),
             server.quality && server.quality.ping !== null && server.quality.ping !== undefined
                 ? server.quality.ping + " мс"
                 : "—"
@@ -521,6 +540,7 @@
             "Источник проверки",
             qualitySourceLabel(server.quality)
         );
+        appendCloudEstablishment(metrics, server.quality);
         card.appendChild(metrics);
 
         checkButton = create("button", "button button-secondary", "Проверить");
@@ -687,6 +707,7 @@
         appendDefinition(grid, "Последняя проверка", formatDate(details.quality && details.quality.lastCheckedAt));
         appendDefinition(grid, "Источник проверки", qualitySourceLabel(details.quality));
         appendDefinition(grid, "Метод проверки", qualityMethodLabel(details.quality));
+        appendCloudEstablishment(grid, details.quality);
         appendDefinition(grid, "Успешных проверок", details.quality && details.quality.successfulChecks);
         appendDefinition(grid, "Неудачных проверок", details.quality && details.quality.failedChecks);
         root.appendChild(grid);
@@ -790,18 +811,23 @@
             }
 
             setBusy(button, true, "Подключение…");
-            request(
-                "/api/servers/activate.cgi",
-                {
-                    method: "POST",
-                    body: { id: server.id }
+            BROrayUI.followQueued("/api/servers/activate.cgi", server.id, function (result) {
+                if (["queued", "running"].includes(result.state)) {
+                    setBusy(button, true, BROrayUI.queueLabel(result));
+                    return;
                 }
-            ).then(function () {
-                state.details = {};
-                BROrayUI.toast("Сервер активирован.", "success");
-                return loadSummary(false);
-            }).catch(handleError).then(function () {
                 setBusy(button, false);
+                state.details = {};
+                BROrayUI.toast(result.state === "completed" ? "Сервер активирован." :
+                    result.message || "Результат подключения не подтверждён.",
+                    result.state === "completed" ? "success" : "warning");
+                loadSummary(false).catch(handleError);
+            }).catch(function (error) {
+                setBusy(button, false);
+                handleError(error);
+                // An uncertain response does not prove that activation failed.
+                // Observe real state; never replay the mutation blindly.
+                loadSummary(false).catch(handleError);
             });
         });
     }

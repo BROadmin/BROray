@@ -98,7 +98,7 @@ func (s *svc) handleAutoSwitchSave(c *cgi.Req) (any, error) {
 			return nil, cgi.E(400, "SERVER_NOT_FOUND", "Предпочтительный сервер не найден.")
 		}
 		if rec, err := ReadRecord(s.d, preferred); err == nil {
-			if err := requireConnectionSupport(rec); err != nil {
+			if err := s.requireRuntimeSupport(s.d.Ctx, rec); err != nil {
 				return nil, err
 			}
 		}

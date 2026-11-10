@@ -16,6 +16,15 @@ func lower(v any) any {
 // importKeyObject is the object of broray_server_subscription_import_key
 // (server-subscription-service.sh:66-102).
 func importKeyObject(s Record) map[string]any {
+	if s["network"] == "xdrive" || s["protocol"] == "masque" {
+		key := map[string]any{"protocol": s["protocol"], "network": s["network"], "security": s["security"], "address": lower(s["address"]), "port": s["port"]}
+		for _, k := range []string{"uuid", "encryption", "flow", "tls", "xdrive", "masque", "mux", "remoteDNS", "transport"} {
+			if has(s, k) {
+				key[k] = s[k]
+			}
+		}
+		return key
+	}
 	if s["protocol"] == "wireguard" {
 		return map[string]any{"protocol": "wireguard", "settings": s["wireguard"]}
 	}
@@ -121,6 +130,33 @@ func RotationKey(rec Record) (string, error) {
 // a subscription server id across credential rotation.
 func ContinuityKey(rec Record) (string, error) {
 	s := normalize(rec)
+	if s["network"] == "xdrive" || s["protocol"] == "masque" {
+		// A cloud profile's formal address does not identify its storage.
+		// Keep credential rotation possible without reassigning a different
+		// bucket/folder/template to an existing active server ID.
+		endpoint := map[string]any{"protocol": s["protocol"], "network": s["network"], "address": lower(s["address"]), "port": s["port"], "security": s["security"]}
+		if s["network"] == "xdrive" {
+			for _, field := range []string{"service", "remoteFolder", "s3"} {
+				endpoint[field] = get(s, "xdrive", field)
+			}
+			if template, ok := get(s, "xdrive", "template").(map[string]any); ok {
+				// Only storage endpoints identify the node. Auth tokens,
+				// headers, response selectors and retry tuning are mutable
+				// configuration, still included in CanonicalKey.
+				locations := map[string]any{}
+				for _, op := range []string{"list", "get", "put", "delete"} {
+					locations[op] = map[string]any{"url": get(template, op, "url"), "method": get(template, op, "method")}
+				}
+				endpoint["template"] = locations
+			}
+		} else {
+			for _, field := range []string{"host", "path"} {
+				endpoint[field] = get(s, "masque", field)
+			}
+			endpoint["warp"] = has(s["masque"], "warp")
+		}
+		return compat.CanonicalSHA256(endpoint)
+	}
 	if s["protocol"] == "amneziawg" || s["protocol"] == "wireguard" {
 		return compat.CanonicalSHA256(map[string]any{"protocol": s["protocol"], "address": lower(s["address"]), "port": s["port"]})
 	}

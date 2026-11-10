@@ -3,6 +3,8 @@ package servers
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/BROadmin/broray/internal/strictjson"
 )
 
 // StreamOptions carries only explicitly supported client-side stream fields.
@@ -106,9 +108,35 @@ func headerToken(s string) bool {
 }
 
 func parseLink(link, id string, source map[string]any) (Record, *ParseError) {
+	// A UTF-8 BOM is framing only at the start of a native document.
+	nativeText := strings.TrimPrefix(link, "\ufeff")
+	if strings.HasPrefix(strings.TrimSpace(nativeText), "{") {
+		return parseNativeDocument(nativeText, id, source)
+	}
 	r, err := parseBaseLink(link, id, source)
 	if err != nil {
 		return nil, err
+	}
+	// Check the original JSON as well as the normalized legacy result.
+	if strings.Contains(link, "://") && !strings.HasPrefix(link, "vpn://") {
+		body, _, _ := splitFirst(link, '#')
+		_, raw, _ := splitFirst(body, '?')
+		q := query(raw)
+		for _, field := range []string{"extra", "header", "fm", "streamOptions"} {
+			if !q.has(field) {
+				continue
+			}
+			v, err := q.value(field)
+			if err != nil {
+				return nil, err
+			}
+			if v == "" {
+				continue
+			}
+			if _, err := strictjson.Decode([]byte(v)); err != nil {
+				return nil, die("неправильный или неоднозначный JSON: " + field)
+			}
+		}
 	}
 	if in(asString(r["protocol"]), "wireguard", "amneziawg") {
 		return r, nil
@@ -117,6 +145,9 @@ func parseLink(link, id string, source map[string]any) (Record, *ParseError) {
 	_, raw, _ := splitFirst(body, '?')
 	q := query(raw)
 	if err := auditQuery(q, r); err != nil {
+		return nil, err
+	}
+	if err := validateQueryContext(q, r); err != nil {
 		return nil, err
 	}
 	if q.has("streamOptions") {
@@ -139,8 +170,14 @@ func parseLink(link, id string, source map[string]any) (Record, *ParseError) {
 	if e := validate(r, tempLabel()); e != nil {
 		return nil, e
 	}
+	if e := validateFreshFinalMasks(r); e != nil {
+		return nil, e
+	}
 	return r, nil
 }
+
+const mlkemMetadataWarning = "support-x25519mlkem768 предназначен для Mihomo. В Xray использование X25519MLKEM768 определяется TLS-профилем и сервером; этот флаг отдельно не применяется."
+const legacyMLKEMMetadataWarning = "Поле URI support-x25519mlkem768 не применяется; параметры соединения берутся из поддерживаемых полей."
 
 func auditQuery(q query, r Record) *ParseError {
 	allowed := []string{"streamOptions"}
@@ -197,7 +234,7 @@ func auditQuery(q query, r Record) *ParseError {
 	var warnings []any
 	for _, key := range metadata {
 		if q.has(key) {
-			warnings = append(warnings, "Поле URI "+key+" не применяется; параметры соединения берутся из поддерживаемых полей.")
+			warnings = append(warnings, mlkemMetadataWarning)
 		}
 	}
 	if len(warnings) > 0 {

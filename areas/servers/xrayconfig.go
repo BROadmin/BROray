@@ -158,6 +158,9 @@ func hysteriaFinalMask(s Record) any {
 }
 
 func streamSettings(s Record) (map[string]any, error) {
+	if s["network"] == "xdrive" || s["network"] == "masque" {
+		return nativeStream(s, asString(s["network"])), nil
+	}
 	st := map[string]any{"network": s["network"], "security": s["security"]}
 	switch s["network"] {
 	case "xhttp":
@@ -217,6 +220,11 @@ func Outbound(s Record) (map[string]any, error) {
 	withStream := true
 	protocol := s["protocol"]
 	switch protocol {
+	case "masque":
+		settings = map[string]any{"address": s["address"], "port": s["port"]}
+		if has(s, "remoteDNS") {
+			settings["remoteDNS"] = s["remoteDNS"]
+		}
 	case "wireguard":
 		settings, _ = s["wireguard"].(map[string]any)
 		withStream = false
@@ -250,6 +258,9 @@ func Outbound(s Record) (map[string]any, error) {
 		return nil, die("генератор не поддерживает протокол: " + jqRaw(s["protocol"]))
 	}
 	out := map[string]any{"tag": "proxy", "protocol": protocol, "settings": settings}
+	if s["network"] == "xdrive" {
+		out["mux"] = s["mux"]
+	}
 	if withStream {
 		st, err := streamSettings(s)
 		if err != nil {
@@ -281,5 +292,14 @@ func XrayConfig(rec Record, gs GenSettings, label string) ([]byte, error) {
 			"protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": true}}},
 		"outbounds": []any{ob},
 	}
+	if rec["network"] == "xdrive" || rec["protocol"] == "masque" {
+		// Core backend errors may contain raw API response bodies/credentials.
+		// BROray publishes bounded sanitized operation results separately.
+		cfg["log"] = privateCoreLogSettings()
+	}
 	return Marshal(cfg)
+}
+
+func privateCoreLogSettings() map[string]any {
+	return map[string]any{"loglevel": "none", "access": "none", "error": "none"}
 }
