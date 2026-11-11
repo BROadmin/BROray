@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>WebUI BROray</title>
-<meta name="description" content="Повседневная работа с BROray 3.5.4: знакомые страницы, состояния и действия.">
+<meta name="description" content="Повседневная работа с BROray 3.5.5: знакомые страницы, состояния и действия.">
 <link rel="canonical" href="https://docs.brovibe.cloud/broray/webui/">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -31,7 +31,7 @@
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/webui/" aria-current="page">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
 <main class="content" id="content">
 <style>.content [id]{scroll-margin-top:6rem}@media(max-width:760px){.content [id]{scroll-margin-top:13rem}}</style>
-<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.4 · Stable</p><h1>WebUI BROray</h1><p class="lead">Повседневная работа с BROray 3.5.4: знакомые страницы, состояния и действия.</p></div></section>
+<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.5 · Stable</p><h1>WebUI BROray</h1><p class="lead">Повседневная работа с BROray 3.5.5: знакомые страницы, состояния и действия.</p></div></section>
 <h2 id="login">Вход и навигация</h2>
 
 <p>Откройте локальный адрес роутера с портом 8080 и войдите учётной записью администратора Keenetic. Это не логин root от Entware. После перезапуска или обновления BROray нужно войти заново. Темы переключаются в шапке.</p>
@@ -73,7 +73,7 @@
 
 <p>Обновление приложения и обновление Xray — разные действия. В разделе BROray доступны копия, её предпросмотр и импорт, а также отмена импорта из сохранённого предыдущего состояния. Журнал и панель операций помогают понять, идёт ли задание, завершено ли оно и можно ли его продолжить. <a href="https://docs.brovibe.cloud/broray/maintenance/">Обслуживание по шагам</a>.</p>
 
-<h2 id="import-353">Новые форматы и ядро</h2><p>JSON новых XDRIVE/MASQUE можно вставить в поле импорта, загрузить как UTF-8 файл на странице «Серверы» или получить из подписки. Прежние JSON-протоколы импортируются через URL на странице «Подписки». Перед сохранением проверьте предварительный результат и предупреждения.</p><p>Для XDRIVE/MASQUE требуется Xray 26.11.9. BROray и ядро обновляются отдельно. Поле support-x25519mlkem768 — метаданные Mihomo, оно не передаётся как параметр Xray. Подключение через KeenDNS выполняется в очереди: дождитесь результата операции, не запускайте её повторно.</p><p><a href="/broray/reference/#limitations-353">Известные ограничения</a></p><h2 id="maintenance-354">Обслуживание ядра</h2><p>На странице Xray появились режим нехватки места с копией в RAM и отдельное удаление ядра. <a href="/broray/maintenance/#xray-maintenance">Пошаговая инструкция и предупреждения</a>.</p></main></div>
+<h2 id="import-353">Новые форматы и ядро</h2><p>JSON новых XDRIVE/MASQUE можно вставить в поле импорта, загрузить как UTF-8 файл на странице «Серверы» или получить из подписки. Прежние JSON-протоколы импортируются через URL на странице «Подписки». Перед сохранением проверьте предварительный результат и предупреждения.</p><p>Для XDRIVE/MASQUE требуется Xray 26.11.9. BROray и ядро обновляются отдельно. Поле support-x25519mlkem768 — метаданные Mihomo, оно не передаётся как параметр Xray. Подключение через KeenDNS выполняется в очереди: дождитесь результата операции, не запускайте её повторно.</p><p><a href="/broray/reference/#limitations-353">Известные ограничения</a></p><h2 id="maintenance-354">Обслуживание ядра</h2><p>На странице Xray появились режим нехватки места с копией в RAM и отдельное удаление ядра. <a href="/broray/maintenance/#xray-maintenance">Пошаговая инструкция и предупреждения</a>.</p><h2 id="subscription-formats-355">Одна подписка: URI, JSON и Clash</h2><ol><li>Откройте <strong>Подписки</strong> и добавьте основную ссылку провайдера.</li><li>Нажмите <strong>Обновить</strong>. Если страница явно объявляет JSON и Clash того же сайта, BROray загрузит их сам.</li><li>Откройте список серверов этой подписки. Полные совпадения объединяются; различающиеся настройки сохраняются. На странице «Серверы» варианты доступны в выборе источника.</li><li>Если экспорт недоступен или неполон, прочитайте ошибку: прежний список сохранится. При необходимости можно отдельно добавить прямую ссылку JSON или Clash.</li></ol><p>Существующие отдельные подписки автоматически не удаляются. Из Clash переносятся серверы, а не rules, DNS и proxy-groups. AmneziaWG сохраняется без подключения через Xray.</p></main></div>
 <footer class="site-footer"><div class="footer-inner">
 <span>BROvibe Docs · BROray · WebUI</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
