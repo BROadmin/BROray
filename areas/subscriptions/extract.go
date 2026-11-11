@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"github.com/BROadmin/broray/areas/servers"
+	"github.com/BROadmin/broray/internal/strictjson"
 	"regexp"
 	"strings"
 )
@@ -78,9 +79,11 @@ func decodeBase64Body(lines []string) ([]byte, bool) {
 
 // extracted is the parse input: node lines and whether they came from Xray JSON.
 type extracted struct {
-	Lines      []string
-	JSONImport bool
-	Native     map[int]nativeJSONInput
+	Clash        bool
+	NodeWarnings map[int][]string
+	Lines        []string
+	JSONImport   bool
+	Native       map[int]nativeJSONInput
 }
 
 // extractNodes recognises the payload: URI list, Base64 URI list or Xray
@@ -95,6 +98,9 @@ func extractNodes(body []byte, md *metadata) (*extracted, *subErr) {
 		}
 	}
 	lines := normalizeText(body)
+	if ex, recognized, err := structuredSubscription(lines); recognized {
+		return ex, err
+	}
 	md.apply(metaRecordsFromLines(lines))
 	lines = stripMetadata(lines)
 	if anyMatch(reHTML, lines) {
@@ -109,6 +115,9 @@ func extractNodes(body []byte, md *metadata) (*extracted, *subErr) {
 		if !anyMatch(reJSONLine, lines) {
 			if decoded, ok := decodeBase64Body(lines); ok {
 				input = normalizeText(decoded)
+				if ex, recognized, err := structuredSubscription(input); recognized {
+					return ex, err
+				}
 				md.apply(metaRecordsFromLines(input))
 				input = stripMetadata(input)
 			}
@@ -120,6 +129,9 @@ func extractNodes(body []byte, md *metadata) (*extracted, *subErr) {
 			ex.Native = map[int]nativeJSONInput{}
 			conv, ok := xrayJSONToInputs([]byte(text), maxNodes, ex.Native)
 			if !ok {
+				if cx, recognized, err := clashExtract([]byte(text)); recognized {
+					return cx, err
+				}
 				return nil, fail("PARSE_ERROR", "Содержимое подписки не удалось распознать.")
 			}
 			out, ex.JSONImport = conv, true
@@ -139,4 +151,45 @@ func extractNodes(body []byte, md *metadata) (*extracted, *subErr) {
 		return nil, fail("CONTENT_TOO_LARGE", "Подписка содержит слишком много узлов.")
 	}
 	return ex, nil
+}
+
+// Structured formats must see the exact normalized document before legacy
+// metadata/comment stripping or URI-looking lines inside YAML scalar values.
+func structuredSubscription(lines []string) (*extracted, bool, *subErr) {
+	text := []byte(strings.Join(lines, "\n"))
+	trimmed := bytes.TrimSpace(text)
+	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+		native := map[int]nativeJSONInput{}
+		if conv, ok := xrayJSONToInputs(text, maxNodes, native); ok {
+			if len(conv) == 0 {
+				return nil, true, fail("NO_VALID_NODES", "Подписка не содержит узлов.")
+			}
+			if len(conv) > maxNodes {
+				return nil, true, fail("CONTENT_TOO_LARGE", "Подписка содержит слишком много узлов.")
+			}
+			return &extracted{Lines: conv, JSONImport: true, Native: native}, true, nil
+		}
+		// A JSON export may wrap explicit share links rather than profiles.
+		// Keep the document's provenance while using the same strict parser.
+		if document, err := strictjson.Decode(text); err == nil {
+			if items, ok := document.([]any); ok && len(items) > 0 {
+				if len(items) > maxNodes {
+					return nil, true, errTooLarge
+				}
+				links := make([]string, 0, len(items))
+				for _, item := range items {
+					link, ok := item.(string)
+					if !ok || !reURILine.MatchString(link) || strings.ContainsAny(link, "\r\n") {
+						return nil, false, nil
+					}
+					links = append(links, link)
+				}
+				if len(links) > maxNodes {
+					return nil, true, errTooLarge
+				}
+				return &extracted{Lines: links, JSONImport: true}, true, nil
+			}
+		}
+	}
+	return clashExtract(text)
 }

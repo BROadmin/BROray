@@ -465,7 +465,7 @@ func TestParserFieldCoverageProtocol(t *testing.T) {
 }
 
 func TestParserFieldCoverageMetadata(t *testing.T) {
-	// Ordinary VLESS shares the explicit level=0/email warning policy used by
+	// Ordinary VLESS shares the explicit level/email warning policy used by
 	// the other protocols and native VLESS. Metadata is accepted with a warning
 	// and omitted from the generated connection settings.
 	for _, proto := range []string{"vless", "vmess", "trojan", "shadowsocks", "http", "socks", "wireguard"} {
@@ -490,7 +490,7 @@ func TestParserFieldCoverageMetadata(t *testing.T) {
 				}
 			})
 		}
-		parserCoverageField(t, proto, proto, path+"level", "", nil, []parserCoverageValue{pcValue("policy-nonzero", 1), pcValue("null", nil), pcValue("type", "0"), pcValue("negative", -1)})
+		parserCoverageField(t, proto, proto, path+"level", "", nil, []parserCoverageValue{pcValue("null", nil), pcValue("type", "0"), pcValue("negative", -1)})
 		parserCoverageField(t, proto, proto, path+"email", "", nil, pcBadString())
 	}
 	for _, tc := range []struct {

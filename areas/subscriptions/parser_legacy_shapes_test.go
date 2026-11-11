@@ -245,7 +245,7 @@ func TestParserLegacyAccountMetadata(t *testing.T) {
 			field, name string
 			value       any
 		}{
-			{"level", "null", nil}, {"level", "string", "0"}, {"level", "nonzero-policy", 1},
+			{"level", "null", nil}, {"level", "string", "0"},
 			{"email", "null", nil}, {"email", "number", 7},
 		} {
 			t.Run(proto+"/"+bad.field+"/reject-"+bad.name, func(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 
 // Node staging: broray_subscription_stage_nodes (svc:969-1106).
 
-const jsonImportWarning = "Из JSON импортируются отдельные серверы. DNS, маршрутизация, балансировка и фрагментация профиля не применяются. Служебные поля email, level=0, REALITY show и gRPC mode=false не переносятся."
+const jsonImportWarning = "Из JSON импортируются отдельные серверы. DNS, маршрутизация, балансировка и фрагментация профиля не применяются. Уровень пользователя level нормализуется к локальной политике BROray; политика профиля не применяется. Служебные поля email, REALITY show и gRPC mode=false не переносятся."
 
 // staged is the outcome of the parse step.
 type staged struct {
@@ -55,6 +55,9 @@ func parseReason(err error) string {
 // progress(processed) is called before each node and at the end.
 func stageNodes(subID string, ex *extracted, enabled bool, progress func(int, int)) (*staged, *subErr) {
 	st := &staged{Received: len(ex.Lines)}
+	if ex.Clash {
+		st.Warnings = append(st.Warnings, clashWarning)
+	}
 	if ex.JSONImport {
 		st.Warnings = append(st.Warnings, jsonImportWarning)
 	}
@@ -72,8 +75,13 @@ func stageNodes(subID string, ex *extracted, enabled bool, progress func(int, in
 			progress(i0, len(ex.Lines))
 		}
 		i := i0 + 1
+		st.Warnings = append(st.Warnings, ex.NodeWarnings[i0]...)
 		if strings.HasPrefix(line, unsupportedMarker+"#") {
-			reject("Узел %d: неподдерживаемое поле JSON: %s.", i, safeJSONField(strings.TrimPrefix(line, unsupportedMarker+"#")))
+			format := "JSON"
+			if ex.Clash {
+				format = "Clash"
+			}
+			reject("Узел %d: неподдерживаемое поле %s: %s.", i, format, safeJSONField(strings.TrimPrefix(line, unsupportedMarker+"#")))
 			continue
 		}
 		if line == unsupportedMarker {
@@ -121,6 +129,9 @@ func stageNodes(subID string, ex *extracted, enabled bool, progress func(int, in
 			continue
 		}
 		rec["id"] = stableID
+		if ex.Clash {
+			rec["sourceFormat"] = "clash-yaml"
+		}
 		rec["source"] = map[string]any{"type": "subscription", "subscriptionId": subID, "importKey": key,
 			"nodeIndex": i, "enabled": enabled, "updatedAt": compat.Stamp(now())}
 		if err := servers.Validate(rec, stableID+".json"); err != nil {

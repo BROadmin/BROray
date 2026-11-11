@@ -23,6 +23,12 @@
         editingId: null,
         openServersId: null,
         serverCache: new Map(),
+        serverVersions: new Map(),
+        serverPending: new Map(),
+        serverErrors: new Map(),
+        serverStale: new Set(),
+        catalogGeneration: 0,
+        foregroundLoad: null,
         queued: {},
         polling: null
     };
@@ -196,11 +202,9 @@
         if (!result) {
             return "Обновление ещё не выполнялось.";
         }
-        if (result.errorCode) {
-            return "Код: " + escapeHtml(result.errorCode) +
+        var failure = result.errorCode ? " · Код: " + escapeHtml(result.errorCode) +
                 (typeof result.durationMs === "number" && Number.isFinite(result.durationMs) && result.durationMs >= 0
-                    ? " · длительность: " + escapeHtml(result.durationMs) + " мс" : "");
-        }
+                    ? " · длительность: " + escapeHtml(result.durationMs) + " мс" : "") : "";
         return [
             "получено " + (result.received || 0),
             "принято " + (result.accepted || 0),
@@ -209,7 +213,7 @@
             "удалено " + (result.removed || 0),
             "отклонено " + (result.rejected || 0)
         ].join(" · ") + (Number.isSafeInteger(result.retained) && result.retained > 0
-            ? " · сохранено прежних " + result.retained : "");
+            ? " · сохранено прежних " + result.retained : "") + failure;
     }
 
     function renderNodes(subscriptionId) {
@@ -222,11 +226,14 @@
         }
 
         cached = state.serverCache.get(key);
+        var error = state.serverErrors.get(key);
+        var notice = error ? '<div class="subscription-error" role="status">Не удалось обновить список серверов. ' + escapeHtml(error) + (cached ? ' Показан последний загруженный список.' : '') + '</div>' : '';
         if (!cached) {
+            if (error) return notice;
             return '<div class="subscription-nodes subscription-loading"><span class="loader-spinner" aria-hidden="true"></span><span>Загрузка серверов…</span></div>';
         }
         if (!cached.items || !cached.items.length) {
-            return '<div class="subscription-nodes subscription-empty-compact">Серверы отсутствуют.</div>';
+            return notice + '<div class="subscription-nodes subscription-empty-compact">Серверы отсутствуют.</div>';
         }
 
         items = cached.items.map(function (server) {
@@ -248,7 +255,7 @@
             '</div>';
         }).join("");
 
-        return '<div class="subscription-nodes">' +
+        return notice + '<div class="subscription-nodes">' +
             '<div class="subscription-nodes-heading"><strong>Серверы</strong><span>' + escapeHtml(cached.total) + '</span></div>' +
             '<div class="subscription-node-list">' + items + '</div>' +
         '</div>';
@@ -336,6 +343,7 @@
     async function loadAll(silent) {
         var result;
         var hasRunning;
+        var generation = ++state.catalogGeneration;
         window.clearTimeout(state.polling);
 
         if (!silent) {
@@ -345,12 +353,16 @@
 
         try {
             result = await Promise.allSettled([api(paths.list), api(paths.summary)]);
+            if (generation !== state.catalogGeneration) return;
             var failed = result.find(function (entry) { return entry.status === "rejected"; });
             if (failed) { throw failed.reason; }
             result = result.map(function (entry) { return entry.value; });
-            state.subscriptions = Array.isArray(result[0]) ? result[0] : [];
+            var subscriptions = Array.isArray(result[0]) ? result[0] : [];
+            reconcileServerCatalog(subscriptions);
+            state.subscriptions = subscriptions;
             renderSummary(result[1] || {});
             renderSubscriptions();
+            if (state.openServersId !== null) loadServerNodes(String(state.openServersId));
             state.subscriptions.forEach(function (item) {
                 if (state.queued[item.id] || !BROrayUI.hasQueuedRequest(paths.refresh,item.id)) return;
                 var card=Array.from(listElement.querySelectorAll("[data-id]")).find(function (element) { return element.dataset.id === item.id; });
@@ -366,6 +378,7 @@
                 }, 3000);
             }
         } catch (error) {
+            if (generation !== state.catalogGeneration) return;
             listElement.setAttribute("aria-busy", "false");
             listElement.innerHTML = '<div class="subscription-error-panel"><h2>Не удалось загрузить подписки</h2><p>' + escapeHtml(error.message) + '</p></div>';
             state.polling = window.setTimeout(function () { loadAll(true); }, 5000);
@@ -481,6 +494,7 @@
                     state.queued[id]=result;renderSubscriptions();
                 } else {
                     delete state.queued[id];renderSubscriptions();
+                    invalidateServerNodes(String(id));
                     toast(result.state === "completed" ? "Обновление подписки завершено." :
                         result.message || BROrayUI.queueLabel(result),result.state === "completed" ? "success" : "warning");
                     loadAll(true);
@@ -520,9 +534,66 @@
         }
     }
 
+    function catalogSignature(item) {
+        // Ignore volatile progress/phase and nextUpdateAt. A completed update
+        // can replace every node while retaining exactly the same count.
+        return JSON.stringify([item.enabled, item.serversCount, item.updatedAt,
+            item.lastUpdatedAt, item.lastUpdateStatus, item.lastUpdateResult,
+            item.backgroundOperationId, (item.updateOperation || {}).id]);
+    }
+
+    function invalidateServerNodes(key, removed) {
+        state.serverVersions.set(key, (state.serverVersions.get(key) || 0) + 1);
+        state.serverPending.delete(key);
+        state.serverErrors.delete(key);
+        state.serverStale.add(key);
+        if (removed) {
+            state.serverCache.delete(key);
+            state.serverStale.delete(key);
+            if (String(state.openServersId) === key) state.openServersId = null;
+        }
+    }
+
+    function reconcileServerCatalog(subscriptions) {
+        var next = new Map(subscriptions.map(function (item) { return [String(item.id), item]; }));
+        state.subscriptions.forEach(function (previous) {
+            var key = String(previous.id);
+            var item = next.get(key);
+            if (!item || catalogSignature(previous) !== catalogSignature(item)) invalidateServerNodes(key, !item);
+        });
+    }
+
+    async function loadServerNodes(key) {
+        var item = state.subscriptions.find(function (entry) { return String(entry.id) === key; });
+        if (!item || item.lastUpdateStatus === "running" || state.serverPending.has(key) ||
+            state.serverErrors.has(key) || (state.serverCache.has(key) && !state.serverStale.has(key))) return;
+        var version = state.serverVersions.get(key) || 0;
+        var token = {};
+        state.serverPending.set(key, token);
+        function current() {
+            return state.serverPending.get(key) === token && (state.serverVersions.get(key) || 0) === version &&
+                state.subscriptions.some(function (entry) { return String(entry.id) === key; });
+        }
+        try {
+            var servers = await api(paths.servers + "?id=" + encodeURIComponent(key));
+            if (!servers || !Array.isArray(servers.items)) throw new Error("Сервер вернул некорректный список узлов.");
+            if (!current()) return;
+            state.serverCache.set(key, servers);
+            state.serverStale.delete(key);
+        } catch (error) {
+            if (!current()) return;
+            state.serverErrors.set(key, error.message);
+            toast(error.message, "error");
+        } finally {
+            if (current()) {
+                state.serverPending.delete(key);
+                if (String(state.openServersId) === key) renderSubscriptions();
+            }
+        }
+    }
+
     async function toggleServers(id) {
         var key = String(id);
-        var servers;
 
         if (String(state.openServersId) === key) {
             state.openServersId = null;
@@ -531,15 +602,9 @@
         }
 
         state.openServersId = key;
+        state.serverErrors.delete(key); // An explicit reopen permits a retry.
         renderSubscriptions();
-        try {
-            servers = await api(paths.servers + "?id=" + encodeURIComponent(id));
-            state.serverCache.set(key, servers || {items: [], total: 0});
-        } catch (error) {
-            state.serverCache.set(key, {items: [], total: 0});
-            toast(error.message, "error");
-        }
-        renderSubscriptions();
+        await loadServerNodes(key);
     }
 
     async function removeSubscription(item) {
@@ -573,7 +638,7 @@
             if (state.editingId === String(item.id)) {
                 resetForm();
             }
-            state.serverCache.delete(String(item.id));
+            invalidateServerNodes(String(item.id), true);
             toast("Подписка удалена.");
             await loadAll(false);
         } catch (error) {
@@ -582,6 +647,12 @@
     }
 
     function bindEvents() {
+        function refreshOnReturn() {
+            if (document.visibilityState === "hidden" || state.foregroundLoad) return;
+            state.foregroundLoad = loadAll(true).finally(function () { state.foregroundLoad = null; });
+        }
+        window.addEventListener("focus", refreshOnReturn);
+        document.addEventListener("visibilitychange", refreshOnReturn);
         listElement.addEventListener("click", function (event) {
             var button = event.target.closest("button[data-action]");
             var card;

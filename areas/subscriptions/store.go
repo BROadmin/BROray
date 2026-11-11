@@ -126,6 +126,20 @@ func validRecord(m map[string]any) bool {
 	if m == nil || !isInt(m["schemaVersion"], 1, 1) {
 		return false
 	}
+	if value, exists := m["alternateExports"]; exists {
+		formats, ok := value.([]any)
+		if !ok || len(formats) > 2 {
+			return false
+		}
+		seen := map[string]bool{}
+		for _, value := range formats {
+			format, ok := value.(string)
+			if !ok || (format != "json" && format != "clash") || seen[format] {
+				return false
+			}
+			seen[format] = true
+		}
+	}
 	if v, ok := m["sendDeviceInfo"]; ok {
 		if _, isBool := v.(bool); !isBool {
 			return false

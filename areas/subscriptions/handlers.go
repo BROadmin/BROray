@@ -267,6 +267,7 @@ func (s *svc) updateSettings(id string, b map[string]any) (any, error) {
 	rec := clone(old)
 	if u, isStr := old["url"].(string); !isStr || u != url {
 		delete(rec, "providerMetadata")
+		delete(rec, "alternateExports")
 	}
 	rec["name"], rec["httpUserAgent"], rec["sendDeviceInfo"], rec["url"] = name, ua, sendDevice, url
 	rec["enabled"], rec["autoUpdateEnabled"], rec["updateIntervalMinutes"] = enabled, auto, interval

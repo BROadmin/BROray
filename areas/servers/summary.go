@@ -78,6 +78,8 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 	total, available, unavailable := 0, 0, 0
 	counts := map[string]int{}
 	keys := map[string][]map[string]any{} // CanonicalKey → rows (DEV5_SERVER_MANUAL_SUBSCRIPTION_DUPLICATE)
+	displayGroups := map[string][]map[string]any{}
+	subscriptionNames := map[string]string{}
 	supportView := s.supportViewChecker(ctx)
 	for _, id := range ids {
 		path := RecordPath(s.d, id)
@@ -101,11 +103,15 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 			"protocol": rec["protocol"], "transport": alt(rec["network"], get(rec, "transport", "type"), "unknown"),
 			"security": alt(rec["security"], "none"), "sourceType": alt(get(rec, "source", "type"), "manual"),
 			"subscriptionId": alt(get(rec, "source", "subscriptionId"), nil), "nodeIndex": alt(get(rec, "source", "nodeIndex"), nil),
+			"subscriptionName": s.presentationSubscriptionName(rec, subscriptionNames), "displayGroupId": id,
 			"active": rec["id"] == active, "quality": q, "connectionSupport": support,
 		}
 		rows = append(rows, row)
 		if k, err := CanonicalKey(rec); err == nil {
 			keys[k] = append(keys[k], row)
+		}
+		if k, err := presentationKey(rec); err == nil {
+			displayGroups[k] = append(displayGroups[k], row)
 		}
 		total++
 		switch q["status"] {
@@ -120,9 +126,19 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 		}
 	}
 	activePresent := activeRow != nil
-	// 3.5.0: the same connection imported by hand and from a subscription
-	// stays two records (different lifecycles, as in 3.x); each card names
-	// its twins so the owner sees they are one server.
+	for _, group := range displayGroups {
+		id := asString(group[0]["id"])
+		for _, row := range group {
+			if other := asString(row["id"]); other < id {
+				id = other
+			}
+		}
+		for _, row := range group {
+			row["displayGroupId"] = id
+		}
+	}
+	// Keep legacy twin annotations on raw records for existing API consumers.
+	// The UI uses displayGroupId; every member retains its own lifecycle.
 	for _, group := range keys {
 		for _, row := range group {
 			same := []any{}

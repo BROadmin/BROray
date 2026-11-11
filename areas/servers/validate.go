@@ -418,6 +418,9 @@ func rangePair(v any) ([2]float64, bool) {
 	if !ok {
 		return [2]float64{}, false
 	}
+	if s == "" {
+		return [2]float64{}, true
+	}
 	parts := strings.Split(s, "-")
 	if len(parts) != 1 && len(parts) != 2 {
 		return [2]float64{}, false

@@ -6,6 +6,8 @@
         details: {},
         detailsPending: {},
         queuedChecks: {},
+        groupSelection: new Map(),
+        groupActive: new Map(),
         busy: false
     };
 
@@ -397,15 +399,37 @@
                 : "Сохранено серверов: " + count;
 
         renderServers(state.summary.servers || []);
-        (state.summary.servers || []).forEach(function (server) {
-            if (!BROrayUI.hasQueuedRequest("/api/servers/check.cgi",server.id)) return;
-            var button=Array.from(document.querySelectorAll("[data-check-server]")).find(function (item) { return item.dataset.checkServer === server.id; });
-            if (active && active.id === server.id) button=element("check-active-server");
-            if (button) checkServer(server.id,button);
-        });
     }
+
+    function sourceLabel(server) {
+        return server.sourceType === "subscription"
+            ? text(server.subscriptionName, server.subscriptionId || server.id)
+            : "Ручной импорт";
+    }
+
+    function displayGroups(servers) {
+        var groups = new Map();
+        servers.forEach(function (server) {
+            var id = server.displayGroupId || server.id;
+            if (!groups.has(id)) groups.set(id, {id: id, members: []});
+            groups.get(id).members.push(server);
+        });
+        groups.forEach(function (group) {
+            group.members.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+            group.active = group.members.find(function (member) { return member.active; });
+            var activeId = group.active ? group.active.id : null;
+            var selected = group.members.find(function (member) { return member.id === state.groupSelection.get(group.id); });
+            if (group.active && (!selected || state.groupActive.get(group.id) !== activeId)) selected = group.active;
+            group.server = selected || group.members.find(function (member) { return member.sourceType !== "subscription"; }) || group.members[0];
+            state.groupActive.set(group.id, activeId);
+            state.groupSelection.set(group.id, group.server.id);
+        });
+        return Array.from(groups.values());
+    }
+
     function renderServers(servers) {
         var list = element("servers-list");
+        var groups = displayGroups(servers);
         var expanded = {};
         Array.prototype.forEach.call(list.querySelectorAll(".server-card"), function (card) {
             var toggle = card.querySelector(".server-details-toggle");
@@ -415,6 +439,8 @@
             }
         });
         list.innerHTML = "";
+        element("servers-total").textContent = groups.length + " / " + servers.length;
+        element("servers-list-description").textContent = "Уникальных карточек: " + groups.length + " · сохранённых вариантов: " + servers.length;
 
         if (!servers.length) {
             var empty = create("article", "servers-empty-card");
@@ -432,20 +458,27 @@
             return;
         }
 
-        servers.forEach(function (server) {
-            var card = renderServerCard(server);
+        groups.forEach(function (group) {
+            var server = group.server;
+            var card = renderServerCard(server, group);
             list.appendChild(card);
             if (expanded[server.id]) {
                 toggleDetails(server, card, card.querySelector(".server-details-toggle"));
             }
         });
+        servers.forEach(function (server) {
+            if (!BROrayUI.hasQueuedRequest("/api/servers/check.cgi", server.id)) return;
+            var button = Array.from(document.querySelectorAll("[data-check-server]")).find(function (item) { return item.dataset.checkServer === server.id; });
+            if (server.active) button = element("check-active-server");
+            if (button) checkServer(server.id, button);
+        });
     }
 
-    function renderServerCard(server) {
+    function renderServerCard(server, group) {
 		var unsupported = server.connectionSupport && server.connectionSupport.supported === false;
         var card = create(
             "article",
-            "server-card ui-card" + (server.active ? " is-active" : "")
+            "server-card ui-card" + (group.active ? " is-active" : "")
         );
         var header = create("div", "server-card-header");
         var identity = create("div", "server-card-identity");
@@ -469,6 +502,7 @@
         var toggleButton;
 
         card.setAttribute("data-server-id", server.id);
+        card.setAttribute("data-display-group-id", group.id);
         quality.setAttribute("data-icon", "status");
 		if (unsupported) {
 			quality.textContent = server.connectionSupport.mode === "requires-core" ? "Обновите Xray" : "Подключение не поддерживается";
@@ -500,18 +534,33 @@
 		if (server.connectionSupport && server.connectionSupport.notice) {
 			identity.appendChild(create("p", "server-card-address", server.connectionSupport.notice));
 		}
-        // 3.5.0: the same connection added by hand and from a subscription
-        // (DEV5_SERVER_MANUAL_SUBSCRIPTION_DUPLICATE) — two cards, each names
-        // the other.
-        if (Array.isArray(server.sameAs) && server.sameAs.length) {
-            identity.appendChild(create(
-                "p",
-                "server-card-address server-card-same",
-                "Совпадает с " + server.sameAs.map(function (other) {
-                    return (other.sourceType === "subscription" ? "сервером из подписки «" : "ручным сервером «") +
-                        text(other.name, other.id) + "»";
-                }).join(", ")
-            ));
+        if (group.members.length > 1) {
+            var sourceControl = create("div", "form-field");
+            var label = create("label", "", "Источник конфигурации");
+            var select = create("select");
+            select.id = "server-source-" + group.id;
+            label.setAttribute("for", select.id);
+            group.members.forEach(function (member) {
+                var name = sourceLabel(member);
+                if (group.members.filter(function (other) { return sourceLabel(other) === name; }).length > 1) name += " · " + member.id;
+                var option = create("option", "", name + (member.active ? " · активен" : ""));
+                option.value = member.id;
+                select.appendChild(option);
+            });
+            select.value = server.id;
+            select.addEventListener("change", function () {
+                state.groupSelection.set(group.id, select.value);
+                renderServers(state.summary.servers || []);
+                var replacement = element(select.id);
+                if (replacement) replacement.focus();
+            });
+            sourceControl.append(label, select);
+            identity.appendChild(sourceControl);
+        } else {
+            identity.appendChild(create("p", "server-card-address", "Источник: " + sourceLabel(server)));
+        }
+        if (group.active) {
+            identity.appendChild(create("p", "server-card-address", "Активный источник: " + sourceLabel(group.active)));
         }
         header.appendChild(identity);
         card.appendChild(header);

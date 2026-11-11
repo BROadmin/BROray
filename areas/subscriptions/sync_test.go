@@ -297,7 +297,7 @@ func TestDownloadSecurity(t *testing.T) {
 	if err := fetch(jump.URL+"/start", fetchInput{SendDevice: true, Hwid: "broray-0123456789"}); err != nil {
 		t.Fatal(err)
 	}
-	if h := dev.header(0); h.Get("X-Device-Os") != "" || h.Get("X-Hwid") != "broray-0123456789" {
+	if h := dev.header(0); h.Get("X-Device-Os") != "" || h.Get("X-Hwid") != "" {
 		t.Fatalf("cross-origin device headers: %v", h)
 	}
 }

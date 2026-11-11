@@ -23,12 +23,14 @@ var (
 
 // prepared is the outcome of the preparation steps.
 type prepared struct {
-	OK        bool
-	Code, Msg string
-	Stage     *staged
-	Metadata  map[string]any
-	md        *metadata
-	body      []byte
+	OK            bool
+	Code, Msg     string
+	Stage         *staged
+	Metadata      map[string]any
+	md            *metadata
+	body          []byte
+	documents     []sourceDocument
+	exportFormats []string
 }
 
 func (p *prepared) failWith(e *subErr) {
@@ -55,7 +57,7 @@ func (s *svc) runFetch(ctx context.Context, rec map[string]any, p *prepared, tim
 	fctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 	p.md = newMetadata()
-	body, err := s.fetch(fctx, inputOf(rec), p.md)
+	err := s.fetchDocuments(fctx, rec, p)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -68,7 +70,7 @@ func (s *svc) runFetch(ctx context.Context, rec map[string]any, p *prepared, tim
 		p.failWith(timeoutErr)
 		return nil
 	}
-	p.OK, p.body = true, body
+	p.OK = true
 	return nil
 }
 
@@ -86,7 +88,13 @@ func (s *svc) runParse(ctx context.Context, rec map[string]any, p *prepared, pro
 	enabled := rec["enabled"] == true
 	md := p.md
 	body := p.body
+	docs := p.documents
 	go func() {
+		if len(docs) > 0 {
+			st, err := stageDocuments(id, docs, md, enabled, progress)
+			done <- result{st, err}
+			return
+		}
 		ex, err := extractNodes(body, md)
 		if err != nil {
 			done <- result{nil, err}
@@ -100,6 +108,7 @@ func (s *svc) runParse(ctx context.Context, rec map[string]any, p *prepared, pro
 	select {
 	case r := <-done:
 		p.body = nil
+		p.documents = nil
 		p.Stage = r.st
 		if r.err != nil {
 			p.failWith(r.err)
@@ -111,13 +120,14 @@ func (s *svc) runParse(ctx context.Context, rec map[string]any, p *prepared, pro
 		return ctx.Err()
 	case <-timer.C:
 		p.body = nil
+		p.documents = nil
 		p.failWith(timeoutErr)
 		return nil
 	}
 }
 
 // saveFailed is broray_subscription_save_failed_update.
-func (s *svc) saveFailed(id, code, message, trigger string, started time.Time) {
+func (s *svc) saveFailed(id, code, message, trigger string, started time.Time, prep *prepared) {
 	rec, _, err := s.readRecord(id)
 	if err != nil {
 		return
@@ -127,12 +137,22 @@ func (s *svc) saveFailed(id, code, message, trigger string, started time.Time) {
 	rec["lastUpdatedAt"] = compat.Stamp(t)
 	rec["lastUpdatedEpoch"] = t.Unix()
 	rec["lastError"] = message
+	rememberExports(rec, prep.exportFormats)
 	impact := "none"
 	if code == "ACTIVE_SERVER_CONFLICT" {
 		impact = "requires-decision"
 	}
-	rec["lastUpdateResult"] = map[string]any{"received": 0, "parsed": 0, "accepted": 0, "rejected": 0, "added": 0, "updated": 0,
-		"unchanged": 0, "removed": 0, "warnings": []any{}, "durationMs": (t.Unix() - started.Unix()) * 1000, "trigger": trigger,
+	received, parsed, accepted, rejected := prep.counts()
+	warnings := []any{}
+	if prep.Stage != nil {
+		for _, warning := range prep.Stage.Warnings {
+			if warning != "" {
+				warnings = append(warnings, warning)
+			}
+		}
+	}
+	rec["lastUpdateResult"] = map[string]any{"received": received, "parsed": parsed, "accepted": accepted, "rejected": rejected, "added": 0, "updated": 0,
+		"unchanged": 0, "removed": 0, "warnings": warnings, "durationMs": (t.Unix() - started.Unix()) * 1000, "trigger": trigger,
 		"errorCode": code, "activeServerImpact": impact}
 	setSchedule(rec, t)
 	rec["updatedAt"] = compat.Stamp(t)
@@ -237,7 +257,7 @@ func (s *svc) update(ctx context.Context, op *compat.Operation, id, trigger stri
 		res = r
 	}
 	if failCode != "" {
-		s.saveFailed(id, failCode, failMsg, trigger, started)
+		s.saveFailed(id, failCode, failMsg, trigger, started, prep)
 		s.logf(fmt.Sprintf("subscription=%s action=update trigger=%s status=error code=%s url=%s", id, trigger, failCode, maskURL(url)))
 		return fail(failCode, failMsg)
 	}
@@ -271,6 +291,7 @@ func (s *svc) update(ctx context.Context, op *compat.Operation, id, trigger stri
 	meta = clone(meta)
 	meta["updatedAt"] = compat.Stamp(finished)
 	cur["providerMetadata"] = meta
+	rememberExports(cur, prep.exportFormats)
 	cur["lastUpdateStatus"] = status
 	cur["lastUpdatedAt"] = compat.Stamp(finished)
 	cur["lastUpdatedEpoch"] = finished.Unix()

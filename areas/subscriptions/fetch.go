@@ -136,6 +136,10 @@ func resolvePublic(ctx context.Context, host string) (netip.Addr, error) {
 type fetchInput struct {
 	URL, Hwid, UserAgent string
 	SendDevice           bool
+	// Accept and Origin constrain representation discovery and advertised
+	// exports. FinalURL is transient: private export URLs are never persisted.
+	Accept, Origin string
+	FinalURL       *string
 }
 
 // fetch downloads the subscription body. Provider metadata of the final
@@ -160,21 +164,26 @@ func (s *svc) fetch(ctx context.Context, in fetchInput, md *metadata) ([]byte, e
 		if perr != nil {
 			return nil, perr
 		}
+		origin := normalizedOrigin(p)
+		if in.Origin != "" && origin != in.Origin {
+			return nil, exportError()
+		}
 		ip, err := resolvePublic(ctx, p.Host)
 		if err != nil {
 			return nil, err
 		}
-		if in.SendDevice {
-			origin := p.Scheme + ":" + p.Host + ":" + p.Port
-			if deviceOrigin == "" {
-				deviceOrigin = origin
+		if deviceOrigin == "" {
+			deviceOrigin = origin
+			if in.SendDevice {
 				device = s.deviceInfo(ctx)
-			} else if origin != deviceOrigin {
-				share = false
 			}
 		}
+		hwid := in.Hwid
+		if origin != deviceOrigin {
+			share, hwid = false, ""
+		}
 		port, _ := strconv.Atoi(p.Port)
-		resp, body, err := s.hop(ctx, current, netip.AddrPortFrom(ip, uint16(port)), ua, in.Hwid, share, device)
+		resp, body, err := s.hop(ctx, current, netip.AddrPortFrom(ip, uint16(port)), ua, hwid, share, device, in.Accept)
 		if err != nil {
 			return nil, err
 		}
@@ -196,6 +205,9 @@ func (s *svc) fetch(ctx context.Context, in fetchInput, md *metadata) ([]byte, e
 				return nil, err
 			}
 			md.apply(metaRecordsFromLines(headerLines(resp.Header)))
+			if in.FinalURL != nil {
+				*in.FinalURL = current
+			}
 			return body, nil
 		case status == 301 || status == 302 || status == 303 || status == 307 || status == 308:
 			redirects++
@@ -221,7 +233,7 @@ func (s *svc) fetch(ctx context.Context, in fetchInput, md *metadata) ([]byte, e
 }
 
 // hop performs one request to the pinned address.
-func (s *svc) hop(ctx context.Context, rawURL string, addr netip.AddrPort, ua, hwid string, share bool, device map[string]string) (*http.Response, []byte, error) {
+func (s *svc) hop(ctx context.Context, rawURL string, addr netip.AddrPort, ua, hwid string, share bool, device map[string]string, accept string) (*http.Response, []byte, error) {
 	hctx, cancel := context.WithTimeout(ctx, hopTimeout)
 	defer cancel()
 	dialer := &net.Dialer{Timeout: connectTimeout}
@@ -246,7 +258,10 @@ func (s *svc) hop(ctx context.Context, rawURL string, addr netip.AddrPort, ua, h
 		return nil, nil, errDownload
 	}
 	req.Header.Set("User-Agent", ua)
-	req.Header.Set("Accept", "application/json, text/plain, */*")
+	if accept == "" {
+		accept = "application/json, text/plain, */*"
+	}
+	req.Header.Set("Accept", accept)
 	req.Header.Set("Accept-Encoding", "gzip")
 	if hwid != "" {
 		req.Header["x-hwid"] = []string{hwid}

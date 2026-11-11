@@ -78,7 +78,6 @@ func TestXDriveInvalidCombinations(t *testing.T) {
 		name string
 		edit func(map[string]any)
 	}{
-		{"missing-mux", func(o map[string]any) { delete(o, "mux") }},
 		{"disabled-mux", func(o map[string]any) { o["mux"].(map[string]any)["enabled"] = false }},
 		{"negative-mux", func(o map[string]any) { o["mux"].(map[string]any)["concurrency"] = -1 }},
 		{"skip", func(o map[string]any) { o["mux"].(map[string]any)["xudpProxyUDP443"] = "skip" }},

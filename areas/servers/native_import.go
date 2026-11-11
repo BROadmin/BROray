@@ -91,6 +91,11 @@ func parseNativeOutbound(input map[string]any, name, id string, source map[strin
 	}
 	if has(out, "mux") {
 		r["mux"] = out["mux"]
+	} else if network == "xdrive" {
+		// Some client exports omit the MUX required by Xray XDRIVE. This is
+		// an explicit import compatibility policy, not relaxed validation.
+		r["mux"] = map[string]any{"enabled": true}
+		addNativeImportWarning(r, "В экспорте XDRIVE отсутствует mux. Для обязательного клиентского MUX BROray добавляет mux.enabled=true; применяется локальная политика мультиплексирования.")
 	}
 	if proto == "masque" {
 		settings, e := nativeObject(out["settings"], "settings", "address", "port", "remoteDNS")
@@ -126,14 +131,17 @@ func parseNativeOutbound(input map[string]any, name, id string, source map[strin
 		if e != nil {
 			return nil, e
 		}
-		if has(user, "level") && !jsonEq(user["level"], 0) {
-			return nil, nativeError("settings.vnext.users.level")
+		if has(user, "level") {
+			level, ok := isInt(user["level"])
+			if !ok || level < 0 || level > 4294967295 {
+				return nil, nativeError("settings.vnext.users.level")
+			}
 		}
 		if has(user, "email") && !textValue(user["email"]) {
 			return nil, nativeError("settings.vnext.users.email")
 		}
 		if has(user, "email") || has(user, "level") {
-			addNativeImportWarning(r, "Служебные поля email и level=0 не применяются.")
+			addNativeImportWarning(r, "Служебное поле email не переносится. Уровень пользователя level нормализуется к локальной политике BROray; политика, DNS и маршрутизация профиля не применяются.")
 		}
 		r["address"], r["port"] = endpoint["address"], endpoint["port"]
 		r["uuid"], r["encryption"] = user["id"], user["encryption"]

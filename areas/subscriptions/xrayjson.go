@@ -387,10 +387,10 @@ func rangePair(v any) [2]float64 {
 	}
 	s, ok := v.(string)
 	need(ok)
-	var parts []string
-	if s != "" {
-		parts = strings.Split(s, "-")
+	if s == "" {
+		return [2]float64{}
 	}
+	parts := strings.Split(s, "-")
 	need(len(parts) == 1 || len(parts) == 2)
 	var vals []float64
 	for _, p := range parts {
@@ -751,7 +751,7 @@ func vlessOutbound(profile, out map[string]any, index int, multiple bool) []stri
 		for _, uv := range ep.users {
 			need(keysOnly(uv, "id", "encryption", "flow", "level", "email"))
 			u := uv.(map[string]any)
-			endpointMetadata(u)
+			endpointMetadata(u, 4294967295)
 			need(unreservedStr(u["id"]))
 			enc := stringField(u, "encryption", "none")
 			need(vlessEncryptionValid(enc))
@@ -767,10 +767,13 @@ func vlessOutbound(profile, out map[string]any, index int, multiple bool) []stri
 	return lines
 }
 
-func endpointMetadata(u map[string]any) {
+func endpointMetadata(u map[string]any, limits ...float64) {
+	maxLevel := float64(4294967295)
+	if len(limits) > 0 {
+		maxLevel = limits[0]
+	}
 	if v, ok := u["level"]; ok {
-		f, isNum := num(v)
-		need(isNum && f == 0)
+		need(isInt(v, 0, maxLevel))
 	}
 	if v, ok := u["email"]; ok {
 		need(textValue(v))
@@ -801,7 +804,7 @@ func otherEndpoints(protocol string, settings map[string]any) []credEndpoint {
 			for _, uv := range ep.users {
 				need(keysOnly(uv, "id", "security", "alterId", "experiments", "level", "email"))
 				u := uv.(map[string]any)
-				endpointMetadata(u)
+				endpointMetadata(u, 4294967295)
 				need(unreservedStr(u["id"]))
 				if v, ok := u["alterId"]; ok {
 					f, isNum := num(v)
@@ -834,7 +837,7 @@ func otherEndpoints(protocol string, settings map[string]any) []credEndpoint {
 			keys = append(keys, "method")
 		}
 		need(keysOnly(sv, keys...))
-		endpointMetadata(sv)
+		endpointMetadata(sv, 255)
 		pw, _ := sv["password"].(string)
 		need(textValue(sv["password"]) && runeLen(pw) > 0)
 		if protocol == "trojan" {
