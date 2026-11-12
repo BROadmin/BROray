@@ -364,6 +364,9 @@ func saveShadowsocks(link, id string, source map[string]any, p *parsed) (Record,
 	rec := base(link, id, source, p, port)
 	rec["method"], rec["password"] = p.method, p.password
 	rec["network"], rec["security"] = "raw", "none"
+	if p.network != "raw" || p.security != "none" || p.rawHeader != "" || p.streamMask != "" && p.streamMask != "{}" || p.headerType == "http" {
+		return saveClientTransport(rec, p)
+	}
 	if err := validate(rec, tempLabel()); err != nil {
 		return nil, err
 	}

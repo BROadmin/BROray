@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"net"
 	"net/netip"
 	"strconv"
 	"strings"
+
+	"github.com/BROadmin/broray/internal/strictjson"
+	"github.com/BROadmin/broray/internal/wireguardimport"
 )
 
 func isWireGuardInput(text string) bool {
@@ -57,11 +61,27 @@ func parseWireGuard(text, id string, source map[string]any) (Record, *ParseError
 	}
 	var iface, current map[string][]string
 	var peers []map[string][]string
+	var extensions map[string]any
 	name := ""
 	for _, line := range strings.Split(strings.TrimPrefix(text, "\ufeff"), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "# BROray name: ") {
 			name = strings.TrimPrefix(line, "# BROray name: ")
+		}
+		if strings.HasPrefix(line, wireguardimport.ExtensionComment) {
+			if extensions != nil {
+				return nil, die("WireGuard: повторные расширения импорта")
+			}
+			data, err := base64.StdEncoding.Strict().DecodeString(strings.TrimPrefix(line, wireguardimport.ExtensionComment))
+			if err != nil || len(data) > 2*wireguardimport.MaxSourceBytes {
+				return nil, die("WireGuard: неправильные расширения импорта")
+			}
+			value, err := strictjson.Decode(data)
+			var ok bool
+			extensions, ok = value.(map[string]any)
+			if err != nil || !ok {
+				return nil, die("WireGuard: неправильные расширения импорта")
+			}
 		}
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
@@ -168,8 +188,14 @@ func parseWireGuard(text, id string, source map[string]any) (Record, *ParseError
 		name = "WireGuard @ " + host
 	}
 	r := normalize(Record{"schemaVersion": 2, "id": id, "name": name, "source": cloneSource(source), "uri": text, "protocol": "wireguard", "network": "wireguard", "security": "wireguard", "address": host, "port": n, "wireguard": wg})
+	if extensions != nil {
+		r["protocolExtensions"] = map[string]any{"wireguard": extensions}
+	}
 	if e := validateWireGuard(r); e != nil {
 		return nil, e
+	}
+	if message := wireGuardUnavailable(r); message != "" {
+		addNativeImportWarning(r, message)
 	}
 	return r, nil
 }
@@ -180,7 +206,10 @@ func validateWireGuard(r Record) *ParseError {
 		return bad()
 	}
 	wg, ok := r["wireguard"].(map[string]any)
-	if !ok || !keysSubset(wg, "secretKey", "address", "peers", "mtu", "reserved", "remoteDNS", "noKernelTun") || wg["noKernelTun"] != true {
+	if !ok || !keysSubset(wg, "secretKey", "address", "peers", "mtu", "reserved", "remoteDNS", "noKernelTun") {
+		return bad()
+	}
+	if _, ok := wg["noKernelTun"].(bool); !ok {
 		return bad()
 	}
 	if _, ok := wgKey(asString(wg["secretKey"])); !ok {
@@ -213,7 +242,7 @@ func validateWireGuard(r Record) *ParseError {
 	}
 	if reserved, exists := wg["reserved"]; exists {
 		arr, ok := reserved.([]any)
-		if !ok || len(arr) != 3 {
+		if !ok || arr == nil || len(arr) != 0 && len(arr) != 3 {
 			return bad()
 		}
 		for _, x := range arr {
@@ -229,8 +258,16 @@ func validateWireGuard(r Record) *ParseError {
 	}
 	for i, v := range peers {
 		p, ok := v.(map[string]any)
-		if !ok || !keysSubset(p, "publicKey", "preSharedKey", "endpoint", "allowedIPs", "keepAlive") {
+		if !ok || !keysSubset(p, "publicKey", "preSharedKey", "endpoint", "allowedIPs", "keepAlive", "email", "level") {
 			return bad()
+		}
+		if has(p, "email") && !textValue(p["email"]) {
+			return bad()
+		}
+		if has(p, "level") {
+			if _, ok := freshUnsigned(p["level"], 32); !ok {
+				return bad()
+			}
 		}
 		if _, ok := wgKey(asString(p["publicKey"])); !ok {
 			return bad()
@@ -252,7 +289,7 @@ func validateWireGuard(r Record) *ParseError {
 			return bad()
 		}
 		arr, ok := p["allowedIPs"].([]any)
-		if !ok || len(arr) == 0 || len(arr) > 128 {
+		if !ok || arr == nil || len(arr) > 128 {
 			return bad()
 		}
 		for _, a := range arr {
@@ -267,5 +304,76 @@ func validateWireGuard(r Record) *ParseError {
 			}
 		}
 	}
+	if _, err := wireGuardExtensionProfile(r); err != nil {
+		return err
+	}
 	return nil
+}
+
+// The comment is an import carrier, never authority for runtime capabilities.
+// Recompute normalized extensions and the supported projection from its bounded
+// source on every validation; a hand-written comment cannot override settings.
+func wireGuardExtensionProfile(r Record) (*wireguardimport.Profile, *ParseError) {
+	value, exists := r["protocolExtensions"]
+	if !exists {
+		return nil, nil
+	}
+	bad := func() (*wireguardimport.Profile, *ParseError) {
+		return nil, die("WireGuard: расширения не совпадают с профилем")
+	}
+	extensions, ok := value.(map[string]any)
+	if !ok || !keysSubset(extensions, "wireguard") || len(extensions) != 1 {
+		return bad()
+	}
+	ext, ok := extensions["wireguard"].(map[string]any)
+	if !ok || !keysSubset(ext, "source", "settings") || len(ext) != 2 {
+		return bad()
+	}
+	profile, err := wireguardimport.ParseExtension(ext)
+	if err != nil {
+		return bad()
+	}
+	expected, parseErr := parseWireGuard(profile.INI(), "extension-check", map[string]any{"type": "internal"})
+	if parseErr != nil || !wireGuardImportEqual(r["wireguard"], expected["wireguard"]) ||
+		r["address"] != expected["address"] || !jsonEq(r["port"], expected["port"]) {
+		return bad()
+	}
+	return profile, nil
+}
+
+func wireGuardImportEqual(a, b any) bool {
+	left, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	right, err := json.Marshal(b)
+	return err == nil && bytes.Equal(left, right)
+}
+
+func wireGuardUnavailable(r Record) string {
+	if r["protocol"] != "wireguard" {
+		return ""
+	}
+	profile, err := wireGuardExtensionProfile(r)
+	if err != nil {
+		return "WireGuard: сохранённые расширения импорта не прошли проверку."
+	}
+	if profile == nil {
+		return ""
+	}
+	fields := profile.Unsupported()
+	if len(fields) == 0 {
+		return ""
+	}
+	return "Конфигурация WireGuard сохранена. BROray пока не поддерживает исполнение параметров: " + strings.Join(fields, ", ") + "."
+}
+
+// WireGuardExtensionIdentity excludes presentation/source serialization details
+// while retaining normalized DNS, per-peer reserved and local policy settings.
+func WireGuardExtensionIdentity(r Record) any {
+	profile, err := wireGuardExtensionProfile(r)
+	if err != nil || profile == nil {
+		return nil
+	}
+	return profile.Settings()
 }

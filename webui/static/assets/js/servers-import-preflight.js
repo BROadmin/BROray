@@ -464,9 +464,21 @@
         if (/^(?:\s*(?:[#;][^\n]*\n))*\s*\[Interface\]/.test(value)) {
             return [{line:1,raw:value,error:value.length>65536?"Конфигурация WireGuard слишком длинная.":null,duplicate:null,importState:"ready"}];
         }
-        // Native JSON is one private document. Only the backend validates it;
+        // JSON is one private document. Only the backend validates it;
         // browser JSON.parse would erase duplicate keys before that check.
-        if (/^\s*\{/.test(value)) {
+        if (/^\s*[\[{]/.test(value)) {
+            return [{line:1,raw:value,error:null,duplicate:null,importState:"ready"}];
+        }
+        // A Clash YAML profile or bare node is one document. Preserve its
+        // exact bytes for backend duplicate-key, bounds and singleton checks.
+        if (/^(?:proxies|type|'proxies'|'type'|"proxies"|"type")[ \t]*:/m.test(value.replace(/^\uFEFF/, ""))) {
+            return [{line:1,raw:value,error:null,duplicate:null,importState:"ready"}];
+        }
+        // Keep encoded documents intact, including line wrapping. The server
+        // decodes one envelope and enforces its single-endpoint contract.
+        var compactEnvelope = value.replace(/[\r\n\t ]/g, "");
+        if (/^[A-Za-z0-9+/_-]+={0,2}$/.test(compactEnvelope) &&
+            compactEnvelope.length >= 4 && compactEnvelope.length % 4 !== 1) {
             return [{line:1,raw:value,error:null,duplicate:null,importState:"ready"}];
         }
         var lines = value
@@ -728,7 +740,7 @@
                     "hysteria2://...",
                     "ss://...",
                     "vpn://... (AmneziaWG — только сохранение)",
-                    '{"protocol":"masque", ...} или JSON VLESS/XDRIVE'
+                    '{"protocol":"vless", ...} или профиль Xray JSON с одним сервером'
                 ].join("\n")
             );
         }
@@ -749,7 +761,7 @@
             hint.textContent =
                 "Поддерживаются VLESS, VMess, Trojan, " +
                 "Hysteria2, Shadowsocks, SOCKS/HTTP и WireGuard. AmneziaWG (vpn://) можно сохранить без подключения. " +
-                "XDRIVE и MASQUE принимаются как один документ Xray JSON. Несколько ссылок можно вставить по одной на строку.";
+                "Xray JSON, Clash YAML/JSON с одним сервером, массив с одним сервером и Base64 принимаются как один документ. Можно загрузить файл .json, .yaml, .yml, .txt, .conf или .ini. XDRIVE и MASQUE импортируются из JSON. Несколько ссылок можно вставить по одной на строку; полный профиль с несколькими серверами добавьте как подписку. DNS, маршрутизацией и группами управляет BROray.";
 
             var fieldContainer =
                 field.closest

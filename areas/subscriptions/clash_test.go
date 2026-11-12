@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/BROadmin/broray/areas/servers"
 	"github.com/BROadmin/broray/internal/amnezia"
+	"github.com/BROadmin/broray/internal/cgi"
 	"go.yaml.in/yaml/v3"
 	"os"
 	"os/exec"
@@ -93,7 +95,7 @@ func TestClash355ProviderShape(t *testing.T) {
 	q["dns"] = []any{"1.1.1.1"}
 	q["remote-dns-resolve"] = true
 	q["mtu"] = 1280
-	opts := map[string]any{"version": 3, "header-protection-key": "invented-extension", "content-padding-addition": true, "disable-cookies": true, "random-trailers": true, "keepalive-timeout": 30, "max-handshake-attempts": 5, "reject-after-time": 180, "rekey-after-time": 120, "rekey-timeout": 5, "jc": 4, "jmin": 20, "jmax": 40, "s1": 1, "s2": 2, "s3": 3, "s4": 4, "h1": "1-2", "h2": "3-4", "h3": "5-6", "h4": "7-8", "i1": "<b 0x01>"}
+	opts := map[string]any{"version": 3, "header-protection-key": "invented-extension", "content-padding-addition": "10-20", "disable-cookies": true, "random-trailers": true, "keepalive-timeout": 30, "max-handshake-attempts": 5, "reject-after-time": 180, "rekey-after-time": 120, "rekey-timeout": 5, "jc": 4, "jmin": 20, "jmax": 40, "s1": 1, "s2": 2, "s3": 3, "s4": 4, "h1": "1-2", "h2": "3-4", "h3": "5-6", "h4": "7-8", "i1": "<b 0x01>"}
 	q["amnezia-wg-option"] = opts
 	a := clashStage(t, clashBody(q))
 	if a.Accepted != 1 {
@@ -190,10 +192,37 @@ func TestClash355TransportAndRefusals(t *testing.T) {
 			}
 		})
 	}
-	for _, mut := range []func(map[string]any){func(p map[string]any) { p["type"] = "tuic" }, func(p map[string]any) { p["network"] = "kcp" }, func(p map[string]any) { p["secretExtension"] = "never-display-this" }, func(p map[string]any) { p["skip-cert-verify"] = true }, func(p map[string]any) { p["port"] = 65536 }, func(p map[string]any) { p["port"] = 0.5 }, func(p map[string]any) { p["tls"] = "true" }, func(p map[string]any) {
-		p["xhttp-opts"] = map[string]any{"secretExtension": "never-display-this"}
-		p["network"] = "xhttp"
-	}} {
+	for _, tc := range []struct {
+		name, kind string
+		mut        func(map[string]any)
+	}{
+		{"tuic", "core-unsupported", func(p map[string]any) { p["type"] = "tuic" }},
+		{"unknown-root", "unknown-extension", func(p map[string]any) { p["secretExtension"] = "never-display-this" }},
+		{"removed-insecure", "core-removed", func(p map[string]any) { p["skip-cert-verify"] = true }},
+		{"unknown-xhttp", "unknown-extension", func(p map[string]any) {
+			p["xhttp-opts"] = map[string]any{"secretExtension": "never-display-this"}
+			p["network"] = "xhttp"
+		}},
+	} {
+		t.Run("retained-"+tc.name, func(t *testing.T) {
+			p := clashProxy("vless")
+			tc.mut(p)
+			st := clashStage(t, clashBody(clashProxy("vless"), p))
+			if st.Received != 2 || st.Accepted != 2 || st.Rejected != 0 || len(st.Records) != 2 {
+				t.Fatal("valid unavailable node must remain in the mixed subscription")
+			}
+			clashCapability357Assert(t, p, tc.kind)
+			clashCapability357Persist(t, p)
+			if !clashFull357ContainsSource(st.Records[1], p) {
+				t.Fatal("mixed subscription lost the retained source")
+			}
+			public, _ := json.Marshal(servers.MaskRecord(st.Records[1]))
+			if strings.Contains(strings.Join(st.Warnings, " ")+string(public), "never-display-this") || strings.Contains(string(public), "secretExtension") {
+				t.Fatal("secret leak")
+			}
+		})
+	}
+	for _, mut := range []func(map[string]any){func(p map[string]any) { p["network"] = "kcp" }, func(p map[string]any) { p["port"] = 65536 }, func(p map[string]any) { p["port"] = 0.5 }, func(p map[string]any) { p["tls"] = "true" }} {
 		p := clashProxy("vless")
 		mut(p)
 		st := clashStage(t, clashBody(clashProxy("vless"), p))
@@ -221,7 +250,7 @@ func TestClash355YAMLSafety(t *testing.T) {
 	}
 	body := "proxies:\n- &node {name: anchor, type: vless, server: example.invalid, port: 443, uuid: 11111111-1111-4111-8111-111111111111}\n- *node\nproxy-groups: [{name: ignored}]\nrules: [MATCH,ignored]\n"
 	st := clashStage(t, body)
-	if st.Accepted != 1 || st.Rejected != 1 {
+	if st.Accepted != 1 || st.Rejected != 0 {
 		t.Fatalf("anchor not safely handled: %+v", st)
 	}
 }
@@ -285,7 +314,9 @@ func TestClash355FailedUpdatePreservesCatalog(t *testing.T) {
 	}
 	ids := liveIDs(t, e)
 	before, _ := os.ReadFile(servers.RecordPath(e.d, ids[0]))
-	p.set(clashBody(map[string]any{"name": "invented-secret-name", "type": "vless", "server": "secret.example.invalid", "port": 443, "uuid": "invented-secret", "secretExtension": "never-display-this"}))
+	// A short VLESS ID is valid upstream. Use a known invalid port so an
+	// unknown extension cannot turn this malformed update into retention.
+	p.set(clashBody(map[string]any{"name": "invented-secret-name", "type": "vless", "server": "secret.example.invalid", "port": 65536, "uuid": "invented-secret", "secretExtension": "never-display-this"}))
 	if err := e.refreshSync(t, id); err == nil {
 		t.Fatal("expected failure")
 	}
@@ -294,7 +325,7 @@ func TestClash355FailedUpdatePreservesCatalog(t *testing.T) {
 		t.Fatal("counters lost")
 	}
 	w := fmt.Sprint(res["warnings"])
-	if !strings.Contains(w, "secretExtension") || strings.Contains(w, "never-display-this") || strings.Contains(w, "secret.example") || strings.Contains(w, "invented-secret") {
+	if strings.TrimSpace(w) == "" || strings.Contains(w, "secretExtension") || strings.Contains(w, "never-display-this") || strings.Contains(w, "secret.example") || strings.Contains(w, "invented-secret") {
 		t.Fatal("unsafe field diagnostic")
 	}
 	after, _ := os.ReadFile(servers.RecordPath(e.d, ids[0]))
@@ -348,7 +379,6 @@ func TestClash355PredecodeComplexity(t *testing.T) {
 func TestClash355TLSAndLocalPolicy(t *testing.T) {
 	p := clashProxy("vless")
 	p["tls"] = true
-	p["udp"] = false
 	p["servername"] = "tls.example.invalid"
 	p["alpn"] = []any{"h2", "http/1.1"}
 	p["client-fingerprint"] = "chrome"
@@ -366,9 +396,10 @@ func TestClash355TLSAndLocalPolicy(t *testing.T) {
 	if tls["serverName"] != "tls.example.invalid" || !reflect.DeepEqual(tls["alpn"], []any{"h2", "http/1.1"}) {
 		t.Fatal("TLS semantics lost")
 	}
-	if !strings.Contains(strings.Join(st.Warnings, " "), "udp=false") {
-		t.Fatal("local UDP warning")
-	}
+	// Explicit UDP denial must not silently become an unrestricted outbound.
+	p["udp"] = false
+	clashCapability357Assert(t, p, "local-policy")
+	clashCapability357Persist(t, p)
 }
 
 func TestClash355LegacyXrayDepth(t *testing.T) {
@@ -440,34 +471,69 @@ func TestClash355AWGExactNumericExtension(t *testing.T) {
 	if st.Accepted != 1 {
 		t.Fatalf("%+v", st)
 	}
-	b, _ := json.Marshal(st.Records[0]["amneziawg"])
-	if !strings.Contains(string(b), `"test-extension":18446744073709551615`) {
-		t.Fatal("AWG uint64 extension precision lost")
+	want, _ := json.Marshal(p)
+	checkExact := func(rec servers.Record) {
+		t.Helper()
+		profile, ok := rec["importProfile"].(map[string]any)
+		if !ok || profile["format"] != "clash" {
+			t.Fatal("AWG unknown extension must remain in the private Clash source")
+		}
+		b, err := json.Marshal(profile["node"])
+		if err != nil || string(b) != string(want) || !strings.Contains(string(b), `"test-extension":18446744073709551615`) {
+			t.Fatal("AWG structured source or uint64 extension precision lost")
+		}
+		var api *cgi.APIError
+		if out, err := servers.Outbound(rec); out != nil || !errors.As(err, &api) || api.Code != "PROTOCOL_NOT_SUPPORTED" {
+			t.Fatal("AWG unknown extension emitted a stripped runnable outbound")
+		}
+		public, _ := json.Marshal(servers.MaskRecord(rec))
+		if strings.Contains(string(public), "test-extension") || strings.Contains(string(public), "18446744073709551615") {
+			t.Fatal("AWG private source escaped public masking")
+		}
 	}
+	checkExact(st.Records[0])
+	stored, err := servers.Marshal(st.Records[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := servers.DecodeBackupRecord(stored, st.Records[0]["id"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkExact(restored)
+
+	// The independently supported numeric option still produces native INI.
+	p["amnezia-wg-option"] = map[string]any{"jc": 4}
+	known, _ := clashFull357Record(t, p)
+	b, _ := json.Marshal(known["amneziawg"])
 	if !strings.Contains(string(b), "Jc = 4") {
 		t.Fatal("known numeric native option lost")
 	}
 }
 
 func TestClash355NoGRPCHeader(t *testing.T) {
-	for _, value := range []any{true, false, "true", 1, nil} {
-		t.Run(fmt.Sprint(value), func(t *testing.T) {
+	// Mihomo's pinned weak decoder accepts integral booleans, not strings.
+	for _, tc := range []struct {
+		value any
+		valid bool
+		want  bool
+	}{{true, true, true}, {false, true, false}, {"true", false, false}, {1, true, true}, {0, true, false}, {nil, false, false}} {
+		t.Run(fmt.Sprint(tc.value), func(t *testing.T) {
 			p := clashProxy("vless")
 			p["network"] = "xhttp"
-			p["xhttp-opts"] = map[string]any{"path": "/invented", "mode": "auto", "no-grpc-header": value}
+			p["xhttp-opts"] = map[string]any{"path": "/invented", "mode": "auto", "no-grpc-header": tc.value}
 			st := clashStage(t, clashBody(p))
-			_, valid := value.(bool)
-			if (st.Accepted == 1) != valid {
-				t.Fatalf("valid=%v %+v", valid, st)
+			if (st.Accepted == 1) != tc.valid {
+				t.Fatalf("valid=%v %+v", tc.valid, st)
 			}
-			if valid {
+			if tc.valid {
 				out, e := servers.Outbound(st.Records[0])
 				if e != nil {
 					t.Fatal(e)
 				}
 				stream := out["streamSettings"].(map[string]any)
 				extra := stream["xhttpSettings"].(map[string]any)["extra"].(map[string]any)
-				if v, ok := extra["noGRPCHeader"]; !ok || v != value {
+				if v, ok := extra["noGRPCHeader"]; !ok || v != tc.want {
 					t.Fatal("noGRPCHeader lost or changed")
 				}
 			}

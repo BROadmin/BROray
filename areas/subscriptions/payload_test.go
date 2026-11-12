@@ -115,11 +115,11 @@ func TestXrayJSONConversion(t *testing.T) {
 		{"reality over ws", `{"protocol":"vless","settings":{"address":"h","port":1,"id":"a"},"streamSettings":{"network":"ws","security":"reality","realitySettings":{"serverName":"a","publicKey":"k"}}}`},
 		{"vless flow without tls", `{"protocol":"vless","settings":{"address":"h","port":1,"id":"a","flow":"xtls-rprx-vision"}}`},
 		{"vmess alterId", `{"protocol":"vmess","settings":{"address":"h","port":1,"id":"a","alterId":4}}`},
-		{"ss over ws", `{"protocol":"shadowsocks","settings":{"address":"h","port":1,"method":"m","password":"p"},"streamSettings":{"network":"ws"}}`},
+		{"ss unknown transport", `{"protocol":"shadowsocks","settings":{"address":"h","port":1,"method":"chacha20-ietf-poly1305","password":"p"},"streamSettings":{"network":"not-a-transport"}}`},
 		{"bad port", `{"protocol":"trojan","settings":{"address":"h","port":70000,"password":"x"}}`},
 		{"bad address", `{"protocol":"trojan","settings":{"address":"h/x","port":1,"password":"x"}}`},
-		{"one bad user", `{"protocol":"vless","settings":{"vnext":[{"address":"h","port":1,"users":[{"id":"ok"},{"id":"bad id"}]}]}}`},
-		{"vless fragment ok but unknown key", `{"protocol":"vless","mux":{},"settings":{"address":"h","port":1,"id":"a"}}`},
+		{"one bad user", `{"protocol":"vless","settings":{"vnext":[{"address":"h","port":1,"users":[{"id":"ok"},{"id":"not-a-valid-uuid-and-more-than-thirty-bytes"}]}]}}`},
+		{"vless malformed mux", `{"protocol":"vless","mux":{"enabled":"yes"},"settings":{"address":"h","port":1,"id":"a"}}`},
 		{"bad remarks type", `{"protocol":"trojan","tag":5,"settings":{"address":"h","port":1,"password":"x"}}`},
 		{"xhttp GET upload not packet-up", `{"protocol":"vless","settings":{"address":"h","port":1,"id":"a"},"streamSettings":{"network":"xhttp","xhttpSettings":{"mode":"stream-up","uplinkHTTPMethod":"get"}}}`},
 	}
@@ -160,13 +160,13 @@ func TestStageNodes(t *testing.T) {
 	}
 	lines := &extracted{Lines: []string{linkA, linkA, "tuic://x@h:1", "junk", "vless://bad", "trojan://x@0.0.0.0:1#App not supported"}}
 	st, serr = stageNodes("sub-0123456789abcdef", lines, false, nil)
-	if serr != nil || st.Accepted != 1 || st.Rejected != 5 || st.Parsed != 3 {
+	if serr != nil || st.Accepted != 1 || st.Rejected != 4 || st.Parsed != 3 {
 		t.Fatalf("%v %+v", serr, st)
 	}
 	want := []string{
 		"Узел 2: дубликат уже полученного сервера.",
 		"Узел 3: Ошибка: парсер TUIC ещё не реализован",
-		"Узел 4: Ошибка: для протокола  отсутствует импортёр",
+		"Узел 4: Ошибка: неподдерживаемое или неправильное поле JSON: document",
 	}
 	for i, w := range want {
 		if st.Warnings[i] != w {

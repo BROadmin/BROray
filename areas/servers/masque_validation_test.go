@@ -49,7 +49,12 @@ func TestMasqueWarpFields(t *testing.T) {
 			if field == "publicKey" {
 				want = "publicKey"
 			}
-			if err == nil || !strings.Contains(err.Error(), "warp."+want) || strings.Contains(err.Error(), "synthetic-private") {
+			want = "warp." + want
+			if field == "address-type" {
+				// Declared shape is rejected by the shared structural boundary.
+				want = "поле JSON: outbound"
+			}
+			if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "synthetic-private") {
 				t.Fatalf("wrong field outcome: %v", err)
 			}
 		})

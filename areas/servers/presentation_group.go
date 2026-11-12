@@ -1,9 +1,11 @@
 package servers
 
 import (
+	"fmt"
 	"net/netip"
 	"strings"
 
+	"github.com/BROadmin/broray/internal/amnezia"
 	"github.com/BROadmin/broray/internal/compat"
 	"github.com/BROadmin/broray/internal/strictjson"
 )
@@ -12,6 +14,23 @@ import (
 // persistence, import reconciliation, activation, or automatic server selection.
 func presentationKey(rec Record) (string, error) {
 	s := normalize(rec) // Detach all nested maps before removing display-only differences.
+	// A core log/statistics label is not a different remote connection. Keep it
+	// in the private record and reconciliation key, but not in the UI grouping.
+	delete(s, "accountEmail")
+	delete(s, "hysteriaMasquerade")
+	// Xray's no-policy DefaultManager gives only level 1 a different idle
+	// timeout. HTTP/SOCKS without an account always use level 0. Keep exact
+	// imported levels in persistence; this is display grouping only.
+	level, _ := freshUnsigned(s["accountLevel"], 32)
+	if level != 1 || clientSS2022MetadataIgnored(s) || in(asString(s["protocol"]), "http", "socks") && asString(s["username"]) == "" && s["proxyAccount"] != true {
+		delete(s, "accountLevel")
+	}
+	if s["proxyAccount"] != true {
+		delete(s, "proxyAccount")
+	}
+	if reality, ok := s["reality"].(map[string]any); ok {
+		delete(reality, "show")
+	}
 	if s["network"] == "xdrive" || s["protocol"] == "masque" {
 		return CanonicalKey(s)
 	}
@@ -31,14 +50,81 @@ func presentationKey(rec Record) (string, error) {
 				}
 				delete(client, "config")
 				awg["last_config"] = client
+				if len(client) == 0 {
+					delete(awg, "last_config")
+				}
+			}
+			if awg["sourceFormat"] == "clash-yaml" {
+				delete(awg, "sourceFormat")
+				if opts, ok := awg["clashOptions"].(map[string]any); ok {
+					for _, k := range []string{"name", "type", "server", "port", "private-key", "public-key", "pre-shared-key", "ip", "ipv6", "mtu", "dns", "persistent-keepalive", "udp"} {
+						delete(opts, k)
+					}
+					if opts["remote-dns-resolve"] == false {
+						delete(opts, "remote-dns-resolve")
+					}
+					if options, ok := opts["amnezia-wg-option"].(map[string]any); ok {
+						for k := range options {
+							if field, known := amnezia.ClashInterfaceField(k); known {
+								// Older records kept these only in raw Clash. Do not
+								// erase a value absent/different in the parsed model.
+								if vals, ok := get(profile, "interface", field).([]any); ok && len(vals) == 1 && fmt.Sprint(vals[0]) == fmt.Sprint(options[k]) {
+									delete(options, k)
+								}
+							}
+						}
+						if len(options) == 0 {
+							delete(opts, "amnezia-wg-option")
+						}
+					}
+					if len(opts) == 0 {
+						delete(awg, "clashOptions")
+					}
+				}
+			}
+			if len(awg) == 0 {
+				delete(profile["parameters"].(map[string]any), "awg")
+			}
+		}
+		if params, ok := profile["parameters"].(map[string]any); ok && params["sourceFormat"] == "base64-ini" {
+			delete(params, "sourceFormat")
+		}
+		if iface, ok := profile["interface"].(map[string]any); ok {
+			normalizeProfileLists(iface, "Address", "DNS")
+			// AWG INI uses on/off or 0/1; Clash emits JSON booleans.
+			// Normalize only these documented flags for display grouping.
+			for _, field := range []string{"RandomTrailers", "DisableCookies"} {
+				if vals, ok := iface[field].([]any); ok && len(vals) == 1 {
+					switch strings.ToLower(asString(vals[0])) {
+					case "on", "1", "true":
+						vals[0] = "true"
+					case "off", "0", "false":
+						vals[0] = "false"
+					}
+				}
+			}
+		}
+		if peers, ok := profile["peers"].([]any); ok {
+			for _, p := range peers {
+				if m, ok := p.(map[string]any); ok {
+					normalizeProfileLists(m, "AllowedIPs")
+				}
 			}
 		}
 		delete(profile, "nativeConfig")
 		return compat.CanonicalSHA256(map[string]any{"protocol": s["protocol"], "profile": profile})
 	}
 	if s["protocol"] == "wireguard" {
+		if peers, ok := get(s, "wireguard", "peers").([]any); ok {
+			for _, raw := range peers {
+				if peer, ok := raw.(map[string]any); ok {
+					delete(peer, "email")
+					delete(peer, "level")
+				}
+			}
+		}
 		// The imported settings already contain the complete parsed profile,
-		// without INI comments or serialization metadata. Retain every setting.
+		// without comments or server-only metadata. Retain connection settings.
 		return CanonicalKey(s)
 	}
 	key := importKeyObject(s)
@@ -92,6 +178,22 @@ func presentationKey(rec Record) (string, error) {
 		}
 	}
 	return compat.CanonicalSHA256(key)
+}
+
+func normalizeProfileLists(m map[string]any, keys ...string) {
+	for _, k := range keys {
+		values, ok := m[k].([]any)
+		if !ok {
+			continue
+		}
+		out := []any{}
+		for _, v := range values {
+			for _, item := range strings.Split(asString(v), ",") {
+				out = append(out, strings.TrimSpace(item))
+			}
+		}
+		m[k] = out
+	}
 }
 
 func (s *svc) presentationSubscriptionName(rec Record, names map[string]string) any {

@@ -203,6 +203,15 @@ func (s *svc) backupStage(ctx context.Context, raw json.RawMessage, st *compat.B
 		rec, _ := ReadRecord(s.d, finalActive)
 		return plan, fmt.Errorf("ACTIVE_SERVER_CONFLICT: восстановление удалит активный сервер «%s». Сначала подключите другой сервер или отключите текущий на странице «Серверы».", recordName(rec))
 	}
+	if finalActive != "" {
+		// Refuse an unavailable final active record before swapping any live
+		// paths. A failed post-swap reapply would otherwise leave the old
+		// runtime configuration behind a replacement record with the same ID.
+		rec, err := ReadRecord(st.St, finalActive)
+		if err != nil || requireConnectionSupport(rec) != nil {
+			return plan, fmt.Errorf("ACTIVE_SERVER_CONFLICT: восстановленный активный сервер не поддерживает подключение. Сначала выберите другой активный сервер или отключите текущий на странице «Серверы».")
+		}
+	}
 	if len(in.AutoSwitch) > 0 && string(in.AutoSwitch) != "null" {
 		cfg, err := s.backupAutoSwitch(in.AutoSwitch, exists)
 		if err != nil {

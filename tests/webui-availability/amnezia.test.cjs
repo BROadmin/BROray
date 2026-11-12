@@ -19,7 +19,8 @@ function loadCards() {
   const end='    bindEvents();\n    initialize();';
   assert.ok(code.replaceAll('\r','').includes(end));
   vm.runInContext(code.replaceAll('\r','').replace(end,'    window.renderCard = renderServerCard;'),ctx);
-  return window.renderCard;
+  // renderServerCard has taken a presentation group since candidate3.
+  return server => window.renderCard(server,{id:server.id,active:server.active===true,members:[server]});
 }
 function all(node){return [node,...node.children.flatMap(all)];}
 test('stored AWG has explicit status and disabled connect/check while details remain usable',()=>{

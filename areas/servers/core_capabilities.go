@@ -71,6 +71,9 @@ func CheckCoreSupport(rec Record, installed string) error {
 	}
 	want, _ := coreVersion(minimum)
 	have, ok := coreVersion(installed)
+	if !ok {
+		return cgi.E(400, "XRAY_CORE_VERSION_UNKNOWN", "Не удалось определить версию Xray. Для этой конфигурации требуется "+minimum+" или новее. Проверьте состояние ядра на странице Xray.")
+	}
 	if ok {
 		for i := range want {
 			if have[i] > want[i] {
@@ -102,7 +105,11 @@ func (s *svc) runtimeSupportChecker(ctx context.Context) func(Record) error {
 		if !loaded {
 			loaded = true
 			cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			version, _ = mxray.Version(cctx, s.d.Root.XrayBinary())
+			var err error
+			version, err = mxray.Version(cctx, s.d.Root.XrayBinary())
+			if err != nil {
+				version = ""
+			}
 			cancel()
 		}
 		return CheckCoreSupport(rec, version)
@@ -117,6 +124,9 @@ func (s *svc) supportViewChecker(ctx context.Context) func(Record) map[string]an
 	check := s.runtimeSupportChecker(ctx)
 	return func(rec Record) map[string]any {
 		view := connectionSupport(rec)
+		if view["supported"] == false {
+			return view
+		}
 		minimum := RequiredCore(rec)
 		if minimum != "" {
 			view["minimumCore"] = minimum
@@ -124,6 +134,9 @@ func (s *svc) supportViewChecker(ctx context.Context) func(Record) map[string]an
 			if err := check(rec); err != nil {
 				view["supported"], view["mode"], view["code"] = false, "requires-core", "XRAY_CORE_UNSUPPORTED"
 				view["message"] = "Конфигурация сохранена. Для подключения обновите Xray до " + minimum + " или новее."
+				if ae, ok := err.(*cgi.APIError); ok && ae.Code == "XRAY_CORE_VERSION_UNKNOWN" {
+					view["mode"], view["code"], view["message"] = "core-unverified", ae.Code, ae.Message
+				}
 			}
 		}
 		if rec["network"] == "xdrive" {

@@ -26,10 +26,13 @@ func TestYour355JSONAndURI(t *testing.T) {
 			}
 			if valid {
 				r := st.Records[0]
-				if r["uuid"] != "00000000-0000-4000-8000-000000000001" || r["network"] != "xhttp" {
-					t.Fatal("endpoint lost")
+				if r["uuid"] != "00000000-0000-4000-8000-000000000001" || r["network"] != "xhttp" || fmt.Sprint(r["accountLevel"]) != level {
+					t.Fatal("endpoint or account level lost")
 				}
-				if !strings.Contains(strings.Join(st.Warnings, " "), "политик") {
+				if _, err := servers.Outbound(r); err != nil {
+					t.Fatal("valid account level disabled under BROray's local core policy")
+				}
+				if !strings.Contains(strings.ToLower(strings.Join(st.Warnings, " ")), "политик") {
 					t.Fatal("missing policy warning")
 				}
 			}

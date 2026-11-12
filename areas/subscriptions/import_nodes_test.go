@@ -55,7 +55,9 @@ func TestStrictRefreshPreservesCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := []byte(`{"outbounds":[` + nativeMasqueJSON + `,` + strings.Replace(nativeMasqueJSON, `"pass":"synthetic-private-pass"`, `"pass":"synthetic-private-pass","unsupported":"synthetic-private-value"`, 1) + `]}`)
+	// A malformed known credential must reject; unknown extensions are retained
+	// privately by 3.5.7 and no longer represent a partial-import failure.
+	body := []byte(`{"outbounds":[` + nativeMasqueJSON + `,` + strings.Replace(nativeMasqueJSON, `"pass":"synthetic-private-pass"`, `"pass":null`, 1) + `]}`)
 	ex, err2 := extractNodes(body, newMetadata())
 	if err2 != nil {
 		t.Fatal(err2)

@@ -46,7 +46,7 @@ func lenPositive(v any) bool {
 }
 
 func tlsSettings(s Record) map[string]any {
-	return compactObject(map[string]any{
+	out := compactObject(map[string]any{
 		"serverName":           alt(get(s, "tls", "serverName"), get(s, "reality", "serverName"), ""),
 		"fingerprint":          alt(get(s, "tls", "fingerprint"), get(s, "reality", "fingerprint"), "chrome"),
 		"alpn":                 alt(get(s, "tls", "alpn"), []any{}),
@@ -54,10 +54,16 @@ func tlsSettings(s Record) map[string]any {
 		"verifyPeerCertByName": alt(get(s, "tls", "verifyPeerCertByName"), ""),
 		"pinnedPeerCertSha256": alt(get(s, "tls", "pinnedPeerCertSha256"), ""),
 	})
+	for _, field := range clientTLSExtraNames {
+		if has(s["tls"], field) {
+			out[field] = get(s, "tls", field)
+		}
+	}
+	return out
 }
 
 func realitySettings(s Record) map[string]any {
-	return compactObject(map[string]any{
+	out := compactObject(map[string]any{
 		"serverName":    alt(get(s, "reality", "serverName"), ""),
 		"fingerprint":   alt(get(s, "reality", "fingerprint"), "chrome"),
 		"publicKey":     alt(get(s, "reality", "publicKey"), ""),
@@ -65,6 +71,10 @@ func realitySettings(s Record) map[string]any {
 		"spiderX":       alt(get(s, "reality", "spiderX"), ""),
 		"mldsa65Verify": alt(get(s, "reality", "mldsa65Verify"), ""),
 	})
+	if has(s["reality"], "show") {
+		out["show"] = get(s, "reality", "show")
+	}
+	return out
 }
 
 func xhttpSettings(s Record) map[string]any {
@@ -159,7 +169,9 @@ func hysteriaFinalMask(s Record) any {
 
 func streamSettings(s Record) (map[string]any, error) {
 	if s["network"] == "xdrive" || s["network"] == "masque" {
-		return nativeStream(s, asString(s["network"])), nil
+		st := nativeStream(s, asString(s["network"]))
+		mergeClientStreamEndpoint(st, s)
+		return st, nil
 	}
 	st := map[string]any{"network": s["network"], "security": s["security"]}
 	switch s["network"] {
@@ -211,11 +223,18 @@ func streamSettings(s Record) (map[string]any, error) {
 		st["finalmask"] = get(s, "transport", "finalMask")
 	}
 	mergeStreamOptions(st, s)
+	mergeClientStreamEndpoint(st, s)
 	return st, nil
 }
 
 // Outbound renders the Xray outbound (tag "proxy") of a record.
 func Outbound(s Record) (map[string]any, error) {
+	if err := requireConnectionSupport(s); err != nil {
+		return nil, err
+	}
+	if err := validateClientFields(s); err != nil {
+		return nil, err
+	}
 	var settings map[string]any
 	withStream := true
 	protocol := s["protocol"]
@@ -229,25 +248,80 @@ func Outbound(s Record) (map[string]any, error) {
 		settings, _ = s["wireguard"].(map[string]any)
 		withStream = false
 	case "socks", "http":
+		if asString(s["username"]) == "" && asString(s["password"]) != "" && s["proxyAccount"] != true {
+			return nil, nativeError("settings.servers.users")
+		}
 		server := map[string]any{"address": s["address"], "port": s["port"]}
-		if asString(s["username"]) != "" {
-			server["users"] = []any{map[string]any{"user": s["username"], "pass": s["password"]}}
+		if asString(s["username"]) != "" || s["proxyAccount"] == true {
+			user := map[string]any{"user": s["username"], "pass": s["password"]}
+			if has(s, "accountEmail") {
+				user["email"] = s["accountEmail"]
+			}
+			if has(s, "accountLevel") {
+				user["level"] = s["accountLevel"]
+			}
+			server["users"] = []any{user}
 		}
 		settings = map[string]any{"servers": []any{server}}
+		if asString(s["username"]) == "" && s["proxyAccount"] != true && (has(s, "accountEmail") || has(s, "accountLevel")) {
+			// Flat metadata without an account does not enable proxy auth.
+			settings = map[string]any{"address": s["address"], "port": s["port"]}
+			if has(s, "accountEmail") {
+				settings["email"] = s["accountEmail"]
+			}
+			if has(s, "accountLevel") {
+				settings["level"] = s["accountLevel"]
+			}
+		}
+		if s["protocol"] == "http" && has(s, "httpHeaders") {
+			settings["headers"] = s["httpHeaders"]
+		}
 	case "vless":
 		user := map[string]any{"id": s["uuid"], "encryption": alt(s["encryption"], "none")}
+		if has(s, "accountLevel") {
+			user["level"] = s["accountLevel"]
+		}
+		if has(s, "accountEmail") {
+			user["email"] = s["accountEmail"]
+		}
+		if has(s, "vlessTestpre") {
+			user["testpre"] = s["vlessTestpre"]
+		}
 		if lenPositive(alt(s["flow"], "")) {
 			user["flow"] = s["flow"]
 		}
 		settings = map[string]any{"vnext": []any{map[string]any{"address": s["address"], "port": s["port"], "users": []any{user}}}}
 	case "vmess":
 		user := map[string]any{"id": s["uuid"], "alterId": alt(s["alterId"], json.Number("0")), "security": alt(s["encryption"], "auto")}
+		if has(s, "accountLevel") {
+			user["level"] = s["accountLevel"]
+		}
+		if has(s, "accountEmail") {
+			user["email"] = s["accountEmail"]
+		}
+		if has(s, "vmessExperiments") {
+			user["experiments"] = s["vmessExperiments"]
+		}
 		settings = map[string]any{"vnext": []any{map[string]any{"address": s["address"], "port": s["port"], "users": []any{user}}}}
 	case "trojan":
-		settings = map[string]any{"servers": []any{map[string]any{"address": s["address"], "port": s["port"], "password": s["password"]}}}
+		server := map[string]any{"address": s["address"], "port": s["port"], "password": s["password"]}
+		if has(s, "accountLevel") {
+			server["level"] = s["accountLevel"]
+		}
+		if has(s, "accountEmail") {
+			server["email"] = s["accountEmail"]
+		}
+		settings = map[string]any{"servers": []any{server}}
 	case "shadowsocks":
-		settings = map[string]any{"servers": []any{map[string]any{"address": s["address"], "port": s["port"], "method": s["method"], "password": s["password"]}}}
-		withStream = lenPositive(s["streamOptions"])
+		server := map[string]any{"address": s["address"], "port": s["port"], "method": s["method"], "password": s["password"]}
+		if has(s, "accountLevel") {
+			server["level"] = s["accountLevel"]
+		}
+		if has(s, "accountEmail") {
+			server["email"] = s["accountEmail"]
+		}
+		settings = map[string]any{"servers": []any{server}}
+		withStream = s["network"] != "raw" || s["security"] != "none" || lenPositive(s["transport"]) || lenPositive(s["streamOptions"]) || has(s, "streamEndpoint")
 	case "hysteria2":
 		protocol = "hysteria"
 		settings = map[string]any{"version": 2, "address": s["address"], "port": s["port"]}
@@ -258,8 +332,13 @@ func Outbound(s Record) (map[string]any, error) {
 		return nil, die("генератор не поддерживает протокол: " + jqRaw(s["protocol"]))
 	}
 	out := map[string]any{"tag": "proxy", "protocol": protocol, "settings": settings}
-	if s["network"] == "xdrive" {
+	if has(s, "mux") {
 		out["mux"] = s["mux"]
+	}
+	if opts, ok := s["outboundOptions"].(map[string]any); ok {
+		for k, v := range opts {
+			out[k] = v
+		}
 	}
 	if withStream {
 		st, err := streamSettings(s)

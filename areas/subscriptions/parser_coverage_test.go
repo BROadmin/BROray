@@ -187,6 +187,41 @@ func parserCoverageStage(t *testing.T, out map[string]any, accept bool) (*staged
 	return st, rendered
 }
 
+// Private retention has a separate assertion path: accepting a source must not
+// weaken the runnable-output helper or allow a stripped projection to execute.
+func parserCoverageUnavailable(t *testing.T, input map[string]any) *staged {
+	t.Helper()
+	want, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal("cannot encode private-source fixture")
+	}
+	body, _ := json.Marshal(map[string]any{"outbounds": []any{input}})
+	ex, parseErr := extractNodes(body, newMetadata())
+	if parseErr != nil {
+		t.Fatal("private source framing rejected")
+	}
+	st, stageErr := stageNodes("field-coverage", ex, true, nil)
+	if stageErr != nil || st == nil || st.Accepted != 1 || st.Rejected != 0 || len(st.Records) != 1 {
+		t.Fatal("valid private source not retained")
+	}
+	rec := st.Records[0]
+	got, ok := parserCoverageGet(map[string]any(rec), "importProfile.node")
+	saved, err := json.Marshal(got)
+	if !ok || err != nil || !bytes.Equal(want, saved) || rec["network"] != "unavailable" {
+		t.Fatal("private source lost fields or became a runnable projection")
+	}
+	if err := servers.Validate(rec, "private-source"); err != nil {
+		t.Fatal("private source cannot revalidate")
+	}
+	if _, err := servers.Outbound(rec); err == nil {
+		t.Fatal("private source generated an executable outbound")
+	}
+	if _, exposed := servers.MaskRecord(rec)["importProfile"]; exposed {
+		t.Fatal("private source escaped masking")
+	}
+	return st
+}
+
 func parserCoverageAssert(t *testing.T, out map[string]any, path string, want any, omit bool) {
 	t.Helper()
 	got, found := parserCoverageGet(out, path)
@@ -237,10 +272,15 @@ func TestParserFieldCoverageTransport(t *testing.T) {
 		// ECH is opaque at Config.Build: preservation is not negotiation proof.
 		field("TLS", "tls", "tlsSettings."+tc.key, "", []parserCoverageValue{pcValue("value", tc.value)}, pcBadString())
 	}
-	field("TLS", "tls", "tlsSettings.allowInsecure", "", []parserCoverageValue{pcOmit("false-equivalent-default", false)}, append(pcBadBool(), pcValue("removed-true", true)))
-	field("TLS", "tls", "tlsSettings.alpn", "", []parserCoverageValue{pcValue("ordered-list", []any{"h2", "http/1.1"}), pcOmit("empty-list", []any{})}, []parserCoverageValue{pcValue("null", nil), pcValue("string-instead-of-array", "h2"), pcValue("element-type", []any{3}), pcValue("empty-element", []any{""}), pcValue("element-over-255", []any{strings.Repeat("a", 256)}), pcValue("comma-element", []any{"h2,http/1.1"})})
+	field("TLS", "tls", "tlsSettings.allowInsecure", "", []parserCoverageValue{pcOmit("false-equivalent-default", false)}, pcBadBool())
+	t.Run("TLS/tlsSettings.allowInsecure/removed-true-private", func(t *testing.T) {
+		in := parserCoverageBase("tls")
+		parserCoverageSet(in, "streamSettings.tlsSettings.allowInsecure", true)
+		parserCoverageUnavailable(t, in)
+	})
+	field("TLS", "tls", "tlsSettings.alpn", "", []parserCoverageValue{pcValue("ordered-list", []any{"h2", "http/1.1"}), pcWant("string-list", "h2", []any{"h2"}), pcOmit("empty-list", []any{})}, []parserCoverageValue{pcValue("null", nil), pcValue("element-type", []any{3}), pcValue("empty-element", []any{""}), pcValue("element-over-255", []any{strings.Repeat("a", 256)}), pcValue("comma-element", []any{"h2,http/1.1"})})
 	pin := strings.Repeat("ab", 32)
-	field("TLS", "tls", "tlsSettings.pinnedPeerCertSha256", "", []parserCoverageValue{pcValue("hex32", pin), pcWant("openssl-uppercase", strings.TrimSuffix(strings.Repeat("AB:", 32), ":"), pin), pcValue("two-pins", pin+","+strings.Repeat("cd", 32))}, append(pcBadString(), pcValue("short", strings.Repeat("a", 63)), pcValue("not-hex", strings.Repeat("z", 64))))
+	field("TLS", "tls", "tlsSettings.pinnedPeerCertSha256", "", []parserCoverageValue{pcValue("hex32", pin), pcValue("openssl-uppercase", strings.TrimSuffix(strings.Repeat("AB:", 32), ":")), pcValue("two-pins", pin+","+strings.Repeat("cd", 32))}, append(pcBadString(), pcValue("short", strings.Repeat("a", 63)), pcValue("not-hex", strings.Repeat("z", 64))))
 	for _, tc := range []struct{ key, value string }{
 		{"serverName", "other.example.test"}, {"fingerprint", "firefox"},
 		{"publicKey", base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, 32))},
@@ -249,11 +289,11 @@ func TestParserFieldCoverageTransport(t *testing.T) {
 	} {
 		field("REALITY", "reality", "realitySettings."+tc.key, "", []parserCoverageValue{pcValue("value", tc.value)}, pcBadString())
 	}
-	field("REALITY", "reality", "realitySettings.show", "", []parserCoverageValue{pcOmit("false-metadata", false), pcOmit("true-metadata", true)}, pcBadBool())
+	field("REALITY", "reality", "realitySettings.show", "", pcBool(), pcBadBool())
 	for _, key := range []string{"tcpKeepAliveIdle", "tcpKeepAliveInterval"} {
-		field("Socket", "raw", "sockopt."+key, "", pcBounds(0, 2147483647), pcBadNumber(0, 2147483647))
+		field("Socket", "raw", "sockopt."+key, "", pcBounds(-2147483648, 2147483647), pcBadNumber(-2147483648, 2147483647))
 	}
-	field("Socket", "raw", "sockopt.tcpFastOpen", "", append(pcBool(), pcBounds(0, 2147483647)...), pcBadNumber(0, 2147483647))
+	field("Socket", "raw", "sockopt.tcpFastOpen", "", append(pcBool(), pcBounds(-2147483648, 2147483647)...), pcBadNumber(-2147483648, 2147483647))
 	var strategies []parserCoverageValue
 	for _, strategy := range []string{"AsIs", "UseIP", "UseIPv4", "UseIPv6", "UseIPv4v6", "UseIPv6v4", "ForceIP", "ForceIPv4", "ForceIPv6", "ForceIPv4v6", "ForceIPv6v4"} {
 		strategies = append(strategies, pcValue(strategy, strategy))
@@ -265,7 +305,7 @@ func TestParserFieldCoverageTransport(t *testing.T) {
 		}
 		field(network, network, network+"Settings.headers", "", []parserCoverageValue{pcValue("two-headers", map[string]any{"Authorization": "synthetic-token", "X-Probe": "one"})}, []parserCoverageValue{pcValue("null", nil), pcValue("type", []any{}), pcValue("value-type", map[string]any{"X-Probe": 1}), pcValue("invalid-token", map[string]any{"Bad Name": "one"}), pcValue("case-duplicate", map[string]any{"X-Probe": "one", "x-probe": "two"}), pcValue("control", map[string]any{"X-Probe": "one\ntwo"})})
 	}
-	field("WS", "ws", "wsSettings.heartbeatPeriod", "", pcBounds(0, 2147483647), pcBadNumber(0, 2147483647))
+	field("WS", "ws", "wsSettings.heartbeatPeriod", "", pcBounds(0, 4294967295), pcBadNumber(0, 4294967295))
 	for _, tc := range []struct{ key, value string }{{"authority", "front.example.test"}, {"serviceName", "rpc.Service"}, {"user_agent", "synthetic-agent/1"}} {
 		field("GRPC", "grpc", "grpcSettings."+tc.key, "", []parserCoverageValue{pcValue("value", tc.value)}, pcBadString())
 	}
@@ -273,7 +313,7 @@ func TestParserFieldCoverageTransport(t *testing.T) {
 		field("GRPC", "grpc", "grpcSettings."+key, "", pcBool(), pcBadBool())
 	}
 	for _, key := range []string{"idle_timeout", "health_check_timeout", "initial_windows_size"} {
-		field("GRPC", "grpc", "grpcSettings."+key, "", pcBounds(0, 2147483647), pcBadNumber(0, 2147483647))
+		field("GRPC", "grpc", "grpcSettings."+key, "", pcBounds(-2147483648, 2147483647), pcBadNumber(-2147483648, 2147483647))
 	}
 	for _, tc := range []struct {
 		key      string
@@ -333,9 +373,8 @@ func TestParserFieldCoverageXHTTP(t *testing.T) {
 		field("XHTTP", key, []parserCoverageValue{pcValue("zero", 0), pcValue("max", 2147483647), pcValue("numeric-string", "16"), pcValue("ascending-range", "16-32")}, []parserCoverageValue{pcValue("null", nil), pcValue("type", false), pcValue("fraction", 1.5), pcValue("negative", -1), pcValue("above-max", int64(2147483648)), pcValue("reversed-range", "32-16"), pcValue("malformed-range", "1-2-3")})
 	}
 	field("XHTTP", "xPaddingBytes", nil, []parserCoverageValue{pcValue("zero-to-positive", "0-8")})
-	for _, key := range []string{"scMaxBufferedPosts", "serverMaxHeaderBytes"} {
-		field("XHTTP", key, pcBounds(0, 2147483647), pcBadNumber(0, 2147483647))
-	}
+	field("XHTTP", "serverMaxHeaderBytes", pcBounds(0, 2147483647), pcBadNumber(0, 2147483647))
+	field("XHTTP", "scMaxBufferedPosts", []parserCoverageValue{pcValue("zero", 0), pcValue("minus-one", -1), pcValue("int64-min", json.Number("-9223372036854775808")), pcValue("int64-max", json.Number("9223372036854775807"))}, []parserCoverageValue{pcValue("null", nil), pcValue("type", "1"), pcValue("fraction", 1.5), pcValue("below-int64", json.Number("-9223372036854775809")), pcValue("above-int64", json.Number("9223372036854775808"))})
 	field("XHTTP", "headers", []parserCoverageValue{pcValue("string-map", map[string]any{"X-Probe": "one"})}, []parserCoverageValue{pcValue("null", nil), pcValue("type", []any{}), pcValue("value-type", map[string]any{"X-Probe": 1}), pcValue("host-conflict", map[string]any{"Host": "front.example.test"}), pcValue("control", map[string]any{"X-Probe": "one\ntwo"})})
 	for _, key := range []string{"maxConcurrency", "maxConnections", "cMaxReuseTimes", "hMaxRequestTimes", "hMaxReusableSecs"} {
 		field("XMux", "xmux."+key, []parserCoverageValue{pcValue("zero", 0), pcValue("max", 2147483647), pcValue("numeric-string", "16"), pcValue("ascending-range", "16-32")}, []parserCoverageValue{pcValue("null", nil), pcValue("type", false), pcValue("fraction", 1.5), pcValue("negative", -1), pcValue("above-max", int64(2147483648)), pcValue("reversed-range", "32-16")})
@@ -355,9 +394,13 @@ func TestParserFieldCoverageXHTTP(t *testing.T) {
 		_, out := parserCoverageStage(t, in, true)
 		parserCoverageAssert(t, out, "streamSettings.xhttpSettings.extra", extra, false)
 	})
-	t.Run("XHTTP/extra/reject-mixed-top-level", func(t *testing.T) {
+	t.Run("XHTTP/extra/validated-top-level-precedence", func(t *testing.T) {
 		in := parserCoverageBase("xhttp")
 		parserCoverageSet(in, "streamSettings.xhttpSettings.extra", map[string]any{"noSSEHeader": false})
+		_, out := parserCoverageStage(t, in, true)
+		parserCoverageAssert(t, out, "streamSettings.xhttpSettings.extra.noSSEHeader", false, false)
+		parserCoverageAssert(t, out, "streamSettings.xhttpSettings.extra.sessionIDLength", nil, true)
+		parserCoverageSet(in, "streamSettings.xhttpSettings.sessionIDLength", true)
 		parserCoverageStage(t, in, false)
 	})
 }
@@ -432,14 +475,15 @@ func TestParserFieldCoverageProtocol(t *testing.T) {
 		}
 	}
 	for _, proto := range []string{"vless", "vmess"} {
-		parserCoverageField(t, proto, proto, "settings.id", "settings.vnext.0.users.0.id", []parserCoverageValue{pcValue("uuid", "00000000-0000-4000-8000-000000000002")}, append(pcBadString(), pcValue("empty", "")))
+		// Pinned Xray hashes any nonempty short name of at most 30 bytes.
+		parserCoverageField(t, proto, proto, "settings.id", "settings.vnext.0.users.0.id", []parserCoverageValue{pcValue("uuid", "00000000-0000-4000-8000-000000000002")}, []parserCoverageValue{pcValue("null", nil), pcValue("type", 1), pcValue("overlong-non-uuid", strings.Repeat("q", 31)), pcValue("empty", "")})
 	}
 	for _, security := range []string{"auto", "aes-128-gcm", "chacha20-poly1305", "none"} {
 		parserCoverageField(t, "VMess", "vmess", "settings.security", "settings.vnext.0.users.0.security", []parserCoverageValue{pcValue(security, security)}, nil)
 	}
 	parserCoverageField(t, "VMess", "vmess", "settings.security", "", nil, append(pcBadString(), pcValue("unknown-cipher", "invalid")))
 	parserCoverageField(t, "VMess", "vmess", "settings.alterId", "settings.vnext.0.users.0.alterId", []parserCoverageValue{pcValue("compat-zero", 0)}, []parserCoverageValue{pcValue("null", nil), pcValue("type", "0"), pcValue("nonzero", 1)})
-	parserCoverageField(t, "VMess", "vmess", "settings.experiments", "settings.vnext.0.users.0.experiments", []parserCoverageValue{pcOmit("empty-default", "")}, []parserCoverageValue{pcValue("null", nil), pcValue("type", false)})
+	parserCoverageField(t, "VMess", "vmess", "settings.experiments", "settings.vnext.0.users.0.experiments", []parserCoverageValue{pcValue("empty-default", "")}, []parserCoverageValue{pcValue("null", nil), pcValue("type", false)})
 	parserCoverageField(t, "VLESS", "vless", "settings.encryption", "settings.vnext.0.users.0.encryption", []parserCoverageValue{pcValue("none", "none")}, append(pcBadString(), pcValue("unknown", "invalid")))
 	for _, proto := range []string{"trojan", "shadowsocks"} {
 		parserCoverageField(t, proto, proto, "settings.password", "settings.servers.0.password", []parserCoverageValue{pcValue("percent-sensitive", "synthetic-@:/?#%")}, append(pcBadString(), pcValue("empty", "")))
@@ -465,48 +509,50 @@ func TestParserFieldCoverageProtocol(t *testing.T) {
 }
 
 func TestParserFieldCoverageMetadata(t *testing.T) {
-	// Ordinary VLESS shares the explicit level/email warning policy used by
-	// the other protocols and native VLESS. Metadata is accepted with a warning
-	// and omitted from the generated connection settings.
+	// Account email and explicit level are retained under local core policy;
+	// WireGuard peer metadata is retained with an explicit server-role warning.
 	for _, proto := range []string{"vless", "vmess", "trojan", "shadowsocks", "http", "socks", "wireguard"} {
-		path := "settings."
+		path, output := "settings.", "settings.servers.0."
+		if proto == "vless" || proto == "vmess" {
+			output = "settings.vnext.0.users.0."
+		}
+		if proto == "http" || proto == "socks" {
+			output = "settings.servers.0.users.0."
+		}
 		if proto == "wireguard" {
-			path = "settings.peers.0."
+			path, output = "settings.peers.0.", "settings.peers.0."
 		}
 		for _, tc := range []struct {
 			key   string
 			value any
 		}{{"level", 0}, {"email", "coverage@example.test"}} {
-			t.Run(proto+"/"+tc.key+"/accepted-with-warning", func(t *testing.T) {
+			t.Run(proto+"/"+tc.key+"/source-contract", func(t *testing.T) {
 				in := parserCoverageBase(proto)
 				parserCoverageSet(in, path+tc.key, tc.value)
 				st, out := parserCoverageStage(t, in, true)
-				if !strings.Contains(strings.Join(st.Warnings, " "), tc.key) {
-					t.Fatal("metadata loss lacks warning")
-				}
-				settings, _ := json.Marshal(out["settings"])
-				if bytes.Contains(settings, []byte(`"`+tc.key+`":`)) {
-					t.Fatal("metadata unexpectedly rendered")
+				parserCoverageAssert(t, out, output+tc.key, tc.value, false)
+				if proto == "wireguard" && !strings.Contains(strings.Join(st.Warnings, " "), tc.key) {
+					t.Fatal("server-role metadata warning missing")
 				}
 			})
 		}
 		parserCoverageField(t, proto, proto, path+"level", "", nil, []parserCoverageValue{pcValue("null", nil), pcValue("type", "0"), pcValue("negative", -1)})
 		parserCoverageField(t, proto, proto, path+"email", "", nil, pcBadString())
 	}
-	for _, tc := range []struct {
-		base, path, word string
-		value            any
-	}{{"reality", "streamSettings.realitySettings.show", "show", true}, {"grpc", "streamSettings.grpcSettings.mode", "mode", false}} {
-		t.Run(tc.base+"/"+tc.word+"/explicit-warning", func(t *testing.T) {
-			in := parserCoverageBase(tc.base)
-			parserCoverageSet(in, tc.path, tc.value)
-			st, out := parserCoverageStage(t, in, true)
-			if !strings.Contains(strings.Join(st.Warnings, " "), tc.word) {
-				t.Fatal("metadata warning missing")
-			}
-			parserCoverageAssert(t, out, tc.path, nil, true)
-		})
-	}
+	t.Run("reality/show/explicit-warning", func(t *testing.T) {
+		in := parserCoverageBase("reality")
+		parserCoverageSet(in, "streamSettings.realitySettings.show", true)
+		st, out := parserCoverageStage(t, in, true)
+		if !strings.Contains(strings.Join(st.Warnings, " "), "show") {
+			t.Fatal("diagnostic-output warning missing")
+		}
+		parserCoverageAssert(t, out, "streamSettings.realitySettings.show", true, false)
+	})
+	t.Run("grpc/mode/private-unknown-extension", func(t *testing.T) {
+		in := parserCoverageBase("grpc")
+		parserCoverageSet(in, "streamSettings.grpcSettings.mode", false)
+		parserCoverageUnavailable(t, in)
+	})
 }
 
 func TestParserFieldCoverageProxy(t *testing.T) {
@@ -558,19 +604,19 @@ func TestParserFieldCoverageWireGuard(t *testing.T) {
 	for _, path := range []string{"secretKey", "peers.0.publicKey", "peers.0.preSharedKey"} {
 		field(path, []parserCoverageValue{pcValue("nonzero-base64", parserCoverageWGKey), pcWant("nonzero-hex", strings.Repeat("01", 32), parserCoverageWGKey), pcWant("unpadded", strings.TrimSuffix(parserCoverageWGKey, "="), parserCoverageWGKey)}, append(pcBadString(), pcValue("all-zero", base64.StdEncoding.EncodeToString(make([]byte, 32))), pcValue("31-byte", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 31)))))
 	}
-	field("noKernelTun", []parserCoverageValue{pcValue("userspace-true", true)}, append(pcBadBool(), pcValue("kernel-false", false)))
+	field("noKernelTun", pcBool(), pcBadBool())
 	field("mtu", pcBounds(576, 9000), pcBadNumber(576, 9000))
-	field("reserved", []parserCoverageValue{pcValue("three-bytes", []any{0, 128, 255}), pcOmit("empty-default", []any{})}, []parserCoverageValue{pcValue("null", nil), pcValue("type", "AQID"), pcValue("two-bytes", []any{0, 1}), pcValue("four-bytes", []any{0, 1, 2, 3}), pcValue("byte-overflow", []any{0, 1, 256}), pcValue("byte-type", []any{0, 1, "2"})})
+	field("reserved", []parserCoverageValue{pcValue("three-bytes", []any{0, 128, 255}), pcValue("empty-default", []any{}), pcWant("base64-bytes", "AQID", []any{1, 2, 3})}, []parserCoverageValue{pcValue("null", nil), pcValue("type", true), pcValue("bad-base64", "not base64"), pcValue("two-bytes", []any{0, 1}), pcValue("four-bytes", []any{0, 1, 2, 3}), pcValue("byte-overflow", []any{0, 1, 256}), pcValue("byte-type", []any{0, 1, "2"})})
 	field("address", []parserCoverageValue{pcValue("dual-stack-prefix", []any{"192.0.2.2/32", "2001:db8::2/128"}), pcWant("host-to-prefix", []any{"192.0.2.2", "2001:db8::2"}, []any{"192.0.2.2/32", "2001:db8::2/128"})}, []parserCoverageValue{pcValue("null", nil), pcValue("type", "192.0.2.2"), pcValue("empty", []any{}), pcValue("element-type", []any{1}), pcValue("bad-prefix", []any{"192.0.2.2/33"})})
-	field("remoteDNS", []parserCoverageValue{pcValue("dual-stack", []any{"192.0.2.53", "2001:db8::53"}), pcOmit("empty-default", []any{})}, []parserCoverageValue{pcValue("null", nil), pcValue("type", "192.0.2.53"), pcValue("element-type", []any{false}), pcValue("non-ip", []any{"dns.example.test"})})
+	field("remoteDNS", []parserCoverageValue{pcValue("dual-stack", []any{"192.0.2.53", "2001:db8::53"}), pcValue("empty-default", []any{})}, []parserCoverageValue{pcValue("null", nil), pcValue("type", "192.0.2.53"), pcValue("element-type", []any{false}), pcValue("non-ip", []any{"dns.example.test"})})
 	field("peers.0.endpoint", []parserCoverageValue{pcValue("dns-port", "other.example.test:65535"), pcValue("ipv6-port", "[2001:db8::1]:1")}, append(pcBadString(), pcValue("missing-port", "wg.example.test"), pcValue("zero-port", "wg.example.test:0"), pcValue("port-overflow", "wg.example.test:65536")))
-	field("peers.0.allowedIPs", []parserCoverageValue{pcValue("dual-stack", []any{"192.0.2.0/24", "2001:db8::/32"})}, []parserCoverageValue{pcValue("null", nil), pcValue("type", "0.0.0.0/0"), pcValue("empty", []any{}), pcValue("element-type", []any{true}), pcValue("invalid-prefix", []any{"192.0.2.0/33"})})
+	field("peers.0.allowedIPs", []parserCoverageValue{pcValue("dual-stack", []any{"192.0.2.0/24", "2001:db8::/32"}), pcValue("empty-explicit", []any{})}, []parserCoverageValue{pcValue("null", nil), pcValue("type", "0.0.0.0/0"), pcValue("element-type", []any{true}), pcValue("invalid-prefix", []any{"192.0.2.0/33"})})
 	field("peers.0.keepAlive", pcBounds(0, 65535), pcBadNumber(0, 65535))
 	t.Run("WireGuard/defaults/absent-optional-fields", func(t *testing.T) {
 		in := parserCoverageBase("wireguard")
 		delete(in["settings"].(map[string]any)["peers"].([]any)[0].(map[string]any), "allowedIPs")
 		_, out := parserCoverageStage(t, in, true)
-		parserCoverageAssert(t, out, "settings.noKernelTun", true, false)
+		parserCoverageAssert(t, out, "settings.noKernelTun", false, false)
 		parserCoverageAssert(t, out, "settings.mtu", 1420, false)
 		parserCoverageAssert(t, out, "settings.peers.0.allowedIPs", []any{"0.0.0.0/0", "::/0"}, false)
 	})
@@ -599,8 +645,15 @@ func TestParserFieldCoverageHysteria(t *testing.T) {
 }
 
 func TestParserFieldCoverageDeclaredUnsupported(t *testing.T) {
-	// These negatives document deliberate importer limits, not unsupported
-	// upstream functionality. Parent-level rejection also covers nested schemas.
+	// Former importer limits now have explicit runnable/private dispositions.
+	// Truly malformed or unsupported values remain rejection tests.
+	private := func(schema, base, path string, value any) {
+		t.Run(schema+"/"+strings.TrimPrefix(path, "streamSettings.")+"/retained-private", func(t *testing.T) {
+			in := parserCoverageBase(base)
+			parserCoverageSet(in, path, value)
+			parserCoverageUnavailable(t, in)
+		})
+	}
 	for _, tc := range []struct {
 		schema, base, path string
 		value              any
@@ -615,24 +668,52 @@ func TestParserFieldCoverageDeclaredUnsupported(t *testing.T) {
 		{"RAW", "raw", "streamSettings.rawSettings.acceptProxyProtocol", true}, {"WS", "ws", "streamSettings.wsSettings.acceptProxyProtocol", true}, {"HTTPUpgrade", "httpupgrade", "streamSettings.httpupgradeSettings.acceptProxyProtocol", true},
 		{"XHTTP", "xhttp", "streamSettings.xhttpSettings.h2Params", map[string]any{"maxConcurrentStreams": 1}},
 	} {
-		parserCoverageField(t, tc.schema, tc.base, tc.path, "", nil, []parserCoverageValue{pcValue("declared-unsupported", tc.value)})
+		switch tc.path {
+		case "proxySettings", "settings.seed", "settings.reverse", "settings.testseed", "streamSettings.rawSettings.acceptProxyProtocol", "streamSettings.wsSettings.acceptProxyProtocol", "streamSettings.httpupgradeSettings.acceptProxyProtocol", "streamSettings.xhttpSettings.h2Params":
+			private(tc.schema, tc.base, tc.path, tc.value)
+		case "settings.experiments", "settings.flow":
+			parserCoverageField(t, tc.schema, tc.base, tc.path, "", nil, []parserCoverageValue{pcValue("declared-unsupported", tc.value)})
+		default:
+			output := tc.path
+			if tc.path == "streamSettings.method" {
+				output = "streamSettings.network"
+			}
+			if tc.path == "settings.testpre" {
+				output = "settings.vnext.0.users.0.testpre"
+			}
+			parserCoverageField(t, tc.schema, tc.base, tc.path, output, []parserCoverageValue{pcValue("preserved", tc.value)}, nil)
+		}
 	}
 	for key, value := range map[string]any{
 		"certificates": []any{map[string]any{"certificate": []any{"synthetic"}, "usage": "verify"}}, "enableSessionResumption": true, "disableSystemRoot": true, "minVersion": "1.2", "maxVersion": "1.3", "cipherSuites": "TLS_AES_128_GCM_SHA256", "curvePreferences": []any{"X25519"}, "masterKeyLog": "synthetic.log", "echSockopt": map[string]any{"tcpFastOpen": false}, "useSystemCA": true, "rejectUnknownSni": true, "echServerKeys": "synthetic",
 	} {
-		parserCoverageField(t, "TLS", "tls", "streamSettings.tlsSettings."+key, "", nil, []parserCoverageValue{pcValue("declared-unsupported", value)})
+		path := "streamSettings.tlsSettings." + key
+		switch key {
+		case "masterKeyLog", "rejectUnknownSni", "echServerKeys":
+			private("TLS", "tls", path, value)
+		case "certificates":
+			parserCoverageField(t, "TLS", "tls", path, "", nil, []parserCoverageValue{pcValue("malformed-inline-pem", value)})
+		default:
+			parserCoverageField(t, "TLS", "tls", path, "", []parserCoverageValue{pcValue("preserved", value)}, nil)
+		}
 	}
 	for key, value := range map[string]any{
 		"mark": 1, "tproxy": "tproxy", "acceptProxyProtocol": true, "dialerProxy": "foreign", "tcpCongestion": "cubic", "tcpWindowClamp": 65536, "tcpMaxSeg": 1200, "penetrate": true, "tcpUserTimeout": 1000, "v6only": true, "interface": "synthetic0", "tcpMptcp": true, "addressPortStrategy": "srvportonly", "trustedXForwardedFor": []any{"192.0.2.1"},
 		"happyEyeballs": map[string]any{"prioritizeIPv6": false, "tryDelayMs": 250, "interleave": 1, "maxConcurrentTry": 2},
 		"customSockopt": []any{map[string]any{"system": "linux", "network": "tcp", "level": "1", "opt": "1", "value": "1", "type": "int"}},
 	} {
-		parserCoverageField(t, "Socket", "raw", "streamSettings.sockopt."+key, "", nil, []parserCoverageValue{pcValue("declared-unsupported", value)})
+		path := "streamSettings.sockopt." + key
+		switch key {
+		case "mark", "tproxy", "acceptProxyProtocol", "dialerProxy", "penetrate", "v6only", "interface", "trustedXForwardedFor", "customSockopt":
+			private("Socket", "raw", path, value)
+		default:
+			parserCoverageField(t, "Socket", "raw", path, "", []parserCoverageValue{pcValue("preserved", value)}, nil)
+		}
 	}
 	for key, value := range map[string]any{
 		"masterKeyLog": "synthetic.log", "target": "front.example.test:443", "dest": "front.example.test:443", "type": "tcp", "xver": 1, "serverNames": []any{"front.example.test"}, "privateKey": "synthetic", "minClientVer": "1.0.0", "maxClientVer": "99.0.0", "maxTimeDiff": 1000, "shortIds": []any{"abcd"}, "mldsa65Seed": "synthetic", "limitFallbackUpload": map[string]any{"AfterBytes": 1, "BytesPerSec": 1, "BurstBytesPerSec": 1}, "limitFallbackDownload": map[string]any{"AfterBytes": 1, "BytesPerSec": 1, "BurstBytesPerSec": 1},
 	} {
-		parserCoverageField(t, "REALITY", "reality", "streamSettings.realitySettings."+key, "", nil, []parserCoverageValue{pcValue("declared-unsupported", value)})
+		private("REALITY", "reality", "streamSettings.realitySettings."+key, value)
 	}
 	for _, method := range []string{"aead_aes_128_gcm", "aead_aes_256_gcm", "aead_chacha20_poly1305", "aead_xchacha20_poly1305", "xchacha20-ietf-poly1305"} {
 		parserCoverageField(t, "Shadowsocks", "shadowsocks", "settings.method", "", nil, []parserCoverageValue{pcValue("declared-unsupported-"+method, method)})

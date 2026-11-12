@@ -34,14 +34,16 @@ func (s *service) handleDiagnostics(c *cgi.Req) (any, error) {
 			lastFile = cand
 			if m, ok := compat.ReadObject(cand); ok && m["success"] == true {
 				// a recorded trial counts only for the binary it tested
-				if h, _ := m["sha256"].(string); h == "" || h == sum {
+				if h, _ := m["sha256"].(string); h != "" && sum != "" && h == sum {
 					lastOK = true
 					if d, _ := m["details"].(string); d != "" {
 						lastFile = d
 					}
 				}
 			}
-			break
+			if lastOK {
+				break
+			}
 		}
 	}
 	check := func(id string, ok bool, bad, title, okText, badText string) map[string]any {

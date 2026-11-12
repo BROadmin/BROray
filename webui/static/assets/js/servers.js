@@ -505,7 +505,7 @@
         card.setAttribute("data-display-group-id", group.id);
         quality.setAttribute("data-icon", "status");
 		if (unsupported) {
-			quality.textContent = server.connectionSupport.mode === "requires-core" ? "Обновите Xray" : "Подключение не поддерживается";
+			quality.textContent = server.connectionSupport.mode === "requires-core" ? "Обновите Xray" : server.connectionSupport.mode === "core-unverified" ? "Проверьте Xray" : "Подключение не поддерживается";
 			quality.className = "status-badge status-badge-warning";
 		}
 
@@ -528,6 +528,7 @@
             tags.appendChild(create("span", "server-tag server-tag-active", "Активен"));
         }
         identity.appendChild(tags);
+        appendImportWarnings(identity, server.importWarnings);
 		if (server.connectionSupport && server.connectionSupport.message) {
 			identity.appendChild(create("p", "server-card-address", server.connectionSupport.message));
 		}
@@ -696,6 +697,16 @@
         });
     }
 
+    function appendImportWarnings(root, warnings) {
+        if (!Array.isArray(warnings) || !warnings.length) return;
+        var disclosure = create("details", "server-import-warnings");
+        disclosure.appendChild(create("summary", "", "Предупреждения конфигурации"));
+        var list = create("ul");
+        warnings.forEach(function (warning) { if (typeof warning === "string") list.appendChild(create("li", "", warning)); });
+        disclosure.appendChild(list);
+        root.appendChild(disclosure);
+    }
+
     function renderDetails(root, details, server) {
         var heading;
         var grid;
@@ -715,6 +726,7 @@
             )
         );
         root.appendChild(heading);
+        appendImportWarnings(root, details.importWarnings);
 
         grid = create("div", "server-details-grid");
         appendDefinition(grid, "ID", details.id);

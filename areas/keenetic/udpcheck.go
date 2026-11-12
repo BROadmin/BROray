@@ -315,11 +315,11 @@ func udpVerdict(r *udpCheckResult) {
 	switch {
 	case r.Verdict == "CHECK_FAILED":
 	case !r.Server.OK:
-		r.Verdict, r.Severity, r.Message = "SERVER_UDP_FAILED", "error", "Сервер не передаёт UDP (Xray SOCKS UDP не ответил)"
+		r.Verdict, r.Severity, r.Message = "SERVER_UDP_FAILED", "error", "Не удалось подтвердить UDP через сервер: STUN-проверки через Xray SOCKS UDP не получили ответа"
 	case !r.Proxy.Ran:
 		r.fail(r.Proxy.Error)
 	case !r.Proxy.OK:
-		r.Verdict, r.Severity, r.Message = "PROXY_UDP_FAILED", "error", name+" не передаёт UDP"
+		r.Verdict, r.Severity, r.Message = "PROXY_UDP_FAILED", "error", "Не удалось подтвердить UDP через "+name+": STUN-проверки не получили ответа"
 		if !r.Socks5UDP {
 			r.Message += " (в " + name + " выключен UDP через SOCKS5 — нажмите «Восстановить»)"
 		}
@@ -653,8 +653,8 @@ func (s *service) udpCheck(ctx context.Context, op *compat.Operation) *udpCheckR
 	// (b) UDP through ProxyN.
 	switch {
 	case target == nil:
-		r.Proxy.Error = "сервер не передаёт UDP"
-		r.Proxy.Text = "UDP через " + name + ": не проверялось — сервер не передаёт UDP"
+		r.Proxy.Error = "UDP через сервер не подтверждён"
+		r.Proxy.Text = "UDP через " + name + ": не проверялось — STUN-проверки через сервер не получили ответа"
 	case !complete:
 		r.Proxy.Error = "в таблице маршрутов KeeneticOS есть строки, которые BROray не распознал"
 		r.Proxy.Text = "UDP через " + name + ": не проверялось"

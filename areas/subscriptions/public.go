@@ -109,6 +109,7 @@ func (s *svc) public(rec map[string]any, includeURL bool, live []srvFile) map[st
 	out["updateOperation"] = operation
 	out["parseProgress"] = progress
 	out["sendDeviceInfo"] = rec["sendDeviceInfo"] == true
+	out["fetchJSON"], out["fetchClash"] = rec["fetchJSON"] == true, rec["fetchClash"] == true
 	out["displayUrl"] = maskURL(jqRaw(rec["url"]))
 	out["serversCount"] = count
 	if !includeURL {

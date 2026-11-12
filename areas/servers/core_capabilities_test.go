@@ -32,7 +32,11 @@ func TestCoreCapabilityGate(t *testing.T) {
 					t.Fatalf("activation: %s", r.Raw)
 				}
 			} else {
-				if r.Code != 400 || errCode(r) != "XRAY_CORE_UNSUPPORTED" || !strings.Contains(r.Raw, "26.11.9") {
+				wantCode := "XRAY_CORE_UNSUPPORTED"
+				if tc.version == "unknown" {
+					wantCode = "XRAY_CORE_VERSION_UNKNOWN"
+				}
+				if r.Code != 400 || errCode(r) != wantCode || !strings.Contains(r.Raw, "26.11.9") {
 					t.Errorf("expected a minimum-core error, got %s", r.Raw)
 				}
 				if ActiveID(e.d) != "" || len(e.applied) != 0 || e.ensured.Load() != 0 {

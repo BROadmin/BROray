@@ -37,8 +37,8 @@ func hysteriaDocument356(t *testing.T, outbounds ...any) []byte {
 func assertMasqueradeWarning356(t *testing.T, warnings []string) {
 	t.Helper()
 	text := strings.Join(warnings, " ")
-	if !strings.Contains(text, "masquerade") || !strings.Contains(text, "сервер") {
-		t.Fatal("missing explicit server-only masquerade warning")
+	if (!strings.Contains(text, "masquerade") && !strings.Contains(text, "недоступно")) || !strings.Contains(text, "сервер") {
+		t.Fatal("missing explicit listener-only or unavailable source warning")
 	}
 	for _, private := range []string{"synthetic-", "example.test", "AA==", "https://"} {
 		if strings.Contains(text, private) {
@@ -63,24 +63,8 @@ func TestHysteriaMasquerade356ProviderShape(t *testing.T) {
 			if err != nil || st.Received != 1 || st.Parsed != 1 || st.Accepted != 1 || st.Rejected != 0 {
 				t.Fatalf("server-only masquerade rejected: received=%d parsed=%d accepted=%d rejected=%d error=%v", st.Received, st.Parsed, st.Accepted, st.Rejected, err)
 			}
-			out, renderErr := servers.Outbound(st.Records[0])
-			if renderErr != nil {
-				t.Fatal("accepted Hysteria node cannot render", renderErr)
-			}
-			for path, want := range map[string]any{
-				"settings.address": "edge.example.test", "settings.port": 443,
-				"settings.version": 2, "streamSettings.network": "hysteria", "streamSettings.security": "tls",
-				"streamSettings.hysteriaSettings.version": 2, "streamSettings.hysteriaSettings.auth": "synthetic-auth:@%/",
-				"streamSettings.hysteriaSettings.udpIdleTimeout": 60, "streamSettings.tlsSettings.serverName": "front.example.test",
-				"streamSettings.tlsSettings.alpn": []any{"h3"}, "streamSettings.tlsSettings.echConfigList": "AA==",
-				"streamSettings.tlsSettings.fingerprint": "chrome",
-			} {
-				parserCoverageAssert(t, out, path, want, false)
-			}
-			parserCoverageAssert(t, out, "streamSettings.hysteriaSettings.masquerade", nil, true)
-			stored, _ := json.Marshal(st.Records[0])
-			if strings.Contains(string(stored), "masquerade") || strings.Contains(ex.Lines[0], "masquerade") {
-				t.Fatal("server masquerade leaked into client record or share link")
+			if st.Records[0]["importProfile"] != nil || st.Records[0]["hysteriaMasquerade"] == nil {
+				t.Fatal("known listener metadata blocked or lost")
 			}
 			assertMasqueradeWarning356(t, st.Warnings)
 		})
@@ -101,8 +85,8 @@ func TestHysteriaMasquerade356Schema(t *testing.T) {
 		{"statusCode-int32-min", map[string]any{"statusCode": -2147483648}, true},
 		{"statusCode-int32-max", map[string]any{"statusCode": 2147483647}, true},
 		{"null", nil, false}, {"wrong-object-type", "proxy", false},
-		{"unknown-field", map[string]any{"type": "proxy", "secretExtension": "synthetic-private-value"}, false},
-		{"unknown-type", map[string]any{"type": "future-mode"}, false},
+		{"unknown-field", map[string]any{"type": "proxy", "secretExtension": "synthetic-private-value"}, true},
+		{"unknown-type", map[string]any{"type": "future-mode"}, true},
 		{"type-number", map[string]any{"type": 1}, false},
 		{"url-number", map[string]any{"type": "proxy", "url": 1}, false},
 		{"dir-object", map[string]any{"type": "file", "dir": map[string]any{}}, false},
@@ -120,6 +104,11 @@ func TestHysteriaMasquerade356Schema(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			out := hysteriaMasquerade356()
 			parserCoverageSet(out, "streamSettings.hysteriaSettings.masquerade", tc.value)
+			if tc.name == "unknown-field" || tc.name == "unknown-type" {
+				st := fullXray357SubscriptionUnavailable(t, out)
+				assertMasqueradeWarning356(t, st.Warnings)
+				return
+			}
 			st, rendered := parserCoverageStage(t, out, tc.accept)
 			if tc.accept {
 				parserCoverageAssert(t, rendered, "streamSettings.hysteriaSettings.masquerade", nil, true)
@@ -153,12 +142,22 @@ func TestHysteriaMasquerade356StageDocuments(t *testing.T) {
 		t.Fatalf("complete union failed: received=%d parsed=%d accepted=%d rejected=%d error=%v", st.Received, st.Parsed, st.Accepted, st.Rejected, err)
 	}
 	assertMasqueradeWarning356(t, st.Warnings)
-	// A genuine unsupported client field still aborts the whole advertised export.
+	// Unknown future intent is preserved privately without applying its source.
 	parserCoverageSet(outbounds[5].(map[string]any), "streamSettings.hysteriaSettings.futureClientOption", "synthetic-private-value")
 	docs[1].body = hysteriaDocument356(t, outbounds...)
 	st, err = stageDocuments(subX, docs, newMetadata(), true, nil)
-	if err == nil || err.Code != "ALTERNATE_EXPORT_ERROR" || st.Received != 10 || st.Parsed != 9 || st.Rejected != 1 || st.Accepted != 4 {
-		t.Fatal("genuine JSON failure no longer aborts the union")
+	if err != nil || st.Received != 10 || st.Parsed != 10 || st.Rejected != 0 || st.Accepted != 6 {
+		t.Fatal("valid unknown intent was dropped from the union")
+	}
+	private := 0
+	for _, record := range st.Records {
+		if record["importProfile"] != nil {
+			private++
+			fullXray357SubscriptionUnavailableRecord(t, record, outbounds[5].(map[string]any))
+		}
+	}
+	if private != 1 {
+		t.Fatal("unavailable Hysteria source count changed")
 	}
 }
 
@@ -167,7 +166,7 @@ func TestHysteriaMasquerade356AtomicRefresh(t *testing.T) {
 	p := newAutoFixture355(t)
 	body := hysteriaDocument356(t, hysteriaMasquerade356())
 	p.change(func() { p.jsonBody = string(body) })
-	id := e.create(t, p.URL+"/sub/invented", "")
+	id := e.createWithExports357(t, p.URL+"/sub/invented", "")
 	if err := e.refreshSync(t, id); err != nil {
 		t.Fatal("initial complete refresh failed", err)
 	}
@@ -176,7 +175,7 @@ func TestHysteriaMasquerade356AtomicRefresh(t *testing.T) {
 		strings.Replace(string(body), `"statusCode":0`, `"statusCode":"bad"`, 1),
 		strings.Replace(string(body), `"statusCode":0`, `"statusCode":0,"statusCode":200`, 1),
 		string(body) + `{}`,
-		strings.Replace(string(body), `"udpIdleTimeout":60`, `"udpIdleTimeout":60,"futureClientOption":true`, 1),
+		strings.Replace(string(body), `"udpIdleTimeout":60`, `"udpIdleTimeout":"bad"`, 1),
 	} {
 		p.change(func() { p.jsonBody = malformed })
 		if err := e.refreshSync(t, id); err == nil {
@@ -185,5 +184,29 @@ func TestHysteriaMasquerade356AtomicRefresh(t *testing.T) {
 		if !reflect.DeepEqual(before, snapshotAutoCatalog355(t, e)) {
 			t.Fatal("failed export changed the catalog")
 		}
+	}
+	// A shape-valid unknown parameter is an accepted private update, unlike the
+	// malformed known fields above. It must remain unavailable after refresh.
+	unknown := strings.Replace(string(body), `"udpIdleTimeout":60`, `"udpIdleTimeout":60,"futureClientOption":true`, 1)
+	p.change(func() { p.jsonBody = unknown })
+	if err := e.refreshSync(t, id); err != nil {
+		t.Fatal("valid future source update rejected", err)
+	}
+	found := false
+	for _, body := range snapshotAutoCatalog355(t, e) {
+		if !strings.Contains(body, "futureClientOption") {
+			continue
+		}
+		found = true
+		var record servers.Record
+		if json.Unmarshal([]byte(body), &record) != nil || servers.Validate(record, "updated-source") != nil {
+			t.Fatal("updated source was not stored as a valid private record")
+		}
+		if _, err := servers.Outbound(record); err == nil {
+			t.Fatal("future source update became runnable")
+		}
+	}
+	if !found {
+		t.Fatal("future source value disappeared during refresh")
 	}
 }

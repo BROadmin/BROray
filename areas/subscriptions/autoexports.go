@@ -91,7 +91,7 @@ var formatWord = regexp.MustCompile(`(?i)\b(json|clash)\b`)
 // discoverExports is a bounded static HTML reader, not a JavaScript engine.
 // It recognizes only the documented data assignment and explicit anchors.
 // Script/style bodies are raw text, so apparent anchors inside them are inert.
-func discoverExports(ctx context.Context, body []byte, base string) ([]exportLink, *subErr) {
+func discoverExports(ctx context.Context, body []byte, base string, allowed ...map[string]bool) ([]exportLink, *subErr) {
 	if len(body) > maxDiscoveryBytes {
 		return nil, errTooLarge
 	}
@@ -103,6 +103,9 @@ func discoverExports(ctx context.Context, body []byte, base string) ([]exportLin
 	byFormat := map[string]string{}
 	byURL := map[string]bool{}
 	add := func(format, ref string) *subErr {
+		if len(allowed) > 0 && !allowed[0][format] {
+			return nil
+		}
 		u, err := exportURL(base, ref)
 		if err != nil {
 			return err
@@ -213,6 +216,9 @@ func discoverExports(ctx context.Context, body []byte, base string) ([]exportLin
 						return nil, exportError()
 					}
 					for _, field := range []struct{ key, format string }{{"subJsonUrl", "json"}, {"subClashUrl", "clash"}} {
+						if len(allowed) > 0 && !allowed[0][field.format] {
+							continue
+						}
 						if v, exists := m[field.key]; exists {
 							ref, ok := v.(string)
 							if !ok {
@@ -286,7 +292,7 @@ func rememberedFormats(rec map[string]any) []string {
 	var out []string
 	if formats, ok := rec["alternateExports"].([]any); ok {
 		for _, v := range formats {
-			if v == "json" || v == "clash" {
+			if v == "json" && rec["fetchJSON"] == true || v == "clash" && rec["fetchClash"] == true {
 				out = append(out, v.(string))
 			}
 		}
@@ -336,6 +342,14 @@ func (s *svc) fetchDocuments(ctx context.Context, rec map[string]any, p *prepare
 		in.Hwid, in.SendDevice = "", false
 	}
 	primaryHTML := htmlPayload(body)
+	allowed := map[string]bool{"json": rec["fetchJSON"] == true, "clash": rec["fetchClash"] == true}
+	if !allowed["json"] && !allowed["clash"] {
+		if primaryHTML {
+			return fail("ALTERNATE_EXPORT_DISABLED", "По ссылке получена веб-страница. Включите дополнительный JSON или Clash в настройках подписки либо укажите прямую ссылку на конфигурацию. Прежние серверы сохранены.")
+		}
+		p.documents = append(p.documents, sourceDocument{body: body})
+		return nil
+	}
 	page := body
 	total := len(body)
 	if !primaryHTML {
@@ -365,7 +379,7 @@ func (s *svc) fetchDocuments(ctx context.Context, rec map[string]any, p *prepare
 	var links []exportLink
 	if len(page) > 0 {
 		var de *subErr
-		links, de = discoverExports(ctx, page, final)
+		links, de = discoverExports(ctx, page, final, allowed)
 		if de != nil {
 			return de
 		}
@@ -391,7 +405,18 @@ func (s *svc) fetchDocuments(ctx context.Context, rec map[string]any, p *prepare
 		return exportError()
 	}
 	bp, _ := parseURL(final)
+	primaryFinal, _ := exportURL(final, final)
+	primaryOriginal, _ := exportURL(in.URL, in.URL)
 	for _, link := range links {
+		if !primaryHTML && (link.url == primaryFinal || link.url == primaryOriginal) {
+			// Reuse the same response, not a second randomly rotated snapshot.
+			// Still enforce the declared format during staging.
+			if old := p.documents[0].format; old != "" && old != link.format {
+				return exportError()
+			}
+			p.documents[0].format = link.format
+			continue
+		}
 		export := in
 		export.URL, export.Origin, export.FinalURL = link.url, normalizedOrigin(bp), nil
 		b, err := s.fetch(ctx, export, newMetadata())
@@ -428,6 +453,12 @@ func stageDocuments(id string, docs []sourceDocument, md *metadata, enabled bool
 	merged := &staged{}
 	seen := map[string]servers.Record{}
 	formats := []string{}
+	type documentRecords struct {
+		format  string
+		records []servers.Record
+	}
+	var batches []documentRecords
+	rotationMultiple := map[string]bool{}
 	for index, doc := range docs {
 		dm := newMetadata()
 		if index == 0 && doc.format == "" {
@@ -471,9 +502,30 @@ func stageDocuments(id string, docs []sourceDocument, md *metadata, enabled bool
 		if err != nil {
 			return merged, err
 		}
+		counts := map[string]int{}
 		for _, r := range st.Records {
+			rot, e := servers.RotationKey(r)
+			if e != nil {
+				return merged, fail("PARSE_ERROR", "Не удалось сопоставить конфигурации подписки.")
+			}
+			counts[rot]++
+			if counts[rot] > 1 {
+				rotationMultiple[rot] = true
+			}
+		}
+		batches = append(batches, documentRecords{format, st.Records})
+	}
+	rotations := map[string]servers.Record{}
+	for _, batch := range batches {
+		format := batch.format
+		for _, r := range batch.records {
 			key := sourceOf(r)["importKey"].(string)
-			if old := seen[key]; old != nil {
+			rot, _ := servers.RotationKey(r)
+			old := seen[key]
+			if old == nil && !rotationMultiple[rot] {
+				old = rotations[rot]
+			}
+			if old != nil {
 				formats := sourceOf(old)["formats"].([]any)
 				found := false
 				for _, f := range formats {
@@ -488,6 +540,7 @@ func stageDocuments(id string, docs []sourceDocument, md *metadata, enabled bool
 			}
 			sourceOf(r)["formats"] = []any{format}
 			seen[key] = r
+			rotations[rot] = r
 			merged.Records = append(merged.Records, r)
 			merged.Accepted++
 		}

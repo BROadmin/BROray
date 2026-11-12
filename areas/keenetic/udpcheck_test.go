@@ -168,7 +168,7 @@ func TestUDPCheckBypassAndProxyWithoutUDP(t *testing.T) {
 	e.proxyMode = "drop"
 	e.h.r.resetCommands()
 	r = e.run(t)
-	if r.Verdict != "PROXY_UDP_FAILED" || r.Message != "Proxy0 не передаёт UDP" || !r.Route.Removed {
+	if r.Verdict != "PROXY_UDP_FAILED" || r.Message != "Не удалось подтвердить UDP через Proxy0: STUN-проверки не получили ответа" || !r.Route.Removed {
 		t.Fatalf("%+v", r)
 	}
 	noSave(t, e.h.r.commands())
@@ -184,7 +184,7 @@ func TestUDPCheckServerWithoutUDP(t *testing.T) {
 	e := newUDPEnv(t)
 	e.socksOK = false
 	r := e.run(t)
-	if r.Verdict != "SERVER_UDP_FAILED" || r.Message != "Сервер не передаёт UDP (Xray SOCKS UDP не ответил)" || r.Proxy.Ran {
+	if r.Verdict != "SERVER_UDP_FAILED" || r.Message != "Не удалось подтвердить UDP через сервер: STUN-проверки через Xray SOCKS UDP не получили ответа" || r.Proxy.Ran {
 		t.Fatalf("%+v", r)
 	}
 	if len(r.Server.Tried) != 2 {
@@ -564,8 +564,8 @@ func TestUDPVerdictMapping(t *testing.T) {
 		{"via", ok("5.5.5.5"), ok("5.5.5.5"), ok("1.1.1.1"), true, "UDP_VIA_BROray", "UDP идёт через BROray (выход 5.5.5.5)"},
 		{"via without wan", ok("5.5.5.5"), ok("5.5.5.5"), failed, true, "UDP_VIA_BROray", "UDP идёт через BROray (выход 5.5.5.5)"},
 		{"bypass", ok("5.5.5.5"), ok("1.1.1.1"), ok("1.1.1.1"), true, "BYPASS_WAN", "UDP идёт мимо VPN — через провайдера (1.1.1.1)"},
-		{"proxy timeout", ok("5.5.5.5"), failed, ok("1.1.1.1"), true, "PROXY_UDP_FAILED", "Proxy0 не передаёт UDP"},
-		{"server", failed, udpPart{}, ok("1.1.1.1"), true, "SERVER_UDP_FAILED", "Сервер не передаёт UDP (Xray SOCKS UDP не ответил)"},
+		{"proxy timeout", ok("5.5.5.5"), failed, ok("1.1.1.1"), true, "PROXY_UDP_FAILED", "Не удалось подтвердить UDP через Proxy0: STUN-проверки не получили ответа"},
+		{"server", failed, udpPart{}, ok("1.1.1.1"), true, "SERVER_UDP_FAILED", "Не удалось подтвердить UDP через сервер: STUN-проверки через Xray SOCKS UDP не получили ответа"},
 		{"same exits", ok("1.1.1.1"), ok("1.1.1.1"), ok("1.1.1.1"), true, "CHECK_FAILED", "Не удалось проверить: выход сервера 1.1.1.1 совпадает с адресом провайдера — пути не различить"},
 		{"unexpected", ok("5.5.5.5"), ok("9.9.9.9"), ok("1.1.1.1"), true, "CHECK_FAILED", "Не удалось проверить: адрес выхода 9.9.9.9 не совпадает ни с выходом сервера 5.5.5.5, ни с адресом провайдера 1.1.1.1"},
 		{"unexpected no wan", ok("5.5.5.5"), ok("9.9.9.9"), failed, true, "CHECK_FAILED", "Не удалось проверить: адрес выхода 9.9.9.9 не совпадает с выходом сервера 5.5.5.5, а адрес провайдера определить не удалось"},

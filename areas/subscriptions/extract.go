@@ -2,28 +2,26 @@ package subscriptions
 
 import (
 	"bytes"
-	"encoding/base64"
-	"github.com/BROadmin/broray/areas/servers"
-	"github.com/BROadmin/broray/internal/strictjson"
 	"regexp"
 	"strings"
+
+	"github.com/BROadmin/broray/internal/amnezia"
+	"github.com/BROadmin/broray/internal/strictjson"
+	"github.com/BROadmin/broray/internal/xrayimport"
 )
 
-// Payload detection: broray_subscription_extract_nodes (svc:857-936).
-
 var (
-	reURILine  = regexp.MustCompile(`^[ \t\n\v\f\r]*(vless|vmess|trojan|ss|hysteria2|hy2|tuic|socks|socks5|http|https|vpn)://`)
-	reJSONLine = regexp.MustCompile(`^[ \t\n\v\f\r]*(\{|\[)`)
-	reHTML     = regexp.MustCompile(`(?i)<!doctype[ \t\n\v\f\r]+html|<html[ \t\n\v\f\r>]`)
+	reURILine = regexp.MustCompile(`^[ \t\n\v\f\r]*(vless|vmess|trojan|ss|hysteria2|hy2|tuic|socks|socks5|http|https|vpn)://`)
+	reHTML    = regexp.MustCompile(`(?i)<!doctype[ \t\n\v\f\r]+html|<html[ \t\n\v\f\r>]`)
 )
 
 const spaceChars = " \t\n\v\f\r"
 
-// normalizeText strips a leading UTF-8 BOM and every CR, then splits lines
-// the way line-oriented tools see the file (a final line without LF counts).
+// Normalize line endings only. A literal CR inside JSON string data must not
+// disappear before the strict document decoder sees it.
 func normalizeText(b []byte) []string {
-	b = bytes.TrimPrefix(b, []byte{0xEF, 0xBB, 0xBF})
-	b = bytes.ReplaceAll(b, []byte{'\r'}, nil)
+	b = xrayimport.StripBOM(b)
+	b = bytes.ReplaceAll(b, []byte{'\r', '\n'}, []byte{'\n'})
 	if len(b) == 0 {
 		return nil
 	}
@@ -35,8 +33,8 @@ func normalizeText(b []byte) []string {
 }
 
 func anyMatch(re *regexp.Regexp, lines []string) bool {
-	for _, l := range lines {
-		if re.MatchString(l) {
+	for _, line := range lines {
+		if re.MatchString(line) {
 			return true
 		}
 	}
@@ -45,153 +43,144 @@ func anyMatch(re *regexp.Regexp, lines []string) bool {
 
 func trimLines(lines []string) []string {
 	out := make([]string, len(lines))
-	for i, l := range lines {
-		out[i] = strings.Trim(l, spaceChars)
+	for i, line := range lines {
+		out[i] = strings.Trim(line, spaceChars)
 	}
 	return out
 }
 
-// decodeBase64Body is broray_subscription_decode_base64.
 func decodeBase64Body(lines []string) ([]byte, bool) {
-	compact := strings.Map(func(r rune) rune {
-		switch r {
-		case '\r', '\n', '\t', ' ':
-			return -1
-		case '_':
-			return '/'
-		case '-':
-			return '+'
-		}
-		return r
-	}, strings.Join(lines, "\n"))
-	switch len(compact) % 4 {
-	case 2:
-		compact += "=="
-	case 3:
-		compact += "="
-	}
-	out, err := base64.StdEncoding.DecodeString(compact)
-	if err != nil {
-		return nil, false
-	}
-	return out, true
+	return xrayimport.DecodeBase64([]byte(strings.Join(lines, "\n")))
 }
 
-// extracted is the parse input: node lines and whether they came from Xray JSON.
 type extracted struct {
-	Clash        bool
-	NodeWarnings map[int][]string
-	Lines        []string
-	JSONImport   bool
-	Native       map[int]nativeJSONInput
+	Clash            bool
+	NodeWarnings     map[int][]string
+	Lines            []string
+	JSONImport       bool
+	Native           map[int]nativeJSONInput
+	ClientFields     map[int]map[string]any
+	UnavailableClash map[int]map[string]any
+	UnavailableXray  map[int]map[string]any
+	Amnezia          map[int]amnezia.Imported
 }
 
-// extractNodes recognises the payload: URI list, Base64 URI list or Xray
-// JSON (converted to links). Provider metadata lines of the body are
-// collected into md and removed.
 func extractNodes(body []byte, md *metadata) (*extracted, *subErr) {
-	// A WireGuard INI is one node, even though its payload has many lines.
-	trimmed := strings.TrimSpace(strings.TrimPrefix(string(body), "\ufeff"))
-	if strings.HasPrefix(trimmed, "[Interface]") || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
-		if r, err := servers.ParseLink(trimmed, "wg-detect", nil); err == nil && r["protocol"] == "wireguard" {
-			return &extracted{Lines: []string{trimmed}}, nil
-		}
+	return extractPayload(body, md, true)
+}
+
+func extractPayload(body []byte, md *metadata, allowBase64 bool) (*extracted, *subErr) {
+	if bytes.HasPrefix(body, []byte("\ufeff\ufeff")) {
+		return nil, fail("PARSE_ERROR", "Содержимое подписки не удалось распознать.")
 	}
-	lines := normalizeText(body)
-	if ex, recognized, err := structuredSubscription(lines); recognized {
+	// Recognize INI framing before validation. A damaged private document must
+	// remain one node, rather than falling through to URI-list extraction.
+	for _, line := range strings.Split(string(xrayimport.StripBOM(body)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if line == "[Interface]" {
+			return &extracted{Lines: []string{string(body)}}, nil
+		}
+		break
+	}
+	// Preserve exact JSON bytes until strict decoding; in particular do not
+	// strip comments, metadata, or embedded carriage returns first.
+	original := strings.Split(string(body), "\n")
+	if ex, recognized, err := structuredSubscription(original); recognized {
 		return ex, err
 	}
+	lines := normalizeText(body)
 	md.apply(metaRecordsFromLines(lines))
 	lines = stripMetadata(lines)
 	if anyMatch(reHTML, lines) {
 		return nil, fail("UNSUPPORTED_CONTENT", "Сервер вернул HTML вместо подписки.")
 	}
-	ex := &extracted{}
-	var out []string
-	if anyMatch(reURILine, lines) {
-		out = trimLines(lines)
-	} else {
-		input := lines
-		if !anyMatch(reJSONLine, lines) {
-			if decoded, ok := decodeBase64Body(lines); ok {
-				input = normalizeText(decoded)
-				if ex, recognized, err := structuredSubscription(input); recognized {
-					return ex, err
-				}
-				md.apply(metaRecordsFromLines(input))
-				input = stripMetadata(input)
-			}
-		}
-		if anyMatch(reURILine, input) {
-			out = trimLines(input)
-		} else {
-			text := strings.Join(input, "\n")
-			ex.Native = map[int]nativeJSONInput{}
-			ex.NodeWarnings = map[int][]string{}
-			conv, ok := xrayJSONToInputs([]byte(text), maxNodes, ex.Native, ex.NodeWarnings)
-			if !ok {
-				if cx, recognized, err := clashExtract([]byte(text)); recognized {
-					return cx, err
-				}
-				return nil, fail("PARSE_ERROR", "Содержимое подписки не удалось распознать.")
-			}
-			out, ex.JSONImport = conv, true
-		}
+	// Metadata can precede a structured document, but cannot change its grammar.
+	if ex, recognized, err := structuredSubscription(lines); recognized {
+		return ex, err
 	}
-	for _, l := range out {
-		t := strings.TrimLeft(l, spaceChars)
-		if t == "" || !ex.JSONImport && strings.HasPrefix(t, "#") {
+	if !anyMatch(reURILine, lines) {
+		if allowBase64 {
+			if decoded, ok := decodeBase64Body(lines); ok {
+				return extractPayload(decoded, md, false)
+			}
+		}
+		return nil, fail("PARSE_ERROR", "Содержимое подписки не удалось распознать.")
+	}
+	ex := &extracted{Amnezia: map[int]amnezia.Imported{}}
+	for _, line := range trimLines(lines) {
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		ex.Lines = append(ex.Lines, l)
+		if strings.HasPrefix(line, "vpn://") {
+			profiles, err := amnezia.ParseLinks(line, maxNodes-len(ex.Lines))
+			if err == amnezia.ErrTooManyContainers {
+				return nil, errTooLarge
+			}
+			if err == nil && len(profiles) > 1 {
+				for _, profile := range profiles {
+					ex.Amnezia[len(ex.Lines)] = profile
+					ex.Lines = append(ex.Lines, "")
+				}
+				continue
+			}
+		}
+		ex.Lines = append(ex.Lines, line)
 	}
 	if len(ex.Lines) == 0 {
 		return nil, fail("NO_VALID_NODES", "Подписка не содержит узлов.")
 	}
 	if len(ex.Lines) > maxNodes {
-		return nil, fail("CONTENT_TOO_LARGE", "Подписка содержит слишком много узлов.")
+		return nil, errTooLarge
 	}
 	return ex, nil
 }
 
-// Structured formats must see the exact normalized document before legacy
-// metadata/comment stripping or URI-looking lines inside YAML scalar values.
+// Once a JSON document is recognized, malformed syntax/shape is terminal.
+// Never scan a failed JSON document for URI-looking lines and import a subset.
 func structuredSubscription(lines []string) (*extracted, bool, *subErr) {
 	text := []byte(strings.Join(lines, "\n"))
-	trimmed := bytes.TrimSpace(text)
-	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
-		native := map[int]nativeJSONInput{}
-		nodeWarnings := map[int][]string{}
-		if conv, ok := xrayJSONToInputs(text, maxNodes, native, nodeWarnings); ok {
-			if len(conv) == 0 {
-				return nil, true, fail("NO_VALID_NODES", "Подписка не содержит узлов.")
-			}
-			if len(conv) > maxNodes {
-				return nil, true, fail("CONTENT_TOO_LARGE", "Подписка содержит слишком много узлов.")
-			}
-			return &extracted{Lines: conv, JSONImport: true, Native: native, NodeWarnings: nodeWarnings}, true, nil
+	if xrayimport.LooksJSON(text) {
+		document, err := strictjson.Decode(xrayimport.StripBOM(text))
+		if err != nil {
+			return nil, true, fail("PARSE_ERROR", "Содержимое подписки не удалось распознать.")
 		}
-		// A JSON export may wrap explicit share links rather than profiles.
-		// Keep the document's provenance while using the same strict parser.
-		if document, err := strictjson.Decode(text); err == nil {
-			if items, ok := document.([]any); ok && len(items) > 0 {
-				if len(items) > maxNodes {
+		// Explicit Clash JSON retains its existing schema adapter. Arbitrary
+		// objects do not gain a permissive YAML fallback after a JSON failure.
+		if m, ok := document.(map[string]any); ok {
+			if has(m, "containers") {
+				profiles, _, err := amnezia.ParseDocument(text, maxNodes)
+				if err == amnezia.ErrTooManyContainers {
 					return nil, true, errTooLarge
 				}
-				links := make([]string, 0, len(items))
-				for _, item := range items {
-					link, ok := item.(string)
-					if !ok || !reURILine.MatchString(link) || strings.ContainsAny(link, "\r\n") {
-						return nil, false, nil
-					}
-					links = append(links, link)
+				if err != nil {
+					return nil, true, fail("PARSE_ERROR", "Неправильная клиентская конфигурация AmneziaWG.")
 				}
-				if len(links) > maxNodes {
-					return nil, true, errTooLarge
+				ex := &extracted{Amnezia: map[int]amnezia.Imported{}, Lines: make([]string, len(profiles))}
+				for i, profile := range profiles {
+					ex.Amnezia[i] = profile
 				}
-				return &extracted{Lines: links, JSONImport: true}, true, nil
+				return ex, true, nil
+			}
+			if has(m, "proxies") || has(m, "type") {
+				if ex, recognized, err := clashExtract(text); recognized {
+					return ex, true, err
+				}
 			}
 		}
+		ex, ok := xrayJSONExtract(text, maxNodes)
+		if !ok {
+			return nil, true, fail("PARSE_ERROR", "Содержимое подписки не удалось распознать.")
+		}
+		if len(ex.Lines) == 0 {
+			return nil, true, fail("NO_VALID_NODES", "Подписка не содержит узлов.")
+		}
+		if len(ex.Lines) > maxNodes {
+			return nil, true, errTooLarge
+		}
+		return ex, true, nil
 	}
 	return clashExtract(text)
 }

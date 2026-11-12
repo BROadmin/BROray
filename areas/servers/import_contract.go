@@ -9,7 +9,7 @@ import (
 // historical defaults; reading them must not silently rewrite a connection.
 func validateQueryContext(q query, rec Record) *ParseError {
 	proto, network, security := asString(rec["protocol"]), asString(rec["network"]), asString(rec["security"])
-	if !in(proto, "vless", "vmess", "trojan") {
+	if !in(proto, "vless", "vmess", "trojan", "http", "socks", "shadowsocks") {
 		return nil
 	}
 	for _, key := range []string{"flow", "encryption", "authority", "serviceName", "service_name", "mode", "sni", "fp", "alpn", "pbk", "sid", "spx", "pqv", "ech", "pcs", "vcn", "host", "path"} {

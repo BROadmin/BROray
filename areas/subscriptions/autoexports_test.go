@@ -127,7 +127,7 @@ func TestAutoExports355ServiceMerge(t *testing.T) {
 		}
 	}))
 	defer p.Close()
-	id := e.create(t, p.URL+"/sub/invented", "")
+	id := e.createWithExports357(t, p.URL+"/sub/invented", "")
 	if err := e.refreshSync(t, id); err != nil {
 		t.Fatalf("%v result=%v", err, e.record(t, id)["lastUpdateResult"])
 	}
@@ -175,7 +175,7 @@ func TestAutoExports355AtomicFailures(t *testing.T) {
 		t.Run(failure, func(t *testing.T) {
 			e := newEnv(t)
 			p := newAutoFixture355(t)
-			id := e.create(t, p.URL+"/sub/invented", "")
+			id := e.createWithExports357(t, p.URL+"/sub/invented", "")
 			if err := e.refreshSync(t, id); err != nil {
 				t.Fatal(err)
 			}
@@ -246,7 +246,7 @@ func TestAutoExports355AtomicFailures(t *testing.T) {
 func TestAutoExports355RefreshAndWithdrawal(t *testing.T) {
 	e := newEnv(t)
 	p := newAutoFixture355(t)
-	id := e.create(t, p.URL+"/sub/invented", "")
+	id := e.createWithExports357(t, p.URL+"/sub/invented", "")
 	if err := e.refreshSync(t, id); err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func TestAutoExports355HTMLPrimaryAndDirect(t *testing.T) {
 					p.jsonBody = `{"outbounds":[` + x + `]}`
 				}
 			})
-			id := e.create(t, p.URL+"/sub/invented", extra)
+			id := e.createWithExports357(t, p.URL+"/sub/invented", extra)
 			if err := e.refreshSync(t, id); err != nil {
 				t.Fatal(err)
 			}
@@ -417,7 +417,7 @@ func TestAutoExports355Cancellation(t *testing.T) {
 		}
 	}))
 	defer p.Close()
-	id := e.create(t, p.URL+"/sub/invented", "")
+	id := e.createWithExports357(t, p.URL+"/sub/invented", "")
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	prep := &prepared{}
@@ -450,7 +450,7 @@ func TestAutoExports355RedirectIdentifiers(t *testing.T) {
 	defer final.Close()
 	start := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, final.URL+"/final", 302) }))
 	defer start.Close()
-	id := e.create(t, start.URL+"/sub/invented", `,"sendDeviceInfo":true`)
+	id := e.createWithExports357(t, start.URL+"/sub/invented", `,"sendDeviceInfo":true`)
 	if err := e.refreshSync(t, id); err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +478,7 @@ func TestAutoExports355KnownFailureLabel(t *testing.T) {
 					p.clashBody = "unrecognized-invented-secret"
 				}
 			})
-			id := e.create(t, p.URL+"/sub/invented", "")
+			id := e.createWithExports357(t, p.URL+"/sub/invented", "")
 			err := e.refreshSync(t, id)
 			if err == nil || !strings.Contains(strings.ToLower(err.Error()), format) {
 				t.Fatal("missing safe failed format label", err)
@@ -518,7 +518,7 @@ func TestAutoExports355Bounds(t *testing.T) {
 		e := newEnv(t)
 		p := newAutoFixture355(t)
 		p.change(func() { p.primary = strings.Repeat("a", maxBodyBytes); p.jsonBody = strings.Repeat("b", maxBodyBytes) })
-		id := e.create(t, p.URL+"/sub/invented", "")
+		id := e.createWithExports357(t, p.URL+"/sub/invented", "")
 		prep := &prepared{}
 		if err := e.s.runFetch(context.Background(), e.record(t, id), prep, errPrepTimeout); err != nil {
 			t.Fatal(err)
@@ -551,7 +551,7 @@ func TestAutoExports355Bounds(t *testing.T) {
 func TestAutoExports355DiscoveryStateValidation(t *testing.T) {
 	e := newEnv(t)
 	p := newAutoFixture355(t)
-	id := e.create(t, p.URL+"/sub/invented", "")
+	id := e.createWithExports357(t, p.URL+"/sub/invented", "")
 	if err := e.refreshSync(t, id); err != nil {
 		t.Fatal(err)
 	}

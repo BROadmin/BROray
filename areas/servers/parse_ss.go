@@ -202,7 +202,18 @@ func parseShadowsocks(uri string) (*parsed, *ParseError) {
 	if err != nil {
 		return nil, then(err, "Shadowsocks: импорт ссылки отклонён")
 	}
-	return p, nil
+	body, _, _ := splitFirst(uri, '#')
+	_, rawQuery, _ := splitFirst(body, '?')
+	if rawQuery == "" {
+		return p, nil
+	}
+	transport, e := parseClientTransport(p.address, p.port, rawQuery, "none")
+	if e != nil {
+		return nil, e
+	}
+	transport.protocol, transport.method, transport.password = p.protocol, p.method, p.password
+	transport.name = p.name
+	return transport, nil
 }
 
 func ssURI(uri string) (*parsed, *ParseError) {

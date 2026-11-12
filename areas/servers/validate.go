@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/BROadmin/broray/internal/strictjson"
+	"github.com/BROadmin/broray/internal/xrayid"
 )
 
 // ---------- jq-like accessors over decoded JSON ----------
@@ -197,8 +198,11 @@ func streamFieldsValid(s map[string]any) bool {
 	security := s["security"]
 	if protocol == "hysteria2" {
 		hy := s["hysteria"]
-		if has(hy, "udpIdleTimeout") && !nonNegInt32(get(hy, "udpIdleTimeout")) {
-			return false
+		if has(hy, "udpIdleTimeout") {
+			timeout, ok := isInt(get(hy, "udpIdleTimeout"))
+			if !ok || (timeout != 0 && (timeout < 2 || timeout > 600)) {
+				return false
+			}
 		}
 		if !isText(s["auth"]) {
 			return false
@@ -271,7 +275,7 @@ func streamFieldsValid(s map[string]any) bool {
 		return false
 	}
 	tr := s["transport"]
-	if in(protocol, "vless", "vmess", "trojan") {
+	if in(protocol, "vless", "vmess", "trojan", "http", "socks", "shadowsocks") {
 		switch network {
 		case "xhttp":
 			m, ok := strOr(get(tr, "mode"), "auto").(string)
@@ -332,20 +336,12 @@ func streamFieldsValid(s map[string]any) bool {
 		}
 	}
 	tls := s["tls"]
+	if security == "tls" && tls != nil && clientTLSValid(tls, "streamSettings.tlsSettings") != nil {
+		return false
+	}
 	for _, k := range []string{"echConfigList", "verifyPeerCertByName", "pinnedPeerCertSha256"} {
 		if has(tls, k) && !(security == "tls" && isText(get(tls, k))) {
 			return false
-		}
-	}
-	if pin := strOr(get(tls, "pinnedPeerCertSha256"), ""); pin != "" {
-		ps, ok := pin.(string)
-		if !ok {
-			return false
-		}
-		for _, p := range strings.Split(ps, ",") {
-			if !hexPin(p) {
-				return false
-			}
 		}
 	}
 	if pqv := strOr(get(s, "reality", "mldsa65Verify"), ""); pqv != "" {
@@ -510,7 +506,7 @@ func xhttpExtraValid(e map[string]any, mode string, depth int) bool {
 			}
 		}
 	}
-	if has(e, "scMaxBufferedPosts") && !nonNegInt32(e["scMaxBufferedPosts"]) {
+	if has(e, "scMaxBufferedPosts") && !strictjson.SignedInt64(e["scMaxBufferedPosts"]) {
 		return false
 	}
 	xm := map[string]any{}
@@ -632,7 +628,13 @@ func jqNetwork(s map[string]any) (string, bool) {
 		}
 		v = s["network"].(string)
 	}
-	switch v {
+	if has(s, "method") {
+		if !textValue(s["method"]) {
+			return "", false
+		}
+		v = s["method"].(string)
+	}
+	switch strings.ToLower(v) {
 	case "raw", "tcp":
 		return "tcp", true
 	case "websocket", "ws":
@@ -658,13 +660,13 @@ func stringField(o map[string]any, k, def string) (string, bool) {
 }
 
 func downloadSettingsValid(d map[string]any) bool {
-	if !keysSubset(d, "address", "port", "network", "security", "tlsSettings", "realitySettings", "xhttpSettings", "splithttpSettings", "finalmask") {
+	if !keysSubset(d, "address", "port", "network", "method", "security", "tlsSettings", "realitySettings", "xhttpSettings", "splithttpSettings", "sockopt", "finalmask") {
 		return false
 	}
 	if n, ok := jqNetwork(d); !ok || n != "xhttp" {
 		return false
 	}
-	if has(d, "address") && !addressURIValid(d["address"]) {
+	if !has(d, "address") || !addressURIValid(d["address"]) {
 		return false
 	}
 	if has(d, "port") {
@@ -675,6 +677,11 @@ func downloadSettingsValid(d map[string]any) bool {
 	}
 	if !protectionValid(d) {
 		return false
+	}
+	if has(d, "sockopt") {
+		if err := ValidateStreamOptions("xhttp", map[string]any{"sockopt": d["sockopt"]}); err != nil {
+			return false
+		}
 	}
 	if has(d, "finalmask") && !isObject(d["finalmask"]) {
 		return false
@@ -885,29 +892,7 @@ func protectionValid(s map[string]any) bool {
 			}
 			t = m
 		}
-		if !keysSubset(t, "serverName", "fingerprint", "alpn", "allowInsecure", "echConfigList", "pinnedPeerCertSha256", "verifyPeerCertByName") {
-			return false
-		}
-		if has(t, "allowInsecure") && t["allowInsecure"] != false {
-			return false
-		}
-		if has(t, "alpn") {
-			arr, ok := t["alpn"].([]any)
-			if !ok {
-				return false
-			}
-			for _, a := range arr {
-				s, ok := a.(string)
-				if !textValue(a) || !ok || s == "" || runeLen(s) > 255 || strings.Contains(s, ",") {
-					return false
-				}
-			}
-		}
-		for _, k := range []string{"serverName", "fingerprint", "echConfigList", "pinnedPeerCertSha256", "verifyPeerCertByName"} {
-			if _, ok := stringField(t, k, ""); !ok {
-				return false
-			}
-		}
+		return clientTLSValid(t, "streamSettings.tlsSettings") == nil
 	default:
 		if has(s, "tlsSettings") || has(s, "realitySettings") {
 			return false
@@ -1026,14 +1011,14 @@ func structureValid(s map[string]any) bool {
 		if get(s, "tls", "allowInsecure") == true {
 			return false
 		}
-		if has(s["tls"], "pinnedPeerCertSha256") && !hexPin(get(s, "tls", "pinnedPeerCertSha256")) {
+		if has(s["tls"], "pinnedPeerCertSha256") && clientTLSValid(s["tls"], "streamSettings.tlsSettings") != nil {
 			return false
 		}
 		if !isObject(s["tls"]) || !nonEmptyString(get(s, "tls", "serverName")) {
 			return false
 		}
 	case "shadowsocks":
-		if !nonEmptyString(s["method"]) || !nonEmptyString(s["password"]) || s["network"] != "raw" || s["security"] != "none" {
+		if !nonEmptyString(s["method"]) || !nonEmptyString(s["password"]) || !ordinaryClientStreamValid(s) {
 			return false
 		}
 	case "vless":
@@ -1044,7 +1029,7 @@ func structureValid(s map[string]any) bool {
 		if s["security"] == "reality" && !in(asString(s["network"]), "raw", "grpc", "xhttp") {
 			return false
 		}
-		if !nonEmptyString(s["uuid"]) {
+		if !xrayid.Valid(asString(s["uuid"])) {
 			return false
 		}
 		if s["flow"] != nil {
@@ -1054,7 +1039,7 @@ func structureValid(s map[string]any) bool {
 			}
 		}
 	default:
-		if !nonEmptyString(s["uuid"]) {
+		if !xrayid.Valid(asString(s["uuid"])) {
 			return false
 		}
 	}
@@ -1073,6 +1058,12 @@ func Validate(rec Record, label string) error {
 }
 
 func validate(rec Record, label string) *ParseError {
+	if has(rec, "importProfile") {
+		return validateUnavailableProfile(rec)
+	}
+	if e := validateClientFields(rec); e != nil {
+		return e
+	}
 	if e := streamOptionsError(rec); e != nil {
 		return e
 	}

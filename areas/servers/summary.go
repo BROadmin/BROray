@@ -105,6 +105,7 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 			"subscriptionId": alt(get(rec, "source", "subscriptionId"), nil), "nodeIndex": alt(get(rec, "source", "nodeIndex"), nil),
 			"subscriptionName": s.presentationSubscriptionName(rec, subscriptionNames), "displayGroupId": id,
 			"active": rec["id"] == active, "quality": q, "connectionSupport": support,
+			"importWarnings": MaskRecord(rec)["importWarnings"],
 		}
 		rows = append(rows, row)
 		if k, err := CanonicalKey(rec); err == nil {

@@ -33,6 +33,15 @@ func streamOptionsError(r Record) *ParseError {
 		if block != "sockopt" && (expected[block] == "" || expected[block] != r["network"]) {
 			return bad(block)
 		}
+		if block == "sockopt" {
+			// The same pinned client socket schema is used at the stream root
+			// and inside FinalMask TLS. Do not silently narrow signed values,
+			// Happy Eyeballs options, or the case-insensitive core enums here.
+			if e := freshSocket(opts, "streamOptions.sockopt", 0); e != nil {
+				return e
+			}
+			continue
+		}
 		for k, val := range opts {
 			valid := false
 			switch block {
@@ -51,28 +60,17 @@ func streamOptionsError(r Record) *ParseError {
 						seen[lower] = true
 					}
 				case "heartbeatPeriod":
-					valid = block == "wsSettings" && nonNegInt32(val)
+					_, valid = freshUnsigned(val, 32)
+					valid = block == "wsSettings" && valid
 				}
 			case "grpcSettings":
 				switch k {
 				case "idle_timeout", "health_check_timeout", "initial_windows_size":
-					valid = nonNegInt32(val)
+					_, valid = freshSigned(val, 32)
 				case "permit_without_stream":
 					_, valid = val.(bool)
 				case "user_agent":
 					valid = textValue(val)
-				}
-			case "sockopt":
-				switch k {
-				case "tcpFastOpen":
-					_, valid = val.(bool)
-					if !valid {
-						valid = nonNegInt32(val)
-					}
-				case "tcpKeepAliveIdle", "tcpKeepAliveInterval":
-					valid = nonNegInt32(val)
-				case "domainStrategy":
-					valid = in(asString(val), "AsIs", "UseIP", "UseIPv4", "UseIPv6", "UseIPv4v6", "UseIPv6v4", "ForceIP", "ForceIPv4", "ForceIPv6", "ForceIPv4v6", "ForceIPv6v4")
 				}
 			}
 			if !valid {
@@ -108,10 +106,8 @@ func headerToken(s string) bool {
 }
 
 func parseLink(link, id string, source map[string]any) (Record, *ParseError) {
-	// A UTF-8 BOM is framing only at the start of a native document.
-	nativeText := strings.TrimPrefix(link, "\ufeff")
-	if strings.HasPrefix(strings.TrimSpace(nativeText), "{") {
-		return parseNativeDocument(nativeText, id, source)
+	if rec, handled, err := parseInputEnvelope(link, id, source); handled {
+		return rec, err
 	}
 	r, err := parseBaseLink(link, id, source)
 	if err != nil {
@@ -186,11 +182,11 @@ func auditQuery(q query, r Record) *ParseError {
 	case "vless", "vmess", "trojan":
 		allowed = append(allowed, "type", "security", "encryption", "flow", "sni", "fp", "pbk", "sid", "spx", "host", "authority", "path", "serviceName", "service_name", "mode", "headerType", "extra", "alpn", "allowInsecure", "insecure", "header", "ech", "pcs", "vcn", "pqv", "fm", "seed", "mtu", "tti", "uplinkCapacity", "downlinkCapacity", "cwndMultiplier", "maxSendingWindow")
 	case "http", "socks":
-		allowed = append(allowed, "type", "security", "sni", "fp", "alpn", "pcs", "vcn", "ech")
+		allowed = append(allowed, clientStreamQueryKeys...)
 	case "hysteria2":
 		allowed = append(allowed, "sni", "peer", "security", "fp", "insecure", "alpn", "pinSHA256", "obfs", "obfs-password", "fm", "udpIdleTimeout", "ech", "pcs", "vcn", "pqv")
 	case "shadowsocks":
-		allowed = append(allowed, "plugin")
+		allowed = append(append(allowed, clientStreamQueryKeys...), "plugin")
 	}
 	if q.has("extra") && r["network"] != "xhttp" {
 		raw, _ := q.value("extra")

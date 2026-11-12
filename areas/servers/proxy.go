@@ -60,7 +60,7 @@ func parseProxy(link, id string, source map[string]any) (Record, *ParseError) {
 		return nil, die("неправильная ссылка прокси")
 	}
 	q := query(u.RawQuery)
-	if err := queryKeys(q, "type", "security", "sni", "fp", "alpn", "pcs", "vcn", "ech", "streamOptions"); err != nil {
+	if err := queryKeys(q, clientStreamQueryKeys...); err != nil {
 		return nil, err
 	}
 	proto, security, port := "http", "none", "80"
@@ -80,12 +80,8 @@ func parseProxy(link, id string, source map[string]any) (Record, *ParseError) {
 	if pe != nil {
 		return nil, pe
 	}
-	network, _ := q.value("type")
-	if !in(network, "", "raw", "tcp") {
-		return nil, die("для прокси поддерживается транспорт RAW/TCP")
-	}
 	if sec, _ := q.value("security"); sec != "" {
-		if !in(sec, "none", "tls") || u.Scheme == "https" && sec != "tls" {
+		if !in(sec, "none", "tls", "reality") || u.Scheme == "https" && sec != "tls" {
 			return nil, die("защита не соответствует схеме прокси")
 		}
 		security = sec
@@ -104,38 +100,19 @@ func parseProxy(link, id string, source map[string]any) (Record, *ParseError) {
 	}
 	r := Record{"schemaVersion": 2, "id": id, "name": name, "source": cloneSource(source), "uri": link, "protocol": proto,
 		"address": u.Hostname(), "port": n, "network": "raw", "security": security, "username": user, "password": password}
-	tls := map[string]any{}
-	for _, pair := range [][2]string{{"sni", "serverName"}, {"fp", "fingerprint"}, {"pcs", "pinnedPeerCertSha256"}, {"vcn", "verifyPeerCertByName"}, {"ech", "echConfigList"}} {
-		if v, _ := q.value(pair[0]); v != "" {
-			tls[pair[1]] = v
-		}
-	}
-	if v, _ := q.value("alpn"); v != "" {
-		tls["alpn"] = splitNonEmpty(v)
-	}
-	if security == "none" && len(tls) > 0 {
-		return nil, die("параметры TLS требуют защищённого соединения прокси")
-	}
-	if security == "tls" {
-		if !has(tls, "serverName") {
-			tls["serverName"] = u.Hostname()
-		}
-		if !has(tls, "fingerprint") {
-			tls["fingerprint"] = "chrome"
-		}
-		r["tls"] = tls
-	}
-	r = normalize(r)
-	if e := validateProxy(r); e != nil {
+	p, e := parseClientTransport(u.Hostname(), port, u.RawQuery, security)
+	if e != nil {
 		return nil, e
 	}
-	return r, nil
+	if p.security == "tls" && p.sni == "" {
+		p.sni = u.Hostname()
+	}
+	return saveClientTransport(r, p)
 }
 
 func validateProxy(r Record) *ParseError {
-	if !basicRecordValid(r) || !in(asString(r["protocol"]), "http", "socks") || r["network"] != "raw" ||
-		!in(asString(r["security"]), "none", "tls") || !textValue(r["username"]) || !textValue(r["password"]) ||
-		(r["username"] == "" && r["password"] != "") || !streamFieldsValid(r) {
+	if !basicRecordValid(r) || !in(asString(r["protocol"]), "http", "socks") || !textValue(r["username"]) || !textValue(r["password"]) ||
+		(r["username"] == "" && r["password"] != "" && r["proxyAccount"] != true) || !ordinaryClientStreamValid(r) {
 		return die("неправильные параметры прокси")
 	}
 	if r["protocol"] == "socks" && (len(asString(r["username"])) > 255 || len(asString(r["password"])) > 255) {

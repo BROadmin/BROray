@@ -1,10 +1,13 @@
 package servers
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 
+	"github.com/BROadmin/broray/internal/amnezia"
 	"github.com/BROadmin/broray/internal/strictjson"
+	"github.com/BROadmin/broray/internal/xrayimport"
 )
 
 func nativeError(field string) *ParseError {
@@ -51,7 +54,7 @@ func ParseNativeOutbound(input map[string]any, name, id string, source map[strin
 func parseNativeOutbound(input map[string]any, name, id string, source map[string]any) (Record, *ParseError) {
 	// Detach caller-owned maps before storing credentials or normalizing fields.
 	out := normalize(input)
-	if err := nativeKeys(out, "outbound", "protocol", "tag", "settings", "streamSettings", "mux"); err != nil {
+	if err := nativeKeys(out, "outbound", "protocol", "tag", "settings", "streamSettings", "mux", "targetStrategy", "sendThrough"); err != nil {
 		return nil, err
 	}
 	if has(out, "tag") && !textValue(out["tag"]) {
@@ -64,11 +67,20 @@ func parseNativeOutbound(input map[string]any, name, id string, source map[strin
 		return nil, nativeError("name")
 	}
 	proto := asString(out["protocol"])
-	st, err := nativeObject(out["streamSettings"], "streamSettings", "network", "security", "tlsSettings", "xdriveSettings", "masqueSettings", "sockopt", "finalmask")
+	if proto == "wireguard" {
+		return parseNativeWireGuard(out, name, id, source)
+	}
+	st, err := nativeObject(out["streamSettings"], "streamSettings", "network", "method", "address", "port", "security", "tlsSettings", "xdriveSettings", "masqueSettings", "sockopt", "finalmask")
 	if err != nil {
 		return nil, err
 	}
-	network := asString(st["network"])
+	if has(st, "method") {
+		if !textValue(st["method"]) || has(st, "network") && !textValue(st["network"]) {
+			return nil, nativeError("streamSettings.method")
+		}
+		st["network"] = st["method"]
+	}
+	network := strings.ToLower(asString(st["network"]))
 	if !(proto == "vless" && network == "xdrive" || proto == "masque" && network == "masque") {
 		return nil, nativeError("protocol.network")
 	}
@@ -77,9 +89,33 @@ func parseNativeOutbound(input map[string]any, name, id string, source map[strin
 	}
 	security := "none"
 	if has(st, "security") {
-		security = asString(st["security"])
+		if !textValue(st["security"]) {
+			return nil, nativeError("streamSettings.security")
+		}
+		security = strings.ToLower(asString(st["security"]))
+		if security == "" {
+			security = "none"
+		}
 	}
 	r := Record{"schemaVersion": 2, "id": id, "name": name, "source": cloneSource(source), "protocol": proto, "network": network, "security": security}
+	endpoint := map[string]any{}
+	for _, key := range []string{"address", "port"} {
+		if has(st, key) {
+			endpoint[key] = st[key]
+		}
+	}
+	if len(endpoint) > 0 {
+		r["streamEndpoint"] = endpoint
+	}
+	options := map[string]any{}
+	for _, key := range []string{"targetStrategy", "sendThrough"} {
+		if has(out, key) {
+			options[key] = out[key]
+		}
+	}
+	if len(options) > 0 {
+		r["outboundOptions"] = options
+	}
 	if has(st, "tlsSettings") {
 		r["tls"] = st["tlsSettings"]
 	}
@@ -140,8 +176,12 @@ func parseNativeOutbound(input map[string]any, name, id string, source map[strin
 		if has(user, "email") && !textValue(user["email"]) {
 			return nil, nativeError("settings.vnext.users.email")
 		}
-		if has(user, "email") || has(user, "level") {
-			addNativeImportWarning(r, "Служебное поле email не переносится. Уровень пользователя level нормализуется к локальной политике BROray; политика, DNS и маршрутизация профиля не применяются.")
+		if has(user, "email") {
+			r["accountEmail"] = user["email"]
+		}
+		if has(user, "level") {
+			r["accountLevel"] = user["level"]
+			addNativeImportWarning(r, clientAccountLevelWarning)
 		}
 		r["address"], r["port"] = endpoint["address"], endpoint["port"]
 		r["uuid"], r["encryption"] = user["id"], user["encryption"]
@@ -188,53 +228,117 @@ func nativeVLESSSettings(input any) (map[string]any, *ParseError) {
 }
 
 func parseNativeDocument(text, id string, source map[string]any) (Record, *ParseError) {
-	v, err := strictjson.Decode([]byte(text))
+	inputs, err := xrayimport.DecodeJSON([]byte(text), 1, xrayimport.Checks{
+		VlessEncryptionValid:  VlessEncryptionValid,
+		ValidateStreamOptions: ValidateStreamOptions,
+		ValidateClientFields:  ValidateClientFields,
+	})
 	if err != nil {
 		return nil, nativeError("document")
 	}
-	m, ok := v.(map[string]any)
+	if len(inputs.Inputs) != 1 {
+		return nil, die("для ручного JSON-импорта нужен один сервер; список добавьте как подписку")
+	}
+	input := inputs.Inputs[0]
+	if input.Rejected {
+		return nil, nativeError(orStr(input.RejectionField, "outbound"))
+	}
+	var rec Record
+	var parseErr *ParseError
+	if input.NativeOutbound != nil {
+		rec, parseErr = parseNativeOutbound(input.NativeOutbound, input.Name, id, source)
+	} else {
+		rec, parseErr = parseLink(input.Link, id, source)
+	}
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if len(input.ClientFields) > 0 {
+		var applyErr error
+		rec, applyErr = ApplyClientFields(rec, input.ClientFields)
+		if applyErr != nil {
+			if e, ok := applyErr.(*ParseError); ok {
+				return nil, e
+			}
+			return nil, nativeError("outbound")
+		}
+	}
+	if input.UnavailableSource != nil {
+		wrapped, wrapErr := WrapUnavailableXray(rec, input.UnavailableSource)
+		if wrapErr != nil {
+			return nil, unavailableProfileError()
+		}
+		rec = wrapped
+	}
+	if input.NativeOutbound == nil {
+		addNativeImportWarning(rec, xrayimport.JSONWarning)
+	}
+	if input.FromProfile {
+		addNativeImportWarning(rec, xrayimport.ProfileWarning)
+	}
+	for _, warning := range input.Warnings {
+		addNativeImportWarning(rec, warning)
+	}
+	return rec, nil
+}
+
+// parseInputEnvelope only unwraps recognized document forms and one Base64
+// layer. URI and INI parsing retain their existing final validation path.
+func parseInputEnvelope(text, id string, source map[string]any) (Record, bool, *ParseError) {
+	if isWireGuardInput(text) {
+		if amnezia.HasNativeINIParameters(text) {
+			if source == nil {
+				source = map[string]any{"type": "manual"}
+			}
+			// Reuse the established private native-profile importer without
+			// changing BOM, comments, line endings or the original INI values.
+			rec, err := parseAmnezia("vpn://"+base64.RawURLEncoding.EncodeToString([]byte(text)), id, source)
+			return rec, true, err
+		}
+		return nil, false, nil
+	}
+	if rec, recognized, err := parseAmneziaDocument(text, id, source); recognized {
+		return rec, true, err
+	}
+	if rec, recognized, err := parseClashDocument(text, id, source); recognized {
+		return rec, true, err
+	}
+	if xrayimport.LooksJSON([]byte(text)) {
+		rec, err := parseNativeDocument(text, id, source)
+		return rec, true, err
+	}
+	if strings.Contains(text, "://") {
+		// A URI is one line. Otherwise a second link can be swallowed by
+		// the first link's fragment instead of being counted as another node.
+		if strings.ContainsAny(text, "\r\n") {
+			return nil, true, die("для ручного импорта нужен один сервер; несколько ссылок передайте отдельно")
+		}
+		return nil, false, nil
+	}
+	decoded, ok := xrayimport.DecodeBase64([]byte(text))
 	if !ok {
-		return nil, nativeError("document")
+		return nil, false, nil
 	}
-	for _, field := range []string{"tag", "remarks"} {
-		if has(m, field) && !textValue(m[field]) {
-			return nil, nativeError(field)
-		}
+	if isWireGuardInput(string(decoded)) {
+		rec, err := parseLink(string(decoded), id, source)
+		return rec, true, err
 	}
-	out := m
-	name := asString(m["tag"])
-	if has(m, "outbounds") {
-		list, ok := m["outbounds"].([]any)
-		if !ok {
-			return nil, nativeError("outbounds")
-		}
-		var nodes []map[string]any
-		for _, v := range list {
-			o, ok := v.(map[string]any)
-			if !ok {
-				return nil, nativeError("outbounds")
-			}
-			if !in(asString(o["protocol"]), "freedom", "blackhole") {
-				nodes = append(nodes, o)
-			}
-		}
-		if len(nodes) != 1 {
-			return nil, die("для ручного JSON-импорта нужен один сервер; список добавьте как подписку")
-		}
-		out = nodes[0]
-		name = asString(m["remarks"])
-		if name == "" {
-			name = asString(out["tag"])
-		}
+	if rec, recognized, err := parseAmneziaDocument(string(decoded), id, source); recognized {
+		return rec, true, err
 	}
-	r, e := parseNativeOutbound(out, name, id, source)
-	if e != nil {
-		return nil, e
+	if rec, recognized, err := parseClashDocument(string(decoded), id, source); recognized {
+		return rec, true, err
 	}
-	if has(m, "outbounds") {
-		addNativeImportWarning(r, "Из полного профиля импортирован только сервер. DNS, маршрутизация, inbound и API не применяются.")
+	if xrayimport.LooksJSON(decoded) {
+		rec, err := parseNativeDocument(string(decoded), id, source)
+		return rec, true, err
 	}
-	return r, nil
+	plain := strings.TrimSpace(string(xrayimport.StripBOM(decoded)))
+	if xrayimport.IsShareLink(plain) {
+		rec, err := parseLink(plain, id, source)
+		return rec, true, err
+	}
+	return nil, true, nativeError("document")
 }
 
 func nativeStreamValid(r Record) *ParseError {

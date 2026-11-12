@@ -2,19 +2,19 @@
   "target": "XTLS/Xray-core v26.11.9",
   "count": 468,
   "sourceSHA256": {
-    "transport_internet.go": "5786d15149d6379462e02fe6de3c1c62e6cb0967fcd0c8464503d8f21522b3de",
-    "transport_security.go": "24f954785b273b7bbf58ce7de09da7552a43a9e356e457d14c6be2b879d3f677",
-    "transport_sockopt.go": "627cb499d6e59936ee9ec6c94318292d7b045690e173aec77705c4bfa81aad20",
-    "transport_finalmask.go": "dc12c034e5ce4ea3b0670b5ee94a132bf5f6892d5ea8044be925c0b6d6874acf",
+    "transport_internet.go": "d07fb2fe1f3935f86396564afb26d79e0cfe865adc5dd52bd694f5cff8518d9c",
+    "transport_security.go": "dd7ea89e62d90bfd644bbd37ae44f0a1f8e66d10095fe12bd87a774571e4554e",
+    "transport_sockopt.go": "9fba6eab1f52d0dac18c26b12f828a04762dfe44f08c123218da53faf45b32e3",
+    "transport_finalmask.go": "d1037d60d4a372b82eb7e053726c76ac49bf84726367517d49b0df93c7284455",
     "transport_method.go": "017bde70fa6b9f37ca1f445409b5ed96de2b2cce85993ce32e4e0179e52c3ff1",
-    "http.go": "3cd68030a5b1f1f5f882c4dd6463e2aee71fd34151fa4ace8612d36760429261",
-    "socks.go": "7d019bd23e40bb1d2bc0bf337d053deed0fa5828e2b90f66b2cd666bbf240f95",
-    "vless.go": "b8f68fdb7385ed32e67a579a6a846303ecadd8505303dab7b48cc31a36c11e02",
-    "vmess.go": "add936cdf67389c9e25a2939e7c6bb4ee8549b50848002074d0a19e030674d04",
-    "trojan.go": "58200dcc1cf65055760a58581baa8125bc1a5f5e98684da52f447b0a11ed1230",
-    "shadowsocks.go": "2e9eb0aeaa5332869e3b5d9dc41d248d70c9ff928b5be1fa3b202ae16775a3d3",
-    "wireguard.go": "f18d19bc82c6854c112c363c18b1f7cadb0fa617ee5a01c111522d696f6c3939",
-    "hysteria.go": "8da7816dab5f6141f1fcdaf9e98f55e07bef9a89054503e5c333efdc5707fa93",
+    "http.go": "093c0aa48ebea396766f836a7be4036f429ff100eb4bf5f0bc70679fc7e59936",
+    "socks.go": "487ef1e587b0cfbb2f9cde8ab71f28922acf5bfa95719e5d24b8c5d2be9063a5",
+    "vless.go": "931e622cb00384016921fb825edd166f2753b9447113a0ed36c946e53e1b06d1",
+    "vmess.go": "64a95f1085c794407432f6e89e22b835f5ae5f747dcafa425f5b3aff7b3ee096",
+    "trojan.go": "9aa3c084b6e1eb8e0819c360c6ac316c5055fe31fde7b6879683aa277b5a4e50",
+    "shadowsocks.go": "8f14e3b3a925ca0f16d5ed8b83e38be526c30234803bd75ade6806daeab0bad6",
+    "wireguard.go": "9e437212a7adf79ce5887f9c76fe9fd43093c42e62e73ed0e2caa5d245b884dd",
+    "hysteria.go": "28627316ad7c5a68202aea51c489c1c7e33742b570113bde7a323cce45a7bc8b",
     "masque.go": "dc8750465a97611015c1c7cebff594c8bd8f88973045cfe918b6d90b0c3b4c69",
     "xray.go": "6620e01be06b90b4452dcf6bf2d9ced2cda3d1362ed353273b9000cb31af856f"
   },
@@ -15497,5 +15497,29 @@
     "cryptographic keys and REALITY combinations",
     "XDNS domain semantics",
     "mask transform/runtime peer semantics"
-  ]
+  ],
+  "sourceCommit": "676eaf66f8f05d4d558ee7a74b4736623d3feeb9",
+  "historicalSourceLedger": {
+    "sha256": "b214110cfa4e0ce8e39b1b86d83cc666d790b6fa30457d539a5176595cc1cfa1",
+    "mismatchingFiles": [
+      "transport_internet.go",
+      "transport_security.go",
+      "transport_sockopt.go",
+      "transport_finalmask.go",
+      "http.go",
+      "socks.go",
+      "vless.go",
+      "vmess.go",
+      "trojan.go",
+      "shadowsocks.go",
+      "wireguard.go",
+      "hysteria.go"
+    ],
+    "interpretation": "Earlier source hash ledger differs; no retag or binary replacement inferred. Historical dispositions below are not 3.5.7 acceptance."
+  },
+  "importCoverage357": {
+    "state": "in-progress",
+    "spec": "FULL-IMPORT-SPEC.md",
+    "fieldStatuses": "pending final per-field reconciliation after code and targeted checks"
+  }
 }

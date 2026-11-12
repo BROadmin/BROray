@@ -7,11 +7,12 @@ import (
 
 	"github.com/BROadmin/broray/areas/servers"
 	"github.com/BROadmin/broray/internal/compat"
+	"github.com/BROadmin/broray/internal/xrayimport"
 )
 
 // Node staging: broray_subscription_stage_nodes (svc:969-1106).
 
-const jsonImportWarning = "Из JSON импортируются отдельные серверы. DNS, маршрутизация, балансировка и фрагментация профиля не применяются. Уровень пользователя level нормализуется к локальной политике BROray; политика профиля не применяется. Служебные поля email, REALITY show и gRPC mode=false не переносятся."
+const jsonImportWarning = xrayimport.JSONWarning
 
 // staged is the outcome of the parse step.
 type staged struct {
@@ -92,13 +93,23 @@ func stageNodes(subID string, ex *extracted, enabled bool, progress func(int, in
 		source := map[string]any{"type": "subscription", "subscriptionId": subID, "nodeIndex": i}
 		var rec servers.Record
 		var err error
-		if input, native := ex.Native[i0]; native {
+		if input, unavailable := ex.UnavailableClash[i0]; unavailable {
+			rec, err = servers.ParseUnavailableClash(input, rawID, source)
+		} else if input, native := ex.Amnezia[i0]; native {
+			rec, err = servers.ParseAmneziaProfile(input, rawID, source)
+		} else if input, native := ex.Native[i0]; native {
 			var node importNode
 			node, err = parseJSONNode(input.Outbound, input.Name, rawID, source)
 			rec = node.Record
 			st.Warnings = append(st.Warnings, node.Warnings...)
 		} else {
 			rec, err = servers.ParseLink(line, rawID, source)
+		}
+		if err == nil && len(ex.ClientFields[i0]) > 0 {
+			rec, err = servers.ApplyClientFields(rec, ex.ClientFields[i0])
+		}
+		if err == nil && ex.UnavailableXray[i0] != nil {
+			rec, err = servers.WrapUnavailableXray(rec, ex.UnavailableXray[i0])
 		}
 		if err != nil {
 			reason := parseReason(err)
@@ -124,8 +135,8 @@ func stageNodes(subID string, ex *extracted, enabled bool, progress func(int, in
 			continue
 		}
 		stableID := "subscription-" + subID + "-" + key[:16]
-		if seen[stableID] {
-			reject("Узел %d: дубликат уже полученного сервера.", i)
+		if seen[key] {
+			st.Warnings = append(st.Warnings, fmt.Sprintf("Узел %d: дубликат уже полученного сервера.", i))
 			continue
 		}
 		rec["id"] = stableID
@@ -138,7 +149,7 @@ func stageNodes(subID string, ex *extracted, enabled bool, progress func(int, in
 			reject("Узел %d: нормализованный сервер не прошёл проверку.", i)
 			continue
 		}
-		seen[stableID] = true
+		seen[key] = true
 		if rec["protocol"] == "amneziawg" {
 			st.Warnings = append(st.Warnings, fmt.Sprintf("Узел %d: конфигурация AmneziaWG сохранена. Подключение пока не поддерживается BROray.", i))
 		}

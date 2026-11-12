@@ -14,16 +14,20 @@ func TestUnknownJSONFieldIsNamedWithoutValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := stageNodes("test", ex, true, nil)
-	if err == nil && st.Rejected != 1 {
-		t.Fatal("unknown field accepted")
+	if err != nil || st == nil || st.Accepted != 1 || st.Rejected != 0 {
+		t.Fatal("unknown server intent was not retained privately")
 	}
-	// All rejected nodes return an error; its details must identify the field.
-	if st == nil {
-		t.Fatal("missing staging result")
+	rec := st.Records[0]
+	profile, ok := rec["importProfile"].(map[string]any)
+	if !ok || profile["node"].(map[string]any)["settings"].(map[string]any)["secretExtension"] != "never-display-this" {
+		t.Fatal("unknown field lost")
 	}
-	warning := strings.Join(st.Warnings, " ")
-	if !strings.Contains(warning, "secretExtension") || strings.Contains(warning, "never-display-this") {
-		t.Fatal("missing safe field diagnostic")
+	if _, e := servers.Outbound(rec); e == nil {
+		t.Fatal("unknown extension executed as a stripped connection")
+	}
+	public, _ := json.Marshal(servers.MaskRecord(rec))
+	if len(st.Warnings) == 0 || strings.Contains(strings.Join(st.Warnings, " ")+string(public), "never-display-this") {
+		t.Fatal("missing private-source diagnostic or disclosed value")
 	}
 }
 
@@ -108,14 +112,16 @@ func TestWireGuardAndHysteriaJSON(t *testing.T) {
 		`{"outbounds":[{"protocol":"wireguard","settings":{"secretKey":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","address":["10.10.0.2/32"],"peers":[{"publicKey":"AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=","endpoint":"wg.example:51820","allowedIPs":["0.0.0.0/0"],"keepAlive":25}],"reserved":[1,2,3],"mtu":1420,"noKernelTun":true}}]}`,
 		`{"outbounds":[{"protocol":"hysteria","settings":{"version":2,"address":"hy.example","port":443},"streamSettings":{"network":"hysteria","security":"tls","tlsSettings":{"serverName":"hy.example","alpn":["h3"]},"hysteriaSettings":{"version":2,"auth":"secret","udpIdleTimeout":41}}}]}`,
 	} {
-		lines, ok := xrayJSONToLinks([]byte(body), 10)
-		if !ok || len(lines) != 1 || lines[0] == unsupportedMarker {
-			t.Fatal("supported WG/HY2 JSON rejected")
+		// Native WG is intentionally carried as typed input, not a synthetic URI.
+		ex, e := extractNodes([]byte(body), newMetadata())
+		if e != nil {
+			t.Fatal(e)
 		}
-		r, err := servers.ParseLink(lines[0], "new-proto", nil)
-		if err != nil {
-			t.Fatal(err)
+		st, e := stageNodes("native-protocol", ex, true, nil)
+		if e != nil || st.Accepted != 1 || st.Rejected != 0 {
+			t.Fatal("supported WG/HY2 typed input rejected")
 		}
+		r := st.Records[0]
 		if _, err := servers.Outbound(r); err != nil {
 			t.Fatal(err)
 		}

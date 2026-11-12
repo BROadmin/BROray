@@ -111,7 +111,7 @@
     function selectionMatches() {
         var servers = selectedServers();
         var managed = status && Array.isArray(status.managed) ? status.managed : [];
-        if (status && typeof status.matchesSelection === "boolean") return status.matchesSelection;
+        if (status && typeof status.matchesSelection === "boolean" && selectionSaved()) return status.matchesSelection;
         if (!servers.length) return false;
         if (!servers.every(function (server) { return server.present === true; })) return false;
         return managed.every(function (entry) {

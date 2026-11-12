@@ -140,6 +140,32 @@ test('older catalog request cannot restore removed subscription',async()=>{
     h.context.fetcher=async(url)=>{if(url.includes('/list.')&&old){old=false;return new Promise(r=>finish=()=>r(response([metadata()])));}return normal(url);};
     const pending=h.f.loadAll(true);h.catalog=[];await h.f.loadAll(true);finish();await pending;assert.equal(h.f.state.subscriptions.length,0);
 });
-test('affected page assets bypass cached candidate2 scripts',()=>{
-    for(const name of ['servers','subscriptions'])assert.match(fs.readFileSync(path.join(__dirname,'../../webui/static/'+name+'.html'),'utf8'),new RegExp('/assets/js/'+name+'\\.js\\?v=WebUI-3\\.5\\.5-c3'));
+test('affected page assets bypass cached candidate5 scripts',()=>{
+    for(const name of ['servers','subscriptions'])assert.match(fs.readFileSync(path.join(__dirname,'../../webui/static/'+name+'.html'),'utf8'),new RegExp('/assets/js/'+name+'\\.js\\?v=WebUI-3\\.5\\.7-c6'));
+});
+
+ test('update warnings are a collapsed disclosure with escaped messages',()=>{
+ const h=fixture('subscriptions.js','renderWarnings');
+ const html=h.f.renderWarnings({lastUpdateResult:{warnings:['<private>','second']}});
+ assert.match(html, /^<details\b/); assert.match(html, /<summary>Предупреждения обновления<\/summary>/);
+ assert.doesNotMatch(html, /<details[^>]*\bopen(?:[\s=>])/);assert.match(html,/&lt;private&gt;/);
+ assert.equal(h.f.renderWarnings({lastUpdateResult:{warnings:[]}}),'');
+ });
+test('saved server warning remains visible after import and reload',()=>{
+ const h=serverFixture();h.f.state.summary.servers.forEach(r=>r.importWarnings=['Synthetic warning <value>']);h.f.renderServers(h.f.state.summary.servers);
+ const card=h.document.getElementById('servers-list').children[0];assert.match(card.textContent,/Synthetic warning <value>/);assert.ok(card.querySelector('details'));assert.equal(card.querySelector('details').hasAttribute('open'),false);
+});
+test('DNS unsaved selection does not reuse saved matchesSelection',()=>{
+ const h=fixture('dns.js','selectionMatches,setFixture:function(s,p){status=s;selected=p;}');
+ const a={id:'a',address:'192.0.2.1',port:853,sni:'a.example',present:true};const b={id:'b',address:'192.0.2.2',port:853,sni:'b.example',present:true};
+ h.f.setFixture({servers:[a,b],selectedIds:['a','b'],managed:[a,b],matchesSelection:true},{a:true,b:false});assert.equal(h.f.selectionMatches(),false);
+});
+test('additional JSON and Clash switches reset off, load independently, and submit booleans',async()=>{
+ const h=fixture('subscriptions.js','state,resetForm,openEdit,saveForm');let saved;
+ h.f.resetForm();assert.equal(h.document.getElementById('subscription-fetch-json').checked,false);assert.equal(h.document.getElementById('subscription-fetch-clash').checked,false);
+ h.context.fetcher=async(url,opt)=>{if(url.includes('/details.'))return response({id:'test',name:'Synthetic',url:'https://example.test/sub',fetchJSON:true,fetchClash:false});if(url.includes('/update.')){saved=JSON.parse(opt.body);return response({});}if(url.includes('/list.'))return response([]);return response({});};
+ await h.f.openEdit('test');assert.equal(h.document.getElementById('subscription-fetch-json').checked,true);assert.equal(h.document.getElementById('subscription-fetch-clash').checked,false);
+ h.document.getElementById('subscription-fetch-json').checked=false;h.document.getElementById('subscription-fetch-clash').checked=true;await h.f.saveForm({preventDefault(){}});
+ assert.equal(saved.fetchJSON,false);assert.equal(saved.fetchClash,true);
+ const html=fs.readFileSync(path.join(__dirname,'../../webui/static/subscriptions.html'),'utf8');for(const id of ['subscription-fetch-json','subscription-fetch-clash']){assert.match(html,new RegExp('id="'+id+'"[^>]*type="checkbox"'));assert.doesNotMatch(html,new RegExp('id="'+id+'"[^>]*checked'));}
 });

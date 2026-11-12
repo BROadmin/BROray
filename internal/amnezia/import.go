@@ -24,12 +24,15 @@ const MaxProfileBytes = 256 * 1024
 // container, including last_config and extensions not understood by this build.
 // It is private data, like the share URI and WireGuard private/preshared keys.
 type Profile struct {
-	SchemaVersion int                   `json:"schemaVersion"`
-	Container     string                `json:"container"`
-	Interface     map[string][]string   `json:"interface"`
-	Peers         []map[string][]string `json:"peers"`
-	NativeConfig  string                `json:"nativeConfig"`
-	Parameters    map[string]any        `json:"parameters"`
+	SchemaVersion int `json:"schemaVersion"`
+	// ProtocolVersion is the explicit Mihomo implementation selector, not an
+	// invented INI directive or an inferred native AmneziaWG version.
+	ProtocolVersion *int                  `json:"protocolVersion,omitempty"`
+	Container       string                `json:"container"`
+	Interface       map[string][]string   `json:"interface"`
+	Peers           []map[string][]string `json:"peers"`
+	NativeConfig    string                `json:"nativeConfig"`
+	Parameters      map[string]any        `json:"parameters"`
 }
 
 type Imported struct {
@@ -115,7 +118,17 @@ func jsonValue(d *json.Decoder, depth int) (any, error) {
 // ParseLink supports Base64 client JSON, Qt qCompress JSON (big-endian length
 // followed by zlib), and provider exports containing a plain AWG INI profile.
 func ParseLink(link string) (Imported, error) {
-	var out Imported
+	profiles, err := ParseLinks(link, 1)
+	if err != nil {
+		return Imported{}, err
+	}
+	return profiles[0], nil
+}
+
+// ParseLinks expands only typed native containers. Every container is validated
+// before any result is returned, so a damaged export cannot silently lose nodes.
+func ParseLinks(link string, maxNodes int) ([]Imported, error) {
+	var out []Imported
 	if !strings.HasPrefix(link, "vpn://") || len(link) > MaxLinkBytes {
 		return out, invalid("неправильная ссылка или превышен размер")
 	}
@@ -138,8 +151,8 @@ func ParseLink(link string) (Imported, error) {
 			return out, err
 		}
 		awg := false
-		for _, k := range []string{"Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5"} {
-			if _, exists := iface[k]; exists {
+		for k := range iface {
+			if nativeAWGField(k) {
 				awg = true
 				break
 			}
@@ -151,12 +164,15 @@ func ParseLink(link string) (Imported, error) {
 		if err != nil {
 			return out, err
 		}
-		return Imported{Name: "AmneziaWG", Address: address, Port: port, Profile: Profile{
+		if maxNodes < 1 {
+			return nil, ErrTooManyContainers
+		}
+		return []Imported{{Name: "AmneziaWG", Address: address, Port: port, Profile: Profile{
 			SchemaVersion: 1, Container: "amnezia-awg", Interface: iface, Peers: peers, NativeConfig: native,
 			Parameters: map[string]any{"container": "amnezia-awg", "sourceFormat": "base64-ini"},
-		}}, nil
+		}}}, nil
 	}
-	if !bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
+	if !bytes.HasPrefix(bytes.TrimSpace(bytes.TrimPrefix(data, []byte("\ufeff"))), []byte("{")) {
 		if len(data) < 6 {
 			return out, invalid("повреждённый сжатый профиль")
 		}
@@ -176,18 +192,18 @@ func ParseLink(link string) (Imported, error) {
 		}
 		data = decoded
 	}
-	root, err := object(data)
+	profiles, recognized, err := ParseDocument(data, maxNodes)
 	if err != nil {
-		return out, err
+		return nil, err
 	}
-	containers, ok := root["containers"].([]any)
-	if !ok || len(containers) != 1 {
-		return out, invalid("ожидался один контейнер с клиентской конфигурацией")
+	if !recognized {
+		return nil, invalid("ожидался документ с клиентскими контейнерами")
 	}
-	container, ok := containers[0].(map[string]any)
-	if !ok {
-		return out, invalid("неправильный контейнер")
-	}
+	return profiles, nil
+}
+
+func parseContainer(container map[string]any, name string) (Imported, error) {
+	var out Imported
 	kind, _ := container["container"].(string)
 	if kind != "amnezia-awg" && kind != "amnezia-awg2" {
 		return out, invalid("тип контейнера пока не поддерживается")
@@ -216,19 +232,50 @@ func ParseLink(link string) (Imported, error) {
 	if err != nil {
 		return out, err
 	}
-	name, _ := root["description"].(string)
-	if name == "" {
-		name = "AmneziaWG"
-	}
-	if len(name) > 1024 || !plain(name) {
-		return out, invalid("неправильное имя профиля")
-	}
 	out = Imported{Name: name, Address: address, Port: port, Profile: Profile{SchemaVersion: 1, Container: kind, Interface: iface, Peers: peers, NativeConfig: native, Parameters: container}}
+	out.Profile.ProtocolVersion, err = clashProtocolVersion(container)
+	if err != nil {
+		return Imported{}, err
+	}
 	return out, nil
 }
 
+func clashProtocolVersion(container map[string]any) (*int, error) {
+	awg, _ := container["awg"].(map[string]any)
+	if awg["sourceFormat"] != "clash-yaml" {
+		return nil, nil
+	}
+	source, _ := awg["clashOptions"].(map[string]any)
+	options, _ := source["amnezia-wg-option"].(map[string]any)
+	v, exists := options["version"]
+	if !exists {
+		return nil, nil
+	}
+	var value int64
+	switch x := v.(type) {
+	case json.Number:
+		n, err := x.Int64()
+		if err != nil {
+			return nil, invalid("неправильная версия протокола")
+		}
+		value = n
+	case float64:
+		if x != float64(int64(x)) {
+			return nil, invalid("неправильная версия протокола")
+		}
+		value = int64(x)
+	default:
+		return nil, invalid("неправильная версия протокола")
+	}
+	if value < -2147483648 || value > 2147483647 {
+		return nil, invalid("неправильная версия протокола")
+	}
+	n := int(value)
+	return &n, nil
+}
+
 func nativeINIHeader(data []byte) bool {
-	for _, line := range strings.Split(string(data), "\n") {
+	for _, line := range strings.Split(strings.TrimPrefix(string(data), "\ufeff"), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
@@ -315,7 +362,7 @@ func parseNative(text string) (map[string][]string, []map[string][]string, error
 	}
 	var iface, current map[string][]string
 	var peers []map[string][]string
-	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+	for _, line := range strings.Split(strings.TrimPrefix(strings.ReplaceAll(text, "\r\n", "\n"), "\ufeff"), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
@@ -342,7 +389,7 @@ func parseNative(text string) (map[string][]string, []map[string][]string, error
 		k, v, ok := strings.Cut(line, "=")
 		k = strings.TrimSpace(k)
 		v = strings.TrimSpace(v)
-		if !ok || current == nil || k == "" || v == "" || len(k) > 64 {
+		if !ok || current == nil || k == "" || v == "" && (len(peers) != 0 || !emptyNativeAWGField(k)) || len(k) > 64 {
 			return nil, nil, invalid("неправильное поле конфигурации")
 		}
 		for _, c := range k {
@@ -380,6 +427,12 @@ func parseNative(text string) (map[string][]string, []map[string][]string, error
 func (p Profile) Validate() (string, int, error) {
 	if p.SchemaVersion != 1 || (p.Container != "amnezia-awg" && p.Container != "amnezia-awg2") || p.Parameters == nil {
 		return "", 0, invalid("неправильная модель профиля")
+	}
+	if p.ProtocolVersion != nil {
+		expected, err := clashProtocolVersion(p.Parameters)
+		if err != nil || expected == nil || *expected != *p.ProtocolVersion {
+			return "", 0, invalid("версия протокола не совпадает с источником")
+		}
 	}
 	i, peers, err := parseNative(p.NativeConfig)
 	if err != nil {

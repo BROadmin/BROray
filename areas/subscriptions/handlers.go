@@ -130,6 +130,13 @@ func intervalText(v any) (int64, *subErr) {
 
 // validateBody is broray_subscription_validate_body (UA, sendDeviceInfo).
 func validateBody(b map[string]any) *subErr {
+	for _, key := range []string{"fetchJSON", "fetchClash"} {
+		if v, exists := b[key]; exists {
+			if _, ok := v.(bool); !ok {
+				return fail("INVALID_EXPORT_SETTING", "Настройки дополнительных форматов должны быть логическими.")
+			}
+		}
+	}
 	if v, ok := b["httpUserAgent"]; ok {
 		ua, isStr := v.(string)
 		if !isStr || !printableASCII(ua, 128) {
@@ -191,7 +198,7 @@ func (s *svc) create(op *compat.Operation, release compat.Release, b map[string]
 	id := s.newID()
 	t := now()
 	rec := map[string]any{"schemaVersion": 1, "id": id, "name": name, "url": url, "clientHwid": newHwid(), "httpUserAgent": ua,
-		"sendDeviceInfo": b["sendDeviceInfo"] == true, "enabled": enabled, "autoUpdateEnabled": auto, "updateIntervalMinutes": interval,
+		"sendDeviceInfo": b["sendDeviceInfo"] == true, "fetchJSON": b["fetchJSON"] == true, "fetchClash": b["fetchClash"] == true, "enabled": enabled, "autoUpdateEnabled": auto, "updateIntervalMinutes": interval,
 		"lastUpdateStatus": "never", "lastUpdatedAt": nil, "lastUpdatedEpoch": nil, "lastError": nil, "serversReceived": 0,
 		"lastUpdateResult": nil, "createdAt": compat.Stamp(t), "updatedAt": compat.Stamp(t)}
 	setSchedule(rec, t)
@@ -265,6 +272,7 @@ func (s *svc) updateSettings(id string, b map[string]any) (any, error) {
 	}
 	t := now()
 	rec := clone(old)
+	rec["fetchJSON"], rec["fetchClash"] = pick("fetchJSON") == true, pick("fetchClash") == true
 	if u, isStr := old["url"].(string); !isStr || u != url {
 		delete(rec, "providerMetadata")
 		delete(rec, "alternateExports")

@@ -185,15 +185,15 @@
 
         if (!warnings.length) return "";
 
-        return '<div class="subscription-warning" role="status">' +
-            '<strong>Предупреждения обновления</strong>' +
+        return '<details class="subscription-provider subscription-warning">' +
+            '<summary>Предупреждения обновления</summary>' +
             '<ul>' + warnings.map(function (warning) {
                 var message = warning && typeof warning === "object"
                     ? warning.message || warning.details || JSON.stringify(warning)
                     : warning;
                 return '<li>' + escapeHtml(message) + '</li>';
             }).join("") + '</ul>' +
-        '</div>';
+        '</details>';
     }
 
     function renderResult(item) {
@@ -394,6 +394,8 @@
         byId("subscription-enabled").checked = true;
         byId("subscription-auto").checked = true;
         byId("subscription-device-info").checked = false;
+        byId("subscription-fetch-json").checked = false;
+        byId("subscription-fetch-clash").checked = false;
         byId("subscription-immediate").checked = true;
         byId("subscription-interval").value = "360";
         byId("subscription-immediate-row").hidden = false;
@@ -414,6 +416,8 @@
             byId("subscription-enabled").checked = item.enabled === true;
             byId("subscription-auto").checked = item.autoUpdateEnabled === true;
             byId("subscription-device-info").checked = item.sendDeviceInfo === true;
+            byId("subscription-fetch-json").checked = item.fetchJSON === true;
+            byId("subscription-fetch-clash").checked = item.fetchClash === true;
             byId("subscription-immediate-row").hidden = true;
             formPanel.hidden = false;
             byId("subscription-name").focus();
@@ -441,6 +445,8 @@
             url: byId("subscription-url").value.trim(),
             httpUserAgent: byId("subscription-user-agent").value,
             sendDeviceInfo: byId("subscription-device-info").checked,
+            fetchJSON: byId("subscription-fetch-json").checked,
+            fetchClash: byId("subscription-fetch-clash").checked,
             updateIntervalMinutes: Number(byId("subscription-interval").value),
             enabled: byId("subscription-enabled").checked,
             autoUpdateEnabled: byId("subscription-auto").checked

@@ -40,11 +40,20 @@ func TestWireGuardINIAndBackup(t *testing.T) {
 	if bytes.Contains(masked, []byte(awgPrivate)) || bytes.Contains(masked, []byte("PrivateKey")) {
 		t.Fatal("WG secret leaked")
 	}
-	for _, inject := range []string{"PostUp = echo should-not-run", "Jc = 4", "MTU = 1400"} {
+	for _, inject := range []string{"PostUp = echo should-not-run", "Jc = 4\nJc = 5", "MTU = 1400"} {
 		bad := strings.Replace(testWG, "[Peer]", inject+"\n[Peer]", 1)
 		if _, err := ParseLink(bad, "bad", nil); err == nil {
 			t.Fatal("unsupported/duplicate WG setting accepted")
 		}
+	}
+	// A valid AWG marker changes the protocol and retains the private source.
+	awg := strings.Replace(testWG, "[Peer]", "Jc = 4\n[Peer]", 1)
+	private, err := ParseLink(awg, "awg-test", nil)
+	if err != nil || private["protocol"] != "amneziawg" || get(private, "amneziawg", "nativeConfig") != awg {
+		t.Fatal("valid native AWG not retained")
+	}
+	if _, err := Outbound(private); err == nil {
+		t.Fatal("native AWG must remain unavailable to Xray")
 	}
 }
 
@@ -115,12 +124,20 @@ func TestProxyImportAndGenerate(t *testing.T) {
 }
 
 func TestProxyRejectsUnsupportedAndConflictingSettings(t *testing.T) {
-	for _, uri := range []string{"https://proxy.example?security=none", "socks://:secret@proxy.example", "socks://proxy.example:0", "http://proxy.example/not-a-proxy-path", "http://proxy.example?unknownSecret=do-not-echo", "http://proxy.example?sni=a&sni=b", "socks://proxy.example?type=ws"} {
+	for _, uri := range []string{"https://proxy.example?security=none", "socks://:secret@proxy.example", "socks://proxy.example:0", "http://proxy.example/not-a-proxy-path", "http://proxy.example?unknownSecret=do-not-echo", "http://proxy.example?sni=a&sni=b", "socks://proxy.example?type=invalid"} {
 		if _, err := ParseLink(uri, "bad", nil); err == nil {
 			t.Fatal("invalid proxy accepted")
 		} else if bytes.Contains([]byte(err.Error()), []byte("do-not-echo")) {
 			t.Fatal("error leaked value")
 		}
+	}
+	rec, err := ParseLink("socks://proxy.example?type=ws&path=%2Fsocket", "proxy-ws", nil)
+	if err != nil {
+		t.Fatal("supported proxy transport rejected")
+	}
+	out, err := Outbound(rec)
+	if err != nil || get(out, "streamSettings", "network") != "ws" || get(out, "streamSettings", "wsSettings", "path") != "/socket" {
+		t.Fatal("supported proxy transport lost")
 	}
 }
 

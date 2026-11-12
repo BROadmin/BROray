@@ -111,6 +111,11 @@ func TestXDriveInvalidCombinations(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			o := nativeTestOutbound("xdrive")
 			c.edit(o)
+			if c.name == "unknown" {
+				// Unknown source intent is retained privately; never executed.
+				fullXray357Unavailable(t, o)
+				return
+			}
 			b, _ := json.Marshal(o)
 			_, err := ParseLink(string(b), "test", nil)
 			if err == nil {

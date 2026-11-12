@@ -44,8 +44,8 @@ func TestYour355NativeLevel(t *testing.T) {
 				if !strings.Contains(fmt.Sprint(r["importWarnings"]), "политик") {
 					t.Fatal("missing policy warning")
 				}
-				if _, ok := r["level"]; ok {
-					t.Fatal("foreign level retained")
+				if fmt.Sprint(r["accountLevel"]) != fmt.Sprint(level) {
+					t.Fatal("account level was not retained under local policy")
 				}
 				coverageRoundTrip(t, r, true)
 			}

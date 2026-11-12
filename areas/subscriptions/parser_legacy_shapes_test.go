@@ -1,10 +1,8 @@
 package subscriptions
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/BROadmin/broray/areas/servers"
@@ -79,13 +77,17 @@ func TestParserLegacyMalformedContainers(t *testing.T) {
 		}
 		// HTTP/SOCKS empty users are intentionally accepted; their existing
 		// TestParserFieldCoverageProxy users/count-0 test asserts no-auth output.
-		t.Run(proto+"/endpoint/mixed-flat-account-and-users", func(t *testing.T) {
+		t.Run(proto+"/endpoint/misplaced-account-private", func(t *testing.T) {
 			in, listPath, _ := parserLegacyFixture(proto)
 			key := "id"
 			if proto == "http" || proto == "socks" {
 				key = "user"
 			}
 			parserCoverageSet(in, listPath+".0."+key, "synthetic-account")
+			// id/user is not declared at this endpoint location. Preserve the
+			// unknown intent privately after validating the actual users list.
+			parserCoverageUnavailable(t, in)
+			parserCoverageSet(in, listPath+".0.port", 0)
 			parserCoverageStage(t, in, false)
 		})
 	}
@@ -214,20 +216,9 @@ func TestParserLegacyAccountMetadata(t *testing.T) {
 			in, listPath, accountPath := parserLegacyFixture(proto)
 			parserCoverageSet(in, accountPath+".level", 0)
 			parserCoverageSet(in, accountPath+".email", "coverage@example.test")
-			st, out := parserCoverageStage(t, in, true)
-			warnings := strings.Join(st.Warnings, " ")
-			settings, err := json.Marshal(out["settings"])
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, key := range []string{"level", "email"} {
-				if !strings.Contains(warnings, key) {
-					t.Fatal("nested metadata omission lacks warning")
-				}
-				if bytes.Contains(settings, []byte(`"`+key+`":`)) {
-					t.Fatal("nested metadata unexpectedly rendered")
-				}
-			}
+			_, out := parserCoverageStage(t, in, true)
+			parserCoverageAssert(t, out, accountPath+".level", 0, false)
+			parserCoverageAssert(t, out, accountPath+".email", "coverage@example.test", false)
 			parserCoverageAssert(t, out, "protocol", proto, false)
 			parserCoverageAssert(t, out, listPath+".0.address", "edge.example.test", false)
 			parserCoverageAssert(t, out, listPath+".0.port", 443, false)

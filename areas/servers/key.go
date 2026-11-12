@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/BROadmin/broray/internal/compat"
+	"github.com/BROadmin/broray/internal/xrayid"
 )
 
 func lower(v any) any {
@@ -16,6 +17,22 @@ func lower(v any) any {
 // importKeyObject is the object of broray_server_subscription_import_key
 // (server-subscription-service.sh:66-102).
 func importKeyObject(s Record) map[string]any {
+	if has(s, "importProfile") {
+		return unavailableProfileIdentity(s)
+	}
+	key := baseImportKeyObject(s)
+	// The core accepts UUID text and short names for the same credential.
+	// Keep the imported spelling in the record, but compare the effective ID.
+	if in(asString(s["protocol"]), "vless", "vmess") {
+		if id, ok := xrayid.Canonical(asString(s["uuid"])); ok {
+			key["uuid"] = id
+		}
+	}
+	addClientFieldIdentity(key, s)
+	return key
+}
+
+func baseImportKeyObject(s Record) map[string]any {
 	if s["network"] == "xdrive" || s["protocol"] == "masque" {
 		key := map[string]any{"protocol": s["protocol"], "network": s["network"], "security": s["security"], "address": lower(s["address"]), "port": s["port"]}
 		for _, k := range []string{"uuid", "encryption", "flow", "tls", "xdrive", "masque", "mux", "remoteDNS", "transport"} {
@@ -26,10 +43,18 @@ func importKeyObject(s Record) map[string]any {
 		return key
 	}
 	if s["protocol"] == "wireguard" {
-		return map[string]any{"protocol": "wireguard", "settings": s["wireguard"]}
+		key := map[string]any{"protocol": "wireguard", "settings": s["wireguard"]}
+		if extensions := WireGuardExtensionIdentity(s); extensions != nil {
+			key["extensions"] = extensions
+		}
+		return key
 	}
 	if in(asString(s["protocol"]), "http", "socks") {
-		return map[string]any{"protocol": s["protocol"], "address": lower(s["address"]), "port": s["port"], "username": s["username"], "password": s["password"], "security": s["security"], "tls": s["tls"]}
+		key := map[string]any{"protocol": s["protocol"], "address": lower(s["address"]), "port": s["port"], "username": s["username"], "password": s["password"], "security": s["security"], "tls": s["tls"]}
+		if s["network"] != "raw" || s["security"] == "reality" || lenPositive(get(s, "transport", "header")) || lenPositive(get(s, "transport", "finalMask")) || get(s, "transport", "headerType") == "http" {
+			key["network"], key["transport"], key["reality"] = s["network"], s["transport"], s["reality"]
+		}
+		return key
 	}
 	if s["protocol"] == "amneziawg" {
 		return map[string]any{"protocol": "amneziawg", "profile": s["amneziawg"]}
@@ -130,6 +155,11 @@ func RotationKey(rec Record) (string, error) {
 // a subscription server id across credential rotation.
 func ContinuityKey(rec Record) (string, error) {
 	s := normalize(rec)
+	if has(s, "importProfile") {
+		// An unmapped endpoint may have credentials which also select its
+		// destination. Keep exact private identity until that mapping is known.
+		return compat.CanonicalSHA256(unavailableProfileIdentity(s))
+	}
 	if s["network"] == "xdrive" || s["protocol"] == "masque" {
 		// A cloud profile's formal address does not identify its storage.
 		// Keep credential rotation possible without reassigning a different

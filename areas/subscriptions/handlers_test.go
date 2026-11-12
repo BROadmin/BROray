@@ -346,7 +346,7 @@ func TestCreateImmediate(t *testing.T) {
 		rec["providerMetadata"].(map[string]any)["title"] != "Провайдер" {
 		t.Fatalf("%v", rec)
 	}
-	if w := res["warnings"].([]any); len(w) != 1 || w[0] != "Узел 2: Ошибка: для протокола  отсутствует импортёр" {
+	if w := res["warnings"].([]any); len(w) != 1 || w[0] != "Узел 2: Ошибка: неподдерживаемое или неправильное поле JSON: document" {
 		t.Fatalf("warnings %v", w)
 	}
 	h := p.header(0)

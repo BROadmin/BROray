@@ -1,18 +1,16 @@
-package subscriptions
+package xrayimport
 
 import (
-	"github.com/BROadmin/broray/areas/servers"
 	"strings"
 )
 
 // Extract supported extensions, then let the existing transport converter
 // validate every remaining field. Nothing unrecognized is removed.
-func transport(sv any) []string {
+func (c *converter) transport(sv any) []string {
 	original := obj(sv)
 	s := without(original, "sockopt")
 	extra := map[string]any{}
 	if has(original, "sockopt") {
-		need(keysOnly(original["sockopt"], "tcpFastOpen", "tcpKeepAliveIdle", "tcpKeepAliveInterval", "domainStrategy"))
 		extra["sockopt"] = obj(original["sockopt"])
 	}
 	for _, block := range []string{"wsSettings", "httpupgradeSettings", "grpcSettings"} {
@@ -61,8 +59,8 @@ func transport(sv any) []string {
 	if net == "tcp" {
 		net = "raw"
 	}
-	need(servers.ValidateStreamOptions(net, extra) == nil)
-	out := basicTransport(s)
+	need(c.checks.ValidateStreamOptions(net, extra) == nil)
+	out := c.basicTransport(s)
 	if len(extra) > 0 {
 		out = append(out, pair("streamOptions", toJSON(extra)))
 	}

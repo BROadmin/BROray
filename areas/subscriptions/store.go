@@ -126,6 +126,13 @@ func validRecord(m map[string]any) bool {
 	if m == nil || !isInt(m["schemaVersion"], 1, 1) {
 		return false
 	}
+	for _, key := range []string{"fetchJSON", "fetchClash"} {
+		if v, exists := m[key]; exists {
+			if _, ok := v.(bool); !ok {
+				return false
+			}
+		}
+	}
 	if value, exists := m["alternateExports"]; exists {
 		formats, ok := value.([]any)
 		if !ok || len(formats) > 2 {

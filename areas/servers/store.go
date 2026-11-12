@@ -191,6 +191,7 @@ func NewManualID(d *compat.Deps) (string, error) {
 // shortened.
 func MaskRecord(rec Record) Record {
 	out := normalize(rec)
+	delete(out, "hysteriaMasquerade")
 	// Refresh presentation of old metadata without migrating saved profiles.
 	if warnings, ok := out["importWarnings"].([]any); ok {
 		for i, warning := range warnings {
@@ -199,8 +200,11 @@ func MaskRecord(rec Record) Record {
 			}
 		}
 	}
-	for _, k := range []string{"uri", "uuid", "password", "auth", "privateKey", "amneziawg", "wireguard", "streamOptions", "xdrive", "masque"} {
+	for _, k := range []string{"uri", "uuid", "password", "auth", "privateKey", "amneziawg", "wireguard", "streamOptions", "xdrive", "masque", "httpHeaders", "accountEmail", "accountLevel", "proxyAccount", "protocolExtensions", "importProfile"} {
 		delete(out, k)
+	}
+	if tls, ok := out["tls"].(map[string]any); ok {
+		delete(tls, "certificates")
 	}
 	if c, ok := out["connection"].(map[string]any); ok {
 		for _, k := range []string{"uuid", "password", "auth", "privateKey"} {

@@ -1,8 +1,8 @@
-package subscriptions
+package xrayimport
 
 import "strings"
 
-func proxyOutbound(profile, out map[string]any, index int, multiple bool) []string {
+func (c *converter) proxyOutbound(profile, out map[string]any, index int, multiple bool) []string {
 	need(keysOnly(out, "protocol", "tag", "settings", "streamSettings"))
 	settings := obj(out["settings"])
 	s := settings
@@ -33,8 +33,7 @@ func proxyOutbound(profile, out map[string]any, index int, multiple bool) []stri
 	}
 	need(user != "" || password == "")
 	stream := objectField(out, "streamSettings")
-	need(network(stream) == "tcp" && inList(stringField(stream, "security", "none"), "none", "tls") && len(objectField(stream, "finalmask")) == 0)
-	params := append(transport(stream), protection(stream)...)
+	params := append(append(c.transport(stream), protection(stream)...), pair("fm", toJSON(objectField(stream, "finalmask"))))
 	name := outboundName(profile, out, index, multiple)
 	need(isInt(s["port"], 1, 65535))
 	scheme := out["protocol"].(string)

@@ -355,6 +355,7 @@ func TestFinalMaskNestedDownloadUsesSameContract(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mask := finalMaskTestDecode(t, tc.mask)
 			extra := map[string]any{"downloadSettings": map[string]any{
+				"address": "download.example.test", "port": 443,
 				"network": "xhttp", "security": "tls",
 				"tlsSettings": map[string]any{"serverName": "download.example.test"},
 				"finalmask":   mask,

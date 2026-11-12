@@ -103,7 +103,7 @@ func TestCustomPreviewReportAndWarning(t *testing.T) {
 		}
 	}
 	if rep["name"] != "Discord" || rep["ready"] != true || !isHex64(rep["token"].(string)) ||
-		rep["warning"] != "Набор содержит очень широкие сети /7–/8. Через Xray может направляться значительная часть интернет-трафика." {
+		rep["warning"] != "Набор содержит очень широкие сети /1–/8. Через Xray может направляться значительная часть интернет-трафика." {
 		t.Fatal(rep)
 	}
 	opt, _ := os.ReadFile(filepath.Join(env.e.previewsDir(), rep["token"].(string), "optimized.txt"))

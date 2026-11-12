@@ -350,7 +350,7 @@ func (e *engine) userPreviewWithHook(req obj, beforeStore func(string)) (obj, *c
 	token := sha256Hex([]byte(fmt.Sprintf("%d\n%d\n%s\n%s\n%s\n%s%s", now.Unix(), os.Getpid(), name, normSHA, optSHA, meta.String(), compat.RandHex(16))))
 	var warning any
 	if len(broad) > 0 {
-		warning = "Набор содержит очень широкие сети /7–/8. Через Xray может направляться значительная часть интернет-трафика."
+		warning = "Набор содержит очень широкие сети /1–/8. Через Xray может направляться значительная часть интернет-трафика."
 	}
 	report := obj{"schemaVersion": 1, "token": token, "name": name, "createdAt": compat.Stamp(now), "createdEpoch": now.Unix(),
 		"expiresInSeconds": userPreviewTTL, "fileCount": len(files), "totalBytes": total, "sourceRouteLineCount": totalLines,

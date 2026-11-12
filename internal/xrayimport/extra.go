@@ -1,7 +1,7 @@
-package subscriptions
+package xrayimport
 
 import (
-	"github.com/BROadmin/broray/areas/servers"
+	"fmt"
 	"net/netip"
 	"strings"
 )
@@ -86,6 +86,18 @@ func wireGuardOutbound(profile, out map[string]any, index int, multiple bool) []
 
 const hysteriaMasqueradeWarning = "Hysteria2: поле masquerade относится к серверу и не применяется в клиентском подключении."
 
+// ValidateHysteriaMasqueradeMetadata validates inert metadata without opening
+// any referenced file or URL. Error text never contains provider values.
+func ValidateHysteriaMasqueradeMetadata(v any) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = fmt.Errorf("invalid hysteria masquerade metadata")
+		}
+	}()
+	validateHysteriaMasquerade(v)
+	return nil
+}
+
 // Xray v26.11.9 consumes masquerade only in the Hysteria listener. Check the
 // known JSON shape before omitting it; never open its URL or directory.
 func validateHysteriaMasquerade(v any) {
@@ -115,7 +127,7 @@ func validateHysteriaMasquerade(v any) {
 	}
 }
 
-func hysteriaOutbound(profile, out map[string]any, index int, multiple bool) []string {
+func (c *converter) hysteriaOutbound(profile, out map[string]any, index int, multiple bool) []string {
 	need(keysOnly(out, "protocol", "tag", "settings", "streamSettings"))
 	s := obj(out["settings"])
 	need(keysOnly(s, "version", "address", "port") && s["version"] != nil && isInt(s["version"], 2, 2) && isInt(s["port"], 1, 65535))
@@ -130,9 +142,8 @@ func hysteriaOutbound(profile, out map[string]any, index int, multiple bool) []s
 	params := protection(stream)
 	if has(stream, "sockopt") {
 		opts := obj(stream["sockopt"])
-		need(keysOnly(opts, "tcpFastOpen", "tcpKeepAliveIdle", "tcpKeepAliveInterval", "domainStrategy"))
 		extra := map[string]any{"sockopt": opts}
-		need(servers.ValidateStreamOptions("hysteria", extra) == nil)
+		need(c.checks.ValidateStreamOptions("hysteria", extra) == nil)
 		params = append(params, pair("streamOptions", toJSON(extra)))
 	}
 	params = append(params, pair("fm", toJSON(objectField(stream, "finalmask"))))
