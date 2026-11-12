@@ -4,7 +4,7 @@
 **BROray — клиент Xray и менеджер сетевых политик для Keenetic.** Серверы, подписки, маршруты, DNS-over-TLS и обслуживание в знакомом WebUI. Развиваем тот же BROray и делаем его удобнее.
 
 
-**Текущий выпуск: BROray 3.5.6 · Stable · 12 ноября 2026.** [Скачать](https://github.com/BROadmin/BROray/releases/tag/v3.5.6) · [Документация](https://docs.brovibe.cloud/broray/) · [История версий](https://docs.brovibe.cloud/broray/releases/).
+**Текущий выпуск: BROray 3.5.7 · Stable · 13 ноября 2026.** [Скачать](https://github.com/BROadmin/BROray/releases/tag/v3.5.7) · [Документация](https://docs.brovibe.cloud/broray/) · [История версий](https://docs.brovibe.cloud/broray/releases/).
 
 
 > **Перед установкой** BROray теперь работает на Go. Пользователю не нужно устанавливать Go или менять привычные способы работы в WebUI. Для перехода с 3.2 требуется чистая установка; обновитель и резервная копия 3.2 для этого не используются.
@@ -22,26 +22,31 @@
 
 
 <a id="changes"></a>
-## Что нового в 3.5.6
+## Что нового в 3.5.7
 
-- При чистой установке BROray автоматически создаёт адрес broray.…, если на роутере настроен KeenDNS. Настраивать VPN для открытия WebUI не требуется.
-- Обновление сохраняет намеренно отключённый внешний адрес. При конфликте или отсутствии KeenDNS установщик показывает причину и команду восстановления; локальный WebUI остаётся доступен.
-- Исправлен импорт JSON Hysteria2 с серверным блоком masquerade: корректная подписка больше не отклоняется целиком. Блок не применяется к клиенту, об этом выводится предупреждение.
-- Сохраняется автоматическое объединение URI, JSON и Clash из одной основной подписки. Ошибочные или неизвестные поля по-прежнему защищены проверкой перед заменой каталога.
+- Расширен единый импорт серверов: ссылки и Base64, Xray JSON, Clash YAML/JSON, WireGuard/AmneziaWG INI и контейнеры Amnezia. Ручное добавление принимает документ с одним сервером; подписки — список.
+- Сохраняются дополнительные TLS, транспортные и socket-параметры, Mux, XHTTP download, WireGuard и метаданные учётной записи. Валидные, но неприменимые параметры сохраняются приватно с объяснением; неполный профиль не запускается.
+- Исправлены распознавание основной ссылки как JSON-экспорта, объединение эквивалентных узлов и удаление исчезнувших серверов при полном успешном обновлении. Ручные записи сохраняются; включённый автовыбор ищет замену исчезнувшему активному серверу.
+- Для каждой подписки добавлены независимые переключатели дополнительной загрузки JSON и Clash. Оба по умолчанию выключены; прямые JSON/Clash-ссылки работают без включения переключателей.
+- Известные серверные параметры Hysteria2 masquerade не блокируют клиент: сохраняются приватно и не применяются к исходящему подключению.
+- Предупреждения обновления раскрываются по нажатию. Предупреждения конфигурации видны и у сохранённых серверов. Уточнены сообщения о версии и памяти Xray, UDP и широких маршрутах; исправлены проверка диагностической квитанции ядра и пересчёт выбранных DNS.
 
-[Изменения](docs/RELEASE-3.5.6.md) · [Приёмка](docs/ACCEPTANCE-3.5.6.md).
+[Изменения и ограничения](docs/RELEASE-3.5.7.md).
 
-## Обновление на 3.5.6
+## Обновление на 3.5.7
 
-С 3.5.0–3.5.5: сохраните копию настроек, откройте BROray → Проверить обновление → Установить обновление. Дождитесь завершения и войдите снова. Пользовательские данные сохраняются, Xray обновляется отдельно. С 3.2 требуется чистая установка по пошаговой инструкции. Go на роутер устанавливать не нужно.
+С 3.5.0–3.5.6: сохраните резервную копию, откройте BROray → Проверить обновление → Установить обновление. Дождитесь завершения и войдите снова. Данные сохраняются, Xray обновляется отдельно. С 3.2 требуется чистая установка по пошаговой инструкции. Go на роутер устанавливать не нужно.
+
+Важно для прежних подписок: если настроек JSON/Clash ещё нет, оба дополнительных формата выключены. Чтобы продолжить объединять их с основной ссылкой, включите нужные флажки до обновления подписки. Сохранение флажков само по себе не удаляет серверы; следующее успешное обновление удалит из этой подписки узлы, встречающиеся только в отключённых форматах. Ручные записи сохраняются. При HTML вместо основного списка включите нужный формат или добавьте прямую ссылку.
 
 ### Известные ограничения
 
-- Автоматический адрес требует настроенного KeenDNS и доступности его сервиса. При обновлении уже отключённый адрес включается вручную; --no-start не создаёт его автоматически.
-- masquerade Hysteria2 — настройка серверной маскировки. Её разбор не означает применение на клиенте и не подтверждает трафик каждого импортированного сервера.
-- Новые аппаратные проверки выполнены на KN-1811 и NC-1812/aarch64. Для armv7/mipsel/mips проверены сборки и CLI в эмуляции; прежнее ограничение WireGuard на MIPS/MIPS LE сохраняется.
-- AmneziaWG сохраняется без подключения, TUIC и MTProto не поддерживаются. Импорт Clash не переносит rules, DNS и proxy-groups. Остальные ограничения 3.5.5 сохраняются.
-- При экономии места Xray копия в RAM теряется при отключении питания. После обновления нужен повторный вход; маршруты без auto и TCP-only на прошивках без UDP для ProxyN сохраняются.
+- Импорт не заменяет DNS, маршруты, правила, группы прокси и локальную политику BROray. Чужие файлы, команды и программы не выполняются.
+- Не каждый распознанный профиль можно подключить: AmneziaWG, TUIC и другие зарегистрированные неприменимые к Xray варианты сохраняются с ограничением исполнения. MTProto не поддерживается. Неизвестные расширения не отбрасываются молча.
+- Закреплённый Xray 26.11.9 не отправляет обычный клиентский mTLS-сертификат. Некоторые TLS-настройки не действуют при uTLS fingerprint; BROray показывает предупреждение.
+- Сохраняется ограничение обычного WireGuard на MIPS/MIPS LE. Новые аппаратные проверки выполнялись на KN-1811/aarch64; остальные сборки проверены в эмуляции. Работа каждого сервера провайдера, реальных Google Drive/WARP и всех сочетаний параметров не гарантируется матрицей импорта.
+- После обновления нужен повторный вход. Новые приватные форматы могут быть несовместимы со старыми версиями: для отката используйте согласованную старую резервную копию. Копия Xray в RAM теряется при отключении питания.
+- Внешний WebUI зависит также от KeenDNS/CrazeDNS и доступности роутера. В аппаратном прогоне сохранены ответы внешнего шлюза 503; положительная проверка после восстановления не отменяет первый отказ.
 
 ### Основа ветки 3.5: изменения выпуска 3.5.0
 
@@ -68,7 +73,7 @@
 
 ## Выберите свой случай
 
-- **Уже установлена 3.5.0, 3.5.1, 3.5.2, 3.5.3, 3.5.4 или 3.5.5:** обновите её через WebUI по инструкции выше. Установочные команды ниже не нужны.
+- **Уже установлена 3.5.0, 3.5.1, 3.5.2, 3.5.3, 3.5.4, 3.5.5 или 3.5.6:** обновите её через WebUI по инструкции выше. Установочные команды ниже не нужны.
 - **BROray ещё не установлен:** начните с [подготовки роутера](#prepare).
 - **Установлена 3.2:** сначала выполните раздел ниже, затем чистую установку. Не начинайте с установочной команды поверх старой версии.
 
@@ -228,17 +233,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.6-aarch64/broray" "$workdir/broray-3.5.6-aarch64/README.txt"
-  rmdir "$workdir/broray-3.5.6-aarch64" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.7-aarch64/broray" "$workdir/broray-3.5.7-aarch64/README.txt"
+  rmdir "$workdir/broray-3.5.7-aarch64" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.6/broray-3.5.6-aarch64.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' 'd9d565f101dd44b1e4443ac3248c6aa9851e3de88a0978809f3f8cd4469e4816' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.7/broray-3.5.7-aarch64.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' '1470e45205a08daac1bd87e10398abe29589fe5dda13bffc68c79d0edb79b461' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.6-aarch64/broray" installer preflight
-"$workdir/broray-3.5.6-aarch64/broray" installer install
-"$workdir/broray-3.5.6-aarch64/broray" ctl ping
+"$workdir/broray-3.5.7-aarch64/broray" installer preflight
+"$workdir/broray-3.5.7-aarch64/broray" installer install
+"$workdir/broray-3.5.7-aarch64/broray" ctl ping
 echo "BROray установлен. Откройте адрес KeenDNS из результата установщика или локальный адрес роутера на порту 8080."
 )
 ```
@@ -263,17 +268,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.6-mipsel/broray" "$workdir/broray-3.5.6-mipsel/README.txt"
-  rmdir "$workdir/broray-3.5.6-mipsel" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.7-mipsel/broray" "$workdir/broray-3.5.7-mipsel/README.txt"
+  rmdir "$workdir/broray-3.5.7-mipsel" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.6/broray-3.5.6-mipsel.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' '6b4f26642d54825d9868030e1c2844e7aee9261c586021d309d438e78fc6fb81' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.7/broray-3.5.7-mipsel.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' '93e8896717e809597edb7e25416f64ce0890a4357afcae41d7d9a89ff821aab8' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.6-mipsel/broray" installer preflight
-"$workdir/broray-3.5.6-mipsel/broray" installer install
-"$workdir/broray-3.5.6-mipsel/broray" ctl ping
+"$workdir/broray-3.5.7-mipsel/broray" installer preflight
+"$workdir/broray-3.5.7-mipsel/broray" installer install
+"$workdir/broray-3.5.7-mipsel/broray" ctl ping
 echo "BROray установлен. Откройте адрес KeenDNS из результата установщика или локальный адрес роутера на порту 8080."
 )
 ```
@@ -298,17 +303,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.6-mips/broray" "$workdir/broray-3.5.6-mips/README.txt"
-  rmdir "$workdir/broray-3.5.6-mips" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.7-mips/broray" "$workdir/broray-3.5.7-mips/README.txt"
+  rmdir "$workdir/broray-3.5.7-mips" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.6/broray-3.5.6-mips.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' 'd8200372e5e601f5000d60333d0c77404b2a81be9781b9b75727d4194951e60f' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.7/broray-3.5.7-mips.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' '2cc661c955b2c48af6ecf725d0fd61f681471fd51e1031f838027179cd7cb08a' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.6-mips/broray" installer preflight
-"$workdir/broray-3.5.6-mips/broray" installer install
-"$workdir/broray-3.5.6-mips/broray" ctl ping
+"$workdir/broray-3.5.7-mips/broray" installer preflight
+"$workdir/broray-3.5.7-mips/broray" installer install
+"$workdir/broray-3.5.7-mips/broray" ctl ping
 echo "BROray установлен. Откройте адрес KeenDNS из результата установщика или локальный адрес роутера на порту 8080."
 )
 ```
@@ -351,17 +356,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.6-armv7/broray" "$workdir/broray-3.5.6-armv7/README.txt"
-  rmdir "$workdir/broray-3.5.6-armv7" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.7-armv7/broray" "$workdir/broray-3.5.7-armv7/README.txt"
+  rmdir "$workdir/broray-3.5.7-armv7" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.6/broray-3.5.6-armv7.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' '4675fc4509c40e21ecf9ab013fb4d1937167a8db9c5258d03dd67cbc1c483c39' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.7/broray-3.5.7-armv7.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' '6c06a51a15191e999afd0d7ce2c97a42e66e6628c05712f5944ec17656ce6da6' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.6-armv7/broray" installer preflight
-"$workdir/broray-3.5.6-armv7/broray" installer install
-"$workdir/broray-3.5.6-armv7/broray" ctl ping
+"$workdir/broray-3.5.7-armv7/broray" installer preflight
+"$workdir/broray-3.5.7-armv7/broray" installer install
+"$workdir/broray-3.5.7-armv7/broray" ctl ping
 echo "BROray установлен. Откройте адрес KeenDNS из результата установщика или локальный адрес роутера на порту 8080."
 )
 ```
@@ -398,7 +403,7 @@ echo "BROray установлен. Откройте адрес KeenDNS из ре
 ### Если доступен только KeenDNS
 
 
-В 3.5.6 при чистой установке адрес broray.… создаётся автоматически, если настроен KeenDNS. Если установщик сообщил предупреждение или адрес ранее был отключён, включите его вручную. Оставьте основную панель роутера открытой и в уже работающем терминале Entware выполните команду **3.5**:
+В 3.5.7 при чистой установке адрес broray.… создаётся автоматически, если настроен KeenDNS. Если установщик сообщил предупреждение или адрес ранее был отключён, включите его вручную. Оставьте основную панель роутера открытой и в уже работающем терминале Entware выполните команду **3.5**:
 
 
 ```sh
@@ -422,7 +427,7 @@ echo "BROray установлен. Откройте адрес KeenDNS из ре
 
 
 1. Введите имя и пароль **администратора Keenetic или Netcraze**. Здесь нужны данные основной панели роутера, а не root и пароль Entware.
-2. Если открылась старая страница 3.2, выполните принудительное обновление **Ctrl+F5**; в Firefox также доступно **Ctrl+Shift+R**. Затем на странице «BROray» убедитесь, что установлена 3.5.6. При необходимости откройте адрес в новой приватной вкладке.
+2. Если открылась старая страница 3.2, выполните принудительное обновление **Ctrl+F5**; в Firefox также доступно **Ctrl+Shift+R**. Затем на странице «BROray» убедитесь, что установлена 3.5.7. При необходимости откройте адрес в новой приватной вкладке.
 3. Откройте «Серверы», импортируйте свою ссылку и активируйте подключение. Либо добавьте ссылку в «Подписках», обновите подписку и выберите её сервер.
 4. Нажмите «Проверить» у активного сервера. Затем установите нужные наборы на странице «Маршруты → Готовые маршруты». Выбор трафика устройств определяется маршрутами и политиками роутера.
 
@@ -434,7 +439,7 @@ echo "BROray установлен. Откройте адрес KeenDNS из ре
 ## Если хотите скачать файлы вручную
 
 
-Все архивы, манифест, подпись и открытый ключ доступны в [релизе 3.5.6](https://github.com/BROadmin/BROray/releases/tag/v3.5.6). В готовых командах закреплены SHA-256 из подписанного манифеста. Дополнительная проверка подписи возможна на ПК с minisign:
+Все архивы, манифест, подпись и открытый ключ доступны в [релизе 3.5.7](https://github.com/BROadmin/BROray/releases/tag/v3.5.7). В готовых командах закреплены SHA-256 из подписанного манифеста. Дополнительная проверка подписи возможна на ПК с minisign:
 
 
 ```sh
@@ -484,15 +489,15 @@ minisign -Vm manifest.json -P RWTcmO2pPYr+FgTRMQHzWjGQeJcTF/iJZQSIQF353UWJUfYEOj
 Ручная проверка активного сервера сохраняет качество. Неудачное дополнительное измерение не превращает успешное подключение в неисправное. Одинаковый сервер, добавленный вручную и из подписки, может отображаться отдельными записями разных источников.
 
 
-Ссылка сервера или весь клиентский INI WireGuard вводятся на странице «Серверы». Xray JSON принимается через URL на странице «Подписки», а не как ссылка сервера. У HTTP/HTTPS-прокси и подписки может быть одинаковое начало адреса: выбирайте страницу по назначению адреса. AmneziaWG сохраняется с пометкой «Только сохранение»; подключение, проверка качества и автовыбор для него недоступны.
+На странице «Серверы» можно вставить ссылку, клиентский WireGuard/AmneziaWG INI, Xray JSON или Clash/Mihomo YAML/JSON; JSON/YAML также можно выбрать как UTF-8 файл. Ручной документ должен давать ровно один клиентский узел. Документ с несколькими серверами добавляйте через подписку: BROray не выбирает первый узел молча. HTTP/HTTPS-адрес в поле сервера означает прокси; URL подписки указывайте на странице «Подписки». Перед сохранением проверьте результат и предупреждения.
 
 <a id="subscriptions"></a>
 ## Подписки
 
 
-Укажите URL провайдера, обновите подписку и проверьте её серверы. Поддерживаются списки ссылок, Base64-списки, поддержанные профили Xray JSON и один клиентский WireGuard INI. Сведения о трафике и сроке показываются, если их передал провайдер. Узел, удалённый вами только из BROray, может вернуться при обновлении, пока он остаётся у провайдера.
+Подписка принимает списки ссылок, одну Base64-оболочку над поддержанным документом, Xray JSON (отдельные outbound, полные профили и допустимые массивы), Clash/Mihomo YAML/JSON, клиентский WireGuard INI и поддержанные клиентские контейнеры Amnezia. Полный профиль не заменяет настройки BROray: DNS, маршруты, rules, группы прокси и локальная политика остаются под управлением приложения.
 
-В 3.5.6 смена SNI/Short ID сохраняет ID одного узла при однозначном соответствии. Совпадающие по прочим параметрам старые варианты внутри одной подписки объединяются; ручные записи и другие подписки остаются отдельными. Если узел удалён провайдером, полный успешно разобранный ответ удалит его из BROray. Для исчезнувшего активного узла VPN отключается; включённый автовыбор ищет замену по своим настройкам. Если подходящей замены нет, поиск повторяется после защитного интервала. При выключенном автовыборе выберите сервер вручную. Ручное отключение VPN отменяет поиск.
+В 3.5.7 смена SNI/Short ID сохраняет ID одного узла при однозначном соответствии. Совпадающие по прочим параметрам старые варианты внутри одной подписки объединяются; ручные записи и другие подписки остаются отдельными. Если узел удалён провайдером, полный успешно разобранный ответ удалит его из BROray. Для исчезнувшего активного узла VPN отключается; включённый автовыбор ищет замену по своим настройкам. Если подходящей замены нет, поиск повторяется после защитного интервала. При выключенном автовыборе выберите сервер вручную. Ручное отключение VPN отменяет поиск.
 
 Пустой, повреждённый или частично разобранный ответ не подтверждает удаление прежних узлов. Прочитайте предупреждения. Валидный AmneziaWG в режиме «Только сохранение» сам по себе не означает ошибку подписки.
 
@@ -530,7 +535,13 @@ minisign -Vm manifest.json -P RWTcmO2pPYr+FgTRMQHzWjGQeJcTF/iJZQSIQF353UWJUfYEOj
 Обновление приложения и обновление Xray — разные действия. В разделе BROray доступны копия, её предпросмотр и импорт, а также отмена импорта из сохранённого предыдущего состояния. Журнал и панель операций помогают понять, идёт ли задание, завершено ли оно и можно ли его продолжить. [Обслуживание по шагам](https://docs.brovibe.cloud/broray/maintenance/).
 
 
+
+
 ## История версий
+
+### 3.5.7 · 13 ноября 2026
+
+Расширенный импорт, синхронизация и дубли, отдельные JSON/Clash-переключатели и проверенные предупреждения. [Подробнее](docs/RELEASE-3.5.7.md).
 
 ### 3.5.6 · 12 ноября 2026
 
