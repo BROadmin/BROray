@@ -85,6 +85,15 @@
 
 <p>KeenDNS может открывать только веб-панель и не предоставлять SSH. <a href="https://docs.brovibe.cloud/broray/start/#web-terminal">Откройте штатный веб-терминал</a>, включите доступ OPKG для своей учётной записи и выполните exec sh. Для установленной 3.5 <a href="https://docs.brovibe.cloud/broray/start/#remote-webui">включите её адрес штатной командой ctl</a>. Не закрывайте основную панель до проверки нового адреса. Если компонент терминала требуется установить, учтите возможное обновление ОС и автоматическую перезагрузку по подтверждению мастера.</p>
 
+<h2 id="keendns-clean-install">После чистой установки BROray открывается только локально</h2>
+<p>В 3.5.0–3.5.5 установщик не создаёт адрес <code>broray.…</code> автоматически. Если основная панель доступна по KeenDNS, переустанавливать BROray не нужно. Оставьте её открытой и перейдите в веб-терминал. Из приглашения <code>(config)&gt;</code> выполните <code>exec sh</code>: команды ниже предназначены для Entware.</p>
+<p>Проверьте, что BROray запущен:</p><pre><code>/opt/bin/broray ctl ping</code></pre>
+<p>При <code>success:true</code> включите адрес:</p><pre><code>/opt/bin/broray ctl post /api/keenetic/web-access-enable.cgi '{}'</code></pre>
+<p>После успешного ответа получите адрес и проверьте результат:</p><pre><code>/opt/bin/broray ctl get /api/keenetic/web-access-status.cgi</code></pre>
+<p>Откройте адрес из <code>data.address</code>. Успешное состояние: <code>data.state=enabled</code>, <code>data.enabled=true</code>, <code>data.consistent=true</code>. VPN и перезагрузка для этого не требуются. Вместо команд можно нажать «Включить» в блоке доступа к WebUI на странице «Keenetic» локального BROray.</p>
+<ul><li><code>KEENDNS_ADDRESS_UNAVAILABLE</code>: проверьте регистрацию имени KeenDNS.</li><li><code>WEB_ACCESS_OWNERSHIP_CONFLICT</code>, <code>WEB_PUBLISH_RECEIPT_INVALID</code>, <code>WEB_PUBLISH_RECEIPT_LIVE_MISMATCH</code>: требуется проверка записи и её владельца; не удаляйте конфигурацию или файлы вручную.</li><li>Код с <code>RECOVERY_REQUIRED</code>: сохраните ошибку предыдущей операции для диагностики.</li><li><code>OPERATION_BUSY</code>: дождитесь завершения текущей операции и повторите один раз.</li><li><code>is the daemon running?</code>: сначала проверьте службу BROray.</li></ul>
+<p>При ошибке остановитесь и сохраните её код. Даже при <code>enabled</code> внешний доступ может зависеть от доступности KeenDNS; отдельно проверьте основную панель и локальную страницу BROray.</p>
+
 <h2 id="stale-cache">После установки видна старая страница или не работает вход</h2>
 
 <p>После замены 3.2 на 3.5 браузер может показать сохранённый HTML старой версии. Выполните Ctrl+F5 или Ctrl+Shift+R в Firefox; при необходимости проверьте адрес в новой приватной вкладке. Затем на странице «BROray» сверьте версию 3.5.5. Для входа используйте учётную запись администратора основной панели, а не пароль root Entware. Если свежая страница также отказывает во входе, сохраните код ошибки и версию прошивки; не повторяйте пароль многократно.</p>
