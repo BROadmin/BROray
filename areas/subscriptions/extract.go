@@ -127,7 +127,8 @@ func extractNodes(body []byte, md *metadata) (*extracted, *subErr) {
 		} else {
 			text := strings.Join(input, "\n")
 			ex.Native = map[int]nativeJSONInput{}
-			conv, ok := xrayJSONToInputs([]byte(text), maxNodes, ex.Native)
+			ex.NodeWarnings = map[int][]string{}
+			conv, ok := xrayJSONToInputs([]byte(text), maxNodes, ex.Native, ex.NodeWarnings)
 			if !ok {
 				if cx, recognized, err := clashExtract([]byte(text)); recognized {
 					return cx, err
@@ -160,14 +161,15 @@ func structuredSubscription(lines []string) (*extracted, bool, *subErr) {
 	trimmed := bytes.TrimSpace(text)
 	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
 		native := map[int]nativeJSONInput{}
-		if conv, ok := xrayJSONToInputs(text, maxNodes, native); ok {
+		nodeWarnings := map[int][]string{}
+		if conv, ok := xrayJSONToInputs(text, maxNodes, native, nodeWarnings); ok {
 			if len(conv) == 0 {
 				return nil, true, fail("NO_VALID_NODES", "Подписка не содержит узлов.")
 			}
 			if len(conv) > maxNodes {
 				return nil, true, fail("CONTENT_TOO_LARGE", "Подписка содержит слишком много узлов.")
 			}
-			return &extracted{Lines: conv, JSONImport: true, Native: native}, true, nil
+			return &extracted{Lines: conv, JSONImport: true, Native: native, NodeWarnings: nodeWarnings}, true, nil
 		}
 		// A JSON export may wrap explicit share links rather than profiles.
 		// Keep the document's provenance while using the same strict parser.

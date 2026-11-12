@@ -613,7 +613,6 @@ func TestParserFieldCoverageDeclaredUnsupported(t *testing.T) {
 		{"VMess", "vmess", "settings.experiments", "unsupported"}, {"Trojan", "trojan", "settings.flow", "xtls-rprx-vision"},
 		{"HTTP", "http", "settings.headers", map[string]any{"X-Probe": "value"}},
 		{"RAW", "raw", "streamSettings.rawSettings.acceptProxyProtocol", true}, {"WS", "ws", "streamSettings.wsSettings.acceptProxyProtocol", true}, {"HTTPUpgrade", "httpupgrade", "streamSettings.httpupgradeSettings.acceptProxyProtocol", true},
-		{"Hysteria", "hysteria", "streamSettings.hysteriaSettings.masquerade", map[string]any{"type": "string", "content": "synthetic"}},
 		{"XHTTP", "xhttp", "streamSettings.xhttpSettings.h2Params", map[string]any{"maxConcurrentStreams": 1}},
 	} {
 		parserCoverageField(t, tc.schema, tc.base, tc.path, "", nil, []parserCoverageValue{pcValue("declared-unsupported", tc.value)})

@@ -84,6 +84,37 @@ func wireGuardOutbound(profile, out map[string]any, index int, multiple bool) []
 	return []string{b.String()}
 }
 
+const hysteriaMasqueradeWarning = "Hysteria2: поле masquerade относится к серверу и не применяется в клиентском подключении."
+
+// Xray v26.11.9 consumes masquerade only in the Hysteria listener. Check the
+// known JSON shape before omitting it; never open its URL or directory.
+func validateHysteriaMasquerade(v any) {
+	m := obj(v)
+	need(keysOnly(m, "type", "dir", "url", "content", "headers", "insecure", "rewriteHost", "statusCode", "xForwarded"))
+	need(inList(stringField(m, "type", ""), "", "file", "proxy", "string"))
+	for _, key := range []string{"dir", "url", "content"} {
+		if v, exists := m[key]; exists {
+			_, ok := v.(string)
+			need(ok)
+		}
+	}
+	for _, key := range []string{"insecure", "rewriteHost", "xForwarded"} {
+		if v, exists := m[key]; exists {
+			_, ok := v.(bool)
+			need(ok)
+		}
+	}
+	if v, exists := m["headers"]; exists {
+		for _, value := range obj(v) {
+			_, ok := value.(string)
+			need(ok)
+		}
+	}
+	if v, exists := m["statusCode"]; exists {
+		need(isInt(v, -2147483648, 2147483647))
+	}
+}
+
 func hysteriaOutbound(profile, out map[string]any, index int, multiple bool) []string {
 	need(keysOnly(out, "protocol", "tag", "settings", "streamSettings"))
 	s := obj(out["settings"])
@@ -91,7 +122,10 @@ func hysteriaOutbound(profile, out map[string]any, index int, multiple bool) []s
 	stream := objectField(out, "streamSettings")
 	need(keysOnly(stream, "network", "security", "tlsSettings", "hysteriaSettings", "finalmask", "sockopt") && stream["network"] == "hysteria" && stream["security"] == "tls")
 	h := objectField(stream, "hysteriaSettings")
-	need(keysOnly(h, "version", "auth", "udpIdleTimeout") && isInt(h["version"], 2, 2))
+	need(keysOnly(h, "version", "auth", "udpIdleTimeout", "masquerade") && isInt(h["version"], 2, 2))
+	if v, exists := h["masquerade"]; exists {
+		validateHysteriaMasquerade(v)
+	}
 	auth := stringField(h, "auth", "")
 	params := protection(stream)
 	if has(stream, "sockopt") {

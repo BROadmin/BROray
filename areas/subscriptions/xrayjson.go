@@ -930,10 +930,10 @@ func tryLines(fn func() []string) (lines []string, ok bool) {
 // profiles) into share links; unsupported outbounds become the marker line.
 // ok=false is a document-level failure (PARSE_ERROR).
 func xrayJSONToLinks(text []byte, maxNodes int) (out []string, ok bool) {
-	return xrayJSONToInputs(text, maxNodes, nil)
+	return xrayJSONToInputs(text, maxNodes, nil, nil)
 }
 
-func xrayJSONToInputs(text []byte, maxNodes int, native map[int]nativeJSONInput) (out []string, ok bool) {
+func xrayJSONToInputs(text []byte, maxNodes int, native map[int]nativeJSONInput, nodeWarnings map[int][]string) (out []string, ok bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			out, ok = nil, false
@@ -996,6 +996,13 @@ func xrayJSONToInputs(text []byte, maxNodes int, native map[int]nativeJSONInput)
 				lines = []string{unsupportedMarker}
 			} else if len(lines) > limit {
 				lines = lines[:limit]
+			}
+			if good && nodeWarnings != nil && o.(map[string]any)["protocol"] == "hysteria" {
+				stream, _ := o.(map[string]any)["streamSettings"].(map[string]any)
+				hysteria, _ := stream["hysteriaSettings"].(map[string]any)
+				if has(hysteria, "masquerade") {
+					nodeWarnings[len(out)] = append(nodeWarnings[len(out)], hysteriaMasqueradeWarning)
+				}
 			}
 			for _, l := range lines {
 				out = append(out, l)

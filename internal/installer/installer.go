@@ -284,6 +284,9 @@ func Install(root platform.Root, version string, start bool) (Report, error) {
 	if err := preflightInstallPaths(root, version); err != nil {
 		return rep, err
 	}
+	_, currentErr := os.Lstat(root.Current())
+	freshInstall := errors.Is(currentErr, os.ErrNotExist)
+	newConfig := false
 	if err := root.EnsureDirs(); err != nil {
 		return rep, err
 	}
@@ -319,11 +322,14 @@ func Install(root platform.Root, version string, start bool) (Report, error) {
 		return rep, err
 	}
 	rep.step("%s -> %s", BinLink(), filepath.Join(root.Current(), "broray"))
-	if _, err := os.Stat(root.ConfigFile()); err != nil {
+	if _, err := os.Stat(root.ConfigFile()); errors.Is(err, os.ErrNotExist) {
 		if err := platform.SaveConfig(root, platform.DefaultConfig()); err != nil {
 			return rep, err
 		}
+		newConfig = true
 		rep.step("config: %s (defaults)", root.ConfigFile())
+	} else if err != nil {
+		return rep, err
 	} else {
 		rep.step("config: %s (kept)", root.ConfigFile())
 	}
@@ -344,6 +350,15 @@ func Install(root platform.Root, version string, start bool) (Report, error) {
 			return rep, fmt.Errorf("INSTALL_START_FAILED: %v: %s", err, strings.TrimSpace(string(out)))
 		}
 		rep.step("daemon: %s", strings.TrimSpace(string(out)))
+	}
+	if freshInstall && newConfig {
+		if start {
+			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+			defer cancel()
+			publishInitialWebUI(ctx, root, &rep)
+		} else {
+			rep.warning("WEB_ACCESS_DEFERRED: daemon not started; after starting BROray run: %s ctl post /api/keenetic/web-access-enable.cgi '{}'", BinLink())
+		}
 	}
 	return rep, nil
 }
