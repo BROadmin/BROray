@@ -32,7 +32,7 @@
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/troubleshooting/" aria-current="page">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
 <main class="content" id="content">
 <style>.content [id]{scroll-margin-top:6rem}@media(max-width:760px){.content [id]{scroll-margin-top:13rem}}</style>
-<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.5 · Stable</p><h1>Решение проблем BROray</h1><p class="lead">Начните с симптома и сообщения в интерфейсе. Повторная установка и перезагрузка — не первый шаг диагностики.</p></div></section>
+<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.6 · Stable</p><h1>Решение проблем BROray</h1><p class="lead">Начните с симптома и сообщения в интерфейсе. Повторная установка и перезагрузка — не первый шаг диагностики.</p></div></section>
 <h2 id="webui">WebUI не открывается</h2>
 
 <p>Проверьте подключение к домашней сети и адрес с портом 8080. Для KeenDNS сначала проверьте локальный вход: внешний адрес и само приложение могут иметь разную доступность. Убедитесь, что Entware запущен. В терминале используйте <code>/opt/bin/broray ctl ping</code>.</p>
@@ -86,7 +86,7 @@
 <p>KeenDNS может открывать только веб-панель и не предоставлять SSH. <a href="https://docs.brovibe.cloud/broray/start/#web-terminal">Откройте штатный веб-терминал</a>, включите доступ OPKG для своей учётной записи и выполните exec sh. Для установленной 3.5 <a href="https://docs.brovibe.cloud/broray/start/#remote-webui">включите её адрес штатной командой ctl</a>. Не закрывайте основную панель до проверки нового адреса. Если компонент терминала требуется установить, учтите возможное обновление ОС и автоматическую перезагрузку по подтверждению мастера.</p>
 
 <h2 id="keendns-clean-install">После чистой установки BROray открывается только локально</h2>
-<p>В 3.5.0–3.5.5 установщик не создаёт адрес <code>broray.…</code> автоматически. Если основная панель доступна по KeenDNS, переустанавливать BROray не нужно. Оставьте её открытой и перейдите в веб-терминал. Из приглашения <code>(config)&gt;</code> выполните <code>exec sh</code>: команды ниже предназначены для Entware.</p>
+<p>В 3.5.6 это исправлено: адрес создаётся при чистой установке, если настроен KeenDNS. При обновлении отключённый адрес сохраняется отключённым.</p><p>В 3.5.0–3.5.5 установщик не создаёт адрес <code>broray.…</code> автоматически. Если основная панель доступна по KeenDNS, переустанавливать BROray не нужно. Оставьте её открытой и перейдите в веб-терминал. Из приглашения <code>(config)&gt;</code> выполните <code>exec sh</code>: команды ниже предназначены для Entware.</p>
 <p>Проверьте, что BROray запущен:</p><pre><code>/opt/bin/broray ctl ping</code></pre>
 <p>При <code>success:true</code> включите адрес:</p><pre><code>/opt/bin/broray ctl post /api/keenetic/web-access-enable.cgi '{}'</code></pre>
 <p>После успешного ответа получите адрес и проверьте результат:</p><pre><code>/opt/bin/broray ctl get /api/keenetic/web-access-status.cgi</code></pre>
@@ -96,7 +96,7 @@
 
 <h2 id="stale-cache">После установки видна старая страница или не работает вход</h2>
 
-<p>После замены 3.2 на 3.5 браузер может показать сохранённый HTML старой версии. Выполните Ctrl+F5 или Ctrl+Shift+R в Firefox; при необходимости проверьте адрес в новой приватной вкладке. Затем на странице «BROray» сверьте версию 3.5.5. Для входа используйте учётную запись администратора основной панели, а не пароль root Entware. Если свежая страница также отказывает во входе, сохраните код ошибки и версию прошивки; не повторяйте пароль многократно.</p>
+<p>После замены 3.2 на 3.5 браузер может показать сохранённый HTML старой версии. Выполните Ctrl+F5 или Ctrl+Shift+R в Firefox; при необходимости проверьте адрес в новой приватной вкладке. Затем на странице «BROray» сверьте версию 3.5.6. Для входа используйте учётную запись администратора основной панели, а не пароль root Entware. Если свежая страница также отказывает во входе, сохраните код ошибки и версию прошивки; не повторяйте пароль многократно.</p>
 
 <h2 id="first-empty">Xray установлен, но подключения ещё нет</h2>
 
