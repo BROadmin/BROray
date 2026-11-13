@@ -1,6 +1,6 @@
-# Установка BROray 3.5.7 — по шагам
+# Установка BROray 3.5.8 — по шагам
 
-## Обновление с 3.5.0, 3.5.1, 3.5.2, 3.5.3, 3.5.4, 3.5.5 или 3.5.6 на 3.5.7
+## Обновление с 3.5.0, 3.5.1, 3.5.2, 3.5.3, 3.5.4, 3.5.5, 3.5.6 или 3.5.7 на 3.5.8
 
 Удалять BROray не нужно. Откройте страницу **BROray**, нажмите **«Проверить обновление»**, затем **«Установить обновление»**. Дождитесь завершения и войдите снова. Серверы, подписки и маршруты сохраняются; перезагрузка роутера не требуется. Если страница не открывается, сначала проверьте доступ к основной панели Keenetic и, если вы дома, к адресу роутера на порту 8080.
 
@@ -14,7 +14,7 @@
 
 ## Выберите свой случай
 
-- **Уже установлена 3.5.0, 3.5.1, 3.5.2, 3.5.3, 3.5.4, 3.5.5 или 3.5.6:** обновите её через WebUI по инструкции выше. Установочные команды ниже не нужны.
+- **Уже установлена 3.5.0, 3.5.1, 3.5.2, 3.5.3, 3.5.4, 3.5.5, 3.5.6 или 3.5.7:** обновите её через WebUI по инструкции выше. Установочные команды ниже не нужны.
 - **BROray ещё не установлен:** начните с [подготовки роутера](#prepare).
 - **Установлена 3.2:** сначала выполните раздел ниже, затем чистую установку. Не начинайте с установочной команды поверх старой версии.
 
@@ -174,17 +174,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.7-aarch64/broray" "$workdir/broray-3.5.7-aarch64/README.txt"
-  rmdir "$workdir/broray-3.5.7-aarch64" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.8-aarch64/broray" "$workdir/broray-3.5.8-aarch64/README.txt"
+  rmdir "$workdir/broray-3.5.8-aarch64" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.7/broray-3.5.7-aarch64.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' '1470e45205a08daac1bd87e10398abe29589fe5dda13bffc68c79d0edb79b461' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.8/broray-3.5.8-aarch64.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' '3e523eed696e04b716d8da263ed1e3dfd738809b92877b2d4a7a3bf07d557106' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.7-aarch64/broray" installer preflight
-"$workdir/broray-3.5.7-aarch64/broray" installer install
-"$workdir/broray-3.5.7-aarch64/broray" ctl ping
+"$workdir/broray-3.5.8-aarch64/broray" installer preflight
+"$workdir/broray-3.5.8-aarch64/broray" installer install
+"$workdir/broray-3.5.8-aarch64/broray" ctl ping
 echo "BROray установлен. Откройте адрес KeenDNS из результата установщика или локальный адрес роутера на порту 8080."
 )
 ```
@@ -209,17 +209,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.7-mipsel/broray" "$workdir/broray-3.5.7-mipsel/README.txt"
-  rmdir "$workdir/broray-3.5.7-mipsel" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.8-mipsel/broray" "$workdir/broray-3.5.8-mipsel/README.txt"
+  rmdir "$workdir/broray-3.5.8-mipsel" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.7/broray-3.5.7-mipsel.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' '93e8896717e809597edb7e25416f64ce0890a4357afcae41d7d9a89ff821aab8' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.8/broray-3.5.8-mipsel.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' 'f8ef9433243b0c77ae130bff72a79310f06d821b4c4f7ab4c2d038f545327967' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.7-mipsel/broray" installer preflight
-"$workdir/broray-3.5.7-mipsel/broray" installer install
-"$workdir/broray-3.5.7-mipsel/broray" ctl ping
+"$workdir/broray-3.5.8-mipsel/broray" installer preflight
+"$workdir/broray-3.5.8-mipsel/broray" installer install
+"$workdir/broray-3.5.8-mipsel/broray" ctl ping
 echo "BROray установлен. Откройте адрес KeenDNS из результата установщика или локальный адрес роутера на порту 8080."
 )
 ```
@@ -244,17 +244,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.7-mips/broray" "$workdir/broray-3.5.7-mips/README.txt"
-  rmdir "$workdir/broray-3.5.7-mips" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.8-mips/broray" "$workdir/broray-3.5.8-mips/README.txt"
+  rmdir "$workdir/broray-3.5.8-mips" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.7/broray-3.5.7-mips.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' '2cc661c955b2c48af6ecf725d0fd61f681471fd51e1031f838027179cd7cb08a' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.8/broray-3.5.8-mips.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' '93fcfa171c0afe80430ade803ba7f456a9bc6f4b07765b163de9dea6b0324279' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.7-mips/broray" installer preflight
-"$workdir/broray-3.5.7-mips/broray" installer install
-"$workdir/broray-3.5.7-mips/broray" ctl ping
+"$workdir/broray-3.5.8-mips/broray" installer preflight
+"$workdir/broray-3.5.8-mips/broray" installer install
+"$workdir/broray-3.5.8-mips/broray" ctl ping
 echo "BROray установлен. Откройте адрес KeenDNS из результата установщика или локальный адрес роутера на порту 8080."
 )
 ```
@@ -297,17 +297,17 @@ case "$entware_arch" in
 esac
 workdir="$(mktemp -d /tmp/broray-install.XXXXXX)"
 cleanup() {
-  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.7-armv7/broray" "$workdir/broray-3.5.7-armv7/README.txt"
-  rmdir "$workdir/broray-3.5.7-armv7" "$workdir" 2>/dev/null || true
+  rm -f "$workdir/broray.tar.gz" "$workdir/broray-3.5.8-armv7/broray" "$workdir/broray-3.5.8-armv7/README.txt"
+  rmdir "$workdir/broray-3.5.8-armv7" "$workdir" 2>/dev/null || true
 }
 trap cleanup EXIT
 curl --proto '=https' --proto-redir '=https' -fL --connect-timeout 20 --max-time 600 \
-  'https://github.com/BROadmin/BROray/releases/download/v3.5.7/broray-3.5.7-armv7.tar.gz' -o "$workdir/broray.tar.gz"
-printf '%s  %s\n' '6c06a51a15191e999afd0d7ce2c97a42e66e6628c05712f5944ec17656ce6da6' "$workdir/broray.tar.gz" | sha256sum -c -
+  'https://github.com/BROadmin/BROray/releases/download/v3.5.8/broray-3.5.8-armv7.tar.gz' -o "$workdir/broray.tar.gz"
+printf '%s  %s\n' 'b1b2c2536bed6c37845579f7f5dfd333973e38ad9781718211a9029e75c1293d' "$workdir/broray.tar.gz" | sha256sum -c -
 tar -xzf "$workdir/broray.tar.gz" -C "$workdir"
-"$workdir/broray-3.5.7-armv7/broray" installer preflight
-"$workdir/broray-3.5.7-armv7/broray" installer install
-"$workdir/broray-3.5.7-armv7/broray" ctl ping
+"$workdir/broray-3.5.8-armv7/broray" installer preflight
+"$workdir/broray-3.5.8-armv7/broray" installer install
+"$workdir/broray-3.5.8-armv7/broray" ctl ping
 echo "BROray установлен. Откройте адрес KeenDNS из результата установщика или локальный адрес роутера на порту 8080."
 )
 ```
@@ -344,7 +344,7 @@ echo "BROray установлен. Откройте адрес KeenDNS из ре
 ### Если доступен только KeenDNS
 
 
-В 3.5.7 при чистой установке адрес broray.… создаётся автоматически, если настроен KeenDNS. Если установщик сообщил предупреждение или адрес ранее был отключён, включите его вручную. Оставьте основную панель роутера открытой и в уже работающем терминале Entware выполните команду **3.5**:
+В 3.5.8 при чистой установке адрес broray.… создаётся автоматически, если настроен KeenDNS. Если установщик сообщил предупреждение или адрес ранее был отключён, включите его вручную. Оставьте основную панель роутера открытой и в уже работающем терминале Entware выполните команду **3.5**:
 
 
 ```sh
@@ -368,7 +368,7 @@ echo "BROray установлен. Откройте адрес KeenDNS из ре
 
 
 1. Введите имя и пароль **администратора Keenetic или Netcraze**. Здесь нужны данные основной панели роутера, а не root и пароль Entware.
-2. Если открылась старая страница 3.2, выполните принудительное обновление **Ctrl+F5**; в Firefox также доступно **Ctrl+Shift+R**. Затем на странице «BROray» убедитесь, что установлена 3.5.7. При необходимости откройте адрес в новой приватной вкладке.
+2. Если открылась старая страница 3.2, выполните принудительное обновление **Ctrl+F5**; в Firefox также доступно **Ctrl+Shift+R**. Затем на странице «BROray» убедитесь, что установлена 3.5.8. При необходимости откройте адрес в новой приватной вкладке.
 3. Откройте «Серверы», импортируйте свою ссылку и активируйте подключение. Либо добавьте ссылку в «Подписках», обновите подписку и выберите её сервер.
 4. Нажмите «Проверить» у активного сервера. Затем установите нужные наборы на странице «Маршруты → Готовые маршруты». Выбор трафика устройств определяется маршрутами и политиками роутера.
 
@@ -380,7 +380,7 @@ echo "BROray установлен. Откройте адрес KeenDNS из ре
 ## Если хотите скачать файлы вручную
 
 
-Все архивы, манифест, подпись и открытый ключ доступны в [релизе 3.5.7](https://github.com/BROadmin/BROray/releases/tag/v3.5.7). В готовых командах закреплены SHA-256 из подписанного манифеста. Дополнительная проверка подписи возможна на ПК с minisign:
+Все архивы, манифест, подпись и открытый ключ доступны в [релизе 3.5.8](https://github.com/BROadmin/BROray/releases/tag/v3.5.8). В готовых командах закреплены SHA-256 из подписанного манифеста. Дополнительная проверка подписи возможна на ПК с minisign:
 
 
 ```sh
