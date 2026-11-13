@@ -398,6 +398,7 @@
         setText("dns-detail-external-dot", external);
         setText("dns-detail-doh", Number(status.actual.dohCount || 0));
         setText("dns-detail-total", Number(status.actual.totalSecure || 0) + " из " + Number(status.maxServers || 8));
+        setText("dns-detail-filter-dot", ((status.actual.runtime && status.actual.runtime.filterDot) || []).length);
         setText("dns-detail-capacity", Number(status.maxServers || 8));
         setText("dns-detail-write-protocol", status.writeProtocolEnabled === true ? "Доступен в этой сборке" : "Не включён — изменения заблокированы");
         setText("dns-detail-delete-gate", deleteAvailable() ? "Разрешено для точных выбранных записей" : valueOrDash(status.deleteBlockedReason || "Удаление заблокировано"));

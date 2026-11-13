@@ -1328,7 +1328,8 @@ label,
     box-shadow: 0 0 12px rgba(255, 255, 255, 0.10), 0 12px 32px rgba(0, 0, 0, 0.34);
     font-size: 1.04rem;
     line-height: 1.45;
-    pointer-events: auto;
+    /* Notifications contain no controls; do not intercept page actions. */
+    pointer-events: none;
     animation: broray-toast-enter 160ms ease-out both;
 }
 .toast-success { --toast-accent: #32b379; }
@@ -3878,6 +3879,36 @@ body.modal-open {
 
 .page-servers .server-details[hidden] {
     display: none;
+}
+
+.page-servers .server-import-warnings {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    border: 1px solid var(--ui-divider);
+    border-radius: 12px;
+    background: var(--ui-surface-muted);
+}
+
+.page-servers .server-import-warnings summary {
+    box-sizing: border-box;
+    min-height: 44px;
+    padding: 10px 12px;
+    cursor: pointer;
+}
+
+.page-servers .server-import-warnings summary:focus-visible {
+    outline: 2px solid var(--ui-brand);
+    outline-offset: 2px;
+}
+
+.page-servers .server-import-warnings ul {
+    margin: 0;
+    padding: 0 16px 12px 32px;
+}
+
+.page-servers .server-import-warnings li + li {
+    margin-top: 8px;
 }
 
 .page-servers .server-details-heading h4 {

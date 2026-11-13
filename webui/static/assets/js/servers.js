@@ -528,7 +528,6 @@
             tags.appendChild(create("span", "server-tag server-tag-active", "Активен"));
         }
         identity.appendChild(tags);
-        appendImportWarnings(identity, server.importWarnings);
 		if (server.connectionSupport && server.connectionSupport.message) {
 			identity.appendChild(create("p", "server-card-address", server.connectionSupport.message));
 		}

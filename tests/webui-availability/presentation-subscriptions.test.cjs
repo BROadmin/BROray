@@ -29,6 +29,7 @@ function fixture(file,exports){
     const context={window,document,BROrayUI:ui,Map,Set,AbortController,fetch:(...a)=>context.fetcher(...a)};
     let code=fs.readFileSync(path.join(__dirname,'../../webui/static/assets/js/',file),'utf8');
     if(file==='servers.js')code=code.replace(/    bindEvents\(\);\s*initialize\(\);\s*(?=\}\)\(\);)/,'');
+    if(file==='home.js')code=code.replace(/    initialize\(\);\s*(?=\}\)\(\);)/,'');
     code=code.replace(/\}\)\(\);\s*$/,'window.fixture={'+exports+'};})();');
     vm.runInNewContext(code,context);
     return {f:window.fixture,document,window,ui,calls,toasts,context,ids};
@@ -36,6 +37,19 @@ function fixture(file,exports){
 const tick=()=>new Promise(r=>setImmediate(r));
 const row=(id,active=false,source='subscription')=>({id,displayGroupId:'a',name:'NL',active,sourceType:source,subscriptionName:id==='b'?'<JSON source>':id,subscriptionId:id,protocol:'vless',transport:'xhttp',security:'reality',quality:{status:id==='b'?'available':'unavailable',ping:id==='b'?12:99,freshness:'fresh'}});
 function serverFixture(){const h=fixture('servers.js','state,renderServers,renderSummary');h.f.state.summary={servers:[row('a'),row('b',true),row('c',false,'manual')]};return h;}
+
+test('configuration warnings appear only after opening server Details',async()=>{
+    const h=serverFixture();
+    h.f.state.summary.servers.forEach(s=>{s.importWarnings=['configuration-warning-fixture'];});
+    h.f.renderServers(h.f.state.summary.servers);
+    const card=h.document.getElementById('servers-list').children[0];
+    assert.equal(!!card.querySelector('.server-import-warnings'),false,'collapsed card must not duplicate configuration warnings');
+    h.ui.apiRequest=async()=>({id:'b',importWarnings:['configuration-warning-fixture']});
+    card.querySelector('.server-details-toggle').dispatch('click');await tick();
+    const warnings=card.querySelector('.server-import-warnings');
+    assert.ok(warnings,'Details must retain warnings');
+    assert.match(warnings.textContent,/configuration-warning-fixture/);
+});
 test('one card per group defaults to active and keeps explicit source across render',()=>{
     const h=serverFixture();h.f.renderServers(h.f.state.summary.servers);
     const list=h.document.getElementById('servers-list');assert.equal(list.children.length,1);
@@ -140,8 +154,14 @@ test('older catalog request cannot restore removed subscription',async()=>{
     h.context.fetcher=async(url)=>{if(url.includes('/list.')&&old){old=false;return new Promise(r=>finish=()=>r(response([metadata()])));}return normal(url);};
     const pending=h.f.loadAll(true);h.catalog=[];await h.f.loadAll(true);finish();await pending;assert.equal(h.f.state.subscriptions.length,0);
 });
-test('affected page assets bypass cached candidate5 scripts',()=>{
-    for(const name of ['servers','subscriptions'])assert.match(fs.readFileSync(path.join(__dirname,'../../webui/static/'+name+'.html'),'utf8'),new RegExp('/assets/js/'+name+'\\.js\\?v=WebUI-3\\.5\\.7-c6'));
+test('page asset cache tags match the current build and revision',()=>{
+ const app=fs.readFileSync(path.join(__dirname,'../../internal/app/app.go'),'utf8');const version=app.match(/var Version = "([^"]+)"/)[1];
+ for(const name of ['home','servers','subscriptions']){
+  const html=fs.readFileSync(path.join(__dirname,'../../webui/static/'+name+'.html'),'utf8');
+  const tag=html.match(/allpage\.css\?v=([^" ]+)/)[1];
+  assert.ok(tag.startsWith('WebUI-'+version+'-c'));assert.match(tag,/-c[1-9][0-9]*$/);
+  assert.ok(html.includes('/assets/js/'+name+'.js?v='+tag));
+ }
 });
 
  test('update warnings are a collapsed disclosure with escaped messages',()=>{
@@ -151,9 +171,12 @@ test('affected page assets bypass cached candidate5 scripts',()=>{
  assert.doesNotMatch(html, /<details[^>]*\bopen(?:[\s=>])/);assert.match(html,/&lt;private&gt;/);
  assert.equal(h.f.renderWarnings({lastUpdateResult:{warnings:[]}}),'');
  });
-test('saved server warning remains visible after import and reload',()=>{
+test('saved server warning stays in Details after import and reload',async()=>{
  const h=serverFixture();h.f.state.summary.servers.forEach(r=>r.importWarnings=['Synthetic warning <value>']);h.f.renderServers(h.f.state.summary.servers);
- const card=h.document.getElementById('servers-list').children[0];assert.match(card.textContent,/Synthetic warning <value>/);assert.ok(card.querySelector('details'));assert.equal(card.querySelector('details').hasAttribute('open'),false);
+ const card=h.document.getElementById('servers-list').children[0];assert.doesNotMatch(card.textContent,/Synthetic warning/);
+ h.ui.apiRequest=async()=>({id:'b',importWarnings:['Synthetic warning <value>']});
+ card.querySelector('.server-details-toggle').dispatch('click');await tick();
+ const warnings=card.querySelector('.server-import-warnings');assert.match(warnings.textContent,/Synthetic warning <value>/);assert.equal(warnings.hasAttribute('open'),false);
 });
 test('DNS unsaved selection does not reuse saved matchesSelection',()=>{
  const h=fixture('dns.js','selectionMatches,setFixture:function(s,p){status=s;selected=p;}');
@@ -169,3 +192,12 @@ test('additional JSON and Clash switches reset off, load independently, and subm
  assert.equal(saved.fetchJSON,false);assert.equal(saved.fetchClash,true);
  const html=fs.readFileSync(path.join(__dirname,'../../webui/static/subscriptions.html'),'utf8');for(const id of ['subscription-fetch-json','subscription-fetch-clash']){assert.match(html,new RegExp('id="'+id+'"[^>]*type="checkbox"'));assert.doesNotMatch(html,new RegExp('id="'+id+'"[^>]*checked'));}
 });
+
+ test('home summary keeps configuration warning text in subscription Details only',()=>{
+ const h=fixture('home.js','renderSubscriptions');
+ h.f.renderSubscriptions({severity:'ok',lastUpdateStatus:'ok',lastWarnings:['configuration-only-secretless-marker'],enabled:1,total:1,serversReceived:16});
+ assert.doesNotMatch(h.document.getElementById('home-subscriptions-main').textContent,/configuration-only-secretless-marker/);
+ assert.match(h.document.getElementById('home-subscriptions-main').textContent,/Последнее обновление/);
+ h.f.renderSubscriptions({severity:'warning',lastUpdateStatus:'partial',lastWarnings:['configuration-only-secretless-marker'],enabled:1,total:1,serversReceived:16});
+ assert.equal(h.document.getElementById('home-subscriptions-status').textContent,'Обновлено частично');
+ });

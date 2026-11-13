@@ -45,6 +45,7 @@ type runtimeObs struct {
 	PolicyProxyTLSSections int       `json:"policyProxyTlsSections"`
 	UnknownSchemaCount     int       `json:"unknownSchemaCount"`
 	Dot                    []liveRec `json:"dot"`
+	FilterDot              []liveRec `json:"filterDot,omitempty"`
 	ParseErrorCount        int       `json:"parseErrorCount"`
 	Determinate            bool      `json:"determinate"`
 }
@@ -234,6 +235,18 @@ func parseRunning(lines []string) observed {
 
 // parseRuntime implements broray_dot_fetch_runtime's awk/jq program.
 func parseRuntime(lines []string) runtimeObs {
+	r := parseRuntimeSection(lines, "proxy-tls:")
+	filters := parseRuntimeSection(lines, "proxy-tls-filters:")
+	r.FilterDot = filters.Dot
+	// Filters are optional. When present they must be just as unambiguous as
+	// explicit upstreams; policy profiles cannot explain System records.
+	r.Determinate = r.Determinate && filters.SystemProxyCount == 1 && filters.SystemProxyTLSSections <= 1 && filters.UnknownSchemaCount == 0 && filters.ParseErrorCount == 0
+	r.UnknownSchemaCount += filters.UnknownSchemaCount
+	r.ParseErrorCount += filters.ParseErrorCount
+	return r
+}
+
+func parseRuntimeSection(lines []string, section string) runtimeObs {
 	var recs []liveRec
 	inProxyTLS, inRecord := false, false
 	idx, unknownSchema, sections, systemProfiles, systemSections := 0, 0, 0, 0, 0
@@ -296,7 +309,7 @@ func parseRuntime(lines []string) runtimeObs {
 				systemProfiles++
 			}
 			continue
-		case line == "proxy-tls:":
+		case line == section:
 			flush()
 			sections++
 			if current == "System" {
@@ -419,8 +432,25 @@ func reconcile(c observed, r runtimeObs) observed {
 		}
 		return n
 	}
-	cm, rm := matched(c.Dot, r.Dot), matched(r.Dot, c.Dot)
-	det := c.Determinate && r.Determinate && len(c.Dot) == len(r.Dot) && cm == len(c.Dot) && rm == len(r.Dot)
+	// Runtime System TLS is the union of explicit upstreams and router filter
+	// entries. A shared endpoint occurs once in runtime; filters never become
+	// explicit/owned records and therefore cannot become deletion candidates.
+	expected := append([]liveRec(nil), c.Dot...)
+	filtersValid := matched(r.FilterDot, r.Dot) == len(r.FilterDot) && matched(r.FilterDot, r.FilterDot) == len(r.FilterDot)
+	for _, f := range r.FilterDot {
+		found := false
+		for _, e := range expected {
+			if liveSame(e, f) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			expected = append(expected, f)
+		}
+	}
+	cm, rm := matched(expected, r.Dot), matched(r.Dot, expected)
+	det := c.Determinate && r.Determinate && filtersValid && len(expected) == len(r.Dot) && cm == len(expected) && rm == len(r.Dot)
 	c.Runtime = r
 	c.RuntimeReconciled = det
 	c.Determinate = det

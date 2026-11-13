@@ -167,7 +167,7 @@
     }
 
     function renderSubscriptions(data) {
-        var severity, updateStatus, updateTime, warning;
+        var severity, updateStatus, updateTime;
         if (!data) {
             renderUnavailable("home-subscriptions", "Сводка подписок недоступна.");
             setText("home-subscriptions-enabled", null);
@@ -178,8 +178,7 @@
         setStatus("home-subscriptions-status", data.lastUpdateStatus === "partial" ? "Обновлено частично" : labelOf(severity), toneOf(severity));
         updateStatus = translateUpdateStatus(data.lastUpdateStatus);
         updateTime = data.lastUpdatedAt ? formatDate(data.lastUpdatedAt) : "";
-        warning = Array.isArray(data.lastWarnings) && data.lastWarnings.length ? data.lastWarnings[0] : null;
-        setText("home-subscriptions-main", warning || ("Последнее обновление: " + (updateTime ? updateTime + " · " + updateStatus : updateStatus) + "."));
+        setText("home-subscriptions-main", "Последнее обновление: " + (updateTime ? updateTime + " · " + updateStatus : updateStatus) + ".");
         setText("home-subscriptions-enabled", Number(data.enabled || 0) + " из " + Number(data.total || 0));
         setText("home-subscriptions-servers", Number(data.serversReceived || 0));
     }
