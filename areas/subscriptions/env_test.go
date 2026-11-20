@@ -22,6 +22,7 @@ import (
 )
 
 type env struct {
+	daemonGuard *platform.Lock
 	d           *compat.Deps
 	s           *svc
 	mu          sync.Mutex
@@ -45,6 +46,7 @@ func newEnv(t *testing.T) *env {
 	d.Lock = compat.NewGlobalLock(d.RunPath("global-operation.json"))
 	d.Queue = compat.NewCoordinator(d)
 	e := &env{d: d, dns: map[string][]string{}}
+	sourceQueueOwner(t, e)
 	if err := setup(d); err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +88,7 @@ func newEnv(t *testing.T) *env {
 		return map[string]any{"hw_id": "KN-1010", "vendor": "Keenetic", "title": "4.2.3"}, true
 	}
 	t.Cleanup(func() { addrAllowed, lookupIP, testActiveConfig, showVersion = oldAllowed, oldLookup, oldTest, oldShow })
+	sourceRefreshTestServices(t, e)
 	return e
 }
 
@@ -210,7 +213,7 @@ func (e *env) refreshSync(t *testing.T, id string) error {
 	}
 	defer release()
 	op := e.d.Queue.StartOperation("", "subscription_update", "subscriptions:refresh", "USER", "cooperative", "")
-	err := e.s.update(e.d.Ctx, op, id, "manual", nil)
+	err := e.s.update(compat.WithFence(e.d.Ctx), op, id, "manual", nil)
 	op.Finish(err)
 	return err
 }

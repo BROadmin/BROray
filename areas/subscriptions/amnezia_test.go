@@ -1,7 +1,6 @@
 package subscriptions
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -47,7 +46,7 @@ func TestAmneziaBase64INISubscription(t *testing.T) {
 		t.Fatalf("native AWG made subscription partial: %+v %v", st, err)
 	}
 	e := newEnv(t)
-	r, syncErr := e.s.syncCatalog(context.Background(), subX, st.Records, true, "manual", "replace")
+	r, syncErr := e.s.syncCatalog(sourceRefreshContext(), subX, st.Records, true, "manual", "replace")
 	if syncErr != nil || r.Total != 2 || r.Added != 2 {
 		t.Fatalf("native AWG not persisted: %+v %v", r, syncErr)
 	}
@@ -93,7 +92,7 @@ func TestAmneziaCorruptionKeepsPartialProtection(t *testing.T) {
 	if se != nil || st.Rejected != 1 || st.Accepted != 1 {
 		t.Fatalf("bad container not rejected: %v", se)
 	}
-	res, err := e.s.syncCatalog(context.Background(), subX, st.Records, true, "partial", "retain-unmatched")
+	res, err := e.s.syncCatalog(sourceRefreshContext(), subX, st.Records, true, "partial", "retain-unmatched")
 	if err != nil || res.Retained != 1 || res.Removed != 0 {
 		t.Fatalf("partial response deleted old server: %v %+v", err, res)
 	}

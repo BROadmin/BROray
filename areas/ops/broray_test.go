@@ -62,8 +62,23 @@ func TestInfoShapeAndLayout(t *testing.T) {
 	if b["installationHealthy"] != false || b["versionsConsistent"] != false || b["health"].(map[string]any)["severity"] != "error" {
 		t.Fatalf("uninstalled layout must be unhealthy: %v %v", b["installationHealthy"], b["versionsConsistent"])
 	}
-	if len(b["capabilities"].([]any)) != 9 || len(b["protocols"].([]any)) != 5 {
-		t.Fatal("capabilities/protocols")
+	reportedCapabilities := b["capabilities"].([]any)
+	if len(reportedCapabilities) != 14 {
+		t.Fatalf("capabilities count = %d, want 14", len(reportedCapabilities))
+	}
+	for i, want := range []string{
+		"Настройка и проверка DNS-over-TLS",
+		"Автопроверка качества и автовыбор сервера",
+		"Резервирование VPN с автоматическим переключением",
+		"Готовые и свои доменные списки Keenetic",
+		"Автообновление подписок по расписанию",
+	} {
+		if got := reportedCapabilities[9+i]; got != want {
+			t.Errorf("capability %d = %q, want %q", 10+i, got, want)
+		}
+	}
+	if len(b["protocols"].([]any)) != 5 {
+		t.Fatal("protocols count")
 	}
 	// installed layout of the running version → consistent
 	installLayout(t, a, app.Version)

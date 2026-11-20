@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -148,13 +149,43 @@ func TestXrayUDPPerProtocol(t *testing.T) {
 	}
 }
 
+var fixtureTCPPorts = struct {
+	sync.Mutex
+	next int
+}{next: 10000}
+
+// These isolated Linux fixtures hand the port to a subsequently started core.
+// Automatic port allocation must not steal it in between. Do not reuse an old
+// fixture port, which may still belong to a previous connection or TIME_WAIT.
 func freeTCP(t *testing.T) int {
-	l, err := net.Listen("tcp4", "127.0.0.1:0")
+	t.Helper()
+	fixtureTCPPorts.Lock()
+	defer fixtureTCPPorts.Unlock()
+	raw, err := os.ReadFile("/proc/sys/net/ipv4/ip_local_port_range")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	var low, high int
+	if n, err := fmt.Sscanf(string(raw), "%d %d", &low, &high); err != nil || n != 2 || low < 1 || high > 65535 || low > high {
+		t.Fatal("invalid automatic port range", err)
+	}
+	for fixtureTCPPorts.next <= 65535 {
+		port := fixtureTCPPorts.next
+		fixtureTCPPorts.next++
+		if port >= low && port <= high {
+			continue
+		}
+		l, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err != nil {
+			continue
+		}
+		if err := l.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return port
+	}
+	t.Fatal("isolated fixture port pool exhausted")
+	return 0
 }
 
 func startXray(t *testing.T, bin, path string, cfg []byte, port int, env []string) *exec.Cmd {

@@ -40,10 +40,11 @@ type svc struct {
 	loopRunning    atomic.Bool
 	monitorRunning atomic.Bool
 	probePIDs      sync.Map // pids of temporary probe Xray processes
+	reserveMon     *reserveMonitor
 }
 
 func newSvc(d *compat.Deps) *svc {
-	s := &svc{d: d, now: time.Now}
+	s := &svc{d: d, now: time.Now, reserveMon: &reserveMonitor{}}
 	s.xrayTest = s.execXrayTest
 	s.measure = s.isolatedProbe
 	s.activeProbe = s.socksProbe
@@ -117,7 +118,11 @@ func (s *svc) genSettings(ctx context.Context) GenSettings {
 // a record with the current settings (broray_generate_server_config).
 func GenerateConfig(ctx context.Context, d *compat.Deps, rec Record) ([]byte, error) {
 	s := newSvc(d)
-	return XrayConfig(rec, s.genSettings(ctx), RecordPath(d, asString(rec["id"])))
+	cfg, err := XrayConfig(rec, s.genSettings(ctx), RecordPath(d, asString(rec["id"])))
+	if err != nil {
+		return nil, err
+	}
+	return d.Svc.ConfigureRouting(ctx, cfg)
 }
 
 // TestConfig runs `xray run -test -c <file>` on config bytes

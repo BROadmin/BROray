@@ -44,6 +44,10 @@ func setup(d *compat.Deps) error {
 	current.Store(s)
 	regOnce.Do(register)
 	d.Svc.XrayApplyConfig = func(ctx context.Context, cfg []byte) error { return current.Load().ApplyConfig(ctx, cfg) }
+	d.Svc.XrayValidateConfig = func(ctx context.Context, cfg []byte) error { return current.Load().ValidateConfig(ctx, cfg) }
+	d.Svc.XrayValidateStagedConfig = func(ctx context.Context, cfg []byte, assets *os.File) error {
+		return current.Load().ValidateStagedConfig(ctx, cfg, assets)
+	}
 	d.Svc.XrayRunning = func() bool { return d.App.Xray.Running() }
 	compat.RegisterSnapshot("xray", func(ctx context.Context) (map[string]any, error) {
 		return current.Load().computeStatus(ctx), nil
@@ -96,7 +100,7 @@ func (s *service) bootStart(ctx context.Context) {
 		return
 	}
 	waitClock(ctx, s.d.Log.Printf)
-	if out, err := s.lifecycle(ctx, "start"); err != nil {
+	if out, err := s.lifecycle(ctx, "boot-start"); err != nil {
 		s.d.Log.Printf("xray: boot start failed: %v %s", err, out)
 		return
 	}

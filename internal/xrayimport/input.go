@@ -192,6 +192,13 @@ func (c *converter) inputs(profile, out map[string]any, index int, multiple, fro
 			nodes = []Input{{Rejected: true, RejectionField: field, FromProfile: fromProfile}}
 		}
 	}()
+	// Preserve this public enum diagnostic before structural validation.
+	// Other schema failures keep their existing generic rejection envelope.
+	if mux, ok := out["mux"].(map[string]any); ok && has(mux, "xudpProxyUDP443") {
+		if _, ok := mux["xudpProxyUDP443"].(string); !ok {
+			panic(jqFail{field: "mux.xudpProxyUDP443"})
+		}
+	}
 	assessment, err := xrayschema.Classify(out)
 	need(err == nil)
 	var unavailable map[string]any

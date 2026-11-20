@@ -8,6 +8,7 @@
         queuedChecks: {},
         groupSelection: new Map(),
         groupActive: new Map(),
+        deletingOthers: false,
         busy: false
     };
 
@@ -142,9 +143,10 @@
         return "status-badge-neutral";
     }
 
-    function connectionLabel(value) {
+    function connectionLabel(value, connection) {
         if (value === "connected") return "Подключено";
-        if (value === "degraded") return "Подключение не подтверждено";
+        if (value === "degraded") return connection && connection.available === false
+            ? "Ожидание проверки" : "Подключение не подтверждено";
         if (value === "error") return "Ошибка";
         return "Нет подключения";
     }
@@ -191,6 +193,7 @@
 
     function renderSummary(summary) {
         state.summary = summary || {};
+        if (window.BROrayReserve) window.BROrayReserve.updateSummary(state.summary, sourceLabel);
 
         var active = state.summary.activeServer;
         var connectionState =
@@ -230,7 +233,7 @@
 
         var badge = element("connection-state-badge");
 
-        badge.textContent = connectionLabel(connectionState);
+        badge.textContent = connectionLabel(connectionState, state.summary.activeConnection);
         badge.className = "status-badge ";
 
         if (severity === "ok") {
@@ -402,9 +405,13 @@
     }
 
     function sourceLabel(server) {
-        return server.sourceType === "subscription"
+        var source = server.sourceType === "subscription"
             ? text(server.subscriptionName, server.subscriptionId || server.id)
             : "Ручной импорт";
+        var formats = new Map([["json", "JSON"], ["clash", "Clash"], ["uri", "URI"]]);
+        var labels = (Array.isArray(server.sourceFormats) ? server.sourceFormats : [])
+            .map(function (format) { return formats.get(format); }).filter(Boolean);
+        return labels.length ? source + " · " + labels.join(" / ") : source;
     }
 
     function displayGroups(servers) {
@@ -428,6 +435,7 @@
     }
 
     function renderServers(servers) {
+        updateDeleteOthersButton();
         var list = element("servers-list");
         var groups = displayGroups(servers);
         var expanded = {};
@@ -509,7 +517,7 @@
 			quality.className = "status-badge status-badge-warning";
 		}
 
-        titleRow.append(title, quality);
+        titleRow.appendChild(title);
         identity.append(
             titleRow,
             create(
@@ -526,8 +534,11 @@
         );
         if (server.active) {
             tags.appendChild(create("span", "server-tag server-tag-active", "Активен"));
+            tags.appendChild(create("span", "server-tag", qualityLabel(server.quality)));
+            quality.textContent = connectionLabel(state.summary.connectionState || "disabled", state.summary.activeConnection);
+            quality.className = "status-badge " + (state.summary.connectionState === "connected"
+                ? "status-badge-success" : "status-badge-warning");
         }
-        identity.appendChild(tags);
 		if (server.connectionSupport && server.connectionSupport.message) {
 			identity.appendChild(create("p", "server-card-address", server.connectionSupport.message));
 		}
@@ -542,7 +553,8 @@
             label.setAttribute("for", select.id);
             group.members.forEach(function (member) {
                 var name = sourceLabel(member);
-                if (group.members.filter(function (other) { return sourceLabel(other) === name; }).length > 1) name += " · " + member.id;
+                var sameSource = group.members.filter(function (other) { return sourceLabel(other) === name; });
+                if (sameSource.length > 1) name += " · " + (sameSource.indexOf(member) + 1);
                 var option = create("option", "", name + (member.active ? " · активен" : ""));
                 option.value = member.id;
                 select.appendChild(option);
@@ -562,7 +574,8 @@
         if (group.active) {
             identity.appendChild(create("p", "server-card-address", "Активный источник: " + sourceLabel(group.active)));
         }
-        header.appendChild(identity);
+        identity.appendChild(tags);
+        header.append(identity, quality);
         card.appendChild(header);
 
         appendDefinition(
@@ -591,6 +604,7 @@
         );
         appendCloudEstablishment(metrics, server.quality);
         card.appendChild(metrics);
+        if (window.BROrayDPI) card.appendChild(window.BROrayDPI.create(server));
 
         checkButton = create("button", "button button-secondary", "Проверить");
         checkButton.type = "button";
@@ -952,6 +966,43 @@
         });
     }
 
+    function updateDeleteOthersButton() {
+        var button = element("delete-inactive-servers");
+        var summary = state.summary || {};
+        var active = summary.activeServer;
+        var others = (summary.servers || []).filter(function (server) { return !active || server.id !== active.id; });
+        if (button) button.disabled = state.deletingOthers || !active || !active.id || !others.length;
+    }
+
+    function deleteOtherServers(button) {
+        var summary = state.summary || {};
+        var active = summary.activeServer;
+        if (!active || !active.id || state.deletingOthers) return;
+        var others = (summary.servers || []).filter(function (server) { return server.id !== active.id; });
+        if (!others.length) return;
+        var message = "Будет удалено серверов: " + others.length + ". Активный сервер «" + text(active.name, active.id) + "» сохранится. Отменить удаление нельзя.";
+        if (others.some(function (server) { return server.sourceType === "subscription"; })) {
+            message += " Серверы подписок могут появиться снова при следующем обновлении подписки.";
+        }
+        showConfirm("Удалить все, кроме активного?", message, "Удалить", true).then(function (confirmed) {
+            if (!confirmed) return;
+            state.deletingOthers = true;
+            setBusy(button, true, "Удаление…");
+            request("/api/servers/delete-inactive.cgi", { method: "POST", headers: { "X-BROray-Request": "operations", "X-BROray-Origin": window.location.origin }, body: { activeId: active.id } }).then(function (result) {
+                Object.keys(state.details).forEach(function (id) { if (id !== active.id) delete state.details[id]; });
+                BROrayUI.toast("Удалено серверов: " + result.removed + ".", "success");
+                return loadSummary(false);
+            }).catch(function (error) {
+                handleError(error);
+                return loadSummary(false).catch(handleError);
+            }).then(function () {
+                state.deletingOthers = false;
+                setBusy(button, false);
+                updateDeleteOthersButton();
+            });
+        });
+    }
+
     function toggleImport(show) {
         var card = element("server-import-card");
         var button = element("toggle-import");
@@ -1027,6 +1078,8 @@
     }
 
     function bindEvents() {
+        var deleteOthers = element("delete-inactive-servers");
+        if (deleteOthers) deleteOthers.addEventListener("click", function () { deleteOtherServers(this); });
         var refresh = element("refresh-servers");
         var activeCheck = element("check-active-server");
         var deactivate = element("deactivate-servers");

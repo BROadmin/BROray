@@ -27,13 +27,16 @@ import (
 
 // Deps is what an area gets at setup.
 type Deps struct {
-	Root  platform.Root
-	App   *app.App // Cfg, T (Keenetic transport), K (adapter), Xray process, HTTP client
-	Lock  *GlobalLock
-	Queue *Coordinator
-	Log   *log.Logger
-	Ctx   context.Context // cancelled at daemon shutdown; areas start loops with it
-	Svc   *Services       // cross-area calls (services.go)
+	// DaemonGuard is retained by runDaemon; cold metadata operations recheck
+	// the exact kernel owner. Maintenance and ordinary test deps leave it nil.
+	DaemonGuard *platform.Lock
+	Root        platform.Root
+	App         *app.App // Cfg, T (Keenetic transport), K (adapter), Xray process, HTTP client
+	Lock        *GlobalLock
+	Queue       *Coordinator
+	Log         *log.Logger
+	Ctx         context.Context // cancelled at daemon shutdown; areas start loops with it
+	Svc         *Services       // cross-area calls (services.go)
 	// Maintenance is true when areas are set up outside the daemon (CLI
 	// uninstall): register endpoints, services and uninstall steps, but
 	// start NO goroutines, timers, Xray or Keenetic writes in Setup.

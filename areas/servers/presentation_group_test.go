@@ -63,6 +63,7 @@ func presentationSummary(t *testing.T, records ...Record) (map[string]map[string
 func TestPresentationGroupVariantsPreserveRecords(t *testing.T) {
 	uri := presentationRecord(t, "uri", "")
 	js := presentationRecord(t, "json", "&spx=%2Fclient&fp=firefox&extra="+url.QueryEscape(`{"xPaddingBytes":"100-200","xmux":{"maxConnections":1}}`))
+	js["source"].(map[string]any)["formats"] = []any{"clash", "json", "invalid", "json"}
 	clash := normalize(uri)
 	clash["id"], clash["name"], clash["source"] = "clash", "Same label", map[string]any{"type": "subscription", "subscriptionId": "missing"}
 	clash["address"] = "example.test"
@@ -85,6 +86,9 @@ func TestPresentationGroupVariantsPreserveRecords(t *testing.T) {
 	}
 	if rows["json"]["subscriptionName"] != "JSON <source>" || rows["clash"]["subscriptionName"] != "missing" {
 		t.Error("local source names/fallback missing")
+	}
+	if formats := rows["json"]["sourceFormats"].([]string); strings.Join(formats, ",") != "json,clash" {
+		t.Errorf("unexpected source formats: %v", formats)
 	}
 	reversed, _ := presentationSummary(t, clash, js, uri)
 	if reversed["uri"]["displayGroupId"] != rows["uri"]["displayGroupId"] {
@@ -230,5 +234,30 @@ func TestPresentationGroupParsedAWG(t *testing.T) {
 	}
 	if rows["awg-c"]["displayGroupId"] == rows["awg-a"]["displayGroupId"] {
 		t.Error("different AWG peer grouped")
+	}
+}
+
+func TestPresentationGroupSubscriptionKeepsTransportVariants(t *testing.T) {
+	const first = "subscription-sub-example-1111111111111111"
+	const second = "subscription-sub-example-2222222222222222"
+	base := presentationRecord(t, first, "&mode=auto#Example")
+	base["source"] = map[string]any{"type": "subscription", "subscriptionId": "sub-example"}
+	variant := presentationRecord(t, second, "&mode=stream-up&extra="+url.QueryEscape("{\"mode\":\"stream-up\"}")+"#Example")
+	variant["source"] = base["source"]
+	other := normalize(variant)
+	other["id"] = "other-account"
+	other["uuid"] = "another-account"
+	separate := presentationRecord(t, "other-subscription", "&mode=stream-one#Example")
+	separate["source"] = map[string]any{"type": "subscription", "subscriptionId": "elsewhere"}
+	rows, _ := presentationSummary(t, base, variant, other, separate)
+	if rows[first]["displayGroupId"] != rows[second]["displayGroupId"] {
+		t.Fatal("same subscription server rendered as separate cards")
+	}
+	if rows[first]["displayGroupId"] == rows["other-account"]["displayGroupId"] ||
+		rows[first]["displayGroupId"] == rows["other-subscription"]["displayGroupId"] {
+		t.Fatal("unrelated profiles grouped")
+	}
+	if rows[first]["id"] != first || rows[second]["id"] != second {
+		t.Fatal("display grouping changed an operation identity")
 	}
 }

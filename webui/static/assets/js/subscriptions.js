@@ -30,6 +30,7 @@
         catalogGeneration: 0,
         foregroundLoad: null,
         queued: {},
+        removing: {},
         polling: null
     };
 
@@ -283,7 +284,8 @@
         listElement.innerHTML = state.subscriptions.map(function (item) {
             var queued=state.queued[item.id];
             var pending=queued && ["queued","running"].includes(queued.state);
-            var running = item.lastUpdateStatus === "running" || pending;
+            var removal = state.removing[item.id];
+            var running = item.lastUpdateStatus === "running" || pending || !!removal;
             var operation = item.updateOperation || {};
             var phase = ({fetching: "Загрузка подписки…", parsing: "Разбор серверов…", committing: "Сохранение серверов…", waiting: "Ожидание запуска…"})[operation.phase] || "Обновление подписки…";
             var progress = item.parseProgress || {};
@@ -291,7 +293,9 @@
             if (operation.phase === "parsing" && Number.isInteger(progress.processed) && Number.isInteger(progress.total)) {
                 phase += " Обработано " + progress.processed + " из " + progress.total + ".";
             }
-            var update = statusPresentation(item.lastUpdateStatus);
+            if (removal) phase = removal.state === "unknown" ? "Удаление не подтверждено. Проверьте состояние." :
+                removal.state === "queued" ? "Удаление ожидает запуска…" : "Удаление подписки…";
+            var update = removal ? {label: removal.state === "unknown" ? "Удаление не подтверждено" : "Удаление…", tone: "warning"} : statusPresentation(item.lastUpdateStatus);
             var enabled = item.enabled
                 ? {label: "Активна", tone: "success"}
                 : {label: "Отключена", tone: "neutral"};
@@ -320,18 +324,18 @@
                     '<div><dt>Следующее обновление</dt><dd>' + escapeHtml(formatDate(item.nextUpdateAt)) + '</dd></div>' +
                 '</dl>' +
                 '<div class="subscription-result" role="status">' + (running ? escapeHtml(phase) : renderResult(item)) + '</div>' +
-                renderWarnings(item) +
                 (window.BRORAYSubscriptionProvider ? window.BRORAYSubscriptionProvider.render(item) : "") +
+                renderWarnings(item) +
                 (item.lastError ? '<div class="subscription-error"><strong>Ошибка обновления</strong><span>' + escapeHtml(item.lastError) + '</span></div>' : '') +
                 '<div class="subscription-card-actions">' +
-                    actionButton('button-primary', 'refresh', 'update', pending ? BROrayUI.queueLabel(queued) : running ? 'Обновляется' : 'Обновить сейчас', running, running && !pending) +
-                    (pending && queued.state === "queued" ? actionButton('button-danger-outline', 'cancel-update', 'stop', 'Отменить ожидание', false, false) :
-                        running && operation.id ? actionButton('button-danger-outline', 'cancel-update', 'stop', operation.cancelRequested ? 'Останавливается…' : (operation.canCancel ? 'Остановить обновление' : 'Применяются изменения'), !operation.canCancel, false) : '') +
-                    actionButton('button-secondary', 'servers', 'servers', serversOpen ? 'Скрыть серверы' : 'Показать серверы', false, false) +
+                    actionButton('button-primary', 'refresh', 'update', removal ? 'Обновить' : pending ? BROrayUI.queueLabel(queued) : running ? 'Обновляется' : 'Обновить', running, running && !pending) +
+                    (!removal && pending && queued.state === "queued" ? actionButton('button-danger-outline', 'cancel-update', 'stop', 'Отменить ожидание', false, false) :
+                        !removal && running && operation.id ? actionButton('button-danger-outline', 'cancel-update', 'stop', operation.cancelRequested ? 'Останавливается…' : (operation.canCancel ? 'Остановить обновление' : 'Применяются изменения'), !operation.canCancel, false) : '') +
+                    actionButton('button-secondary', 'servers', 'servers', serversOpen ? 'Скрыть серверы' : 'Серверы', false, false) +
                     actionButton('button-secondary', 'edit', 'edit', 'Изменить', running, false) +
                     actionButton('button-secondary', 'toggle-enabled', 'settings', item.enabled ? 'Отключить' : 'Включить', running, false) +
                     actionButton('button-secondary', 'toggle-auto', 'update', item.autoUpdateEnabled ? 'Отключить автообновление' : 'Включить автообновление', running, false) +
-                    actionButton('button-danger-outline', 'delete', 'delete', 'Удалить', running, false) +
+                    actionButton('button-danger-outline', 'delete', 'delete', removal ? (removal.state === 'unknown' ? 'Проверить удаление' : 'Удаление…') : 'Удалить', removal ? removal.state !== 'unknown' : running, false) +
                 '</div>' +
                 renderNodes(item.id) +
             '</article>';
@@ -364,6 +368,8 @@
             renderSubscriptions();
             if (state.openServersId !== null) loadServerNodes(String(state.openServersId));
             state.subscriptions.forEach(function (item) {
+                if (state.removing[item.id]) return;
+                if (BROrayUI.hasQueuedRequest(paths.remove,item.id)) { watchSourceRemoval(String(item.id)); return; }
                 if (state.queued[item.id] || !BROrayUI.hasQueuedRequest(paths.refresh,item.id)) return;
                 var card=Array.from(listElement.querySelectorAll("[data-id]")).find(function (element) { return element.dataset.id === item.id; });
                 if (card) refreshSubscription(item.id,card.querySelector('[data-action="refresh"]'));
@@ -613,12 +619,56 @@
         await loadServerNodes(key);
     }
 
+    async function watchSourceRemoval(id) {
+        if (state.removing[id] && state.removing[id].state !== "unknown") return;
+        state.removing[id] = {state: "submitting"};
+        renderSubscriptions();
+        var settled = false;
+        try {
+            await BROrayUI.followQueued(paths.remove, id, function (result) {
+                if (settled) return;
+                if (["queued", "running"].includes(result.state)) {
+                    state.removing[id] = result;
+                    renderSubscriptions();
+                    return;
+                }
+                settled = true;
+                if (result.state === "unknown") state.removing[id] = result;
+                else delete state.removing[id];
+                if (result.state === "completed") {
+                    if (state.editingId === id) resetForm();
+                    invalidateServerNodes(id, true);
+                    toast("Подписка и серверы этого источника удалены.", "success");
+                } else {
+                    invalidateServerNodes(id);
+                    toast(result.message || "Удаление подписки не подтверждено.", "warning");
+                }
+                renderSubscriptions();
+                loadAll(true);
+            });
+        } catch (error) {
+            if (settled) return;
+            if (BROrayUI.hasQueuedRequest(paths.remove, id)) state.removing[id] = {state: "unknown"};
+            else delete state.removing[id];
+            renderSubscriptions();
+            toast(error.message, "error");
+            if (state.removing[id]) loadAll(true);
+        }
+    }
+
     async function removeSubscription(item) {
+        var id = String(item.id);
+        if (state.removing[id]) {
+            if (state.removing[id].state === "unknown") await watchSourceRemoval(id);
+            return;
+        }
+        if (BROrayUI.hasQueuedRequest(paths.remove, id)) { await watchSourceRemoval(id); return; }
         var serverText = Number(item.serversCount) > 0
             ? " Вместе с ней будут удалены серверы этого источника: " + item.serversCount + "."
             : "";
         var confirmed;
-
+        state.removing[id] = {state: "confirming"};
+        renderSubscriptions();
         try {
             confirmed = await window.BROrayDialogs.confirm({
                 eyebrow: "Опасное действие",
@@ -629,27 +679,10 @@
             });
         } catch (error) {
             toast(error.message, "error");
-            return;
         }
-
-        if (!confirmed) {
-            return;
-        }
-
-        try {
-            await api(paths.remove + "?id=" + encodeURIComponent(item.id), {
-                method: "POST",
-                body: {}
-            });
-            if (state.editingId === String(item.id)) {
-                resetForm();
-            }
-            invalidateServerNodes(String(item.id), true);
-            toast("Подписка удалена.");
-            await loadAll(false);
-        } catch (error) {
-            toast(error.message, "error");
-        }
+        delete state.removing[id];
+        renderSubscriptions();
+        if (confirmed) await watchSourceRemoval(id);
     }
 
     function bindEvents() {

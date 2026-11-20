@@ -2,11 +2,11 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const tick=()=>new Promise(r=>setImmediate(r));
-function harness(accept=true){
+function harness(accept=true,diagnostics){
  const nodes=new Map(),calls=[],dialogs=[];
  function element(){const listeners={};const children=[];return {listeners,children,childNodes:children,dataset:{},disabled:false,checked:false,hidden:false,textContent:'',value:'',classList:{add(){},remove(){},toggle(){},contains(){return false}},querySelector(){return null},setAttribute(){},removeAttribute(){},getAttribute(){return null},appendChild(c){children.push(c)},addEventListener(k,f){listeners[k]=f},remove(){}};}
  const document={getElementById(id){if(!nodes.has(id))nodes.set(id,element());return nodes.get(id)},createElement:element};
- const window={setInterval(){},setTimeout(){return 1},clearTimeout(){},BROrayUI:{apiRequest:async(url,opt)=>{calls.push({url,body:opt.body});if(url.includes('operation-status'))return {data:{operationRunning:false}};if(url.includes('status.cgi'))return {data:{installed:true,version:'26.11.9',configExists:true,configValid:true}};return {success:true,data:{accepted:true,operationId:'fixture-op'}}},toast(){}},BROrayDialogs:{confirm:async d=>{dialogs.push(d);return accept}}};
+ const window={setInterval(){},setTimeout(){return 1},clearTimeout(){},BROrayUI:{apiRequest:async(url,opt)=>{calls.push({url,body:opt.body});if(url.endsWith('/diagnostics.cgi'))return {data:diagnostics};if(url.includes('operation-status'))return {data:{operationRunning:false}};if(url.includes('status.cgi'))return {data:{installed:true,version:'26.11.9',configExists:true,configValid:true}};return {success:true,data:{accepted:true,operationId:'fixture-op'}}},toast(){}},BROrayDialogs:{confirm:async d=>{dialogs.push(d);return accept}}};
  let source=fs.readFileSync(path.join(__dirname,'../../webui/static/assets/js/xray.js'),'utf8');
  source=source.replace('    bindEvents();\n    initialize();',`    bindEvents(); window.fixture={renderStatus,installRelease,applyControlState,spaceReady,releaseWarnings,setState:function(s,u,rows){latestStatus=s;Object.assign(latestUpdate,u);releaseCatalog=rows;catalogCurrentVersion=s.version||"";selectedTag=rows[0].tagName;}};`);
  vm.runInNewContext(source,{window,document,setTimeout(){return 1},clearTimeout(){},console});
@@ -53,4 +53,22 @@ test('running maintenance is not described as interrupted and completion restore
  assert.equal(h.document.getElementById('xray-uninstall').disabled,false);
  h.api.renderStatus({installed:false,maintenanceStatus:'interrupted'});
  assert.match(h.document.getElementById('xray-maintenance-note').textContent,/прерван/);
+});
+
+test('Xray diagnostics omits the device trial from the cards and totals', async () => {
+ const h = harness(true, {
+  checks: [
+   {id: 'socks-active', status: 'ok', title: 'SOCKS'},
+   {id: 'real-device-test', status: 'warning', title: 'Испытание на Keenetic'},
+   {id: 'opt-storage', status: 'warning', title: 'Свободное место /opt'},
+   {id: 'config-valid', status: 'error', title: 'Проверка конфигурации'}
+  ],
+  summary: {ok: 1, warning: 2, error: 1}
+ });
+ await h.document.getElementById('xray-diagnostics').listeners.click();
+ const cards = h.document.getElementById('diagnostics-list').children;
+ assert.deepEqual(cards.map(card => card.children[1].children[0].textContent),
+  ['SOCKS', 'Свободное место /opt', 'Проверка конфигурации']);
+ assert.equal(h.document.getElementById('diagnostics-summary').textContent,
+  'Успешно: 1 · Предупреждения: 1 · Ошибки: 1');
 });

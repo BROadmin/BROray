@@ -119,6 +119,24 @@ func (f *fakeRouter) Parse(ctx context.Context, cmds []string) ([]keenetic.Resul
 		case c == "system configuration save":
 			f.saveCount++
 			f.startup = f.running()
+		case len(fs) == 4 && fs[0] == "ipv6" && fs[1] == "route":
+			found := false
+			for _, r := range f.routes {
+				if r == c {
+					found = true
+				}
+			}
+			if !found {
+				f.routes = append(f.routes, c)
+			}
+		case len(fs) == 5 && fs[0] == "no" && fs[1] == "ipv6" && fs[2] == "route":
+			var keep []string
+			for _, r := range f.routes {
+				if r != strings.TrimPrefix(c, "no ") {
+					keep = append(keep, r)
+				}
+			}
+			f.routes = keep
 		case len(fs) == 6 && fs[0] == "ip":
 			line := routeLine(fs[2], fs[3], fs[4], fs[5])
 			exists := false
@@ -222,6 +240,7 @@ func newEnv(t *testing.T) *testEnv {
 	env.srv = httptest.NewServer(http.HandlerFunc(env.serveRaw))
 	t.Cleanup(env.srv.Close)
 	e := newEngine(d)
+	e.directInterface = func() (string, error) { return "lo", nil }
 	e.rawBase = env.srv.URL
 	e.http = env.srv.Client()
 	if err := e.prepare(); err != nil {

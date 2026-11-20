@@ -18,8 +18,14 @@
     var formReady = false;
     var formRevision = 0;
     var loadSequence = 0;
+    var confirmedEnabled = false;
+    var configRevision = null;
+    var formConfigRevision = null;
+    var writeInFlight = false;
+    var toggleUnknown = false;
 
-    function markFormDirty() {
+    function markFormDirty(event) {
+        if (event && event.target === element("auto-switch-enabled")) return;
         formDirty = true;
         formRevision += 1;
     }
@@ -186,6 +192,7 @@
             element("auto-switch-form").addEventListener("input", markFormDirty);
             element("auto-switch-form").addEventListener("change", markFormDirty);
             element("auto-switch-rule").addEventListener("change", syncPreferredState);
+            element("auto-switch-enabled").addEventListener("change", saveEnabled);
         }
         if (window.BROrayIcons) {
             window.BROrayIcons.scan(section);
@@ -241,10 +248,10 @@
         var paused = config.enabled === true && payload.automation && payload.automation.paused === true;
         var enabledLabel = paused ? "На паузе" : (config.enabled ? "Включён" : "Выключен");
 
-        if (!formDirty) {
-            element("auto-switch-enabled").checked =
-                config.enabled === true;
+        confirmEnabled({value: config.enabled, revision: payload.revision});
 
+        if (!formDirty) {
+            formConfigRevision = payload.revision;
             element("auto-switch-threshold").value =
                 config.failureThreshold || 3;
 
@@ -322,6 +329,7 @@
     }
 
     function loadStatus(showError, refreshSummary, savedRevision) {
+        if (writeInFlight) return Promise.resolve();
         var sequence = ++loadSequence;
         var summaryRequest =
             refreshSummary || !lastSummary
@@ -339,6 +347,7 @@
             if (!formReady) {
                 formReady = true;
                 setInitialLoading(false);
+                syncWriteState();
                 syncPreferredState();
             }
         }).catch(function (error) {
@@ -365,6 +374,61 @@
         if (window.BROrayIcons) {
             window.BROrayIcons.scan(button);
         }
+        syncWriteState();
+    }
+
+    function syncWriteState() {
+        var locked = writeInFlight || toggleUnknown || !formReady;
+        element("auto-switch-enabled").disabled = locked;
+        element("auto-switch-save").disabled = locked;
+        element("auto-switch-enabled").setAttribute("aria-busy", writeInFlight ? "true" : "false");
+    }
+
+    function confirmEnabled(result) {
+        if (!result || typeof result.value !== "boolean" || typeof result.revision !== "string" || !result.revision) {
+            throw new Error("Состояние переключателя не подтверждено.");
+        }
+        confirmedEnabled = result.value;
+        configRevision = result.revision;
+        toggleUnknown = false;
+        element("auto-switch-enabled").checked = confirmedEnabled;
+        syncWriteState();
+    }
+
+    function saveEnabled() {
+        var wanted = element("auto-switch-enabled").checked;
+        var beforeRevision = configRevision;
+        if (!formReady || writeInFlight || toggleUnknown) return;
+        writeInFlight = true;
+        ++loadSequence; // Invalidate a status request started before this write.
+        syncWriteState();
+        request("/api/servers/auto-switch-enabled.cgi", {
+            method: "POST", body: {enabled: wanted, expectedRevision: configRevision}
+        }).then(function (result) {
+            confirmEnabled(result);
+            if (formConfigRevision === beforeRevision) formConfigRevision = result.revision;
+            BROrayUI.toast(wanted ? "Автовыбор сервера включён." : "Автовыбор сервера выключен.", "success");
+        }).catch(function (error) {
+            var explicit = error.status >= 400 && error.status < 500 && error.payload && error.payload.success === false;
+            BROrayUI.toast(errorMessage(error), "error");
+            if (explicit && error.status !== 409) {
+                element("auto-switch-enabled").checked = confirmedEnabled;
+                if (error.status === 401) BROrayUI.redirectToLogin();
+                return;
+            }
+            // Network/5xx errors can follow a committed write; never replay it.
+            return request(STATUS_URL, {method: "GET"}).then(function (payload) {
+                confirmEnabled({value: payload.config && payload.config.enabled, revision: payload.revision});
+            }).catch(function () {
+                toggleUnknown = true;
+                element("auto-switch-enabled").checked = confirmedEnabled;
+                BROrayUI.toast("Состояние не подтверждено. Ожидаем обновления; повторная запись заблокирована.", "error");
+            });
+        }).then(function () {
+            writeInFlight = false;
+            syncWriteState();
+            if (!toggleUnknown) loadStatus(false, false);
+        });
     }
 
     function saveSettings(event) {
@@ -372,10 +436,11 @@
         var savedRevision = formRevision;
 
         event.preventDefault();
-        if (!formReady) return;
+        if (!formReady || writeInFlight || toggleUnknown) return;
 
         payload = {
-            enabled: element("auto-switch-enabled").checked,
+            enabled: confirmedEnabled,
+            expectedRevision: formConfigRevision,
             failureThreshold: Number(element("auto-switch-threshold").value),
             cooldownMinutes: Number(element("auto-switch-cooldown").value),
             minimumRating: element("auto-switch-minimum").value,
@@ -384,6 +449,8 @@
                 element("auto-switch-preferred").value || null
         };
 
+        writeInFlight = true;
+        ++loadSequence;
         setSaving(true);
 
         request(SAVE_URL, {
@@ -401,10 +468,15 @@
                 element("refresh-servers").click();
             }
 
+            writeInFlight = false;
             return loadStatus(false, true, savedRevision);
         }).catch(function (error) {
             BROrayUI.toast(errorMessage(error), "error");
+            writeInFlight = false;
+            toggleUnknown = true;
+            return loadStatus(true, false);
         }).then(function () {
+            writeInFlight = false;
             setSaving(false);
         });
     }

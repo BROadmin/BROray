@@ -234,6 +234,7 @@ func (s *svc) update(ctx context.Context, op *compat.Operation, id, trigger stri
 		policy = "retain-unmatched"
 	}
 	failCode, failMsg := "", ""
+	var syncCause error
 	var res *syncResult
 	if !prep.OK {
 		failCode, failMsg = prep.Code, prep.Msg
@@ -246,6 +247,7 @@ func (s *svc) update(ctx context.Context, op *compat.Operation, id, trigger stri
 	} else {
 		updateID := fmt.Sprintf("%s-%d-%d", id, started.Unix(), os.Getpid())
 		r, err := s.syncCatalog(ctx, id, prep.Stage.Records, rec["enabled"] == true, updateID, policy)
+		syncCause = err
 		if err != nil {
 			var se *subErr
 			if errors.As(err, &se) {
@@ -259,7 +261,7 @@ func (s *svc) update(ctx context.Context, op *compat.Operation, id, trigger stri
 	if failCode != "" {
 		s.saveFailed(id, failCode, failMsg, trigger, started, prep)
 		s.logf(fmt.Sprintf("subscription=%s action=update trigger=%s status=error code=%s url=%s", id, trigger, failCode, maskURL(url)))
-		return fail(failCode, failMsg)
+		return errors.Join(fail(failCode, failMsg), syncCause)
 	}
 	finished := now()
 	received, parsed, accepted, rejected := prep.counts()
@@ -366,7 +368,7 @@ func (s *svc) launch(op *compat.Operation, release compat.Release, id, trigger s
 
 // ---------- queue action subscriptions:refresh ----------
 
-const actionRefresh = "subscriptions:refresh"
+const actionRefresh = compat.SourceRefreshAction
 
 func stepFail(t *compat.Task, code, message string) error {
 	t.Result(message, code)
@@ -398,6 +400,7 @@ func (s *svc) checkContext(t *compat.Task) (map[string]any, error) {
 var errPrepTimeout = fail("PREPARATION_TIMEOUT", "Превышено время подготовки подписки.")
 
 func (s *svc) defineActions() {
+	s.defineSourceRemovalAction()
 	s.d.Queue.Define(compat.ActionSpec{Name: actionRefresh, Type: "subscription_update",
 		Priority: map[string]int{"USER": 2, "SUBSCRIPTION_AUTO": 4, "*": 4},
 		Stages: []compat.Stage{
@@ -471,9 +474,9 @@ func (s *svc) stageApply(t *compat.Task) error {
 	if err := s.update(t.Ctx, t.Op, t.Target, trigger, p); err != nil {
 		var se *subErr
 		if errors.As(err, &se) {
-			return stepFail(t, se.Code, se.Msg)
+			return errors.Join(stepFail(t, se.Code, se.Msg), err)
 		}
-		return stepFail(t, "INTERNAL_ERROR", "Не удалось обновить подписку.")
+		return errors.Join(stepFail(t, "INTERNAL_ERROR", "Не удалось обновить подписку."), err)
 	}
 	t.Result("Обновление подписки завершено.", "")
 	return nil

@@ -21,15 +21,20 @@ func containsKey(keys []string, key string) bool {
 // returned so partial responses cannot retain superseded copies as new nodes.
 func (s *svc) remap(olds []oldRow, stage []servers.Record) ([]newRow, string) {
 	type entry struct {
-		key, cont, rotation, id string
-		rec                     servers.Record
+		key, storedKey, cont, rotation, id string
+		rec                                servers.Record
 	}
 	makeEntry := func(rec servers.Record) (entry, bool) {
 		id := jqRaw(rec["id"])
-		key, e1 := servers.CanonicalKey(rec)
-		cont, e2 := servers.ContinuityKey(rec)
-		rot, e3 := servers.RotationKey(rec)
-		return entry{key, cont, rot, id, rec}, safeFileID(id) && e1 == nil && e2 == nil && e3 == nil
+		original, err := servers.DPIOriginalRecord(rec)
+		if err != nil {
+			return entry{}, false
+		}
+		key, e1 := servers.CanonicalKey(original)
+		storedKey, e0 := servers.CanonicalKey(rec)
+		cont, e2 := servers.ContinuityKey(original)
+		rot, e3 := servers.RotationKey(original)
+		return entry{key, storedKey, cont, rot, id, rec}, safeFileID(id) && e0 == nil && e1 == nil && e2 == nil && e3 == nil
 	}
 	var oldE, newE []entry
 	for _, old := range olds {
@@ -40,6 +45,9 @@ func (s *svc) remap(olds []oldRow, stage []servers.Record) ([]newRow, string) {
 		oldE = append(oldE, e)
 	}
 	for _, rec := range stage {
+		if _, local := rec["dpi"]; local {
+			return nil, "SERVER_SYNC_DPI_CONFLICT"
+		}
 		e, ok := makeEntry(rec)
 		if !ok || jqRaw(sourceOf(rec)["importKey"]) == "" {
 			return nil, "SERVER_SYNC_CONFLICT"
@@ -107,6 +115,7 @@ func (s *svc) remap(olds []oldRow, stage []servers.Record) ([]newRow, string) {
 	for i, n := range newE {
 		row := newRow{key: n.key, cont: n.cont, id: n.id, matchKey: n.key}
 		ms := matches[i]
+		var previous servers.Record
 		if len(ms) > 0 {
 			chosen := ms[0]
 			for _, j := range ms {
@@ -121,9 +130,20 @@ func (s *svc) remap(olds []oldRow, stage []servers.Record) ([]newRow, string) {
 					break
 				}
 			}
-			row.id, row.matchKey = oldE[chosen].id, oldE[chosen].key
+			// Matching uses original source identity; cleanup still refers to
+			// the actual saved keys. A merged lineage cannot choose between
+			// conflicting local choices, even when one copy is active.
+			_, chosenDPI := oldE[chosen].rec["dpi"]
 			for _, j := range ms {
-				row.previousKeys = append(row.previousKeys, oldE[j].key)
+				_, localDPI := oldE[j].rec["dpi"]
+				if localDPI != chosenDPI {
+					return nil, "SERVER_SYNC_AMBIGUOUS_IDENTITY"
+				}
+			}
+			previous = oldE[chosen].rec
+			row.id, row.matchKey = oldE[chosen].id, oldE[chosen].storedKey
+			for _, j := range ms {
+				row.previousKeys = append(row.previousKeys, oldE[j].storedKey)
 			}
 		}
 		if ids[row.id] {
@@ -131,6 +151,13 @@ func (s *svc) remap(olds []oldRow, stage []servers.Record) ([]newRow, string) {
 		}
 		ids[row.id] = true
 		rec := deepCopy(n.rec)
+		if previous != nil {
+			var err error
+			rec, err = servers.RefreshDPIRecord(previous, rec)
+			if err != nil {
+				return nil, "SERVER_SYNC_DPI_CONFLICT"
+			}
+		}
 		rec["id"] = row.id
 		sourceOf(rec)["importKey"] = n.key
 		row.rec = rec

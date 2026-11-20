@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/BROadmin/broray/internal/compat"
+	"github.com/BROadmin/broray/modules/reserve"
 )
 
 // probeResult is the bin/broray-server-probe verdict.
@@ -294,8 +295,9 @@ func (s *svc) socksProbe(ctx context.Context, configPath, serverID string) map[s
 		return map[string]any{"method": "current-socks-https", "serverId": serverID, "status": status, "errorCode": errorCode,
 			"endpoint": endpoint, "attempts": attempts, "curlCode": code, "checkedAt": compat.StampUTC(now), "checkedEpoch": now.Unix()}
 	}
-	cfg, ok := readObjectFile(configPath)
-	if !ok {
+	config, err := os.ReadFile(configPath)
+	cfg, ok := decodeObject(config)
+	if err != nil || !ok {
 		return emit("unknown", "CONFIG_UNAVAILABLE")
 	}
 	var socks []map[string]any
@@ -304,6 +306,13 @@ func (s *svc) socksProbe(ctx context.Context, configPath, serverID string) map[s
 			if m, ok := in.(map[string]any); ok && m["protocol"] == "socks" {
 				socks = append(socks, m)
 			}
+		}
+	}
+	// Disabled reserve mode may retain this input until the next normal apply.
+	// Ignore it only when the entire generated diagnostic addition validates.
+	if len(socks) > 0 && socks[len(socks)-1]["tag"] == reserve.HealthInboundTag {
+		if _, ok := reserve.DiagnosticEndpoint(config); ok {
+			socks = socks[:len(socks)-1]
 		}
 	}
 	if len(socks) != 1 {

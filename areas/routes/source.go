@@ -624,7 +624,7 @@ func (e *engine) runDownload(ctx context.Context, id string) (string, error) {
 	routes := make([]any, len(normalized))
 	for i, r := range normalized {
 		net, p, _ := splitCIDR(r)
-		routes[i] = obj{"family": "ipv4", "network": net, "prefix": p}
+		routes[i] = obj{"family": routeFamily(net), "network": net, "prefix": p}
 	}
 	mf, _ := readObj(e.manifestFile(id))
 	writes := []struct {

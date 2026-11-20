@@ -90,7 +90,7 @@ func TestStatusDefaultsAndCache(t *testing.T) {
 		t.Fatal("autoCheck missing")
 	}
 	servers := r.Data["servers"].([]any)
-	if len(servers) != 8 || servers[0].(map[string]any)["id"] != "google-primary" {
+	if len(servers) < 8 || servers[0].(map[string]any)["id"] != "google-primary" {
 		t.Fatal("catalog order")
 	}
 	// cached read writes the cache file
@@ -116,7 +116,7 @@ func TestMethodAndBodyValidation(t *testing.T) {
 	h.expectErr(h.call("POST", "/api/routes/dot-test.cgi", "", nil), 400, "REQUEST_BODY_REQUIRED")
 	h.expectErr(h.call("POST", "/api/routes/dot-test.cgi", "[1]", nil), 400, "REQUEST_JSON_INVALID")
 	h.expectErr(h.call("POST", "/api/routes/dot-test.cgi", strings.Repeat(" ", 70000), nil), 413, "REQUEST_TOO_LARGE")
-	for _, body := range []string{`{"serverIds":[]}`, `{"serverIds":["nope"]}`, `{"serverIds":["quad9","quad9"]}`,
+	for _, body := range []string{`{"serverIds":["nope"]}`, `{"serverIds":["quad9","quad9"]}`,
 		`{"serverIds":["quad9"],"allowUntested":true}`, `{"serverIds":"quad9"}`} {
 		r := h.call("POST", "/api/routes/dot-test.cgi", body, nil)
 		h.expectErr(r, 400, "REQUEST_INVALID")

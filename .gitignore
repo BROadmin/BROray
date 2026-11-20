@@ -1,0 +1,5 @@
+# Local toolchains, test caches and scratch results
+.tools/
+.local/
+.cache/
+dist/

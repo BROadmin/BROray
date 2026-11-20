@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-build-id="WebUI-3.5.8">
+<html lang="ru" data-build-id="WebUI-3.5.9-c5">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -7,21 +7,21 @@
     <meta name="theme-color" content="#0b1117">
     <meta name="robots" content="noindex,nofollow">
     <title>BROray — Серверы</title>
-    <link rel="icon" href="/assets/images/branding/favicon.ico?v=WebUI-3.5.8-c2">
-    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png?v=WebUI-3.5.8-c2">
-    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.5.8-c2">
-    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.5.8-c2">
-    <link rel="manifest" href="/manifest.json?v=WebUI-3.5.8-c2">
-    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.8-c2">
-    <script src="/assets/js/theme-init.js?v=WebUI-3.5.8-c2"></script>
+    <link rel="icon" href="/assets/images/branding/favicon.ico?v=WebUI-3.5.9-c5">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png?v=WebUI-3.5.9-c5">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.5.9-c5">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.5.9-c5">
+    <link rel="manifest" href="/manifest.json?v=WebUI-3.5.9-c5">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c5">
+    <script src="/assets/js/theme-init.js?v=WebUI-3.5.9-c5"></script>
 </head>
-<body class="app-body page-servers" data-page="servers" data-webui-build="WebUI-3.5.8">
+<body class="app-body page-servers" data-page="servers" data-webui-build="WebUI-3.5.9-c5">
     <div id="app" class="app-layout" hidden>
         <aside id="sidebar" class="sidebar" aria-label="Основная навигация">
             <div class="sidebar-header">
                 <a class="sidebar-brand" href="/home.html" aria-label="BROray — Главная">
                     <span class="sidebar-brand-mark" aria-hidden="true">
-                        <img class="sidebar-brand-image" src="/assets/images/branding/broray-logo-64.png?v=WebUI-3.5.8-c2" alt="" width="40" height="40">
+                        <img class="sidebar-brand-image" src="/assets/images/branding/broray-logo-64.png?v=WebUI-3.5.9-c5" alt="" width="40" height="40">
                     </span>
                     <span class="sidebar-brand-copy">
                         <strong>BROray</strong>
@@ -249,6 +249,68 @@
         </form>
     </details>
 
+    <details id="server-reserve-section" class="servers-section server-reserve-section ui-card" aria-labelledby="server-reserve-title">
+        <summary class="servers-disclosure-summary">
+            <span class="servers-disclosure-icon" data-icon="servers" aria-hidden="true"></span>
+            <span class="servers-disclosure-copy">
+                <span class="eyebrow">Резервирование</span>
+                <strong id="server-reserve-title">Резервирование VPN</strong>
+                <small>Основной сервер и до двух резервных</small>
+            </span>
+            <span id="reserve-mode-label" class="status-badge status-badge-neutral">Получение состояния…</span>
+        </summary>
+        <div class="reserve-content">
+            <p>Основной сервер и до двух резервных. При потере связи BROray выберет проверенный резерв, а после восстановления вернётся на основной.</p>
+            <label class="auto-switch-master reserve-mode-control">
+                <span><strong>Включить резервирование</strong><small>Переключать VPN на проверенный резерв при потере связи.</small></span>
+                <input id="reserve-enabled" type="checkbox" disabled>
+                <span class="auto-switch-toggle" aria-hidden="true"></span>
+            </label>
+            <p id="reserve-status" role="status" aria-live="polite">Получение состояния…</p>
+            <p id="reserve-active">Текущий сервер: —</p>
+            <form id="reserve-roster-form" class="reserve-roster-form">
+                <div class="reserve-roster-grid">
+                    <div>
+                        <label for="reserve-primary">Основной сервер</label>
+                        <select id="reserve-primary" required disabled></select>
+                        <div id="reserve-primary-source-control" hidden>
+                            <label for="reserve-primary-source">Источник конфигурации</label>
+                            <select id="reserve-primary-source" disabled></select>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="reserve-backup-1">Первый резерв</label>
+                        <select id="reserve-backup-1" required disabled></select>
+                        <div id="reserve-backup-1-source-control" hidden>
+                            <label for="reserve-backup-1-source">Источник конфигурации</label>
+                            <select id="reserve-backup-1-source" disabled></select>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="reserve-backup-2"><span>Второй резерв <span class="reserve-optional">(необязательно)</span></span></label>
+                        <select id="reserve-backup-2" disabled></select>
+                        <div id="reserve-backup-2-source-control" hidden>
+                            <label for="reserve-backup-2-source">Источник конфигурации</label>
+                            <select id="reserve-backup-2-source" disabled></select>
+                        </div>
+                    </div>
+                </div>
+                <div class="reserve-actions">
+                    <button id="reserve-save" class="button button-primary" type="submit" disabled>Сохранить состав</button>
+                    <button id="reserve-cancel" class="button button-secondary" type="button" disabled>Загрузить сохранённый состав</button>
+                </div>
+            </form>
+            <p id="reserve-draft-note"></p>
+            <div class="reserve-actions">
+                <button id="reserve-refresh" class="button button-secondary" type="button">Проверить состояние</button>
+                <button id="reserve-repair" class="button button-primary" type="button" hidden disabled>Восстановить резервирование</button>
+            </div>
+            <p class="reserve-policy-note">Проверка соединения каждые 15 секунд. Переключение после трёх неудачных проверок. Обычный возврат с резерва на основной происходит после трёх успешных проверок и не раньше чем через 10 минут после переключения.</p>
+            <p class="reserve-policy-note">Если основной и все резервы недоступны, BROray временно подключает проверенный сервер из автовыбора. После восстановления одного из серверов состава BROray возвращается к нему. Прямое подключение не включается.</p>
+            <p class="reserve-policy-note">При включении имя интерфейса — «BROray - mix-auto». Отключение сохраняет текущий сервер и состав резерва. Обновление качества и автоматическое переключение по качеству настраиваются отдельно.</p>
+        </div>
+    </details>
+
     <section class="servers-section servers-list-section ui-card" aria-labelledby="servers-list-title">
         <div class="servers-section-heading">
             <div>
@@ -271,6 +333,11 @@
                 <span>Загрузка серверов…</span>
             </article>
         </div>
+        <div class="servers-section-actions">
+            <button id="delete-inactive-servers" class="button button-danger-outline" data-icon="delete" type="button" disabled>
+                Удалить все, кроме активного
+            </button>
+        </div>
     </section>
 </main>
             <footer class="workspace-footer">
@@ -291,7 +358,7 @@
             <h2 id="support-title">Помочь развитию BROray</h2>
             <div class="support-modal-content">
                 <a class="support-qr-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer" aria-label="Открыть CloudTips для поддержки BROray">
-                    <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=WebUI-3.5.8-c2" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
+                    <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=WebUI-3.5.9-c5" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
                 </a>
                 <div class="support-modal-copy">
                     <p id="support-message">BROray развивается как открытый проект. Поддержка помогает оплачивать инфраструктуру, тестирование и выпуск обновлений.</p>
@@ -323,16 +390,18 @@
         </section>
     </div>
 
-    <script src="/assets/js/common.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/icons.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/app-shell.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/theme.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/dialogs.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/servers-completion.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/servers.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/servers-import-preflight.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/servers-check-all.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/servers-auto-switch.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/servers-quality-refresh.js?v=WebUI-3.5.8-c2"></script>
+    <script src="/assets/js/common.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/icons.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/theme.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/dialogs.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/servers-completion.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/servers-reserve.js?v=WebUI-3.5.9-c5&amp;reserve=2"></script>
+    <script src="/assets/js/servers-dpi.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/servers.js?v=WebUI-3.5.9-c5&amp;reserve=2"></script>
+    <script src="/assets/js/servers-import-preflight.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/servers-check-all.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/servers-auto-switch.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/servers-quality-refresh.js?v=WebUI-3.5.9-c5"></script>
 </body>
 </html>

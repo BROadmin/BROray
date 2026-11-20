@@ -138,10 +138,9 @@ func TestFullLevel357ActiveRefresh(t *testing.T) {
 				t.Fatal("active record disappeared")
 			}
 			if failApply {
-				if _, exists := r["accountLevel"]; exists {
-					t.Fatal("failed replacement did not restore old account")
-				}
-			} else if fmt.Sprint(r["accountLevel"]) != "8" {
+				assertSourceRefreshPending(t, e, err)
+			}
+			if fmt.Sprint(r["accountLevel"]) != "8" {
 				t.Fatal("successful active replacement discarded account level")
 			}
 		})

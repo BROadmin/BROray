@@ -36,6 +36,13 @@ func ValidIPv4(s string) bool {
 	return err == nil && a.Is4()
 }
 
+// ValidDoTAddress admits literal IPv4 and IPv6 only. Zones, brackets and
+// IPv4-mapped IPv6 would make command identity or transport ambiguous.
+func ValidDoTAddress(s string) bool {
+	a, err := netip.ParseAddr(s)
+	return err == nil && a.Zone() == "" && !a.Is4In6()
+}
+
 func validMask(s string) bool {
 	a, err := netip.ParseAddr(s)
 	if err != nil || !a.Is4() {
@@ -64,6 +71,16 @@ func Allow(area Area, cmd string) error {
 		}
 		return bad()
 	case AreaRoutes:
+		valid6 := func(text string) bool {
+			p, err := netip.ParsePrefix(text)
+			return err == nil && p.Addr().Is6() && !p.Addr().Is4In6() && p.Bits() > 0 && p == p.Masked() && p.String() == text
+		}
+		if len(f) == 4 && f[0] == "ipv6" && f[1] == "route" && valid6(f[2]) && ValidProxyName(f[3]) {
+			return nil
+		}
+		if len(f) == 5 && f[0] == "no" && f[1] == "ipv6" && f[2] == "route" && valid6(f[3]) && ValidProxyName(f[4]) {
+			return nil
+		}
 		// ip route <net> <mask> ProxyN <metric>   |   no ip route <net> <mask> ProxyN
 		switch {
 		case len(f) == 6 && f[0] == "ip" && f[1] == "route" && ValidIPv4(f[2]) && validMask(f[3]) && ValidProxyName(f[4]) && validMetric(f[5]):
@@ -108,10 +125,10 @@ func Allow(area Area, cmd string) error {
 		return bad()
 	case AreaDoT:
 		// dns-proxy tls upstream <ip> <port> sni <sni> [spki <b64>]   |   no dns-proxy tls upstream <ip> <port>
-		if len(f) == 6 && f[0] == "no" && f[1] == "dns-proxy" && f[2] == "tls" && f[3] == "upstream" && ValidIPv4(f[4]) && validPort(f[5]) {
+		if len(f) == 6 && f[0] == "no" && f[1] == "dns-proxy" && f[2] == "tls" && f[3] == "upstream" && ValidDoTAddress(f[4]) && validPort(f[5]) {
 			return nil
 		}
-		if (len(f) == 7 || len(f) == 9) && f[0] == "dns-proxy" && f[1] == "tls" && f[2] == "upstream" && ValidIPv4(f[3]) && validPort(f[4]) && f[5] == "sni" && reSNI.MatchString(f[6]) {
+		if (len(f) == 7 || len(f) == 9) && f[0] == "dns-proxy" && f[1] == "tls" && f[2] == "upstream" && ValidDoTAddress(f[3]) && validPort(f[4]) && f[5] == "sni" && reSNI.MatchString(f[6]) {
 			if len(f) == 7 || (f[7] == "spki" && reSPKI.MatchString(f[8])) {
 				return nil
 			}

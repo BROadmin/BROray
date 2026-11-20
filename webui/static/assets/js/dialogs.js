@@ -105,6 +105,9 @@
             resolve(result);
         }
 
+        if (returnFocus && returnFocus.isConnected === false && returnFocus.id) {
+            returnFocus = document.getElementById(returnFocus.id);
+        }
         if (returnFocus && typeof returnFocus.focus === "function") {
             returnFocus.focus();
         }

@@ -191,6 +191,8 @@ func NewManualID(d *compat.Deps) (string, error) {
 // shortened.
 func MaskRecord(rec Record) Record {
 	out := normalize(rec)
+	// Report managed state without exposing the private restoration metadata.
+	out["dpi"] = dpiPresentation(rec)
 	delete(out, "hysteriaMasquerade")
 	// Refresh presentation of old metadata without migrating saved profiles.
 	if warnings, ok := out["importWarnings"].([]any); ok {

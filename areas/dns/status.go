@@ -22,18 +22,18 @@ type classified struct {
 }
 
 func sameEndpoint(a liveRec, c catEntry) bool {
-	return a.Address == c.Address && a.EffectivePort == 853 && a.SNI == c.SNI
+	return sameAddress(a.Address, c.Address) && a.EffectivePort == 853 && a.SNI == c.SNI
 }
 
 func sameFull(a, b liveRec) bool {
-	return a.Address == b.Address && a.PortRaw == b.PortRaw && a.EffectivePort == b.EffectivePort && a.PortState == b.PortState &&
+	return sameAddress(a.Address, b.Address) && a.PortRaw == b.PortRaw && a.EffectivePort == b.EffectivePort && a.PortState == b.PortState &&
 		a.SNI == b.SNI && a.SPKI == b.SPKI && a.Interface == b.Interface && a.Domain == b.Domain
 }
 
 func selectorCount(dot []liveRec, address string, port int) int {
 	n := 0
 	for _, r := range dot {
-		if r.Address == address && r.EffectivePort == port {
+		if sameAddress(r.Address, address) && r.EffectivePort == port {
 			n++
 		}
 	}
@@ -75,7 +75,8 @@ func classify(obs observed, receipts []receipt, quarantined []any) []classified 
 		for _, q := range quarantined {
 			qm, _ := q.(map[string]any)
 			rc, _ := qm["receipt"].(map[string]any)
-			addrOK := rc["address"] == any(e.Address)
+			addr, _ := rc["address"].(string)
+			addrOK := sameAddress(addr, e.Address)
 			portOK := e.EffectivePort == 853
 			if v, ok := rc["effectivePort"]; ok && v != nil && v != false {
 				p, isNum := num(v)
@@ -448,7 +449,9 @@ func (s *service) status(ctx context.Context) (map[string]any, error) {
 	if !runningOK {
 		obs = unavailableObserved()
 	}
-	return buildStatus(statusInputs{f: f, obs: obs, runningOK: runningOK, ndmcAvailable: true, recovery: exists(s.markerPath()), now: s.now()}), nil
+	status := buildStatus(statusInputs{f: f, obs: obs, runningOK: runningOK, ndmcAvailable: true, recovery: exists(s.markerPath()), now: s.now()})
+	addCapabilities(status, s.capabilities(ctx, obs))
+	return status, nil
 }
 
 // statusCached is broray_dot_status_cached (RD:852-908): 30 s cache keyed

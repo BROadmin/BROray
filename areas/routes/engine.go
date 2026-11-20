@@ -16,6 +16,7 @@ import (
 	"github.com/BROadmin/broray/internal/compat"
 	"github.com/BROadmin/broray/internal/keenetic"
 	"github.com/BROadmin/broray/internal/platform"
+	"github.com/BROadmin/broray/modules/geodata"
 )
 
 var errEmptyConfig = errors.New("ROUTES_CONFIG_RUNNING_CONFIG_EMPTY")
@@ -25,17 +26,23 @@ const managedMetric = 1200
 // engine is the routes area runtime: 3.x /opt/broray/routes/* files, the
 // Keenetic transport, the global fence and the operations registry.
 type engine struct {
-	d       *compat.Deps
-	root    string // <data>/routes
-	data    string // <data> (config/interface.json)
-	T       keenetic.Transport
-	lock    *compat.GlobalLock
-	queue   *compat.Coordinator
-	log     *log.Logger
-	ctx     context.Context
-	http    *http.Client
-	rawBase string
-	apiBase string // GitHub API of the scheduled catalog check
+	d               *compat.Deps
+	root            string // <data>/routes
+	data            string // <data> (config/interface.json)
+	T               keenetic.Transport
+	lock            *compat.GlobalLock
+	queue           *compat.Coordinator
+	log             *log.Logger
+	ctx             context.Context
+	http            *http.Client
+	rawBase         string
+	apiBase         string // GitHub API of the scheduled catalog check
+	geoResolve      func(context.Context, geodata.Kind) (string, error)
+	geoFetch        geodata.Fetch
+	geoNow          func() time.Time
+	directInterface func() (string, error)
+	geoScheduleMu   sync.Mutex
+	geoRetryAt      map[string]time.Time
 
 	schedMu      sync.Mutex // catalog-schedule-status.json read-modify-write
 	schedRetryAt time.Time  // in-memory backoff when status cannot be persisted
@@ -74,7 +81,9 @@ var (
 var RawBase = "https://raw.githubusercontent.com"
 
 func newEngine(d *compat.Deps) *engine {
+	remote := geodata.NewRemote()
 	e := &engine{
+		geoResolve: remote.Resolve, geoFetch: remote.Fetch,
 		d: d, root: d.Path("routes"), data: d.Path(), lock: d.Lock, queue: d.Queue, log: d.Log, ctx: d.Ctx,
 		rawBase: RawBase, apiBase: GitHubAPI, active: map[string]bool{}, stops: map[string]*routeStopState{},
 		markerWrite:      writeObj,

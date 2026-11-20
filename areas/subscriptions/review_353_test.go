@@ -1,7 +1,6 @@
 package subscriptions
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -22,14 +21,14 @@ func TestReview353CloudActiveCredentialRefresh(t *testing.T) {
 		}
 		return st.Records
 	}
-	if _, err := e.s.syncCatalog(context.Background(), subX, stage(body), true, "old", "replace"); err != nil {
+	if _, err := e.s.syncCatalog(sourceRefreshContext(), subX, stage(body), true, "old", "replace"); err != nil {
 		t.Fatal(err)
 	}
 	id := liveIDs(t, e)[0]
 	if err := e.s.writeActive(id); err != nil {
 		t.Fatal(err)
 	}
-	result, err := e.s.syncCatalog(context.Background(), subX, stage(strings.Replace(body, "synthetic-old", "synthetic-new", 1)), true, "new", "replace")
+	result, err := e.s.syncCatalog(sourceRefreshContext(), subX, stage(strings.Replace(body, "synthetic-old", "synthetic-new", 1)), true, "new", "replace")
 	if err != nil || result.Added != 0 || result.Removed != 0 || result.Updated != 1 || result.Impact != "configuration-changed" {
 		t.Fatalf("credential rotation treated as withdrawal: %+v %v", result, err)
 	}

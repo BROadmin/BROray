@@ -815,7 +815,6 @@
             return;
         }
         name = result.interfaceName || "ProxyN";
-        panel.hidden = false;
         verdict.textContent = result.message || "—";
         verdict.className = "keenetic-udp-verdict keenetic-udp-verdict-" + (result.severity || "warning");
 
@@ -851,7 +850,6 @@
         if (!panel) {
             return;
         }
-        panel.hidden = false;
         element("udpVerdict").textContent = "Проверка UDP выполняется…";
         element("udpVerdict").className = "keenetic-udp-verdict";
     }
@@ -908,7 +906,7 @@
             })
             .catch(function (error) {
                 state.udpRunning = false;
-                element("udpPanel").hidden = true;
+                element("udpVerdict").textContent = "Не удалось завершить проверку UDP.";
                 handleError(error);
             })
             .then(function () {

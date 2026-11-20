@@ -10,9 +10,13 @@ import (
 	mxray "github.com/BROadmin/broray/modules/xray"
 )
 
-// RequiredCore is the minimum core tested for a feature, not a property stored
-// in the record. Old profiles without a new feature retain their old policy.
+// RequiredCore identifies the tested core requirement, not a stored property.
+// Ordinary features use a minimum; managed DPI requires the exact tested
+// version in CheckCoreSupport. Old profiles retain their existing policy.
 func RequiredCore(rec Record) string {
+	if _, present := rec["dpi"]; present {
+		return dpiRequiredCoreVersion
+	}
 	if rec["network"] == "xdrive" || rec["network"] == "masque" || rec["protocol"] == "masque" {
 		return "26.11.9"
 	}
@@ -65,6 +69,15 @@ func coreVersion(v string) ([3]int, bool) {
 
 // CheckCoreSupport never echoes input credentials or raw version output.
 func CheckCoreSupport(rec Record, installed string) error {
+	if _, present := rec["dpi"]; present {
+		if err := validateDPIRecord(rec); err != nil {
+			return cgi.E(400, "XRAY_DPI_PROFILE_INVALID", "Состояние DPI не подтверждено. Проверьте профиль сервера.")
+		}
+		if strings.TrimPrefix(installed, "v") != dpiRequiredCoreVersion {
+			return cgi.E(400, "XRAY_DPI_CORE_UNVERIFIED", "Для пресета DPI проверен Xray "+dpiRequiredCoreVersion+". Отключите DPI или установите проверенную версию ядра.")
+		}
+		return nil
+	}
 	minimum := RequiredCore(rec)
 	if minimum == "" {
 		return nil
@@ -134,7 +147,7 @@ func (s *svc) supportViewChecker(ctx context.Context) func(Record) map[string]an
 			if err := check(rec); err != nil {
 				view["supported"], view["mode"], view["code"] = false, "requires-core", "XRAY_CORE_UNSUPPORTED"
 				view["message"] = "Конфигурация сохранена. Для подключения обновите Xray до " + minimum + " или новее."
-				if ae, ok := err.(*cgi.APIError); ok && ae.Code == "XRAY_CORE_VERSION_UNKNOWN" {
+				if ae, ok := err.(*cgi.APIError); ok && (ae.Code == "XRAY_CORE_VERSION_UNKNOWN" || ae.Code == "XRAY_DPI_CORE_UNVERIFIED" || ae.Code == "XRAY_DPI_PROFILE_INVALID") {
 					view["mode"], view["code"], view["message"] = "core-unverified", ae.Code, ae.Message
 				}
 			}

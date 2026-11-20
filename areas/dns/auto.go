@@ -29,26 +29,41 @@ func (s *service) pathsSafe() bool {
 	return true
 }
 
-// autoEnabled returns (enabled, valid).
-func (s *service) autoEnabled() (bool, bool) {
+// autoSettingsSnapshot reads enabled and revision from the same file image.
+func (s *service) autoSettingsSnapshot() (map[string]any, bool) {
 	if !s.pathsSafe() {
-		return false, false
+		return nil, false
 	}
-	if !exists(s.autoPath()) {
-		return false, true
+	if _, err := os.Lstat(s.autoPath()); os.IsNotExist(err) {
+		return map[string]any{"schemaVersion": 1, "enabled": false}, true
+	} else if err != nil {
+		return nil, false
 	}
 	if !safeFile(s.autoPath()) {
-		return false, false
+		return nil, false
 	}
 	m, err := readMap(s.autoPath())
 	if err != nil || !numIs(m["schemaVersion"], 1) {
-		return false, false
+		return nil, false
 	}
-	b, ok := m["enabled"].(bool)
+	_, ok := m["enabled"].(bool)
 	if !ok {
+		return nil, false
+	}
+	return m, true
+}
+
+func (s *service) autoEnabled() (bool, bool) {
+	m, valid := s.autoSettingsSnapshot()
+	if !valid {
 		return false, false
 	}
-	return b, true
+	return m["enabled"].(bool), true
+}
+
+func autoSettingsRevision(settings map[string]any) string {
+	revision, _ := compat.CanonicalSHA256(settings)
+	return revision
 }
 
 // autoIDs is broray_dot_auto_ids: the saved selection, sorted.
@@ -74,7 +89,11 @@ func (s *service) autoIDs() ([]string, bool) {
 
 // autoView is broray_dot_auto_view (DA:41-58).
 func (s *service) autoView() map[string]any {
-	enabled, valid := s.autoEnabled()
+	settings, valid := s.autoSettingsSnapshot()
+	enabled, revision := false, ""
+	if valid {
+		enabled, revision = settings["enabled"].(bool), autoSettingsRevision(settings)
+	}
 	ids, ok := s.autoIDs()
 	if !ok {
 		ids = []string{}
@@ -100,7 +119,7 @@ func (s *service) autoView() map[string]any {
 			}
 		}
 	}
-	return map[string]any{"schemaVersion": 1, "enabled": enabled, "settingsValid": valid, "paused": paused, "intervalSeconds": autoInterval,
+	return map[string]any{"schemaVersion": 1, "enabled": enabled, "revision": revision, "settingsValid": valid, "paused": paused, "intervalSeconds": autoInterval,
 		"savedIds": strSlice(ids), "last": last, "observedEpoch": s.now().Unix()}
 }
 
@@ -295,6 +314,7 @@ func (s *service) autoRun(t *compat.Task) error {
 		result := map[string]any{"id": c.ID, "address": c.Address, "effectivePort": 853, "sni": c.SNI, "spki": "", "interface": "",
 			"domain": "", "ok": pr.OK, "status": pr.Status, "message": pr.Message, "testedAt": stamp(time.Unix(pr.EndEpoch, 0)),
 			"testedEpoch": pr.EndEpoch, "latencyMs": pr.LatencyMs}
+		pr.addEvidence(result)
 		if err := publish(status, result, pr.EndEpoch, nil); err != nil {
 			return err
 		}

@@ -54,6 +54,11 @@ var (
 func cur() *svc { return current.Load() }
 
 func register() {
+	cgi.RegisterRaw("/api/servers/dpi-profile.cgi", func(c *cgi.Req) { cur().handleDPIProfile(c) }, cgi.POST(), cgi.Limit(4096))
+	cgi.Register("/api/servers/dpi-status.cgi", func(c *cgi.Req) (any, error) { return cur().dpiStatus(c) })
+	cgi.RegisterRaw("/api/servers/reserve-mode.cgi", func(c *cgi.Req) { cur().handleReserveMode(c) }, cgi.POST(), cgi.Limit(4096))
+	cgi.Register("/api/servers/reserve-status.cgi", func(c *cgi.Req) (any, error) { return cur().reserveStatus() })
+	cgi.Register("/api/servers/reserve-settings.cgi", func(c *cgi.Req) (any, error) { return cur().handleReservePreferences(c) }, cgi.Methods("GET", "POST"), cgi.Limit(4096))
 	cgi.Register("/api/servers/summary.cgi", func(c *cgi.Req) (any, error) { return cur().summary(c.R.Context()) })
 	cgi.Register("/api/servers/details.cgi", func(c *cgi.Req) (any, error) { return cur().details(detailsID(c.RawQuery)) })
 	cgi.Register("/api/servers/import.cgi", func(c *cgi.Req) (any, error) {
@@ -96,6 +101,9 @@ func register() {
 		}
 		return cur().deleteServer(bodyField(body, "id"))
 	}, cgi.POST(), cgi.Limit(65536), cgi.TooLarge(tooLarge64))
+	cgi.Register("/api/servers/delete-inactive.cgi", func(c *cgi.Req) (any, error) {
+		return cur().handleDeleteInactive(c)
+	}, cgi.POST(), cgi.Limit(4096))
 	cgi.RegisterRaw("/api/servers/check.cgi", func(c *cgi.Req) {
 		if c.Header("X-BROray-Queue") == "1" {
 			sv := cur()
@@ -116,9 +124,11 @@ func register() {
 	}, cgi.POST(), cgi.Limit(65536), cgi.TooLarge(tooLarge64))
 	cgi.Register("/api/servers/quality-batch-complete.cgi", func(c *cgi.Req) (any, error) { return cur().publishSnapshot() }, cgi.POST())
 	cgi.Register("/api/servers/auto-switch-status.cgi", func(c *cgi.Req) (any, error) { return cur().handleAutoSwitchStatus(c) })
+	cgi.Register("/api/servers/auto-switch-enabled.cgi", func(c *cgi.Req) (any, error) { return cur().handleAutoSwitchEnabled(c) }, cgi.POST(), cgi.Limit(4096))
 	cgi.Register("/api/servers/auto-switch-save.cgi", func(c *cgi.Req) (any, error) { return cur().handleAutoSwitchSave(c) }, cgi.POST(), cgi.Limit(16384),
 		cgi.TooLarge(cgi.E(413, "REQUEST_TOO_LARGE", "Запрос слишком большой.")))
 	cgi.Register("/api/servers/quality-refresh-status.cgi", func(c *cgi.Req) (any, error) { return cur().handleQualityRefreshStatus(c) })
+	cgi.Register("/api/servers/quality-refresh-enabled.cgi", func(c *cgi.Req) (any, error) { return cur().handleServerSettingEnabled(c, "qualityRefreshEnabled") }, cgi.POST(), cgi.Limit(4096))
 	cgi.Register("/api/servers/quality-refresh-save.cgi", func(c *cgi.Req) (any, error) { return cur().handleQualityRefreshSave(c) }, cgi.POST(), cgi.Limit(4096),
 		cgi.TooLarge(cgi.E(413, "REQUEST_TOO_LARGE", "Запрос слишком большой.")))
 }

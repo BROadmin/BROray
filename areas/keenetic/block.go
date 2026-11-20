@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -41,7 +42,7 @@ func validPort(p int) bool { return p >= 1 && p <= 65535 }
 
 // validDescription is broray_interface_owner_description_valid.
 func validDescription(d string) bool {
-	if d == "" || utf8.RuneCountInString(d) > 128 {
+	if d == "" || !utf8.ValidString(d) || utf8.RuneCountInString(d) > 128 {
 		return false
 	}
 	if d != "BROray" && !strings.HasPrefix(d, "BROray - ") {
@@ -50,7 +51,12 @@ func validDescription(d string) bool {
 	if strings.ContainsAny(d, "\"'\\;`$|&<") || strings.HasSuffix(d, ">") {
 		return false
 	}
-	return !strings.Contains(d, "\n")
+	for _, c := range d {
+		if unicode.IsControl(c) {
+			return false
+		}
+	}
+	return true
 }
 
 // descriptionLine is broray_interface_description_config_line.

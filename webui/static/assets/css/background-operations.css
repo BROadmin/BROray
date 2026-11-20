@@ -1,13 +1,9 @@
 .bg-card { padding:24px; min-width:0; }
 .page-broray .bg-card { margin-bottom:18px; }
-#bg-journal > summary { cursor:pointer; list-style:none; margin-bottom:0; }
-#bg-journal > summary::-webkit-details-marker { display:none; }
-#bg-journal[open] > summary { margin-bottom:16px; }
-#bg-journal > summary:focus-visible { outline:2px solid currentColor; outline-offset:3px; }
-.bg-journal-chevron { display:inline-block; }
-#bg-journal[open] .bg-journal-chevron { transform:rotate(90deg); }
 .bg-card h2 { margin:6px 0 0; font-size:22px; }
 .bg-card .section-heading { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
+.bg-card .bg-journal-heading { margin-bottom:0; }
+#bg-journal { margin-top:16px; }
 .bg-card .status-badge { white-space:normal; max-width:100%; }
 .bg-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
 .bg-actions .button { white-space:normal; max-width:100%; min-width:0; text-align:center; }

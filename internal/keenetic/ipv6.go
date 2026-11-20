@@ -10,10 +10,9 @@ import (
 	"strings"
 )
 
-// IPv6 detection (read-only). BROray routes only IPv4 networks to ProxyN:
-// when the ISP gives the router global IPv6 and the home segment gets it
-// too, a service's AAAA traffic leaves past BROray. BROray never disables
-// IPv6 and never changes Keenetic for this; it only warns.
+// IPv6 detection (read-only). IPv6 traffic outside the configured ProxyN
+// routes can bypass BROray. Detection alone does not prove WAN reachability.
+// BROray never disables IPv6 or changes Keenetic for this warning.
 //
 // The exact KeeneticOS output of "show ipv6 addresses", "show ipv6 prefixes"
 // and the IPv6 part of "show interface" was not verified on a router with
@@ -30,7 +29,7 @@ const (
 )
 
 // IPv6WarningText is shown on the Home and Routes pages for state "global".
-const IPv6WarningText = "На роутере включён IPv6: сервисы с IPv6-адресами могут работать мимо BROray (наборы маршрутов только IPv4)."
+const IPv6WarningText = "На роутере включён IPv6: трафик вне настроенных IPv6-маршрутов может идти мимо BROray."
 
 // IPv6Facts is what BROray knows about the router's IPv6. The zero value is
 // "unknown".

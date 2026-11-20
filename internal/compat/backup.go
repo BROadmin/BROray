@@ -681,3 +681,16 @@ func swapBackupPathsWithHooks(liveRoot, stageRoot, preRoot string, paths []strin
 	}
 	return done, nil
 }
+
+// A policy backup swaps the validated config together with its geodata. Its
+// routes hook owns the single runtime reapply; the servers hook must not also
+// restart it. Only the backup coordinator sets this after selecting that path.
+type backupXrayConfigKey struct{}
+
+func WithBackupXrayConfig(ctx context.Context) context.Context {
+	return context.WithValue(ctx, backupXrayConfigKey{}, true)
+}
+func BackupOwnsXrayConfig(ctx context.Context) bool {
+	value, _ := ctx.Value(backupXrayConfigKey{}).(bool)
+	return value
+}

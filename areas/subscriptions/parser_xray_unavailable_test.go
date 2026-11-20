@@ -53,7 +53,9 @@ func TestSharedImportXrayUnavailableSubscription(t *testing.T) {
 
 func TestSharedImportXrayUnavailableNoEndpointSelection(t *testing.T) {
 	for _, users := range []bool{false, true} {
-		out := subscriptionUnavailableXray(false)
+		// Account levels are supported. Retain an actual unsupported
+		// extension when replacing settings below, so this stays unavailable.
+		out := subscriptionUnavailableXray(true)
 		endpoint := map[string]any{"address": "source.example.test", "port": 443, "users": []any{map[string]any{"id": parserCoverageID, "encryption": "none", "level": 4}}}
 		endpoints := []any{endpoint}
 		if users {

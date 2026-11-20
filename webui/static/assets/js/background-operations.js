@@ -116,11 +116,15 @@
         try {
             var data=await request("events");
             if (!Array.isArray(data.events)) throw new Error("Invalid snapshot");
-            badge("bg-journal-badge",data.complete === true ? "Последние события" : "Журнал неполный",data.complete === true ? "neutral" : "warning");
+            byId("bg-journal-badge").hidden = data.complete === true;
+            if (data.complete !== true) badge("bg-journal-badge","Журнал неполный","warning");
             byId("bg-events").replaceChildren();
             data.events.slice(-20).reverse().forEach(function (event) { var li=node("li");li.append(node("time",date(event.timestamp,true)),node("span",messages[event.event] || "Событие не распознано"));byId("bg-events").append(li); });
             if (!data.events.length) byId("bg-events").appendChild(node("li","Событий пока нет."));
-        } catch (error) { badge("bg-journal-badge","Не удалось обновить журнал","warning"); }
+        } catch (error) {
+            badge("bg-journal-badge","Не удалось обновить журнал","warning");
+            byId("bg-journal-badge").hidden = false;
+        }
     }
     async function mutate(endpoint, payload) {
         if (busy) return; busy=true; render(snapshot,false); text("bg-feedback","Выполняется запрос…");
@@ -166,6 +170,12 @@
         byId("bg-history-more").addEventListener("click",function () {
             historyLimit+=10; render(snapshot,renderStale);
             if (byId("bg-history-more").hidden) byId("bg-history-summary").focus();
+        });
+        byId("bg-journal-toggle").addEventListener("click",function () {
+            var panel = byId("bg-journal"), expanded = panel.hidden;
+            panel.hidden = !expanded;
+            this.setAttribute("aria-expanded",String(expanded));
+            this.textContent = expanded ? "Скрыть журнал" : "Показать журнал";
         });
         byId("bg-journal-refresh").addEventListener("click",journal);
         byId("bg-stop-all").addEventListener("click",function () { mutate("stop-background",{pauseAutomation:true}); });

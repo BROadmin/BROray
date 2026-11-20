@@ -177,6 +177,24 @@ func parseBat(data []byte, catalog bool, maxErrors int) batParse {
 			continue
 		}
 		f := splitSpTab(line)
+		if len(f) >= 3 && asciiLower(f[0]) == "route" && f[1] == "-6" && asciiLower(f[2]) == "add" {
+			if len(f) < 5 || (len(f) > 5 && (len(f) < 7 || f[5] != "&" || asciiLower(f[6]) != "rem")) {
+				report(nr, "ожидалось route -6 add <IPv6/префикс> :: и необязательный комментарий & rem")
+				continue
+			}
+			p, ok := ipv6Prefix(f[3])
+			if !ok || f[4] != "::" {
+				report(nr, "некорректный IPv6-префикс или шлюз; маршрут по умолчанию запрещён")
+				continue
+			}
+			r.RouteLines++
+			canonical := p.Masked().String()
+			if canonical != f[3] {
+				r.NormalizedLines++
+			}
+			r.Routes = append(r.Routes, canonical)
+			continue
+		}
 		if len(f) < 6 || asciiLower(f[0]) != "route" || asciiLower(f[1]) != "add" || asciiLower(f[3]) != "mask" {
 			report(nr, msgOnlyRouteAdd)
 			continue
@@ -241,6 +259,13 @@ func maskString(prefix int) string {
 }
 
 func splitCIDR(s string) (string, int, bool) {
+	if strings.Contains(s, ":") {
+		p, ok := ipv6Prefix(s)
+		if !ok {
+			return "", 0, false
+		}
+		return p.Addr().String(), p.Bits(), true
+	}
 	i := strings.IndexByte(s, '/')
 	if i < 0 {
 		return "", 0, false
@@ -329,5 +354,5 @@ func collapseCIDR(canonical []string) []string {
 	for i, c := range list {
 		out[i] = numToIP(c.n) + "/" + strconv.Itoa(c.p)
 	}
-	return out
+	return append(out, collapseIPv6(canonical)...)
 }

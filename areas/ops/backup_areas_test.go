@@ -56,7 +56,7 @@ func newWorld(t *testing.T) *world {
 		w.mu.Unlock()
 		return platform.WriteFileAtomic(root.XrayConfig(), cfg, 0o600)
 	}
-	d.Svc.XrayRunning = func() bool { return true }
+	d.Svc.XrayRunning = func() bool { w.mu.Lock(); defer w.mu.Unlock(); return w.applied > 0 }
 	d.Svc.KeeneticEnsureInterface = func(ctx context.Context) error { return nil }
 	return w
 }

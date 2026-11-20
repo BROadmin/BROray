@@ -697,7 +697,7 @@ func (e *engine) userCommitAsWithWriter(req obj, newID string, writer func(strin
 	routes := make([]any, 0, len(optimized))
 	for _, r := range optimized {
 		net, p, _ := splitCIDR(r)
-		routes = append(routes, obj{"family": "ipv4", "network": net, "prefix": p})
+		routes = append(routes, obj{"family": routeFamily(net), "network": net, "prefix": p})
 	}
 	manifest := obj{"schemaVersion": 1, "id": bundleID, "name": name, "description": userDesc,
 		"source": obj{"provider": "local-upload", "files": sourceFiles}, "targetInterface": iface, "exportComment": "BROray",

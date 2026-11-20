@@ -11,6 +11,20 @@
     var saving = false;
     var timer = null;
     var wasRunning = false;
+    var unconfirmed = false;
+    var generation = 0;
+    var readSerial = 0;
+    var uncertainField = null;
+    var dirty = Object.create(null);
+    var fields = {intervalHours:"routes-schedule-interval", maxRemovalPercent:"routes-schedule-removal", autoApply:"routes-schedule-auto"};
+
+    function validSettings(data) {
+        return Boolean(data && data.settingsValid === true && typeof data.revision === "string" && data.revision.length === 64 &&
+            typeof data.autoApply === "boolean" && typeof data.intervalHours === "number" && typeof data.maxRemovalPercent === "number");
+    }
+    function markDirty(field) {
+        if (view && (!dirty[field] || dirty[field].conflict)) dirty[field] = {base:view[field]};
+    }
 
     var RESULT_TEXT = {
         no_changes: "Новых версий нет",
@@ -68,17 +82,18 @@
         var enabled;
         var result;
         var resultNode = byId("routes-schedule-result");
-        var busy = saving || !view || view.running === true;
+        var blocked = saving || unconfirmed || !validSettings(view);
+        var busy = blocked || !view || view.running === true;
         if (!view) return;
         enabled = Number(view.intervalHours || 0) > 0;
         if (!saving) { // keep the owner's choice visible while it is being saved
-            byId("routes-schedule-interval").value = String(view.intervalHours || 0);
-            byId("routes-schedule-removal").value = String(view.maxRemovalPercent || 50);
-            byId("routes-schedule-auto").checked = view.autoApply === true;
+            if (!dirty.intervalHours) byId("routes-schedule-interval").value = String(view.intervalHours || 0);
+            if (!dirty.maxRemovalPercent) byId("routes-schedule-removal").value = String(view.maxRemovalPercent || 50);
+            if (!dirty.autoApply) byId("routes-schedule-auto").checked = view.autoApply === true;
         }
-        byId("routes-schedule-interval").disabled = saving;
-        byId("routes-schedule-removal").disabled = saving;
-        byId("routes-schedule-auto").disabled = saving;
+        byId("routes-schedule-interval").disabled = blocked;
+        byId("routes-schedule-removal").disabled = blocked;
+        byId("routes-schedule-auto").disabled = blocked;
         byId("routes-schedule-check").disabled = busy;
         byId("routes-schedule-check").textContent = view.running ? "Проверка…" : "Проверить сейчас";
 
@@ -93,6 +108,8 @@
 
         result = view.lastMessage || "Результатов проверки пока нет.";
         if (view.running) result = "Проверка обновлений выполняется. Карточки наборов обновятся после её завершения.";
+        if (saving) result = "Сохранение настройки…";
+        else if (unconfirmed || !validSettings(view)) result = "Настройки не подтверждены. Ожидается обновление состояния; повторное сохранение заблокировано.";
         resultNode.textContent = result;
         resultNode.classList.toggle("is-error", !view.running && view.lastResult === "failed");
 
@@ -136,6 +153,8 @@
         var finished = data && data.running !== true &&
             (wasRunning || Boolean(view && view.lastCheckAt !== data.lastCheckAt && view.lastCheckAt !== undefined));
         view = data;
+        unconfirmed = !validSettings(data);
+        if (!unconfirmed && uncertainField) { delete dirty[uncertainField]; uncertainField = null; }
         wasRunning = Boolean(data && data.running);
         render();
         if (finished) document.dispatchEvent(new CustomEvent("broray:routes-catalog-refresh"));
@@ -143,8 +162,10 @@
 
     function load() {
         if (document.hidden) { schedule(); return Promise.resolve(); }
+        var serial = ++readSerial;
+        var startedGeneration = generation;
         return request(SCHEDULE_URL, {method: "GET", credentials: "same-origin"})
-            .then(apply)
+            .then(function (data) { if (serial === readSerial && startedGeneration === generation && !saving) apply(data); })
             .catch(function (error) {
                 if (!view) setBadge("Недоступна", "status-badge-danger");
                 if (error && (error.status === 401 || error.code === "AUTH_REQUIRED")) handleError(error);
@@ -152,21 +173,33 @@
             .then(schedule);
     }
 
-    function save() {
+    function save(field) {
         var body;
-        if (saving || !view) return;
-        // read the controls before render() puts the saved values back
-        body = {
-            intervalHours: Number(byId("routes-schedule-interval").value),
-            autoApply: byId("routes-schedule-auto").checked,
-            maxRemovalPercent: Number(byId("routes-schedule-removal").value)
-        };
+        if (saving || unconfirmed || !validSettings(view)) { render(); return; }
+        if (dirty[field] && dirty[field].base !== view[field]) {
+            dirty[field].conflict = true;
+            handleError(new Error("Это поле изменилось в другом окне. Черновик сохранён на экране; введите значение заново перед сохранением."));
+            return;
+        }
+        body = {expectedRevision:view.revision};
+        body[field] = field === "autoApply" ? byId(fields[field]).checked : Number(byId(fields[field]).value);
+        generation++;
         saving = true;
         render();
         post(SCHEDULE_URL, body).then(function (data) {
-            view = data;
+            if (!validSettings(data) || data[field] !== body[field]) throw new Error("Сохранение настройки не подтверждено.");
+            delete dirty[field];
+            apply(data);
             if (window.BROrayUI && window.BROrayUI.toast) window.BROrayUI.toast("Настройки проверки обновлений сохранены.", "success");
-        }).catch(handleError).then(function () {
+        }).catch(function (error) {
+            handleError(error);
+            uncertainField = field;
+            return request(SCHEDULE_URL, {method:"GET", credentials:"same-origin"}).then(function (data) {
+                if (!validSettings(data)) throw new Error("Настройки не подтверждены.");
+                apply(data);
+            }).catch(function () { unconfirmed = true; });
+        }).then(function () {
+            generation++;
             saving = false;
             render();
             schedule();
@@ -174,11 +207,13 @@
     }
 
     function checkNow() {
-        if (!view || view.running) return;
+        if (!view || view.running || saving || unconfirmed || !validSettings(view)) return;
+        var startedGeneration = generation;
         view.running = true;
         render();
         post(CHECK_URL, {}).then(function (data) {
-            apply(data);
+            if (startedGeneration === generation && !saving && !unconfirmed) apply(data);
+            else { view.running = data.running === true; render(); }
             wasRunning = true;
         }).catch(function (error) {
             view.running = false;
@@ -189,9 +224,10 @@
 
     function initialize() {
         if (!byId("routes-schedule")) return;
-        byId("routes-schedule-interval").addEventListener("change", save);
-        byId("routes-schedule-removal").addEventListener("change", save);
-        byId("routes-schedule-auto").addEventListener("change", save);
+        Object.keys(fields).forEach(function (field) {
+            byId(fields[field]).addEventListener("input", function () { markDirty(field); });
+            byId(fields[field]).addEventListener("change", function () { save(field); });
+        });
         byId("routes-schedule-check").addEventListener("click", checkNow);
         document.addEventListener("visibilitychange", function () { if (!document.hidden) load(); });
         load();

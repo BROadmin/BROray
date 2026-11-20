@@ -145,6 +145,10 @@ func (s *svc) qualityContext(target, origin string) (string, error) {
 
 // resolveCheck is the servers-check routing of api/operations/common.sh:47-59.
 func (s *svc) resolveCheck(id string) (string, string, *cgi.APIError) {
+	reserve, err := readReservePreferences(s.d)
+	if err != nil {
+		return "", "", cgi.E(503, "RESERVE_SETTINGS_INVALID", "Не удалось подтвердить настройки резервирования VPN.")
+	}
 	if id != "all" {
 		if st, err := os.Lstat(RecordPath(s.d, id)); err != nil || !st.Mode().IsRegular() {
 			return "", "", cgi.E(404, "SERVER_NOT_FOUND", "Сервер не найден.")
@@ -154,8 +158,10 @@ func (s *svc) resolveCheck(id string) (string, string, *cgi.APIError) {
 				return "", "", cgi.MapError(err)
 			}
 		}
-		if ctx := s.runtimeContext(id); ctx != "" {
-			return actionHealth, ctx, nil
+		if !reserve.Enabled {
+			if ctx := s.runtimeContext(id); ctx != "" {
+				return actionHealth, ctx, nil
+			}
 		}
 	}
 	ctx, err := s.qualityContext(id, "USER")
@@ -166,6 +172,8 @@ func (s *svc) resolveCheck(id string) (string, string, *cgi.APIError) {
 }
 
 func (s *svc) defineActions() {
+	s.defineReserveActions()
+	s.defineDPIActions()
 	s.d.Queue.Define(compat.ActionSpec{Name: actionActivation, Type: "server_operation", Priority: map[string]int{"*": 1},
 		Stages: []compat.Stage{{Name: "activate", Phase: "switching", Global: true, Protected: true, Run: s.activationStep}}})
 	s.d.Queue.Define(compat.ActionSpec{Name: actionReplacement, Type: "server_operation", Priority: map[string]int{"*": 1}, Stages: []compat.Stage{
@@ -400,6 +408,9 @@ func (s *svc) failoverPending(state map[string]any, active, context, hash string
 }
 
 func (s *svc) healthStep(t *compat.Task) error {
+	if err := s.requireOrdinarySelection(t); err != nil {
+		return err
+	}
 	if s.coreMaintenanceBlocked() {
 		return maintenanceRequired(t)
 	}
@@ -419,6 +430,9 @@ func (s *svc) healthStep(t *compat.Task) error {
 		return nil
 	}
 	health, result, hctx := s.activeMeasure(t.Ctx, active)
+	if err := s.requireOrdinarySelection(t); err != nil {
+		return err
+	}
 	if t.Ctx.Err() != nil {
 		return t.Ctx.Err()
 	}
@@ -532,6 +546,9 @@ func rankOf(r any) int {
 }
 
 func (s *svc) failoverVerify(t *compat.Task) error {
+	if err := s.requireOrdinarySelection(t); err != nil {
+		return err
+	}
 	if s.coreMaintenanceBlocked() {
 		return maintenanceRequired(t)
 	}
@@ -581,6 +598,9 @@ func (s *svc) failoverVerify(t *compat.Task) error {
 		return nil
 	}
 	health, result, hctx := s.activeMeasure(t.Ctx, active)
+	if err := s.requireOrdinarySelection(t); err != nil {
+		return err
+	}
 	if t.Ctx.Err() != nil {
 		return t.Ctx.Err()
 	}
@@ -639,6 +659,9 @@ func (s *svc) currentFailoverHealth(f *failState) map[string]any {
 }
 
 func (s *svc) failoverProbe(t *compat.Task) error {
+	if err := s.requireOrdinarySelection(t); err != nil {
+		return err
+	}
 	if s.coreMaintenanceBlocked() {
 		return maintenanceRequired(t)
 	}
@@ -750,6 +773,9 @@ func (s *svc) failoverProbe(t *compat.Task) error {
 		return changed(t)
 	}
 	health, result, hctx := s.activeMeasure(t.Ctx, f.Active)
+	if err := s.requireOrdinarySelection(t); err != nil {
+		return err
+	}
 	if t.Ctx.Err() != nil {
 		return t.Ctx.Err()
 	}
@@ -778,16 +804,13 @@ func (s *svc) failoverProbe(t *compat.Task) error {
 }
 
 func chooseCandidate(cands []map[string]any, rule, preferred string) map[string]any {
-	if rule == "preferred" {
-		for _, c := range cands {
-			if c["id"] == preferred {
-				return c
-			}
-		}
-	}
 	if len(cands) == 0 {
 		return nil
 	}
+	return rankedCandidates(cands, rule, preferred)[0]
+}
+
+func rankedCandidates(cands []map[string]any, rule, preferred string) []map[string]any {
 	sorted := append([]map[string]any(nil), cands...)
 	key := func(c map[string]any) []float64 {
 		r := float64(c["ratingRank"].(int))
@@ -797,6 +820,12 @@ func chooseCandidate(cands []map[string]any, rule, preferred string) map[string]
 		return []float64{-r, c["ping"].(float64), c["jitter"].(float64)}
 	}
 	sort.SliceStable(sorted, func(i, j int) bool {
+		if rule == "preferred" {
+			a, b := sorted[i]["id"] == preferred, sorted[j]["id"] == preferred
+			if a != b {
+				return a
+			}
+		}
 		a, b := key(sorted[i]), key(sorted[j])
 		for k := range a {
 			if a[k] != b[k] {
@@ -805,10 +834,13 @@ func chooseCandidate(cands []map[string]any, rule, preferred string) map[string]
 		}
 		return asString(sorted[i]["id"]) < asString(sorted[j]["id"])
 	})
-	return sorted[0]
+	return sorted
 }
 
 func (s *svc) failoverActivate(t *compat.Task) error {
+	if err := s.requireOrdinarySelection(t); err != nil {
+		return err
+	}
 	if s.coreMaintenanceBlocked() {
 		return maintenanceRequired(t)
 	}

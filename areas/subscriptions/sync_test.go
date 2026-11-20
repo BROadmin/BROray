@@ -28,7 +28,7 @@ func stageLinks(t *testing.T, enabled bool, links ...string) []servers.Record {
 
 func (e *env) sync(t *testing.T, policy string, links ...string) (*syncResult, error) {
 	t.Helper()
-	return e.s.syncCatalog(context.Background(), subX, stageLinks(t, true, links...), true, "u1", policy)
+	return e.s.syncCatalog(sourceRefreshContext(), subX, stageLinks(t, true, links...), true, "u1", policy)
 }
 
 func TestSyncContinuityAndRetention(t *testing.T) {
@@ -63,40 +63,14 @@ func TestSyncContinuityAndRetention(t *testing.T) {
 	if err != nil || rec["password"] != "pw2" || servers.ActiveID(e.d) != idA || len(e.reapplied) != 1 {
 		t.Fatalf("continuity: %v %v %v", err, rec, e.reapplied)
 	}
-	// re-apply failure rolls the catalog back
-	e.reapplyErr = errors.New("XRAY_APPLY_FAILED: x")
-	_, err = e.sync(t, "replace", "trojan://pw3@a.example:443#A", "trojan://pw@b.example:443#B")
+	// Failure/uncertainty branches run in isolated fixtures below.
 	var se *subErr
-	if !errors.As(err, &se) || se.Code != "ACTIVE_SERVER_CONFLICT" || se.Msg != "Новая версия активного сервера не была применена. Восстановлена прежняя рабочая версия." {
-		t.Fatalf("reapply failure: %v", err)
-	}
-	if rec, _ := servers.ReadRecord(e.d, idA); rec["password"] != "pw2" || len(e.reapplied) != 3 {
-		t.Fatalf("rollback: %v %v", rec["password"], e.reapplied)
-	}
-	e.reapplyErr = nil
-	// xray test failure: nothing written
-	e.testErr = errors.New("rejected")
-	_, err = e.sync(t, "replace", "trojan://pw4@a.example:443#A")
-	if !errors.As(err, &se) || se.Msg != "Новая конфигурация активного сервера не прошла проверку Xray. Обновление отменено." || len(liveIDs(t, e)) != 2 {
-		t.Fatalf("test failure: %v", err)
-	}
-	e.testErr = nil
-	// name change only → interface description sync; failure rolls back
-	e.ensureErr = errors.New("KEENETIC_UNAVAILABLE")
-	_, err = e.sync(t, "replace", "trojan://pw2@a.example:443#A2", "trojan://pw@b.example:443#B")
-	if !errors.As(err, &se) || !strings.HasPrefix(se.Msg, "Новое имя активного сервера не удалось синхронизировать") {
-		t.Fatalf("name sync: %v", err)
-	}
-	if rec, _ := servers.ReadRecord(e.d, idA); rec["name"] != "A" {
-		t.Fatal("name not rolled back")
-	}
-	e.ensureErr = nil
 	res, err = e.sync(t, "replace", "trojan://pw2@a.example:443#A2", "trojan://pw@b.example:443#B")
-	if err != nil || res.Impact != "display-name-changed" || e.ensured != 3 {
+	if err != nil || res.Impact != "display-name-changed" || e.ensured != 1 {
 		t.Fatalf("name: %v %+v %d", err, res, e.ensured)
 	}
 	// disabled source cannot hold the active server
-	_, err = e.s.syncCatalog(context.Background(), subX, stageLinks(t, false, "trojan://pw2@a.example:443#A2"), false, "u2", "replace")
+	_, err = e.s.syncCatalog(sourceRefreshContext(), subX, stageLinks(t, false, "trojan://pw2@a.example:443#A2"), false, "u2", "replace")
 	if !errors.As(err, &se) || se.Msg != "Активный сервер не может быть перенесён в выключенный источник." || len(liveIDs(t, e)) != 2 || exists2(e.s.disabledDir(subX)) {
 		t.Fatalf("disabled active: %v %v", err, liveIDs(t, e))
 	}
@@ -157,17 +131,17 @@ func TestSyncPreChecks(t *testing.T) {
 	recs := stageLinks(t, true, linkA)
 	other := deepCopy(recs[0])
 	other["source"].(map[string]any)["subscriptionId"] = "sub-other"
-	_, err := e.s.syncCatalog(context.Background(), subX, []servers.Record{other}, true, "u", "replace")
+	_, err := e.s.syncCatalog(sourceRefreshContext(), subX, []servers.Record{other}, true, "u", "replace")
 	if err == nil || err.(*subErr).Msg != "Подготовленный сервер принадлежит другой подписке." {
 		t.Fatalf("%v", err)
 	}
-	_, err = e.s.syncCatalog(context.Background(), subX, nil, true, "u", "replace")
+	_, err = e.s.syncCatalog(sourceRefreshContext(), subX, nil, true, "u", "replace")
 	if err == nil || err.(*subErr).Msg != "Серверный модуль не получил ни одного узла." {
 		t.Fatalf("%v", err)
 	}
 	broken := deepCopy(recs[0])
 	broken["port"] = "x"
-	_, err = e.s.syncCatalog(context.Background(), subX, []servers.Record{broken}, true, "u", "replace")
+	_, err = e.s.syncCatalog(sourceRefreshContext(), subX, []servers.Record{broken}, true, "u", "replace")
 	if err == nil || err.(*subErr).Msg != "Подготовленный сервер не прошёл проверку серверного модуля." {
 		t.Fatalf("%v", err)
 	}

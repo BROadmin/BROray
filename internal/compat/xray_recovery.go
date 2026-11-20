@@ -9,7 +9,7 @@ import (
 )
 
 func daemonXrayHolder(h *Holder) bool {
-	if h.Scope != "xray" || h.BundleID != "xray" || h.Pending || h.Resumable {
+	if h.Scope != "xray" || h.BundleID != "xray" || h.Pending || h.Resumable || h.DaemonOwnedPolicy || h.DaemonOwnedReserve {
 		return false
 	}
 	switch h.Action {

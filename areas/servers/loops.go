@@ -65,6 +65,15 @@ func (s *svc) enqueueDue() error {
 	if s.d.Queue.Paused() || s.coreMaintenanceBlocked() {
 		return nil
 	}
+	reserve, err := readReservePreferences(s.d)
+	if err != nil {
+		return err
+	}
+	if reserve.Enabled {
+		if err := s.enqueueReserveDue(); err != nil {
+			return err
+		}
+	}
 	ac, ok := s.readAutoConfig()
 	if !ok {
 		if _, err := os.Stat(autoSwitchFile(s.d)); os.IsNotExist(err) {
@@ -78,12 +87,12 @@ func (s *svc) enqueueDue() error {
 	}
 	now := s.now().Unix()
 	active := ActiveID(s.d)
-	if active == "" && ac.enabled {
+	if !reserve.Enabled && active == "" && ac.enabled {
 		if err := s.enqueueReplacement(state); err != nil {
 			return err
 		}
 	}
-	if active != "" {
+	if !reserve.Enabled && active != "" {
 		if context := s.runtimeContext(active); context != "" {
 			ep, okE := num(get(state, "activeHealth", "checkedEpoch"))
 			recent := state["autoConfigSha256"] == ac.hash && get(state, "activeHealth", "serverId") == active &&

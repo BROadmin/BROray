@@ -58,6 +58,10 @@ func setup(d *compat.Deps) error {
 	current.Store(s)
 	regOnce.Do(register)
 	d.Svc.KeeneticEnsureInterface = func(ctx context.Context) error { return current.Load().EnsureInterface(ctx) }
+	d.Svc.KeeneticVerifyInterface = s.VerifyOwnedInterface
+	d.Svc.KeeneticVerifyInterfaceTarget = s.VerifyOwnedInterfaceTarget
+	d.Svc.KeeneticVerifyInterfaceConfiguration = s.VerifyOwnedInterfaceConfiguration
+	registerReserveDescriptionServices(s)
 	d.Svc.KeeneticIPv6 = func(ctx context.Context) map[string]any { return current.Load().ipv6Fact(ctx) }
 	d.Svc.KeeneticWaitUDPJobs = func(ctx context.Context) error { return current.Load().waitUDPJobs(ctx) }
 	compat.KeenDNSOrigin = func(ctx context.Context) (string, bool) { return current.Load().keenDNSOrigin(ctx) }

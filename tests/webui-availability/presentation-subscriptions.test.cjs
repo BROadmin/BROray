@@ -67,6 +67,25 @@ test('one card per group defaults to active and keeps explicit source across ren
     h.f.state.summary.servers=[row('a'),row('b'),row('c',true,'manual')];h.f.renderServers(h.f.state.summary.servers);
     assert.equal(list.children[0].getAttribute('data-server-id'),'c','new activation selects exact active member');
 });
+test('server source labels identify formats and distinguish repeated captions',()=>{
+    const h=serverFixture();
+    const fromProvider=(id,sourceFormats)=>({...row(id),subscriptionName:'Provider',sourceFormats});
+    const rows=[
+        fromProvider('a',['clash']),
+        fromProvider('b',['json','uri']),
+        fromProvider('c',['clash']),
+        fromProvider('d',[])
+    ];
+    h.f.state.summary.servers=rows;
+    h.f.renderServers(rows);
+    const select=h.document.getElementById('servers-list').children[0].querySelector('select');
+    assert.deepEqual(select.children.map(option=>[option.value,option.textContent]),[
+        ['a','Provider · Clash · 1'],
+        ['b','Provider · JSON / URI'],
+        ['c','Provider · Clash · 2'],
+        ['d','Provider']
+    ]);
+});
 test('selected variant owns Check Connect Details and Delete actions',async()=>{
     const h=serverFixture();h.f.renderServers(h.f.state.summary.servers);let card=h.document.getElementById('servers-list').children[0];
     const select=card.querySelector('select');assert.ok(select);select.value='a';select.dispatch('change');card=h.document.getElementById('servers-list').children[0];
@@ -102,7 +121,12 @@ function subscriptionFixture(){
     return h;
 }
 test('opened subscription refreshes 3 to 4 XDRIVE and same-count replacement without collapse or repeated reads',async()=>{
-    const h=subscriptionFixture();await h.f.loadAll(true);await h.f.toggleServers('A');assert.equal(h.gets,1);
+    const h=subscriptionFixture();await h.f.loadAll(true);
+    const list=h.document.getElementById('subscriptions-list');
+    assert.match(list.innerHTML,/data-action="refresh"[^>]*><span class="button-label">Обновить<\/span>/);
+    assert.match(list.innerHTML,/data-action="servers"[^>]*><span class="button-label">Серверы<\/span>/);
+    await h.f.toggleServers('A');assert.equal(h.gets,1);
+    assert.match(list.innerHTML,/data-action="servers"[^>]*><span class="button-label">Скрыть серверы<\/span>/);
     h.nodes=nodes(['NL','FIN','PL','NL XDRIVE GOOGLE']);h.catalog=[metadata(4,'2')];await h.f.loadAll(true);await tick();
     assert.match(h.f.renderNodes('A'),/NL XDRIVE GOOGLE/);assert.equal(h.f.state.openServersId,'A');assert.equal(h.gets,2);
     h.nodes=nodes(['NL','FIN','PL','replacement']);h.catalog=[metadata(4,'3')];await h.f.loadAll(true);await tick();assert.match(h.f.renderNodes('A'),/replacement/);assert.equal(h.gets,3);
@@ -128,7 +152,9 @@ test('node request error retains last good data and is not shown as true empty o
 test('disable reloads nodes and remove rejects in-flight response',async()=>{
     const h=subscriptionFixture();await h.f.loadAll(true);await h.f.toggleServers('A');h.catalog=[{...metadata(),enabled:false}];h.nodes=nodes([]);await h.f.loadAll(true);await tick();assert.equal(h.gets,2);
     let finish;const normal=h.context.fetcher;h.context.fetcher=async(url)=>url.includes('/servers.')?new Promise(r=>finish=()=>r(response(nodes(['removed'])))):normal(url);
-    h.catalog=[metadata(1,'3')];await h.f.loadAll(true);await tick();await h.f.removeSubscription(h.catalog[0]);finish();await tick();
+    h.catalog=[metadata(1,'3')];await h.f.loadAll(true);await tick();
+    h.ui.followQueued=async(url,id,cb)=>{assert.ok(url.endsWith('/delete.cgi'));h.catalog=[];cb({state:'completed'});};
+    await h.f.removeSubscription(h.catalog[0]);finish();await tick();
     assert.equal(h.f.state.serverCache.has('A'),false);assert.equal(h.f.state.openServersId,null);
 });
 test('returning to page refreshes an external revision with one coalesced catalog read',async()=>{
@@ -171,6 +197,19 @@ test('page asset cache tags match the current build and revision',()=>{
  assert.doesNotMatch(html, /<details[^>]*\bopen(?:[\s=>])/);assert.match(html,/&lt;private&gt;/);
  assert.equal(h.f.renderWarnings({lastUpdateResult:{warnings:[]}}),'');
  });
+test('provider details have a bordered disclosure before update warnings',()=>{
+ const h=fixture('subscriptions.js','state,renderSubscriptions');
+ const provider=fs.readFileSync(path.join(__dirname,'../../webui/static/assets/js/subscription-provider.js'),'utf8');
+ vm.runInNewContext(provider,h.context);
+ h.f.state.subscriptions=[{...metadata(),providerMetadata:{schemaVersion:1,title:'Test provider'},
+    lastUpdateResult:{warnings:['Check this']}}];
+ h.f.renderSubscriptions();
+ const html=h.document.getElementById('subscriptions-list').innerHTML;
+ assert.match(html,/<details class="subscription-provider subscription-provider-card"><summary>Сведения провайдера<\/summary>/);
+ assert.ok(html.indexOf('Сведения провайдера')<html.indexOf('Предупреждения обновления'));
+ const css=fs.readFileSync(path.join(__dirname,'../../webui/static/assets/css/allpage.css'),'utf8');
+ assert.match(css,/\.subscription-provider-card\s*\{[^}]*border:\s*1px solid/);
+});
 test('saved server warning stays in Details after import and reload',async()=>{
  const h=serverFixture();h.f.state.summary.servers.forEach(r=>r.importWarnings=['Synthetic warning <value>']);h.f.renderServers(h.f.state.summary.servers);
  const card=h.document.getElementById('servers-list').children[0];assert.doesNotMatch(card.textContent,/Synthetic warning/);
@@ -201,3 +240,52 @@ test('additional JSON and Clash switches reset off, load independently, and subm
  h.f.renderSubscriptions({severity:'warning',lastUpdateStatus:'partial',lastWarnings:['configuration-only-secretless-marker'],enabled:1,total:1,serversReceived:16});
  assert.equal(h.document.getElementById('home-subscriptions-status').textContent,'Обновлено частично');
  });
+
+
+function sourceRemovalFixture() {
+ const h=fixture('subscriptions.js','state,removeSubscription,renderSubscriptions,loadAll');
+ h.item={id:'source-a',name:'Synthetic',serversCount:2,enabled:true,lastUpdateStatus:'ok'};
+ h.f.state.subscriptions=[h.item];h.f.state.editingId=h.item.id;
+ h.f.state.serverCache.set(h.item.id,[{id:'preserved'}]);
+ h.confirmations=0;h.window.BROrayDialogs.confirm=async()=>{h.confirmations++;return true;};
+ h.context.fetcher=async(url)=>{h.calls.push({legacy:url});return response(url.includes('/list.')?[h.item]:{});};
+ h.ui.followQueued=async(url,id,listener)=>{h.calls.push({url,id});h.listener=listener;listener({state:'queued',requestId:'remove-one'});return {accepted:true,state:'queued'};};
+ return h;
+}
+test('source deletion waits for terminal completion and never offers refresh cancellation',async()=>{
+ const h=sourceRemovalFixture();await h.f.removeSubscription(h.item);
+ assert.equal(typeof h.listener,'function','deletion must enter queued owner');
+ assert.equal(h.f.state.editingId,h.item.id);assert.ok(h.f.state.serverCache.has(h.item.id));
+ assert.equal(h.toasts.length,0,'admission is not completion');
+ let html=h.document.getElementById('subscriptions-list').innerHTML;
+ assert.match(html,/Удалени/);assert.doesNotMatch(html,/data-action="cancel-update"/);
+ await h.f.removeSubscription(h.item);assert.equal(h.confirmations,1,'duplicate submission blocked');
+ h.listener({state:'running'});html=h.document.getElementById('subscriptions-list').innerHTML;assert.doesNotMatch(html,/data-action="cancel-update"/);
+ h.context.fetcher=async(url)=>response(url.includes('/list.')?[]:{});
+ h.listener({state:'completed'});await tick();assert.equal(h.f.state.editingId,null);assert.equal(h.f.state.serverCache.has(h.item.id),false);
+ assert.equal(h.toasts.filter(x=>/Подписка.*удален/.test(x[0])).length,1);
+ assert.equal(h.calls.filter(x=>x.legacy&&x.legacy.includes('/delete.')).length,0);
+});
+for(const terminal of ['failed','cancelled','unknown'])test('source deletion '+terminal+' preserves form and avoids false success',async()=>{
+ const h=sourceRemovalFixture();await h.f.removeSubscription(h.item);assert.equal(typeof h.listener,'function');
+ h.listener({state:terminal,message:'Removal outcome '+terminal});await tick();assert.equal(h.f.state.editingId,h.item.id);
+ assert.equal(h.toasts.filter(x=>/Подписка.*удален/.test(x[0])).length,0);
+ assert.ok(h.toasts.some(x=>x[0]==='Removal outcome '+terminal));
+ if(terminal==='unknown'){
+  assert.match(h.document.getElementById('subscriptions-list').innerHTML,/Проверить удаление/);
+  await h.f.removeSubscription(h.item);assert.equal(h.confirmations,1,'unknown recheck must reuse prior intent');
+ }
+});
+test('source deletion resumes saved queue request without another confirmation',async()=>{
+ const h=sourceRemovalFixture();h.ui.hasQueuedRequest=(url,id)=>url.endsWith('/delete.cgi')&&id===h.item.id;
+ await h.f.loadAll(true);assert.equal(typeof h.listener,'function');assert.equal(h.confirmations,0);assert.equal(h.f.state.editingId,h.item.id);
+ assert.doesNotMatch(h.document.getElementById('subscriptions-list').innerHTML,/data-action="cancel-update"/);
+});
+test('source deletion refused confirmation sends no request',async()=>{
+ const h=sourceRemovalFixture();h.window.BROrayDialogs.confirm=async()=>false;
+ await h.f.removeSubscription(h.item);assert.equal(h.calls.length,0);assert.equal(h.f.state.editingId,h.item.id);
+});
+test('source deletion admission error preserves form and surfaces error',async()=>{
+ const h=sourceRemovalFixture();h.ui.followQueued=async()=>{throw new Error('admission refused');};
+ await h.f.removeSubscription(h.item);assert.equal(h.f.state.editingId,h.item.id);assert.ok(h.toasts.some(x=>x[0]==='admission refused'));
+});

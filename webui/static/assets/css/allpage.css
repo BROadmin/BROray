@@ -3086,6 +3086,13 @@ body.modal-open {
 .keenetic-panel-heading {
     margin-bottom: 16px;
 }
+.keenetic-udp-panel .keenetic-panel-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+}
 
 .keenetic-panel-heading .eyebrow {
     margin-bottom: 7px;
@@ -3844,6 +3851,22 @@ body.modal-open {
     min-width: 0;
 }
 
+/* The header keeps its status corner when details open or names wrap. */
+.page-servers .server-card-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+    align-items: start;
+}
+
+.page-servers .server-card-header > .status-badge {
+    justify-self: end;
+    max-width: 150px;
+}
+
+.page-servers .server-card-tags {
+    flex-wrap: wrap;
+}
+
 .page-servers .server-card-title {
     margin: 0;
     font-size: 19px;
@@ -3991,16 +4014,22 @@ body.modal-open {
     margin: 7px 0 0;
 }
 
-.page-servers .server-auto-switch-section {
+.page-servers details.server-auto-switch-section,
+.page-servers details.server-quality-refresh-section,
+.page-servers details.server-reserve-section {
     padding: 0;
     overflow: hidden;
 }
 
-.page-servers .server-auto-switch-section > summary {
+.page-servers .server-auto-switch-section > summary,
+.page-servers .server-quality-refresh-section > summary,
+.page-servers .server-reserve-section > summary {
     list-style: none;
 }
 
-.page-servers .server-auto-switch-section > summary::-webkit-details-marker {
+.page-servers .server-auto-switch-section > summary::-webkit-details-marker,
+.page-servers .server-quality-refresh-section > summary::-webkit-details-marker,
+.page-servers .server-reserve-section > summary::-webkit-details-marker {
     display: none;
 }
 
@@ -4012,10 +4041,6 @@ body.modal-open {
     min-height: 86px;
     padding: 18px 22px;
     cursor: pointer;
-}
-
-.page-servers .servers-disclosure-summary:hover {
-    background: var(--ui-active-soft);
 }
 
 .page-servers .servers-disclosure-icon {
@@ -4031,6 +4056,12 @@ body.modal-open {
 
 .page-servers .servers-disclosure-copy {
     min-width: 0;
+}
+
+.page-servers .servers-disclosure-summary > .status-badge {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
 }
 
 .page-servers .servers-disclosure-copy .eyebrow {
@@ -4209,7 +4240,9 @@ body.modal-open {
     justify-content: flex-end;
 }
 
-.page-servers .auto-switch-badge-enabled {
+.page-servers .auto-switch-badge-enabled,
+.page-servers .quality-refresh-badge-enabled,
+.page-servers .reserve-badge-enabled {
     border-color: var(--ui-success-border);
     color: var(--ui-success);
     background: var(--ui-success-soft);
@@ -4253,12 +4286,6 @@ body.modal-open {
 
 .page-servers .quality-refresh-actions {
     justify-content: flex-end;
-}
-
-.page-servers .quality-refresh-badge-enabled {
-    border-color: var(--ui-success-border);
-    color: var(--ui-success);
-    background: var(--ui-success-soft);
 }
 
 .page-servers .server-import-preflight {
@@ -5215,6 +5242,10 @@ body.modal-open {
 
 .page-dns .dns-summary-metric strong {
     font-size: 18px;
+}
+.page-dns .dns-summary-metric #dns-support {
+    font-size: 14px;
+    overflow-wrap: anywhere;
 }
 
 .page-dns .dns-operation,
@@ -7394,6 +7425,16 @@ body.modal-open {
     }
 }
 
+.subscription-provider-card {
+    padding: 0.8rem 0.9rem;
+    border: 1px solid var(--ui-border-strong);
+    border-radius: 0.8rem;
+    background: var(--ui-surface-muted);
+    overflow-wrap: anywhere;
+}
+.subscription-provider-card > summary { cursor: pointer; }
+.subscription-provider-card[open] > :not(summary) { margin-top: 0.75rem; }
+
 /* BROray 3.0.0: subscription partial-result reasons are visible. */
 .subscription-warning {
     display: grid;
@@ -7493,4 +7534,117 @@ body.modal-open {
     .page-routes .routes-schedule-state > div { border-left: 0; border-top: 1px solid var(--ui-divider); }
     .page-routes .routes-schedule-state > div:first-child { border-top: 0; }
     .page-routes .routes-schedule-actions .button { width: 100%; }
+}
+
+/* Reserve controls share the Servers page without submitting other drafts. */
+.server-reserve-section .reserve-content { display:grid; gap:1rem; padding:18px 22px 22px; border-top:1px solid var(--ui-divider); }
+.server-reserve-section p { margin:0; overflow-wrap:anywhere; }
+.reserve-roster-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1rem; }
+.reserve-roster-grid > div { display:flex; flex-direction:column; gap:.5rem; min-width:0; }
+.reserve-roster-grid select { width:100%; min-width:0; }
+.reserve-roster-form { display:grid; gap:1rem; }
+.reserve-actions { display:flex; gap:.75rem; flex-wrap:wrap; }
+.reserve-policy-note,.reserve-optional,#reserve-draft-note { font-size:.875rem; }
+@media (max-width:720px) { .reserve-roster-grid { grid-template-columns:1fr; } .reserve-actions .button { width:100%; } }
+
+/* Independent per-server DPI control. */
+.server-dpi {
+    display: grid;
+    gap: .5rem;
+    margin: 1rem 0;
+    padding: .875rem;
+    border: 1px solid var(--ui-border-strong);
+    border-radius: 12px;
+}
+.server-dpi label { display:flex; align-items:center; gap:.65rem; }
+.server-dpi input[type="checkbox"] { flex:0 0 1.375rem; width:1.375rem; height:1.375rem; min-height:0; margin:0; padding:0; }
+.server-dpi p { margin:0; }
+.server-dpi .button { justify-self:start; }
+
+/* Approved common controls: native inputs keep keyboard and form semantics. */
+:is(#dns-auto-check, #routes-schedule-auto, .server-dpi input[type="checkbox"]) {
+    appearance: none;
+    position: relative;
+    flex: 0 0 52px;
+    width: 52px;
+    min-width: 52px;
+    height: 30px;
+    min-height: 30px;
+    margin: 0 0 0 auto;
+    padding: 0;
+    order: 2;
+    border: 1px solid var(--ui-border-strong);
+    border-radius: var(--ui-radius-pill);
+    background: var(--ui-surface-muted);
+    cursor: pointer;
+}
+:is(#dns-auto-check, #routes-schedule-auto, .server-dpi input[type="checkbox"])::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--ui-text-muted);
+    transition: transform var(--ui-motion-fast) ease;
+}
+:is(#dns-auto-check, #routes-schedule-auto, .server-dpi input[type="checkbox"]):checked {
+    background: var(--ui-brand);
+    border-color: var(--ui-brand);
+}
+:is(#dns-auto-check, #routes-schedule-auto, .server-dpi input[type="checkbox"]):checked::after {
+    transform: translateX(22px);
+    background: var(--ui-text);
+}
+:is(#dns-auto-check, #routes-schedule-auto, .server-dpi input[type="checkbox"]):indeterminate {
+    background: var(--ui-warning-soft);
+    border-color: var(--ui-warning);
+}
+:is(#dns-auto-check, #routes-schedule-auto, .server-dpi input[type="checkbox"]):indeterminate::after {
+    transform: translateX(11px);
+    background: var(--ui-warning);
+}
+:is(#dns-auto-check, #routes-schedule-auto, .server-dpi input[type="checkbox"]):focus-visible,
+.page-servers .auto-switch-master input:focus-visible + .auto-switch-toggle {
+    outline: 2px solid var(--ui-brand);
+    outline-offset: 3px;
+}
+:is(#dns-auto-check, #routes-schedule-auto, .server-dpi input[type="checkbox"]):disabled,
+.page-servers .auto-switch-master input:disabled + .auto-switch-toggle {
+    opacity: .6;
+    cursor: not-allowed;
+}
+.reserve-mode-control,
+label[for="dns-auto-check"],
+label[for="routes-schedule-auto"],
+.server-dpi label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 44px;
+}
+.page-servers .auto-switch-master input:checked + .auto-switch-toggle {
+    background: var(--ui-brand);
+}
+.page-servers .auto-switch-master input:checked + .auto-switch-toggle::after {
+    background: var(--ui-text);
+}
+.page-servers .auto-switch-master input:indeterminate + .auto-switch-toggle {
+    border-color: var(--ui-warning);
+    background: var(--ui-warning-soft);
+}
+.page-servers .auto-switch-master input:indeterminate + .auto-switch-toggle::after {
+    transform: translateX(10px);
+    background: var(--ui-warning);
+}
+.page-servers .server-card-header { gap: 8px 12px; }
+.page-servers .server-card-identity { display: contents; }
+.page-servers .server-card-title-row { grid-column: 1; grid-row: 1; }
+.page-servers .server-card-header > .status-badge { grid-column: 2; grid-row: 1; }
+.page-servers .server-card-identity > :not(.server-card-title-row) { grid-column: 1 / -1; }
+.page-servers .server-card-tags { margin-top: 0; }
+@media (prefers-reduced-motion: reduce) {
+    :is(#dns-auto-check, #routes-schedule-auto, .server-dpi input[type="checkbox"])::after { transition: none; }
 }

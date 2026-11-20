@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/BROadmin/broray/internal/platform"
+	"github.com/BROadmin/broray/modules/reserve"
 	"github.com/BROadmin/broray/modules/servers"
 	"golang.org/x/sys/unix"
 )
@@ -334,14 +335,20 @@ type child struct {
 // Process supervises one Xray child. The child is restarted after a crash
 // while it is wanted.
 type Process struct {
-	mu        sync.Mutex
-	root      platform.Root
-	cur       *child
-	wanted    bool
-	startedAt time.Time
-	restarts  int
-	lastErr   string
-	onExit    func()
+	mu             sync.Mutex
+	root           platform.Root
+	cur            *child
+	wanted         bool
+	startedAt      time.Time
+	restarts       int
+	lastErr        string
+	onExit         func()
+	assetDirectory string
+	// Observation metadata is process-local and protected by mu. It never
+	// changes signal ownership or authorizes killing an observed PID.
+	generation, lifecycleIntent uint64
+	lastChildPID                int
+	exitConfirmed               bool
 	// Binary overrides root.XrayBinary() (tests).
 	Binary string
 	// Args overrides the "run -c <config>" arguments (tests).
@@ -349,6 +356,12 @@ type Process struct {
 }
 
 func NewProcess(root platform.Root) *Process { return &Process{root: root} }
+
+// NewProbeProcess uses the same owned child lifecycle in a private root, while
+// reading the installed core and its assets without copying them into RAM.
+func NewProbeProcess(root platform.Root, binary, assets string) *Process {
+	return &Process{root: root, Binary: binary, assetDirectory: assets}
+}
 
 type Status struct {
 	Installed bool   `json:"installed"`
@@ -382,16 +395,34 @@ func (p *Process) Status(ctx context.Context) Status {
 
 // Start launches the child (config must already be tested and written).
 func (p *Process) Start(ctx context.Context) error {
+	return p.start(ctx, false)
+}
+
+// StartAtBoot cannot replace a durable recovered stopped intent.
+func (p *Process) StartAtBoot(ctx context.Context) error {
+	return p.start(ctx, true)
+}
+
+func (p *Process) start(ctx context.Context, automatic bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.wanted = true
-	if p.cur != nil {
-		return nil
-	}
-	return p.launchLocked()
+	return reserve.WithProfileStart(ctx, p.root, automatic, func() error {
+		if !p.wanted || p.cur == nil {
+			advanceObservation(&p.lifecycleIntent)
+		}
+		p.wanted = true
+		if p.cur != nil {
+			return nil
+		}
+		return p.launchRawLocked()
+	})
 }
 
 func (p *Process) launchLocked() error {
+	return reserve.WithProfileStart(context.Background(), p.root, false, p.launchRawLocked)
+}
+
+func (p *Process) launchRawLocked() error {
 	bin, cfg := p.root.XrayBinary(), p.root.XrayConfig()
 	args := []string{"run", "-c", cfg}
 	if p.Binary != "" {
@@ -406,7 +437,11 @@ func (p *Process) launchLocked() error {
 		return errors.New("XRAY_NOT_INSTALLED")
 	}
 	cmd := exec.Command(bin, args...)
-	cmd.Env = append(childEnv(), "XRAY_LOCATION_ASSET="+p.root.Runtime())
+	assets := p.root.Runtime()
+	if p.assetDirectory != "" {
+		assets = p.assetDirectory
+	}
+	cmd.Env = append(childEnv(), "XRAY_LOCATION_ASSET="+assets)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
 	guard, err := p.acquireChildGuard()
 	if err != nil {
@@ -439,6 +474,8 @@ func (p *Process) launchLocked() error {
 		p.lastErr = err.Error()
 		return fmt.Errorf("XRAY_START_FAILED: %v", err)
 	}
+	advanceObservation(&p.generation)
+	p.lastChildPID, p.exitConfirmed = c.cmd.Process.Pid, false
 	p.cur, p.startedAt, p.lastErr = c, time.Now(), ""
 	go p.wait(c, logf)
 	return nil
@@ -469,6 +506,7 @@ func (p *Process) wait(c *child, logf *os.File) {
 		p.mu.Unlock()
 		return
 	}
+	p.exitConfirmed = c.cmd.ProcessState != nil && c.cmd.ProcessState.Pid() == c.cmd.Process.Pid
 	p.cur = nil
 	if err != nil {
 		p.lastErr = "xray exited: " + err.Error()
@@ -511,6 +549,7 @@ var StopTimeouts = [2]time.Duration{10 * time.Second, 5 * time.Second}
 // child was not reaped after that.
 func (p *Process) Stop(ctx context.Context) error {
 	p.mu.Lock()
+	advanceObservation(&p.lifecycleIntent)
 	p.wanted = false
 	c := p.cur
 	if c == nil {

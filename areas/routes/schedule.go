@@ -415,7 +415,11 @@ func (e *engine) note(id, event, message string) {
 
 // scheduleView is the GET /api/routes/catalog-schedule.cgi object.
 func (e *engine) scheduleView() obj {
-	s := e.scheduleSettings()
+	s, valid := e.scheduleSettingsSnapshot()
+	revision := ""
+	if valid {
+		revision = scheduleSettingsRevision(s)
+	}
 	st := e.readScheduleStatus()
 	paused := e.queue != nil && e.queue.Paused()
 	queued := false
@@ -443,7 +447,7 @@ func (e *engine) scheduleView() obj {
 	if history == nil {
 		history = []any{}
 	}
-	return obj{"schemaVersion": 1, "intervalHours": s.IntervalHours, "intervalChoices": choices, "autoApply": s.AutoApply,
+	return obj{"schemaVersion": 1, "settingsValid": valid, "revision": revision, "intervalHours": s.IntervalHours, "intervalChoices": choices, "autoApply": s.AutoApply,
 		"maxRemovalPercent": s.MaxRemovalPercent, "automationPaused": paused, "running": queued,
 		"lastCheckAt": orNull(st, "lastCheckAt"), "lastResult": orNull(st, "lastResult"), "lastMessage": orNull(st, "lastMessage"),
 		"headCommit": orNull(st, "headCommit"), "headDate": orNull(st, "headDate"), "nextCheckAt": next,
@@ -490,6 +494,7 @@ func (e *engine) scheduleLoop(ctx context.Context) {
 			return
 		case <-t.C:
 			e.enqueueDueCheck()
+			e.enqueueDueGeodata()
 		}
 	}
 }

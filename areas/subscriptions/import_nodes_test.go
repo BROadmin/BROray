@@ -1,7 +1,6 @@
 package subscriptions
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -69,7 +68,7 @@ func TestStrictRefreshPreservesCatalog(t *testing.T) {
 	if strings.Contains(strings.Join(st.Warnings, " "), "synthetic-private") {
 		t.Fatal("error leaks credentials")
 	}
-	res, err := e.s.syncCatalog(context.Background(), subX, st.Records, true, "native-partial", "retain-unmatched")
+	res, err := e.s.syncCatalog(sourceRefreshContext(), subX, st.Records, true, "native-partial", "retain-unmatched")
 	if err != nil || res.Retained != 1 || len(liveIDs(t, e)) != 2 {
 		t.Fatal("partial import removed old record", err)
 	}

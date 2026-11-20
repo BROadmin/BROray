@@ -48,6 +48,14 @@ func parseRunningConfig(lines []string) *rcSnapshot {
 		line := strings.TrimRight(raw, "\r")
 		t := strings.TrimSpace(line)
 		f := strings.Fields(t)
+		if len(f) >= 2 && f[0] == "ipv6" && f[1] == "route" {
+			r := parseIPv6Route(f, nr)
+			s.Routes = append(s.Routes, r)
+			if !r.Known {
+				s.Unknown++
+			}
+			continue
+		}
 		if len(f) < 2 || f[0] != "ip" || f[1] != "route" {
 			s.NonRoute = append(s.NonRoute, line)
 			continue
@@ -136,6 +144,9 @@ func allDigits(s string) bool {
 
 func (r rcRoute) metricOr(def int) int {
 	if r.Metric == nil {
+		if routeFamily(r.Network) == "ipv6" {
+			return 0
+		}
 		return def
 	}
 	return *r.Metric
@@ -145,7 +156,7 @@ func (r rcRoute) metricOr(def int) int {
 func (s *rcSnapshot) identityCount(dest, iface string) int {
 	n := 0
 	for _, r := range s.Routes {
-		if r.Known && r.Destination == dest && r.Interface == iface && r.Gateway == "0.0.0.0" {
+		if r.Known && r.Destination == dest && r.Interface == iface && r.Gateway == routeGateway(r.Network) {
 			n++
 		}
 	}
@@ -156,6 +167,12 @@ func (s *rcSnapshot) identityCount(dest, iface string) int {
 func (s *rcSnapshot) attributeCount(dest, iface string, metric int) int {
 	n := 0
 	for _, r := range s.Routes {
+		if routeFamily(r.Network) == "ipv6" {
+			if r.Known && r.Destination == dest && r.Interface == iface && r.Gateway == "::" && !r.MetricExplicit && metric == 0 && !r.Automatic && !r.Exclusive {
+				n++
+			}
+			continue
+		}
 		if r.Known && r.MetricExplicit && r.Destination == dest && r.Interface == iface && r.Gateway == "0.0.0.0" && *r.Metric == metric {
 			n++
 		}

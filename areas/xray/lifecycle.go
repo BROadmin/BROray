@@ -131,7 +131,7 @@ func (s *service) lifecycle(ctx context.Context, action string) (string, error) 
 	s.lifeMu.Lock()
 	defer s.lifeMu.Unlock()
 	switch action {
-	case "start", "restart":
+	case "start", "restart", "boot-start":
 		if s.maintenanceBlocksAuto() {
 			return "Xray удалён или требует восстановления. Установите выбранную версию на странице Xray.", errors.New("XRAY_MAINTENANCE_REQUIRED")
 		}
@@ -141,7 +141,9 @@ func (s *service) lifecycle(ctx context.Context, action string) (string, error) 
 			return tailLines(out, 30), errors.New("validate failed")
 		}
 		var err error
-		if action == "restart" && s.d.App.Xray.Running() {
+		if action == "boot-start" {
+			err = s.d.App.Xray.StartAtBoot(ctx)
+		} else if action == "restart" && s.d.App.Xray.Running() {
 			err = s.d.App.Xray.Restart(ctx)
 		} else {
 			err = s.d.App.Xray.Start(ctx)

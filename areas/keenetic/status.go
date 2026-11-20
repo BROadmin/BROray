@@ -93,7 +93,21 @@ func (s *service) socksTarget(ctx context.Context) (string, int, bool) {
 
 // expectedDescription is broray_interface_expected_description (interface layer).
 func (s *service) expectedDescription() (string, bool) {
-	n := s.activeServerName()
+	return s.descriptionForServerName(s.activeServerName())
+}
+
+func (s *service) descriptionForServerName(n string) (string, bool) {
+	override, err := s.d.Svc.InterfaceDescription()
+	if err != nil {
+		return "", false
+	}
+	if override != "" {
+		return override, validDescription(override)
+	}
+	return ordinaryDescription(n)
+}
+
+func ordinaryDescription(n string) (string, bool) {
 	if n == "" {
 		return "BROray", true
 	}
@@ -109,7 +123,7 @@ func (s *service) readExpected(ctx context.Context, name string) expected {
 	}
 	e.ServerName = s.activeServerName()
 	if e.ServerName != "" {
-		if d := "BROray - " + e.ServerName; validDescription(d) {
+		if d, ok := s.descriptionForServerName(e.ServerName); ok {
 			e.Description = d
 		}
 	}

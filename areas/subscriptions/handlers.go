@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -18,7 +17,7 @@ func statusOf(code string) int {
 	switch code {
 	case "SUBSCRIPTION_NOT_FOUND":
 		return 404
-	case "UPDATE_ALREADY_RUNNING", "ACTIVE_SERVER_CONFLICT", "SERVER_SYNC_BUSY", "SERVER_ID_CONFLICT", "OPERATION_CANCELLED":
+	case "SOURCE_REMOVAL_QUEUE_REQUIRED", "UPDATE_ALREADY_RUNNING", "ACTIVE_SERVER_CONFLICT", "SERVER_SYNC_BUSY", "SERVER_ID_CONFLICT", "OPERATION_CANCELLED":
 		return 409
 	case "DOWNLOAD_TIMEOUT", "PARSE_TIMEOUT":
 		return 504
@@ -291,24 +290,7 @@ func (s *svc) updateSettings(id string, b map[string]any) (any, error) {
 // ---------- delete (svc:1891-1938) ----------
 
 func (s *svc) remove(id string) (any, error) {
-	if e := validID(id); e != nil {
-		return nil, e
-	}
-	if !exists(s.recPath(id)) {
-		return nil, errNotFound
-	}
-	if exists(s.d.RunPath("subscriptions", id+".lock")) {
-		return nil, fail("UPDATE_ALREADY_RUNNING", "Состояние прежней операции подписки требует восстановления.")
-	}
-	removed, err := s.removeServers(id)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.Remove(s.recPath(id)); err != nil && !os.IsNotExist(err) {
-		return nil, fail("PERSISTENCE_ERROR", "Серверы удалены, но запись подписки удалить не удалось.")
-	}
-	s.logf("subscription=" + id + " action=delete")
-	return map[string]any{"subscriptionId": id, "removed": removed, "activeServerImpact": "none"}, nil
+	return s.removeLegacySource(id)
 }
 
 // ---------- servers list (svc:1940-1955) ----------
@@ -397,6 +379,10 @@ func register() {
 	}, bodyOpts...)
 	cgi.RegisterRaw("/api/subscriptions/delete.cgi", func(c *cgi.Req) {
 		s := cur()
+		if c.Header("X-BROray-Queue") == "1" {
+			s.handleSourceRemoval(c)
+			return
+		}
 		data, _, err := s.job("delete", func(*compat.Operation, compat.Release) (any, bool, error) {
 			d, err := s.remove(queryID(c.RawQuery))
 			return d, false, err

@@ -10,9 +10,52 @@ import (
 	"github.com/BROadmin/broray/internal/strictjson"
 )
 
-// presentationKey is private to the summary view. It must never be used for
-// persistence, import reconciliation, activation, or automatic server selection.
+// presentationKey identifies variants shown on one card. Persist and activate
+// concrete record IDs; grouping only shapes the view and limits roster choices.
 func presentationKey(rec Record) (string, error) {
+	return presentationProfileKey(rec, false)
+}
+
+type presentationGroups struct {
+	leaders map[string]string
+	parents map[string]string
+}
+
+func newPresentationGroups() *presentationGroups {
+	return &presentationGroups{leaders: map[string]string{}, parents: map[string]string{}}
+}
+
+func (g *presentationGroups) root(id string) string {
+	for g.parents[id] != "" {
+		id = g.parents[id]
+	}
+	return id
+}
+
+func (g *presentationGroups) add(id string, rec Record) {
+	addKey := func(key string, err error) {
+		if err != nil {
+			return
+		}
+		other := g.leaders[key]
+		if other == "" {
+			g.leaders[key] = id
+			return
+		}
+		a, b := g.root(id), g.root(other)
+		if a > b {
+			g.parents[a] = b
+		} else if b > a {
+			g.parents[b] = a
+		}
+	}
+	addKey(presentationKey(rec))
+	if hasSubscriptionPresentationVariants(rec) {
+		addKey(presentationProfileKey(rec, true))
+	}
+}
+
+func presentationProfileKey(rec Record, subscriptionVariants bool) (string, error) {
 	s := normalize(rec) // Detach all nested maps before removing display-only differences.
 	// A core log/statistics label is not a different remote connection. Keep it
 	// in the private record and reconciliation key, but not in the UI grouping.
@@ -158,6 +201,31 @@ func presentationKey(rec Record) (string, error) {
 	if key["network"] == "xhttp" {
 		key["mode"] = orStr(asString(key["mode"]), "auto")
 	}
+	if subscriptionVariants {
+		// Different exports of one named subscription node may carry different
+		// client presets. The selector retains every full, independently usable
+		// profile. Credentials, peers, paths, pins and headers still identify it.
+		key["subscription"] = get(s, "source", "subscriptionId")
+		key["name"] = strings.TrimSpace(asString(s["name"]))
+		delete(key, "allowInsecure")
+		if key["network"] == "xhttp" {
+			delete(key, "accountLevel")
+			delete(key, "mux")
+			delete(key, "mode")
+			if extra, ok := key["extra"].(map[string]any); ok {
+				delete(extra, "mode")
+			}
+		}
+		if key["protocol"] == "hysteria2" {
+			delete(key, "verifyPeerCertByName")
+			if tls, ok := key["clientTLS"].(map[string]any); ok {
+				delete(tls, "verifyPeerCertByName")
+				if len(tls) == 0 {
+					delete(key, "clientTLS")
+				}
+			}
+		}
+	}
 	if options, ok := s["streamOptions"].(map[string]any); ok {
 		// Client timing and window sizes do not identify a remote service.
 		// Headers, user agent and address resolution policy can do so.
@@ -178,6 +246,32 @@ func presentationKey(rec Record) (string, error) {
 		}
 	}
 	return compat.CanonicalSHA256(key)
+}
+
+func hasSubscriptionPresentationVariants(rec Record) bool {
+	if get(rec, "source", "type") != "subscription" || has(rec, "importProfile") ||
+		strings.TrimSpace(asString(rec["name"])) == "" ||
+		!ValidID(asString(get(rec, "source", "subscriptionId"))) {
+		return false
+	}
+	return rec["protocol"] == "vless" && rec["network"] == "xhttp" || rec["protocol"] == "hysteria2"
+}
+
+func presentationSourceFormats(rec Record) []string {
+	stored, _ := get(rec, "source", "formats").([]any)
+	formats := []string{}
+	for _, format := range []string{"json", "clash", "uri"} {
+		for _, raw := range stored {
+			if asString(raw) == format {
+				formats = append(formats, format)
+				break
+			}
+		}
+	}
+	if len(formats) == 0 && rec["sourceFormat"] == "clash-yaml" {
+		return []string{"clash"}
+	}
+	return formats
 }
 
 func normalizeProfileLists(m map[string]any, keys ...string) {

@@ -20,13 +20,22 @@ func setup(d *compat.Deps) error {
 	registerOnce.Do(register)
 	s.defineActions()
 	d.Svc.ServersReapplyActive = s.ReapplyActive
+	d.Svc.ServersPreviewActiveConfig = s.PreviewActiveConfig
+	d.Svc.ServersPreviewBackupBaseConfig = s.PreviewBackupBaseConfig
 	d.Svc.ServersWithdrawActive = s.WithdrawActive
+	d.Svc.ServersPrepareSourceRemoval = s.PrepareSourceRemoval
+	d.Svc.ServersPrepareSourceRefresh = s.PrepareSourceRefresh
+	d.Svc.ServersPrepareSourceRefreshCatalog = s.PrepareSourceRefreshCatalog
+	d.Svc.ServersReapplySourceRefresh = s.ReapplySourceRefresh
+	d.Svc.ServersValidateSourceDPIProposals = s.ValidateSourceDPIProposals
+	d.Svc.ServersInterfaceDescription = s.reserveInterfaceDescription
 	registerBackup(s)
 	compat.RegisterSnapshot("servers", func(ctx context.Context) (map[string]any, error) { return s.summary(ctx) })
 	if !d.Maintenance {
 		s.seedAutoSwitch() // 3.x state-seed
 		go s.autoSwitchLoop(d.Ctx)
 		go s.monitorLoop(d.Ctx)
+		go s.reserveLoop(d.Ctx)
 	}
 	return nil
 }

@@ -30,6 +30,7 @@ type serversBackup struct {
 	Records        []json.RawMessage `json:"records"`
 	ActiveServerID *string           `json:"activeServerId"`
 	AutoSwitch     json.RawMessage   `json:"autoSwitch"`
+	Reserve        json.RawMessage   `json:"reserve,omitempty"`
 }
 
 func registerBackup(s *svc) {
@@ -61,7 +62,15 @@ func (s *svc) backupExport() (any, error) {
 	if m, ok := readObjectFile(autoSwitchFile(s.d)); ok {
 		auto = m
 	}
-	return map[string]any{"records": records, "activeServerId": active, "autoSwitch": auto}, nil
+	result := map[string]any{"records": records, "activeServerId": active, "autoSwitch": auto}
+	reserve, err := readReservePreferences(s.d)
+	if err != nil {
+		return nil, backupInvalid("настройки резервирования повреждены")
+	}
+	if reserve.Exists {
+		result["reserve"] = reserve.reservePreferences
+	}
+	return result, nil
 }
 
 // BackupIDValid is the id rule of an imported server: the 3.x character set
@@ -113,6 +122,10 @@ func DecodeBackupRecord(raw json.RawMessage, label string) (Record, error) {
 
 func (s *svc) backupStage(ctx context.Context, raw json.RawMessage, st *compat.BackupStage) (compat.BackupPlan, error) {
 	var plan compat.BackupPlan
+	reserve, err := s.reserveBackupInput(raw)
+	if err != nil {
+		return plan, err
+	}
 	var in serversBackup
 	if len(raw) > 0 && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &in); err != nil {
@@ -231,6 +244,9 @@ func (s *svc) backupStage(ctx context.Context, raw json.RawMessage, st *compat.B
 			}
 		}
 	}
+	if err := s.stageReservePreferences(reserve, st, &plan); err != nil {
+		return plan, err
+	}
 	return plan, nil
 }
 
@@ -292,7 +308,9 @@ func (s *svc) backupAutoSwitch(raw json.RawMessage, exists func(string) bool) (m
 	case nil:
 	case string:
 		if p != "" {
-			if !BackupIDValid(p) || !exists(p) {
+			// Legacy settings retain the previous preferred ID after switching
+			// selection modes. Only the selected mode needs that record to exist.
+			if !BackupIDValid(p) || (rule == "preferred" && !exists(p)) {
 				return nil, bad("предпочтительный сервер отсутствует")
 			}
 			pref = p
@@ -347,6 +365,9 @@ func (s *svc) backupBefore() any {
 // back so the pointer keeps naming the server Xray actually runs.
 func (s *svc) backupAfter(ctx context.Context, before any) compat.BackupPlan {
 	var out compat.BackupPlan
+	if compat.BackupOwnsXrayConfig(ctx) {
+		return out
+	}
 	b, _ := before.(backupLive)
 	id := ActiveID(s.d)
 	if id == "" {

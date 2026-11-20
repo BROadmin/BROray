@@ -40,6 +40,14 @@ var catalog = []catEntry{
 	{"quad9", "Quad9", "Quad9 9.9.9.9", "9.9.9.9", "dns.quad9.net"},
 	{"adguard-primary", "AdGuard DNS", "AdGuard 94.140.14.14", "94.140.14.14", "dns.adguard-dns.com"},
 	{"adguard-secondary", "AdGuard DNS", "AdGuard 94.140.15.15", "94.140.15.15", "dns.adguard-dns.com"},
+	{"google-primary-ipv6", "Google", "Google IPv6 основной", "2001:4860:4860::8888", "dns.google"},
+	{"google-secondary-ipv6", "Google", "Google IPv6 дополнительный", "2001:4860:4860::8844", "dns.google"},
+	{"cloudflare-primary-ipv6", "Cloudflare", "Cloudflare IPv6 основной", "2606:4700:4700::1111", "one.one.one.one"},
+	{"cloudflare-secondary-ipv6", "Cloudflare", "Cloudflare IPv6 дополнительный", "2606:4700:4700::1001", "one.one.one.one"},
+	{"quad9-primary-ipv6", "Quad9", "Quad9 IPv6 основной", "2620:fe::fe", "dns.quad9.net"},
+	{"quad9-secondary-ipv6", "Quad9", "Quad9 IPv6 дополнительный", "2620:fe::9", "dns.quad9.net"},
+	{"adguard-primary-ipv6", "AdGuard DNS", "AdGuard IPv6 основной", "2a10:50c0::ad1:ff", "dns.adguard-dns.com"},
+	{"adguard-secondary-ipv6", "AdGuard DNS", "AdGuard IPv6 дополнительный", "2a10:50c0::ad2:ff", "dns.adguard-dns.com"},
 }
 
 func findCatalog(id string) (catEntry, bool) {
@@ -58,7 +66,7 @@ func (c catEntry) endpoint() liveRec {
 
 func (c catEntry) object() map[string]any {
 	return map[string]any{"id": c.ID, "provider": c.Provider, "name": c.Name, "address": c.Address, "port": 853,
-		"effectivePort": 853, "sni": c.SNI, "spki": "", "on": "", "interface": "", "domain": ""}
+		"effectivePort": 853, "sni": c.SNI, "spki": "", "on": "", "interface": "", "domain": "", "addressFamily": addressFamily(c.Address)}
 }
 
 func (c catEntry) entryJSON() map[string]any {
@@ -293,7 +301,7 @@ func parseReceipt(v any) (receipt, bool) {
 		return r, false
 	}
 	c, ok := findCatalog(r.ID)
-	if !ok || c.Address != r.Address || c.SNI != r.SNI {
+	if !ok || !sameAddress(c.Address, r.Address) || c.SNI != r.SNI {
 		return r, false
 	}
 	return r, true
@@ -525,13 +533,19 @@ func testsFreshAndOK(state map[string]any, ids []string, now int64) bool {
 
 // validateRequest is broray_dot_validate_request (RD:642-663).
 func validateRequest(m map[string]any) ([]string, error) {
+	return validateSelection(m, false)
+}
+
+// An explicit test/save may persist an empty preference. Applying or deleting
+// router records still requires a nonempty selection through validateRequest.
+func validateSelection(m map[string]any, allowEmpty bool) ([]string, error) {
 	bad := dotErr("REQUEST_INVALID", "Выбран некорректный список DNS-over-TLS серверов.", "")
 	ids, ok := stringList(m["serverIds"])
 	if !ok {
 		// jq: non-string ids can never match a preset id
 		return nil, bad
 	}
-	if len(ids) < 1 || len(ids) > maxServers || len(uniqueSorted(ids)) != len(ids) {
+	if (!allowEmpty && len(ids) == 0) || len(ids) > maxServers || len(uniqueSorted(ids)) != len(ids) {
 		return nil, bad
 	}
 	for _, id := range ids {

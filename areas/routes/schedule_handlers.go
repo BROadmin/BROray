@@ -46,36 +46,61 @@ func hCatalogSchedule(e *engine, c *cgi.Req) (any, error) {
 		return nil, cgi.E(400, "REQUEST_JSON_INVALID", "Запрос должен содержать корректный JSON-объект.")
 	}
 	invalid := cgi.E(400, "REQUEST_INVALID", "Некорректные настройки проверки обновлений.")
-	s := e.scheduleSettings()
-	for k, raw := range body {
-		switch k {
-		case "intervalHours":
-			var h int
-			if json.Unmarshal(raw, &h) != nil || !validInterval(h) {
-				return nil, invalid
-			}
-			s.IntervalHours = h
-		case "autoApply":
-			var b bool
-			if json.Unmarshal(raw, &b) != nil {
-				return nil, invalid
-			}
-			s.AutoApply = b
-		case "maxRemovalPercent":
-			var p int
-			if json.Unmarshal(raw, &p) != nil || !validRemovalPct(p) {
-				return nil, invalid
-			}
-			s.MaxRemovalPercent = p
-		default:
+	var err error
+	body, err = decodeScheduleObject(c.Body())
+	if err != nil {
+		return nil, invalid
+	}
+	var expected string
+	if raw, exists := body["expectedRevision"]; exists {
+		if json.Unmarshal(raw, &expected) != nil || len(expected) != 64 || len(body) != 2 {
+			return nil, invalid
+		}
+	} else {
+		if _, ok := body["intervalHours"]; !ok {
+			return nil, invalid
+		}
+		if _, ok := body["autoApply"]; !ok {
 			return nil, invalid
 		}
 	}
-	if _, ok := body["intervalHours"]; !ok {
-		return nil, invalid
+	release, ok := e.lock.TryAcquire("routes", "catalog:schedule", "settings")
+	if !ok {
+		return nil, cgi.E(409, "ROUTES_OPERATION_BUSY", "Другая операция выполняется. Повторите изменение позже.")
 	}
-	if _, ok := body["autoApply"]; !ok {
-		return nil, invalid
+	defer release()
+	s, valid := e.scheduleSettingsSnapshot()
+	if !valid {
+		return nil, cgi.E(409, "ROUTES_SCHEDULE_UNCONFIRMED", "Не удалось подтвердить текущие настройки. Состояние не изменено.")
+	}
+	if expected != "" && expected != scheduleSettingsRevision(s) {
+		return nil, cgi.E(409, "ROUTES_SCHEDULE_CHANGED", "Настройки уже изменились. Обновите состояние.")
+	}
+	for k, raw := range body {
+		switch k {
+		case "expectedRevision":
+			continue
+		case "intervalHours":
+			var h *int
+			if json.Unmarshal(raw, &h) != nil || h == nil || !validInterval(*h) {
+				return nil, invalid
+			}
+			s.IntervalHours = *h
+		case "autoApply":
+			var b *bool
+			if json.Unmarshal(raw, &b) != nil || b == nil {
+				return nil, invalid
+			}
+			s.AutoApply = *b
+		case "maxRemovalPercent":
+			var p *int
+			if json.Unmarshal(raw, &p) != nil || p == nil || !validRemovalPct(*p) {
+				return nil, invalid
+			}
+			s.MaxRemovalPercent = *p
+		default:
+			return nil, invalid
+		}
 	}
 	if err := e.saveScheduleSettings(s); err != nil {
 		return nil, cgi.E(500, "ROUTES_SCHEDULE_SAVE_FAILED", "Настройки проверки обновлений не сохранены.")

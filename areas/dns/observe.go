@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/BROadmin/broray/internal/keenetic"
 )
 
 // liveRec is one DoT record of the strict r14c01 parsers (RD:364-614).
@@ -203,7 +205,7 @@ func parseRunning(lines []string) observed {
 				unknown++
 			}
 		}
-		if strings.Contains(r.Address, ":") {
+		if !keenetic.ValidDoTAddress(r.Address) {
 			valid = false
 			unknown++
 		}
@@ -220,7 +222,7 @@ func parseRunning(lines []string) observed {
 		if r.ParseError || r.UnknownTokenCount != 0 {
 			parseErrors++
 		}
-		groups[r.Address+"\x00"+strconv.Itoa(r.EffectivePort)]++
+		groups[addressKey(r.Address)+"\x00"+strconv.Itoa(r.EffectivePort)]++
 	}
 	collisions := 0
 	for _, c := range groups {
@@ -282,7 +284,7 @@ func parseRuntimeSection(lines []string, section string) runtimeObs {
 				}
 			}
 		}
-		if strings.ContainsAny(r.Address, ":\"\\") || strings.ContainsAny(r.SNI, "\"\\") || strings.ContainsAny(r.SPKI, "\"\\") ||
+		if !keenetic.ValidDoTAddress(r.Address) || strings.ContainsAny(r.SNI, "\"\\") || strings.ContainsAny(r.SPKI, "\"\\") ||
 			strings.ContainsAny(r.On, "\"\\") || strings.ContainsAny(r.Domain, "\"\\") {
 			valid = false
 			unknown++
@@ -408,7 +410,7 @@ func parseRuntimeSection(lines []string, section string) runtimeObs {
 }
 
 func liveSame(a, b liveRec) bool {
-	return a.Address == b.Address && a.EffectivePort == b.EffectivePort && a.SNI == b.SNI && a.SPKI == b.SPKI &&
+	return sameAddress(a.Address, b.Address) && a.EffectivePort == b.EffectivePort && a.SNI == b.SNI && a.SPKI == b.SPKI &&
 		a.Interface == b.Interface && a.Domain == b.Domain
 }
 

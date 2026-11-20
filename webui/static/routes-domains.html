@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ru" data-build-id="WebUI-3.5.9-c5">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#0b1117">
+    <meta name="robots" content="noindex,nofollow">
+    <title>BROray — По доменам</title>
+    <link rel="icon" href="/assets/images/branding/favicon.ico?v=WebUI-3.5.9-c5">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png?v=WebUI-3.5.9-c5">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.5.9-c5">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.5.9-c5">
+    <link rel="manifest" href="/manifest.json?v=WebUI-3.5.9-c5">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c5">
+    <script src="/assets/js/theme-init.js?v=WebUI-3.5.9-c5"></script>
+    <link rel="stylesheet" href="/assets/css/action-feedback.css?v=WebUI-3.5.9-c5">
+<link rel="stylesheet" href="/assets/css/routing-policy.css?v=WebUI-3.5.9-c5-domain-actions">
+</head>
+<body class="app-body page-routes page-routes-domains" data-page="routes-domains" data-webui-build="WebUI-3.5.9-c5">
+    <div id="app" class="app-layout" hidden>
+        <aside id="sidebar" class="sidebar" aria-label="Основная навигация">
+            <div class="sidebar-header">
+                <a class="sidebar-brand" href="/home.html" aria-label="BROray — Главная">
+                    <span class="sidebar-brand-mark" aria-hidden="true">
+                        <img class="sidebar-brand-image" src="/assets/images/branding/broray-logo-64.png?v=WebUI-3.5.9-c5" alt="" width="40" height="40">
+                    </span>
+                    <span class="sidebar-brand-copy">
+                        <strong>BROray</strong>
+                        <small>Менеджер Xray</small>
+                    </span>
+                </a>
+                <button id="sidebar-collapse" class="sidebar-icon-button sidebar-collapse-button" type="button" aria-label="Свернуть боковое меню" aria-expanded="true">
+                    <span id="sidebar-collapse-symbol" class="sidebar-collapse-symbol" data-icon="chevron" aria-hidden="true"></span>
+                </button>
+            </div>
+            <nav class="sidebar-navigation" aria-label="Разделы BROray">
+                <a class="sidebar-link" href="/home.html" title="Главная" data-page="home">
+                    <span class="sidebar-link-icon" data-icon="home" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Главная</span>
+                </a>
+                <a class="sidebar-link" href="/servers.html" title="Серверы" data-page="servers">
+                    <span class="sidebar-link-icon" data-icon="servers" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Серверы</span>
+                </a>
+                <a class="sidebar-link" href="/subscriptions.html" title="Подписки" data-page="subscriptions">
+                    <span class="sidebar-link-icon" data-icon="subscriptions" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Подписки</span>
+                </a>
+                <a class="sidebar-link" href="/dns.html" title="DNS-over-TLS" data-page="dns">
+                    <span class="sidebar-link-icon" data-icon="dns" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">DNS-over-TLS</span>
+                </a>
+                <a class="sidebar-link" href="/routes.html" title="Маршруты" data-page="routes">
+                    <span class="sidebar-link-icon" data-icon="routes" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Маршруты</span>
+                </a>
+                <a class="sidebar-link" href="/keenetic.html" title="Keenetic" data-page="keenetic">
+                    <span class="sidebar-link-icon" data-icon="keenetic" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Keenetic</span>
+                </a>
+                <a class="sidebar-link" href="/xray.html" title="Xray" data-page="xray">
+                    <span class="sidebar-link-icon" data-icon="xray" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Xray</span>
+                </a>
+                <a class="sidebar-link" href="/broray.html" title="BROray" data-page="broray">
+                    <span class="sidebar-link-icon" data-icon="security" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">BROray</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="support-button" class="sidebar-support" type="button" aria-haspopup="dialog" aria-controls="support-root">
+                    <span class="sidebar-link-icon" data-icon="help" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Поддержать проект</span>
+                </button>
+                <div class="sidebar-user">
+                    <span class="sidebar-user-avatar" data-icon="user" aria-hidden="true"></span>
+                    <span class="sidebar-user-copy">
+                        <strong id="current-user"></strong>
+                        <small>KeeneticOS</small>
+                    </span>
+                </div>
+                <button id="logout-button" class="sidebar-logout" type="button">
+                    <span class="sidebar-link-icon" data-icon="exit" aria-hidden="true"></span>
+                    <span class="sidebar-link-label">Выйти</span>
+                </button>
+            </div>
+        </aside>
+        <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Закрыть меню" hidden></button>
+        <div class="app-workspace">
+            <header class="workspace-header">
+                <div class="workspace-header-primary">
+                    <button id="mobile-menu-button" class="sidebar-icon-button mobile-menu-button" data-icon="menu" type="button" aria-label="Открыть меню" aria-controls="sidebar" aria-expanded="false"></button>
+                    <div class="workspace-title">
+                        <span class="workspace-section">Сеть</span>
+                        <strong>По доменам</strong>
+                    </div>
+                </div>
+                <div class="workspace-header-actions">
+                    <div id="theme-control-mount" class="theme-control-mount"></div>
+                    <button id="refresh-status" class="button button-secondary button-compact" data-icon="update" type="button" hidden aria-hidden="true" tabindex="-1">Обновить</button>
+                </div>
+            </header>
+<main class="workspace-content policy-page"><section class="page-heading" aria-labelledby="policy-title"><div><span class="eyebrow">Маршрутизация</span><h1 id="policy-title">По доменам</h1><p>Выбранные сайты и сервисы — через VPN BROray.</p></div><span id="policy-status" class="status-badge status-loading" role="status">Загрузка…</span></section>
+<div class="policy-feedback" role="status"><p id="policy-message">Получение сохранённых правил…</p><button id="policy-refresh" class="button button-secondary" type="button">Обновить данные</button></div><section class="ui-card policy-card" aria-labelledby="presets-title"><h2 id="presets-title">Готовые домены</h2><p id="native-domain-hint" class="policy-hint">Получение доменных наборов…</p><div id="policy-presets" class="policy-two-columns"></div></section>
+<section class="ui-card policy-card" aria-labelledby="own-title"><div class="policy-card-heading"><h2 id="own-title">Свои списки</h2><div class="policy-buttons"><button id="policy-add" class="button button-primary" type="button">Добавить список</button><button id="policy-import" class="button button-secondary" type="button">Импорт</button><input id="policy-file" type="file" accept=".txt,.list,.conf,text/plain" hidden></div></div>
+<form id="policy-editor" class="policy-editor" hidden><h3 id="policy-editor-title">Новый список</h3><label for="policy-name">Название</label><input id="policy-name" maxlength="128" required autocomplete="off"><label for="policy-domains">Домены</label><textarea id="policy-domains" rows="8" spellcheck="false" required placeholder="example.com&#10;full:one.example.com"></textarea><p class="policy-hint">Один домен на строку. Поддерживаются domain:, full: и *. Поддомены включаются для обычной записи. До 2 МБ и 50 000 доменов.</p><p id="policy-editor-error" class="policy-error" role="alert"></p><div class="policy-buttons"><button id="policy-save" class="button button-primary" type="submit">Сохранить список</button><button id="policy-cancel" class="button button-secondary" type="button">Отмена</button></div></form>
+<div id="policy-own" class="policy-two-columns"></div></section>
+<dialog id="policy-domain-dialog" class="policy-domain-dialog" aria-labelledby="policy-domain-dialog-title">
+    <div class="policy-domain-dialog-heading">
+        <h2 id="policy-domain-dialog-title"></h2>
+        <button id="policy-domain-dialog-close" class="button button-secondary" type="button" autofocus>Закрыть</button>
+    </div>
+    <p id="policy-domain-dialog-message" class="policy-hint" role="status"></p>
+    <div id="policy-domain-dialog-content"></div>
+    <button id="policy-domain-dialog-confirm" class="button button-primary" type="button" hidden></button>
+</dialog></main>
+            <footer class="workspace-footer">
+                <span>BROray · Менеджер Xray для Keenetic</span>
+                <a href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Поддержать проект</a>
+            </footer>
+        </div>
+    </div>
+    <div id="page-loader" class="page-loader">
+        <span class="loader-spinner" aria-hidden="true"></span>
+        <span>Загрузка BROray…</span>
+    </div>
+    <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+    <div id="support-root" class="modal-root support-modal-root" hidden>
+        <button id="support-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть окно поддержки"></button>
+        <section class="modal support-modal" role="dialog" aria-modal="true" aria-labelledby="support-title" aria-describedby="support-message">
+            <span class="eyebrow">Поддержка проекта</span>
+            <h2 id="support-title">Помочь развитию BROray</h2>
+            <div class="support-modal-content">
+                <a class="support-qr-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer" aria-label="Открыть CloudTips для поддержки BROray">
+                    <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=WebUI-3.5.9-c5" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
+                </a>
+                <div class="support-modal-copy">
+                    <p id="support-message">BROray развивается как открытый проект. Поддержка помогает оплачивать инфраструктуру, тестирование и выпуск обновлений.</p>
+                    <a class="support-direct-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">https://pay.cloudtips.ru/p/09b23d0a</a>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="support-close" class="button button-secondary" type="button">Закрыть</button>
+                <a class="button button-primary" data-icon="help" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer">Открыть CloudTips</a>
+            </div>
+        </section>
+    </div>
+    <div id="confirm-root" class="modal-root" hidden>
+        <button id="confirm-backdrop" class="modal-backdrop" type="button" aria-label="Закрыть"></button>
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+            <span id="confirm-eyebrow" class="eyebrow">Подтверждение</span>
+            <h2 id="confirm-title">Подтвердите действие</h2>
+            <p id="confirm-message"></p>
+            <div id="confirm-input-group" class="modal-input-group" hidden>
+                <label id="confirm-input-label" for="confirm-input">Введите значение</label>
+                <input id="confirm-input" type="text" autocomplete="off" spellcheck="false">
+                <p id="confirm-input-hint" class="modal-input-hint" hidden></p>
+                <p id="confirm-input-error" class="modal-input-error" role="alert" hidden></p>
+            </div>
+            <div class="modal-actions">
+                <button id="confirm-cancel" class="button button-secondary" type="button">Отмена</button>
+                <button id="confirm-accept" class="button button-danger" type="button">Продолжить</button>
+            </div>
+        </section>
+    </div>
+
+    <script src="/assets/js/common.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/action-feedback.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/icons.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/theme.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/dialogs.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/routing-policy-client.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/routing-policy-page.js?v=WebUI-3.5.9-c5-domain-actions"></script>
+</body>
+</html>

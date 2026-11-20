@@ -439,7 +439,7 @@ func (a *area) backupPreviewHandler(c *cgi.Req) {
 		return
 	}
 	defer release()
-	si, err := a.stageImport(c.R.Context(), file, payload, encrypted)
+	si, err := a.stageImport(compat.WithFence(c.R.Context()), file, payload, encrypted)
 	if err != nil {
 		writeBackupErr(c, err)
 		return
@@ -550,6 +550,16 @@ func (a *area) recoverFailedBackupSwap(copy incompleteBackupCopy, cause error) e
 // is held by the caller.
 func (a *area) swapWithCopy(ctx context.Context, stageRoot string, paths []string, fields map[string][]string, m copyManifest, prefix string) (string, compat.BackupPlan, error) {
 	var out compat.BackupPlan
+	configRel, err := filepath.Rel(a.d.Root.Dir, a.d.Root.XrayConfig())
+	if err != nil {
+		return "", out, err
+	}
+	for _, path := range paths {
+		if path == filepath.ToSlash(configRel) {
+			ctx = compat.WithBackupXrayConfig(ctx)
+		}
+	}
+
 	parts := a.backupParts()
 	before := map[string]any{}
 	for _, p := range parts {
@@ -697,7 +707,7 @@ func (a *area) backupImportHandler(c *cgi.Req) {
 	defer release()
 	op := a.d.Queue.StartOperation("", "unknown", "system:backup-import", "USER", "protected", "")
 	op.Phase("checking")
-	ctx := c.R.Context()
+	ctx := compat.WithFence(c.R.Context())
 	si, err := a.stageImport(ctx, file, payload, encrypted)
 	if err != nil {
 		op.Finish(err)
@@ -756,13 +766,13 @@ func (a *area) readCopy(id string) (copyManifest, bool) {
 	return m, true
 }
 
-// copyPathAllowed: a clean relative path below data/ or config/ (the swap
-// itself refuses anything else too).
+// copyPathAllowed admits settings paths and the exact managed geodata tree.
+// The executable and other runtime paths are never settings-backup inputs.
 func copyPathAllowed(p string) bool {
 	if p == "" || p != filepath.ToSlash(filepath.Clean(p)) || strings.Contains(p, "..") || strings.HasPrefix(p, "/") {
 		return false
 	}
-	return strings.HasPrefix(p, "data/") || strings.HasPrefix(p, "config/")
+	return strings.HasPrefix(p, "data/") || strings.HasPrefix(p, "config/") || p == "runtime/broray-geodata"
 }
 
 func (a *area) backupStatus() map[string]any {
@@ -836,7 +846,7 @@ func (a *area) backupUndoHandler(c *cgi.Req) {
 	}
 	// a path that did not exist before the import is absent in the copy, so the swap removes it
 	src := a.backupDir(id, backupCopyRoot)
-	undoID, after, err := a.swapWithCopy(context.WithoutCancel(c.R.Context()), src, paths, fields, copyManifest{Kind: "pre-undo"}, "settings-before-undo")
+	undoID, after, err := a.swapWithCopy(compat.WithFence(context.WithoutCancel(c.R.Context())), src, paths, fields, copyManifest{Kind: "pre-undo"}, "settings-before-undo")
 	if err != nil {
 		op.Finish(err)
 		writeBackupErr(c, err)

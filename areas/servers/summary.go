@@ -78,7 +78,7 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 	total, available, unavailable := 0, 0, 0
 	counts := map[string]int{}
 	keys := map[string][]map[string]any{} // CanonicalKey → rows (DEV5_SERVER_MANUAL_SUBSCRIPTION_DUPLICATE)
-	displayGroups := map[string][]map[string]any{}
+	groups := newPresentationGroups()
 	subscriptionNames := map[string]string{}
 	supportView := s.supportViewChecker(ctx)
 	for _, id := range ids {
@@ -104,16 +104,15 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 			"security": alt(rec["security"], "none"), "sourceType": alt(get(rec, "source", "type"), "manual"),
 			"subscriptionId": alt(get(rec, "source", "subscriptionId"), nil), "nodeIndex": alt(get(rec, "source", "nodeIndex"), nil),
 			"subscriptionName": s.presentationSubscriptionName(rec, subscriptionNames), "displayGroupId": id,
-			"active": rec["id"] == active, "quality": q, "connectionSupport": support,
+			"sourceFormats": presentationSourceFormats(rec),
+			"active":        rec["id"] == active, "quality": q, "connectionSupport": support,
 			"importWarnings": MaskRecord(rec)["importWarnings"],
 		}
 		rows = append(rows, row)
 		if k, err := CanonicalKey(rec); err == nil {
 			keys[k] = append(keys[k], row)
 		}
-		if k, err := presentationKey(rec); err == nil {
-			displayGroups[k] = append(displayGroups[k], row)
-		}
+		groups.add(id, rec)
 		total++
 		switch q["status"] {
 		case "available":
@@ -127,16 +126,9 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 		}
 	}
 	activePresent := activeRow != nil
-	for _, group := range displayGroups {
-		id := asString(group[0]["id"])
-		for _, row := range group {
-			if other := asString(row["id"]); other < id {
-				id = other
-			}
-		}
-		for _, row := range group {
-			row["displayGroupId"] = id
-		}
+	for _, raw := range rows {
+		row := raw.(map[string]any)
+		row["displayGroupId"] = groups.root(asString(row["id"]))
 	}
 	// Keep legacy twin annotations on raw records for existing API consumers.
 	// The UI uses displayGroupId; every member retains its own lifecycle.
@@ -165,7 +157,13 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 	xrayOperational := xrayRunning && socksActive
 
 	connAvailable, connUp, connFreshness := false, false, "unknown"
-	switch s.cachedActiveHealth(active)["status"] {
+	var verdict any
+	if prefs, err := readReservePreferences(s.d); err == nil && prefs.Enabled {
+		verdict = s.activeReserveStatus(active)
+	} else {
+		verdict = s.cachedActiveHealth(active)["status"]
+	}
+	switch verdict {
 	case "healthy":
 		connAvailable, connUp, connFreshness = true, true, "fresh"
 	case "unhealthy":

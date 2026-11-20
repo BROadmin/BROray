@@ -93,6 +93,10 @@ func (s *svc) activateUnderFence(ctx context.Context, op *compat.Operation, id s
 // the xray area (which rolls back itself), then switch the active pointer
 // and resync the Keenetic interface (warning only).
 func (s *svc) applyServer(ctx context.Context, id string, cfg []byte) error {
+	cfg, err := s.d.Svc.ConfigureRouting(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("ROUTING_POLICY_INVALID: %w", err)
+	}
 	if err := s.prepareNativeConfig(cfg); err != nil {
 		return err
 	}
@@ -131,6 +135,10 @@ func (s *svc) ReapplyActive(ctx context.Context, reason string) error {
 	cfg, err := XrayConfig(rec, s.genSettings(ctx), RecordPath(s.d, id))
 	if err != nil {
 		return errors.New("SERVER_CONFIG_INVALID: " + strings.ReplaceAll(err.Error(), "\n", " "))
+	}
+	cfg, err = s.d.Svc.ConfigureRouting(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("ROUTING_POLICY_INVALID: %w", err)
 	}
 	if err := s.testBytes(ctx, cfg); err != nil {
 		return errors.New("XRAY_CONFIG_REJECTED: Xray отклонил конфигурацию сервера")

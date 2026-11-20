@@ -19,6 +19,9 @@ type replacementState struct {
 // This context is invalidated by manual activation/disconnection, policy or
 // catalog changes. A replacement must never resurrect a provider-removed node.
 func (s *svc) replacementContext() (string, error) {
+	if err := s.ordinarySelectionAllowed(); err != nil {
+		return "", err
+	}
 	if ActiveID(s.d) != "" {
 		return "", errors.New("active server already selected")
 	}
@@ -53,6 +56,9 @@ func (s *svc) enqueueReplacement(state map[string]any) error {
 }
 
 func (s *svc) replacementVerify(t *compat.Task) error {
+	if err := s.requireOrdinarySelection(t); err != nil {
+		return err
+	}
 	if s.coreMaintenanceBlocked() {
 		return maintenanceRequired(t)
 	}
@@ -81,6 +87,9 @@ func (s *svc) replacementVerify(t *compat.Task) error {
 }
 
 func (s *svc) replacementProbe(t *compat.Task) error {
+	if err := s.requireOrdinarySelection(t); err != nil {
+		return err
+	}
 	if s.coreMaintenanceBlocked() {
 		return maintenanceRequired(t)
 	}
@@ -124,6 +133,9 @@ func (s *svc) replacementProbe(t *compat.Task) error {
 }
 
 func (s *svc) replacementActivate(t *compat.Task) error {
+	if err := s.requireOrdinarySelection(t); err != nil {
+		return err
+	}
 	if s.coreMaintenanceBlocked() {
 		return maintenanceRequired(t)
 	}

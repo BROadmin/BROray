@@ -436,7 +436,15 @@ func (c *Coordinator) execute(ctx context.Context, r *Request, s ActionSpec, op 
 	t := &Task{RequestID: r.RequestID, Action: r.Action, Target: r.Target, Source: r.Source, Context: r.Context,
 		Op: op, data: map[string]any{}, req: r, c: c}
 	var err error
+	usesReserve := reserveQueueAction(r.Action)
+	if usesReserve && !validReserveQueueShape(r, s) {
+		err = errors.New("INVALID_QUEUE_ACTION: invalid protected reserve stage contract")
+	}
 	for _, st := range s.Stages {
+		isReserve := usesReserve && (r.Action != SourceRefreshAction || st.Name == "apply")
+		if err != nil {
+			break
+		}
 		c.mu.Lock()
 		r.Stage = st.Name
 		c.mu.Unlock()
@@ -457,16 +465,36 @@ func (c *Coordinator) execute(ctx context.Context, r *Request, s ActionSpec, op 
 		var release Release
 		if st.Global {
 			op.Phase("waiting")
-			release, err = c.d.Lock.Acquire(sctx, "operations", r.Action, r.Target)
+			target := r.Target
+			if isReserve {
+				target = ReserveOperationTarget
+			}
+			release, err = c.d.Lock.Acquire(sctx, "operations", r.Action, target)
 			if err == nil && st.Phase != "" {
 				op.Phase(st.Phase)
 			}
 		}
+		var reserveToken uint64
+		if err == nil && isReserve {
+			reserveToken, err = c.d.Lock.reserveQueueOwner(r.Action, 0)
+			if err == nil {
+				pending, checkErr := c.reserveQueuePending(sctx)
+				if pending || checkErr != nil {
+					err = errors.Join(ErrReserveTransactionPending, checkErr)
+				}
+			}
+		}
 		if err == nil {
 			t.Ctx = sctx
+			if isReserve {
+				t.Ctx = WithFence(sctx)
+			}
 			err = safeRun(st.Run, t)
 		}
 		if release != nil {
+			if isReserve && reserveToken != 0 {
+				err = c.finishReserveQueue(sctx, r.Action, reserveToken, err)
+			}
 			release()
 		}
 		c.mu.Lock()
@@ -474,7 +502,7 @@ func (c *Coordinator) execute(ctx context.Context, r *Request, s ActionSpec, op 
 		c.mu.Unlock()
 		cancelled := sctx.Err() != nil && ctx.Err() == nil
 		cancel()
-		if cancelled && err != nil {
+		if cancelled && err != nil && !errors.Is(err, ErrReserveTransactionPending) {
 			err = errCancelled
 		}
 		if err != nil {
@@ -485,6 +513,9 @@ func (c *Coordinator) execute(ctx context.Context, r *Request, s ActionSpec, op 
 	switch {
 	case err == nil:
 		r.State = "completed"
+	case errors.Is(err, ErrReserveTransactionPending):
+		r.State, r.ErrorCode = "failed", "RESERVE_TRANSACTION_RECOVERY_REQUIRED"
+		r.Message = "Операция резервирования не завершена. Требуется восстановление перед следующими изменениями."
 	case errors.Is(err, errCancelled) || op.CancelRequested():
 		r.State = "cancelled"
 	default:

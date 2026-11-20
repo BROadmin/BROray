@@ -131,6 +131,10 @@ func expectedKey(key string) string {
 	}
 	metric := 1200
 	seg := "metric:1200"
+	if get(0) == "ipv6" {
+		metric = 0
+		seg = "metric:none"
+	}
 	if len(p) > 4 {
 		seg = p[4]
 	}
@@ -155,7 +159,7 @@ func (e *engine) pageSummary(ctx context.Context, scope string) obj {
 		source, fetchedAt, fetchedEpoch = snap.Source, snap.FetchedAt, snap.FetchedEpoch
 		actualRoutes = snap.Routes
 		for _, r := range snap.Routes {
-			if r.Known && r.Gateway == "0.0.0.0" {
+			if r.Known && r.Gateway == routeGateway(r.Network) && (routeFamily(r.Network) != "ipv6" || (!r.Automatic && !r.Exclusive && !r.MetricExplicit)) {
 				actualIndex[r.Destination+"|"+r.Interface+"|"+strconv.Itoa(r.metricOr(1000))]++
 			} else if !r.Known {
 				// unknown lines have null destination/interface: key "||1000"
@@ -602,6 +606,10 @@ func (e *engine) presence(ctx context.Context, id string, ttl time.Duration) (ob
 		}
 		metric := 1200
 		seg := "metric:1200"
+		if len(parts) > 0 && parts[0] == "ipv6" {
+			metric = 0
+			seg = "metric:none"
+		}
 		if len(parts) > 4 {
 			seg = parts[4]
 		}
@@ -611,7 +619,13 @@ func (e *engine) presence(ctx context.Context, id string, ttl time.Duration) (ob
 			}
 		}
 		matches := 0
+		if len(parts) > 0 && parts[0] == "ipv6" {
+			matches = snap.attributeCount(dest, iface, metric)
+		}
 		for _, rt := range snap.Routes {
+			if len(parts) > 0 && parts[0] == "ipv6" {
+				break
+			}
 			d, i := "", ""
 			if rt.Known {
 				d, i = rt.Destination, rt.Interface

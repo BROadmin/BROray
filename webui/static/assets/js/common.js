@@ -171,7 +171,7 @@
         if (!["queued","running"].includes(result.state)) {
             queueWatches.delete(key);
             if (["completed","failed","cancelled"].includes(result.state)) {
-                sessionStorage.removeItem("broray.queue.v1:"+watch.url+":"+watch.id);
+                sessionStorage.removeItem(watch.storageKey || "broray.queue.v1:"+watch.url+":"+watch.id);
             }
         }
         watch.listeners.forEach(function (listener) { listener(result); });
@@ -212,6 +212,158 @@
         watch.promise=submitQueued(url,id).then(function (result) {
             queueNotify(key,watch,result);queueSchedule();return result;
         },function (error) { queueWatches.delete(key);throw error; });
+        return watch.promise;
+    }
+
+    var reserveModeKey = "broray.reserve-mode.v1";
+    var reserveModeURL = "/api/servers/reserve-mode.cgi";
+    function readReserveModeRequest() {
+        var raw = sessionStorage.getItem(reserveModeKey);
+        if (raw === null) return null;
+        var saved;
+        try { saved = JSON.parse(raw); } catch (_) { /* Preserve unrecognised evidence. */ }
+        if (!saved || saved.schemaVersion !== 1 || typeof saved.enabled !== "boolean" ||
+            typeof saved.expectedRevision !== "string" || !/^[0-9a-f]{64}$/.test(saved.expectedRevision) ||
+            typeof saved.nonce !== "string" || !/^[0-9a-f]{32}$/.test(saved.nonce) ||
+            Object.keys(saved).sort().join(",") !== "enabled,expectedRevision,nonce,schemaVersion") {
+            throw new Error("Сохранённый запрос резервирования повреждён. Проверьте состояние операций.");
+        }
+        return saved;
+    }
+    function followReserveMode(enabled, revision, listener) {
+        var resume = enabled === null && revision === null, saved;
+        if (!resume && (typeof enabled !== "boolean" || typeof revision !== "string" || !/^[0-9a-f]{64}$/.test(revision))) {
+            return Promise.reject(new Error("Некорректный запрос резервирования."));
+        }
+        try {
+            saved = readReserveModeRequest();
+            if (saved && !resume && (saved.enabled !== enabled || saved.expectedRevision !== revision)) {
+                throw new Error("Сначала проверьте результат предыдущего запроса резервирования.");
+            }
+            if (resume && !saved) throw new Error("Нет сохранённого запроса. Обновите состояние резервирования.");
+        } catch (error) { return Promise.reject(error); }
+        var key = reserveModeURL + ":reserve", watch = queueWatches.get(key);
+        if (watch) {
+            if (!resume && (watch.enabled !== enabled || watch.revision !== revision)) {
+                return Promise.reject(new Error("Дождитесь завершения текущего запроса резервирования."));
+            }
+            watch.listeners.add(listener);
+            if (watch.last) listener(watch.last);
+            return watch.promise;
+        }
+        watch = {url:reserveModeURL,id:"reserve",storageKey:reserveModeKey,enabled:saved ? saved.enabled : enabled,
+            revision:saved ? saved.expectedRevision : revision,listeners:new Set([listener]),last:null,promise:null};
+        queueWatches.set(key, watch);
+        watch.promise = Promise.resolve().then(async function () {
+            var request = saved;
+            if (!request) {
+                var bytes = new Uint8Array(16); crypto.getRandomValues(bytes);
+                request = {schemaVersion:1,enabled:enabled,expectedRevision:revision,
+                    nonce:Array.from(bytes,function (n) { return n.toString(16).padStart(2,"0"); }).join("")};
+                sessionStorage.setItem(reserveModeKey, JSON.stringify(request));
+            }
+            function bound(result) {
+                if (result.requestId !== "q-" + request.nonce) throw new Error("Ответ не подтверждает сохранённый запрос резервирования.");
+                return result;
+            }
+            async function lookup() {
+                try { return bound(await queuePost("/api/operations/status.cgi", {nonce:request.nonce}, false)); }
+                catch (error) {
+                    if (error.status === 404 && error.payload && error.payload.errorCode === "REQUEST_UNCONFIRMED") {
+                        sessionStorage.removeItem(reserveModeKey);
+                    }
+                    throw error;
+                }
+            }
+            var result;
+            if (saved) result = await lookup();
+            else {
+                try { result = bound(await queuePost(reserveModeURL, {enabled:request.enabled,expectedRevision:request.expectedRevision,nonce:request.nonce}, true)); }
+                catch (error) {
+                    if ([400,401,403,404,409,413,415,422].includes(error.status)) {
+                        sessionStorage.removeItem(reserveModeKey); throw error;
+                    }
+                    result = await lookup();
+                }
+            }
+            queueNotify(key, watch, result); queueSchedule(); return result;
+        }).catch(function (error) { queueWatches.delete(key); throw error; });
+        return watch.promise;
+    }
+
+    var dpiProfileKey = "broray.dpi-profile.v1";
+    var dpiProfileURL = "/api/servers/dpi-profile.cgi";
+    function readDPIProfileRequest() {
+        var raw = sessionStorage.getItem(dpiProfileKey);
+        if (raw === null) return null;
+        var saved;
+        try { saved = JSON.parse(raw); } catch (_) { /* Preserve unrecognised evidence. */ }
+        if (!saved || saved.schemaVersion !== 1 || typeof saved.id !== "string" || !/^[A-Za-z0-9._-]{1,250}$/.test(saved.id) || typeof saved.enabled !== "boolean" ||
+            typeof saved.expectedRevision !== "string" || !/^[0-9a-f]{64}$/.test(saved.expectedRevision) ||
+            typeof saved.nonce !== "string" || !/^[0-9a-f]{32}$/.test(saved.nonce) ||
+            Object.keys(saved).sort().join(",") !== "enabled,expectedRevision,id,nonce,schemaVersion") {
+            throw new Error("Сохранённый запрос обхода DPI повреждён. Проверьте состояние операций.");
+        }
+        return saved;
+    }
+    function followDPIProfile(id, enabled, revision, listener) {
+        var resume = id === null && enabled === null && revision === null, saved;
+        if (!resume && (typeof id !== "string" || !/^[A-Za-z0-9._-]{1,250}$/.test(id) || typeof enabled !== "boolean" || typeof revision !== "string" || !/^[0-9a-f]{64}$/.test(revision))) {
+            return Promise.reject(new Error("Некорректный запрос обхода DPI."));
+        }
+        try {
+            saved = readDPIProfileRequest();
+            if (saved && !resume && (saved.id !== id || saved.enabled !== enabled || saved.expectedRevision !== revision)) {
+                throw new Error("Сначала проверьте результат предыдущего запроса обхода DPI.");
+            }
+            if (resume && !saved) throw new Error("Нет сохранённого запроса. Обновите состояние обхода DPI.");
+        } catch (error) { return Promise.reject(error); }
+        var key = dpiProfileURL + ":reserve", watch = queueWatches.get(key);
+        if (watch) {
+            if (!resume && (watch.serverID !== id || watch.enabled !== enabled || watch.revision !== revision)) {
+                return Promise.reject(new Error("Дождитесь завершения текущего запроса обхода DPI."));
+            }
+            watch.listeners.add(listener);
+            if (watch.last) listener(watch.last);
+            return watch.promise;
+        }
+        watch = {url:dpiProfileURL,id:"reserve",storageKey:dpiProfileKey,serverID:saved ? saved.id : id,enabled:saved ? saved.enabled : enabled,
+            revision:saved ? saved.expectedRevision : revision,listeners:new Set([listener]),last:null,promise:null};
+        queueWatches.set(key, watch);
+        watch.promise = Promise.resolve().then(async function () {
+            var request = saved;
+            if (!request) {
+                var bytes = new Uint8Array(16); crypto.getRandomValues(bytes);
+                request = {schemaVersion:1,id:id,enabled:enabled,expectedRevision:revision,
+                    nonce:Array.from(bytes,function (n) { return n.toString(16).padStart(2,"0"); }).join("")};
+                sessionStorage.setItem(dpiProfileKey, JSON.stringify(request));
+            }
+            function bound(result) {
+                if (result.requestId !== "q-" + request.nonce) throw new Error("Ответ не подтверждает сохранённый запрос обхода DPI.");
+                return result;
+            }
+            async function lookup() {
+                try { return bound(await queuePost("/api/operations/status.cgi", {nonce:request.nonce}, false)); }
+                catch (error) {
+                    if (error.status === 404 && error.payload && error.payload.errorCode === "REQUEST_UNCONFIRMED") {
+                        sessionStorage.removeItem(dpiProfileKey);
+                    }
+                    throw error;
+                }
+            }
+            var result;
+            if (saved) result = await lookup();
+            else {
+                try { result = bound(await queuePost(dpiProfileURL, {id:request.id,enabled:request.enabled,expectedRevision:request.expectedRevision,nonce:request.nonce}, true)); }
+                catch (error) {
+                    if ([400,401,403,404,409,413,415,422].includes(error.status)) {
+                        sessionStorage.removeItem(dpiProfileKey); throw error;
+                    }
+                    result = await lookup();
+                }
+            }
+            queueNotify(key, watch, result); queueSchedule(); return result;
+        }).catch(function (error) { queueWatches.delete(key); throw error; });
         return watch.promise;
     }
 
@@ -440,6 +592,10 @@
         apiRequest: apiRequest,
         submitQueued: submitQueued,
         followQueued: followQueued,
+        followReserveMode: followReserveMode,
+        followDPIProfile: followDPIProfile,
+        readDPIProfileRequest: readDPIProfileRequest,
+        readReserveModeRequest: readReserveModeRequest,
         hasQueuedRequest: hasQueuedRequest,
         queueLabel: queueLabel,
         toast: toast,

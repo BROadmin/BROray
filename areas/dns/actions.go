@@ -39,30 +39,13 @@ type txPlan struct {
 }
 
 func sameSemantic(a, b liveRec) bool {
-	return a.Address == b.Address && a.EffectivePort == b.EffectivePort && a.SNI == b.SNI && a.SPKI == b.SPKI &&
+	return sameAddress(a.Address, b.Address) && a.EffectivePort == b.EffectivePort && a.SNI == b.SNI && a.SPKI == b.SPKI &&
 		a.Interface == b.Interface && a.Domain == b.Domain
 }
 
-// ---------- Keenetic commands (frozen R14C01 DoT grammar, RD:910-959) ----------
+// ---------- Keenetic commands (R14C01 contract, strict IPv6 extension in 3.5.9) ----------
 
 func safeValue(v string) bool { return v != "" && !strings.ContainsAny(v, ";\"\\") }
-
-func ipv4(v string) bool {
-	p := strings.Split(v, ".")
-	if len(p) != 4 {
-		return false
-	}
-	for _, x := range p {
-		if !reDigits.MatchString(x) {
-			return false
-		}
-		n, err := strconv.Atoi(x)
-		if err != nil || n > 255 {
-			return false
-		}
-	}
-	return true
-}
 
 func portOK(v string) bool {
 	if !reDigits.MatchString(v) {
@@ -82,11 +65,11 @@ func commandAllowed(c string) bool {
 	}
 	f := strings.Fields(c)
 	n := len(f)
-	if n == 6 && f[0] == "no" && f[1] == "dns-proxy" && f[2] == "tls" && f[3] == "upstream" && ipv4(f[4]) && portOK(f[5]) &&
+	if n == 6 && f[0] == "no" && f[1] == "dns-proxy" && f[2] == "tls" && f[3] == "upstream" && keenetic.ValidDoTAddress(f[4]) && portOK(f[5]) &&
 		c == "no dns-proxy tls upstream "+f[4]+" "+f[5] {
 		return true
 	}
-	if (n == 7 || n == 9 || n == 11 || n == 13) && f[0] == "dns-proxy" && f[1] == "tls" && f[2] == "upstream" && ipv4(f[3]) && portOK(f[4]) &&
+	if (n == 7 || n == 9 || n == 11 || n == 13) && f[0] == "dns-proxy" && f[1] == "tls" && f[2] == "upstream" && keenetic.ValidDoTAddress(f[3]) && portOK(f[4]) &&
 		f[5] == "sni" && safeValue(f[6]) {
 		exp := "dns-proxy tls upstream " + f[3] + " " + f[4] + " sni " + f[6]
 		ok := true
@@ -114,7 +97,7 @@ func (s *service) command(ctx context.Context, c string) error {
 		area = keenetic.AreaSystem
 	}
 	if !commandAllowed(c) || keenetic.Allow(area, c) != nil {
-		return dotErr("DOT_COMMAND_NOT_AUTHORIZED", "Команда не входит в замороженный R14C01 DoT grammar.", "")
+		return dotErr("DOT_COMMAND_NOT_AUTHORIZED", "Команда не входит в разрешённый набор команд DNS-over-TLS.", "")
 	}
 	res, err := s.d.App.T.Parse(ctx, []string{c})
 	if err != nil {
@@ -146,7 +129,7 @@ func addCommand(e liveRec) (string, bool) {
 }
 
 func deleteCommand(e liveRec) (string, bool) {
-	if strings.ContainsAny(e.Address, " \t\n\r\v\f;\"\\:") {
+	if !keenetic.ValidDoTAddress(e.Address) {
 		return "", false
 	}
 	return "no dns-proxy tls upstream " + e.Address + " " + strconv.Itoa(e.EffectivePort), true
@@ -159,7 +142,7 @@ func entryPresent(obs observed, e planEntry) bool {
 		if r.clean() && sameSemantic(r, e.liveRec) {
 			exact++
 		}
-		if r.Address == e.Address && r.EffectivePort == e.EffectivePort {
+		if sameAddress(r.Address, e.Address) && r.EffectivePort == e.EffectivePort {
 			sel++
 		}
 		if sameSemantic(r, e.liveRec) && r.PortRaw == e.PortRaw && r.PortState == e.PortState {
@@ -172,7 +155,7 @@ func entryPresent(obs observed, e planEntry) bool {
 func semanticKeys(items []liveRec) []string {
 	out := make([]string, 0, len(items))
 	for _, r := range items {
-		out = append(out, strings.Join([]string{r.Address, strconv.Itoa(r.EffectivePort), r.SNI, r.SPKI, r.Interface, r.Domain}, "\x00"))
+		out = append(out, strings.Join([]string{addressKey(r.Address), strconv.Itoa(r.EffectivePort), r.SNI, r.SPKI, r.Interface, r.Domain}, "\x00"))
 	}
 	sort.Strings(out)
 	return out
@@ -181,7 +164,7 @@ func semanticKeys(items []liveRec) []string {
 func fullKeys(items []liveRec) []string {
 	out := make([]string, 0, len(items))
 	for _, r := range items {
-		out = append(out, strings.Join([]string{r.Address, r.PortRaw, strconv.Itoa(r.EffectivePort), r.PortState, r.SNI, r.SPKI, r.Interface, r.Domain}, "\x00"))
+		out = append(out, strings.Join([]string{addressKey(r.Address), r.PortRaw, strconv.Itoa(r.EffectivePort), r.PortState, r.SNI, r.SPKI, r.Interface, r.Domain}, "\x00"))
 	}
 	sort.Strings(out)
 	return out
@@ -460,7 +443,7 @@ func (s *service) runTest(ctx context.Context, req map[string]any) (map[string]a
 	if _, err := s.ensureFiles(); err != nil {
 		return nil, err
 	}
-	ids, err := validateRequest(req)
+	ids, err := validateSelection(req, true)
 	if err != nil {
 		return nil, err
 	}
@@ -482,6 +465,7 @@ func (s *service) runTest(ctx context.Context, req map[string]any) (map[string]a
 		row := map[string]any{"id": c.ID, "address": c.Address, "effectivePort": 853, "sni": c.SNI, "spki": "", "interface": "",
 			"domain": "", "ok": pr.OK, "status": pr.Status, "latencyMs": pr.LatencyMs, "message": pr.Message,
 			"testedAt": testedAt, "testedEpoch": testedEpoch}
+		pr.addEvidence(row)
 		allOK = allOK && pr.OK
 		tests = append(tests, row)
 	}
@@ -543,6 +527,9 @@ func (s *service) runApply(ctx context.Context, req map[string]any) (map[string]
 		return nil, dotErr("DOT_TEST_REQUIRED", "Сначала успешно проверьте все выбранные DNS-over-TLS серверы.", "")
 	}
 	current, err := s.fetchObserved(ctx)
+	if s.capabilities(ctx, current)["dotComponent"] == "missing" {
+		return nil, dotErr("DOT_COMPONENT_MISSING", "В Keenetic не установлен компонент «Прокси-сервер DNS-over-TLS». Проверьте компоненты KeeneticOS.", "")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -571,7 +558,7 @@ func (s *service) runApply(ctx context.Context, req map[string]any) (map[string]
 		}
 	}
 	for _, rc := range f.receipts {
-		if contains(ids, rc.ID) {
+		if rc.ProtoSHA != writeProtocolSHA256 || contains(ids, rc.ID) {
 			continue
 		}
 		n := 0
@@ -653,7 +640,7 @@ func (s *service) runApply(ctx context.Context, req map[string]any) (map[string]
 			owned[added.ID] = true
 		}
 		for _, rc := range f.receipts {
-			if selectorCount(current.Dot, rc.Address, rc.Port) != 1 {
+			if rc.ProtoSHA != writeProtocolSHA256 || selectorCount(current.Dot, rc.Address, rc.Port) != 1 {
 				continue
 			}
 			for _, before := range current.Dot {
@@ -996,11 +983,17 @@ func (s *service) uninstall(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if !current.Determinate || !current.RuntimeReconciled {
+		return dotErr("DOT_OBSERVATION_UNDERDETERMINED", "DoT-записи running-config и runtime не сведены однозначно; изменение запрещено.", "")
+	}
 	var remove []liveRec
 	for _, rc := range f.receipts {
+		if rc.ProtoSHA != writeProtocolSHA256 {
+			continue
+		}
 		n := 0
 		for _, r := range current.Dot {
-			if sameFull(rc.rec(), r) {
+			if r.clean() && sameFull(rc.rec(), r) {
 				n++
 			}
 		}
@@ -1023,7 +1016,7 @@ func (s *service) uninstall(ctx context.Context) error {
 		}
 		gone := false
 		for attempt := 1; attempt <= convergenceAttempts && !gone; attempt++ {
-			if v, err := s.fetchObserved(ctx); err == nil {
+			if v, err := s.fetchObserved(ctx); err == nil && v.Determinate && v.RuntimeReconciled {
 				gone = true
 				for _, r := range remove {
 					if selectorCount(v.Dot, r.Address, r.EffectivePort) != 0 {

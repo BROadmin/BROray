@@ -8,6 +8,9 @@
     var selected = Object.create(null);
     var busy = false;
     var autoSaving = false;
+    var autoUnconfirmed = false;
+    var autoGeneration = 0;
+    var statusReadSerial = 0;
     var selectionInitialized = false;
     var pollTimer = null;
 
@@ -76,9 +79,19 @@
     }
     function sameEntry(first, second) {
         return first && second &&
-            first.address === second.address &&
+            addressKey(first.address) === addressKey(second.address) &&
             effectivePort(first) === effectivePort(second) &&
             first.sni === second.sni;
+    }
+    function addressKey(value) {
+        if (typeof value === "string" && value.indexOf(":") >= 0) {
+            try { return new URL("http://[" + value + "]/").hostname; } catch (_) { return value; }
+        }
+        return value;
+    }
+    function endpointText(address, port) {
+        var text = valueOrDash(address);
+        return (text.indexOf(":") >= 0 ? "[" + text + "]" : text) + ":" + valueOrDash(port);
     }
     function projectedTotal() {
         var actual = status && status.actual && Array.isArray(status.actual.dot) ? status.actual.dot : [];
@@ -135,6 +148,7 @@
     }
     function mutationBlockText() {
         var reason = status && status.mutationBlockedReason;
+        if (reason === "dot-component-missing") return "не установлен компонент «Прокси-сервер DNS-over-TLS»";
         if (status && status.writeProtocolEnabled !== true) return "изменение настроек недоступно в этой сборке";
         if (reason === "recovery-required") return "нужно завершить восстановление предыдущей транзакции";
         if (reason === "keenetic-unavailable") return "Keenetic CLI недоступен";
@@ -209,19 +223,25 @@
         badge.setAttribute("data-icon", icon || "dns");
     }
     function testDuration(test) {
-        // This backend reports differences of whole-second wall-clock readings.
-        // Do not label them as millisecond ping measurements.
         var value = test && test.latencyMs;
+        if (test && test.dnsStatus && typeof value === "number" && isFinite(value) && value >= 0) return " · время " + (value === 0 ? "< 1" : value) + " мс";
+        // Legacy rows measured whole seconds; do not invent finer precision.
         if (typeof value !== "number" || !isFinite(value) || value < 0 || value % 1000 !== 0) return "";
         return value === 0 ? " · время < 1 с" : " · время ≈ " + (value / 1000) + " с";
     }
     function testPresentation(server) {
         if (!server.test) return {text:"Не проверен", className:"status-neutral"};
-        if (server.test.ok === false && server.test.status === "failed") return {text:"TLS/SNI: ошибка" + (testTimeFresh(server.test) ? "" : " · последняя проверка"), className:"status-error"};
+        if (server.test.ok === false && server.test.status === "failed") {
+            var stage = server.test.dnsStatus === "failed" ? "DNS" : server.test.tlsStatus === "failed" ? "TLS" : server.test.tcpStatus === "failed" ? "TCP" : "DoT";
+            return {text:stage + ": " + (server.test.errorCode === "DOT_PROBE_TIMEOUT" ? "тайм-аут" : "ошибка") + (testTimeFresh(server.test) ? "" : " · последняя проверка"), className:"status-error"};
+        }
         if (!testTimeFresh(server.test)) return {text:status && status.autoCheck && status.autoCheck.enabled ? "Ожидает перепроверки" : "Проверка устарела", className:status && status.autoCheck && status.autoCheck.enabled ? "status-neutral" : "status-warning"};
-        if (server.test.ok === true) return {text:"TLS/SNI: OK" + testDuration(server.test), className:"status-success"};
-        if (server.test.status === "unavailable") return {text:"TLS-проверка недоступна", className:"status-warning"};
-        return {text:"TLS/SNI: ошибка", className:"status-error"};
+        if (server.test.ok === true) return {text:(server.test.dnsStatus === "ok" ? "DoT: OK" : "TLS: OK · DNS не проверен") + testDuration(server.test), className:"status-success"};
+        if (server.test.status === "unavailable") return {text:"Проверка DoT недоступна", className:"status-warning"};
+        return {text:"DoT: ошибка", className:"status-error"};
+    }
+    function probeStage(value) {
+        return value === "ok" ? "OK" : value === "failed" ? "ошибка" : "не проверен";
     }
 
     function valueOrDash(value) {
@@ -282,7 +302,7 @@
         marker.setAttribute("data-icon", entry.valid === true ? "dns" : "warning");
         copy.append(
             create("span", "eyebrow", "Установленная DoT-запись"),
-            create("strong", "dns-server-name", valueOrDash(entry.address) + ":" + valueOrDash(effectivePort(entry))),
+            create("strong", "dns-server-name", endpointText(entry.address, effectivePort(entry))),
             create("span", "dns-server-address", portPresentation(entry)),
             actualAttribute("SNI", entry.sni),
             actualAttribute("SPKI", entry.spki),
@@ -331,9 +351,12 @@
         copy.append(
             create("span", "eyebrow", server.provider),
             create("strong", "dns-server-name", server.name),
-            create("span", "dns-server-address", "Адрес: " + server.address + ":" + valueOrDash(effectivePort(server))),
+            create("span", "dns-server-address", (server.addressFamily || "IP") + " · " + endpointText(server.address, effectivePort(server))),
             create("span", "dns-server-sni", "TLS-домен: " + server.sni)
         );
+        if (server.test && server.test.tcpStatus) copy.append(create("span", "dns-server-address",
+            "TCP: " + probeStage(server.test.tcpStatus) + " · TLS: " + probeStage(server.test.tlsStatus) + " · DNS: " + probeStage(server.test.dnsStatus)));
+        if (server.test && server.test.ok === false && server.test.message) copy.append(create("span", "dns-server-address", server.test.message));
         testBadge.setAttribute("data-icon", test.className === "status-success" ? "status" : "dns");
         badges.append(testBadge, ownership);
         header.append(copy, badges);
@@ -349,18 +372,18 @@
         if (!status) return {text:"Получение состояния…", kind:"neutral", badge:"Загрузка…"};
         if (status.runningConfigAvailable !== true) return {text:"Не удалось прочитать фактическую конфигурацию Keenetic. Состояние установки неизвестно; установка и удаление заблокированы.", kind:"error", badge:"Состояние неизвестно"};
         if (!observationDeterminate() || installationState() === "unknown") return {text:"Фактические DoT-записи прочитаны не полностью или не удалось однозначно разобрать и сверить их с работающим роутером. Состояние установки неизвестно; установка и удаление заблокированы.", kind:"error", badge:"Состояние неизвестно"};
-        if (!ids.length) return {text:"Выберите один или несколько серверов. Для устойчивой работы рекомендуется несколько серверов разных провайдеров.", kind:"neutral", badge:"Требуется выбор"};
+        if (!ids.length) return {text:selectionSaved() ? "Сохранён пустой выбор. Настройки DNS на роутере сохранены." : "Сохраните пустой выбор. Это остановит автопроверку выбранных серверов и сохранит настройки DNS на роутере.", kind:"neutral", badge:selectionSaved() ? "Выбор сохранён" : "Выбор не сохранён"};
         if (selectionOverLimit()) return {text:"Сохранено " + ids.length + " выбранных серверов, но Keenetic поддерживает максимум " + Number(status.maxServers || 8) + ". Фактически BROray управляет " + Number((status.effectiveIds || []).length || (status.managed || []).length) + ". Снимите выбор минимум с " + (ids.length - Number(status.maxServers || 8)) + " сервера. Текущая конфигурация Keenetic не изменяется.", kind:"warning", badge:"Выбор превышает лимит"};
         if (capacityExceeded()) return {text:"После экспорта будет " + projectedTotal() + " из " + Number(status.maxServers || 8) + " DoT/DoH-серверов. Снимите выбор минимум с " + (projectedTotal() - Number(status.maxServers || 8)) + " сервера или удалите лишнюю внешнюю запись в Keenetic.", kind:"error", badge:"Превышен лимит Keenetic"};
         if (selectionMatches()) {
-            if (selectedServers().some(function (server) { return server.test && server.test.ok === false && server.test.status === "failed"; })) return {text:"Настройки установлены, но последняя TLS/SNI-проверка выявила ошибку. " + (status.autoCheck && status.autoCheck.enabled ? "Повтор выполняется автоматически, когда автоматика BROray доступна." : "Повторите проверку."), kind:"error", badge:"Ошибка проверки"};
-            if (tested !== ids.length && status.testAvailable === true && status.autoCheck && status.autoCheck.enabled === true && savedSelectionMatches()) return {text:"Установлено " + present + " из " + ids.length + ". Настройки роутера подтверждены; свежая TLS/SNI-проверка ожидается автоматически. Это не подтверждение доступности серверов.", kind:"neutral", badge:"Установлено"};
+            if (selectedServers().some(function (server) { return server.test && server.test.ok === false && server.test.status === "failed"; })) return {text:"Настройки установлены, но последняя проверка DoT выявила ошибку. " + (status.autoCheck && status.autoCheck.enabled ? "Повтор выполняется автоматически, когда автоматика BROray доступна." : "Повторите проверку."), kind:"error", badge:"Ошибка проверки"};
+            if (tested !== ids.length && status.testAvailable === true && status.autoCheck && status.autoCheck.enabled === true && savedSelectionMatches()) return {text:"Установлено " + present + " из " + ids.length + ". Настройки роутера подтверждены; свежая проверка DoT ожидается автоматически. Это не подтверждение доступности серверов.", kind:"neutral", badge:"Установлено"};
             if (tested === ids.length) return {text:"Установлено " + present + " из " + ids.length + ". Фактическая конфигурация Keenetic соответствует выбранной.", kind:"success", badge:"Установлено"};
-            if (status.testAvailable !== true) return {text:"Установлено " + present + " из " + ids.length + ". Фактическая конфигурация Keenetic соответствует выбранной, но OpenSSL недоступен для повторной TLS/SNI-проверки.", kind:"warning", badge:"Установлено"};
-            return {text:"Установлено " + present + " из " + ids.length + ". Фактическая конфигурация Keenetic соответствует выбранной. TLS/SNI-проверка актуальна для " + tested + " из " + ids.length + ".", kind:"warning", badge:"Установлено"};
+            if (status.testAvailable !== true) return {text:"Установлено " + present + " из " + ids.length + ". Фактическая конфигурация Keenetic соответствует выбранной, но повторная проверка DoT сейчас недоступна.", kind:"warning", badge:"Установлено"};
+            return {text:"Установлено " + present + " из " + ids.length + ". Фактическая конфигурация Keenetic соответствует выбранной. Проверка DoT актуальна для " + tested + " из " + ids.length + ".", kind:"warning", badge:"Установлено"};
         }
-        if (status.testAvailable !== true) return {text:"OpenSSL недоступен. Установите зависимость openssl-util, чтобы выполнить TLS/SNI-проверку.", kind:"error", badge:"Нет OpenSSL"};
-        if (tested !== ids.length) return {text:"Проверено " + tested + " из " + ids.length + ". Перед установкой каждый выбранный сервер должен пройти TLS/SNI-проверку.", kind:"warning", badge:"Требуется проверка"};
+        if (status.testAvailable !== true) return {text:"Проверка DoT сейчас недоступна. Обновите состояние и повторите попытку.", kind:"error", badge:"Проверка недоступна"};
+        if (tested !== ids.length) return {text:"Проверено " + tested + " из " + ids.length + ". Перед установкой каждый выбранный сервер должен пройти проверку DoT.", kind:"warning", badge:"Требуется проверка"};
         if (!mutationAvailable()) return {text:"Изменение DoT заблокировано: " + mutationBlockText() + ".", kind:"error", badge:status.writeProtocolEnabled === true ? "Изменения заблокированы" : "Протокол записи не включён"};
         return {text:"Все выбранные серверы проверены. Следующее действие — установить конфигурацию в Keenetic.", kind:"warning", badge:"Готово к установке"};
     }
@@ -382,13 +405,14 @@
         var notice = byId("dns-notice");
         var buttons;
         var external;
+        var saveEmptySelection = !ids.length && !selectionSaved();
 
         if (!status || !list) return;
         list.replaceChildren();
         status.servers.forEach(function (server) { list.appendChild(createServerCard(server)); });
         renderActualEntries();
 
-        setText("dns-support", status.runningConfigAvailable === true ? "Доступна" : "Недоступна");
+        renderCapabilities();
         setText("dns-selected", ids.length);
         setText("dns-tested", tested + " из " + ids.length);
         setText("dns-installed", installationState() === "unknown" ? "Неизвестно" : present + " из " + ids.length);
@@ -420,7 +444,8 @@
             refresh: byId("dns-refresh"),
             delete: byId("dns-delete")
         };
-        buttons.test.disabled = busy || !ids.length || selectionOverLimit() || status.testAvailable !== true;
+        buttons.test.disabled = busy || (!ids.length && !saveEmptySelection) || selectionOverLimit() || status.testAvailable !== true || status.recoveryRequired === true;
+        buttons.test.textContent = saveEmptySelection ? "Сохранить выбор" : "Проверить выбранные";
         buttons.apply.disabled = busy || !ids.length || selectionOverLimit() || capacityExceeded() || !allSelectedTested() || status.runningConfigAvailable !== true || !mutationAvailable() || selectionMatches();
         buttons.refresh.disabled = busy;
         buttons.delete.disabled = busy || !deleteAvailable();
@@ -431,17 +456,28 @@
         renderAutoCheck();
         if (window.BROrayIcons) window.BROrayIcons.scan(document);
     }
+    function renderCapabilities() {
+        var cap = status && status.capabilities || {};
+        var label = cap.dotComponent === "present" ? "Установлен" : cap.dotComponent === "missing" ? "Не установлен" : "Не определён";
+        var hint = cap.dotComponent === "missing" ? "В Keenetic не установлен компонент «Прокси-сервер DNS-over-TLS». Проверьте компоненты KeeneticOS." :
+            cap.dotComponent !== "present" ? "Не удалось однозначно определить наличие компонента DNS-over-TLS. Обновите состояние и проверьте компоненты KeeneticOS." :
+            cap.ipv6DoT === "confirmed" ? "Поддержка DoT через IPv6 подтверждена текущей конфигурацией и работающим DNS-прокси роутера. Доступность сервера проверяется отдельно." :
+            "Поддержка DoT через IPv6 на роутере пока не подтверждена. Проверка сервера показывает доступность соединения; применение проверяется отдельно. Глобальные настройки IPv6 не меняются.";
+        if (cap.firmware) hint += " KeeneticOS: " + cap.firmware + ".";
+        setText("dns-support", label);
+        setText("dns-capability-hint", hint);
+    }
     function initializeSelection(data) {
         if (selectionInitialized) return;
         (data.selectedIds || []).forEach(function (id) { selected[id] = true; });
         selectionInitialized = true;
     }
-    function handleError(error) {
+    function handleError(error, settingsOnly) {
         if (error && (error.status === 401 || error.code === "AUTH_REQUIRED" || error.code === "SESSION_REQUIRED")) {
             window.BROrayUI.redirectToLogin();
             return;
         }
-        if (window.BROrayActionFeedback && (!document.getElementById("dns-feedback") || !document.getElementById("dns-feedback").hasChildNodes())) {
+        if (!settingsOnly && window.BROrayActionFeedback && (!document.getElementById("dns-feedback") || !document.getElementById("dns-feedback").hasChildNodes())) {
             window.BROrayActionFeedback.show("dns-feedback", {
                 title:"Проверьте состояние DNS-over-TLS",
                 message:"Не удалось завершить действие. Его результат нужно проверить в роутере.",
@@ -452,7 +488,15 @@
         window.BROrayUI.toast(error && error.message ? error.message : "Операция DNS-over-TLS завершилась ошибкой.", "error");
     }
     function loadStatus(silent, force) {
+        var readSerial = ++statusReadSerial;
+        var generation = autoGeneration;
         return request("/api/routes/dot-status.cgi" + (force ? "?force=1" : ""), {method:"GET", credentials:"same-origin"}).then(function (data) {
+            if (readSerial !== statusReadSerial) return status;
+            if (autoSaving || generation !== autoGeneration) {
+                if (status) data.autoCheck = status.autoCheck;
+            } else {
+                autoUnconfirmed = !validAutoInfo(data.autoCheck);
+            }
             status = data;
             initializeSelection(data);
             render();
@@ -470,7 +514,8 @@
     }
     function runAction(action, payload, propagateError) {
         var endpoint = action === "test" ? "dot-test.cgi" : action === "apply" ? "dot-apply.cgi" : "dot-delete.cgi";
-        var title = action === "test" ? "Проверка TLS/SNI" : action === "apply" ? "Установка в Keenetic" : "Удаление выбранных записей";
+        var emptySave = action === "test" && payload && !payload.serverIds.length;
+        var title = action === "test" ? (emptySave ? "Сохранение выбора" : "Проверка DoT") : action === "apply" ? "Установка в Keenetic" : "Удаление выбранных записей";
         var failure = null;
         if (window.BROrayActionFeedback) window.BROrayActionFeedback.clear("dns-feedback");
         setBusy(true, title, "Подождите. После завершения состояние обновится автоматически.");
@@ -481,9 +526,9 @@
             body: payload ? JSON.stringify(payload) : undefined
         }).then(function (data) {
             status = data;
-            if (action === "test") window.BROrayUI.toast(
-                "TLS/SNI-проверка завершена: подтверждено " + testedSelectedCount() + " из " + selectedIds().length + ".",
-                allSelectedTested() ? "success" : "warning");
+            if (action === "test") window.BROrayUI.toast(emptySave ? "Пустой выбор сохранён. Настройки DNS на роутере сохранены." :
+                "Проверка DoT завершена: подтверждено " + testedSelectedCount() + " из " + selectedIds().length + ".",
+                emptySave || allSelectedTested() ? "success" : "warning");
             if (action === "apply") window.BROrayUI.toast("DNS-over-TLS установлен и фактически проверен в Keenetic.", "success");
             if (action === "delete") {
                 selected = Object.create(null);
@@ -509,7 +554,7 @@
     }
     function onTest() {
         var ids = selectedIds();
-        if (!ids.length || selectionOverLimit() || busy) return;
+        if ((!ids.length && selectionSaved()) || selectionOverLimit() || busy) return;
         runAction("test", {serverIds:ids, allowUntested:false});
     }
     function onApply() {
@@ -577,7 +622,7 @@
                 eyebrow:"Опасное действие",
                 title:"Удалить выбранные DoT-записи?",
                 message:"Будут удалены следующие записи из роутера:\n" + preview.entries.map(function (entry) {
-                    return entry.address + ":" + entry.effectivePort + " · TLS-домен: " + entry.sni;
+                    return endpointText(entry.address, entry.effectivePort) + " · TLS-домен: " + entry.sni;
                 }).join("\n") + "\n\nЗаписи удаляются независимо от того, кто их добавил. Не выбранные DoT и все DoH-записи сохраняются. Эти DNS-серверы перестанут использоваться роутером. Если других рабочих DNS-серверов нет, доступ по именам сайтов может пропасть.",
                 confirmText:"Удалить перечисленные записи", cancelText:"Отмена", variant:"danger", icon:"delete"
             });
@@ -642,7 +687,7 @@
         var toggle = byId("dns-auto-check");
         var info = status && status.autoCheck;
         if (!toggle) return;
-        toggle.disabled = busy || autoSaving || !info || info.settingsValid !== true;
+        toggle.disabled = busy || autoSaving || autoUnconfirmed || !validAutoInfo(info);
         if (!autoSaving) toggle.checked = Boolean(info && info.enabled === true);
         var message = "Не удалось получить настройки автопроверки.";
         if (info && info.settingsValid === true) {
@@ -654,16 +699,31 @@
             else if (info.last && info.last.status === "error") message = "Последняя автопроверка не завершена. BROray повторит попытку; прежние результаты не объявляются свежими.";
             else message = "Повторная проверка каждые 5 минут, даже при закрытой странице. Занятые операции имеют приоритет. Настройки DNS в роутере не меняются.";
         }
-        setText("dns-auto-hint", autoSaving ? "Сохранение настройки…" : message);
+        setText("dns-auto-hint", autoSaving ? "Сохранение настройки…" : autoUnconfirmed ? "Состояние автопроверки не подтверждено. Обновите состояние перед изменением." : message);
+    }
+    function validAutoInfo(info) {
+        return Boolean(info && info.settingsValid === true && typeof info.enabled === "boolean" &&
+            typeof info.revision === "string" && info.revision.length === 64);
     }
     function onAutoCheckChange() {
-        if (busy || autoSaving) { renderAutoCheck(); return; }
+        var info = status && status.autoCheck;
+        if (busy || autoSaving || autoUnconfirmed || !validAutoInfo(info)) { renderAutoCheck(); return; }
         var enabled = byId("dns-auto-check").checked;
+        var revision = info.revision;
+        autoGeneration++;
         autoSaving = true; renderAutoCheck();
         request("/api/routes/dot-auto-settings.cgi", {method:"POST", credentials:"same-origin",
-            headers:{"Accept":"application/json", "Content-Type":"application/json", "X-BROray-Request":"operations", "X-BROray-Origin":window.location.origin}, body:JSON.stringify({enabled:enabled})
-        }).then(function (data) { if (status) status.autoCheck = data; })
-        .catch(handleError).then(function () { autoSaving = false; render(); });
+            headers:{"Accept":"application/json", "Content-Type":"application/json", "X-BROray-Request":"operations", "X-BROray-Origin":window.location.origin}, body:JSON.stringify({enabled:enabled, expectedRevision:revision})
+        }).then(function (data) {
+            if (!validAutoInfo(data) || data.enabled !== enabled) throw new Error("Сохранение автопроверки не подтверждено.");
+            status.autoCheck = data; autoUnconfirmed = false;
+        }).catch(function (error) {
+            handleError(error, true);
+            return request("/api/routes/dot-status.cgi?force=1", {method:"GET", credentials:"same-origin"}).then(function (data) {
+                if (!validAutoInfo(data.autoCheck)) throw new Error("Состояние автопроверки не подтверждено.");
+                status.autoCheck = data.autoCheck; autoUnconfirmed = false;
+            }).catch(function () { autoUnconfirmed = true; });
+        }).then(function () { autoGeneration++; autoSaving = false; render(); });
     }
 
     function initialize() {

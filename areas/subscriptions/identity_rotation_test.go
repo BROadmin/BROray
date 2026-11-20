@@ -1,7 +1,6 @@
 package subscriptions
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -99,7 +98,7 @@ func TestSyncRotationBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := e.s.disabledServers(subX)[0].id
-	r, err = e.s.syncCatalog(context.Background(), subX, stageLinks(t, false, rotationLink("last.example", "ee")), false, "disabled", "replace")
+	r, err = e.s.syncCatalog(sourceRefreshContext(), subX, stageLinks(t, false, rotationLink("last.example", "ee")), false, "disabled", "replace")
 	if err != nil || r.Updated != 1 || e.s.disabledServers(subX)[0].id != id {
 		t.Fatalf("disabled: %+v %v", r, err)
 	}

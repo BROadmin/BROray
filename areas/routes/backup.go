@@ -38,6 +38,7 @@ type backupCustom struct {
 }
 
 type routesBackup struct {
+	Policy           *policyBackup   `json:"policy,omitempty"`
 	Custom           []backupCustom  `json:"custom"`
 	BuiltinInstalled []string        `json:"builtinInstalled"`
 	Schedule         *backupSchedule `json:"schedule,omitempty"` // scheduled catalog updates (optional)
@@ -52,11 +53,12 @@ type backupSchedule struct {
 func registerBackup(e *engine) {
 	compat.RegisterBackupPart(compat.BackupPart{
 		Name: "routes", Order: 30,
-		Export: func(ctx context.Context) (any, error) { return e.backupExport() },
+		Export: func(ctx context.Context) (any, error) { return e.backupExportContext(ctx) },
 		Stage:  e.backupStage,
-		After: func(ctx context.Context, _ any) compat.BackupPlan {
+		Before: func() any { return e.d.Svc.IsXrayRunning() },
+		After: func(ctx context.Context, before any) compat.BackupPlan {
 			e.ensureCustomRegistries()
-			return compat.BackupPlan{}
+			return e.backupPolicyAfter(ctx, before)
 		},
 	})
 }
@@ -124,6 +126,10 @@ func (e *engine) customSources(id string) ([]backupFile, error) {
 }
 
 func (e *engine) backupExport() (any, error) {
+	return e.backupExportContext(context.Background())
+}
+
+func (e *engine) backupExportContext(ctx context.Context) (any, error) {
 	out := routesBackup{Custom: []backupCustom{}, BuiltinInstalled: []string{}}
 	for _, id := range e.customIDs() {
 		if !validUserID(id) {
@@ -143,6 +149,11 @@ func (e *engine) backupExport() (any, error) {
 	}
 	ss := e.scheduleSettings()
 	out.Schedule = &backupSchedule{IntervalHours: ss.IntervalHours, AutoApply: ss.AutoApply, MaxRemovalPercent: ss.MaxRemovalPercent}
+	var err error
+	out.Policy, err = e.backupPolicy(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -176,6 +187,10 @@ func (e *engine) backupStage(ctx context.Context, raw json.RawMessage, st *compa
 	if len(raw) == 0 || string(raw) == "null" {
 		return plan, nil
 	}
+	policy, err := policyBackupInput(raw)
+	if err != nil {
+		return plan, err
+	}
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return plan, backupInvalid("раздел маршрутов повреждён")
 	}
@@ -193,6 +208,9 @@ func (e *engine) backupStage(ctx context.Context, raw json.RawMessage, st *compa
 			install = append(install, b.Name)
 		}
 		seenBuiltin[id] = true
+	}
+	if err = e.stageBackupPolicy(ctx, policy, st, &plan); err != nil {
+		return plan, err
 	}
 	se := newEngine(st.St) // the staging root: same code, no Keenetic transport
 	if in.Schedule != nil {

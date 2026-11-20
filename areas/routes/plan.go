@@ -21,14 +21,17 @@ type planRoute struct {
 }
 
 func routeKey(network string, prefix int, iface string) string {
+	if routeFamily(network) == "ipv6" {
+		return "ipv6|" + network + "/" + strconv.Itoa(prefix) + "|" + iface + "|gateway:none|metric:none|automatic:unspecified|exclusive:unspecified"
+	}
 	return "ipv4|" + network + "/" + strconv.Itoa(prefix) + "|" + iface + "|gateway:none|metric:1200|automatic:unspecified|exclusive:unspecified"
 }
 
 func (r planRoute) dest() string { return r.Network + "/" + strconv.Itoa(r.Prefix) }
 
 func (r planRoute) object() obj {
-	return obj{"key": r.Key, "family": "ipv4", "network": r.Network, "prefix": r.Prefix, "mask": r.Mask, "targetInterface": r.Iface,
-		"gatewayToken": "0.0.0.0", "metric": r.Metric, "automatic": nil, "exclusive": nil, "comment": r.Comment}
+	return obj{"key": r.Key, "family": routeFamily(r.Network), "network": r.Network, "prefix": r.Prefix, "mask": r.Mask, "targetInterface": r.Iface,
+		"gatewayToken": routeGateway(r.Network), "metric": r.Metric, "automatic": nil, "exclusive": nil, "comment": r.Comment}
 }
 
 // registryRoute converts a global registry entry into a planRoute.
@@ -43,8 +46,8 @@ func registryRoute(m obj) planRoute {
 }
 
 func registryEntry(r planRoute, owner, now string) obj {
-	return obj{"key": r.Key, "family": "ipv4", "network": r.Network, "prefix": r.Prefix, "mask": r.Mask, "interface": r.Iface,
-		"gatewayToken": "0.0.0.0", "metric": r.Metric, "automatic": nil, "comment": r.Comment, "createdByBROray": true,
+	return obj{"key": r.Key, "family": routeFamily(r.Network), "network": r.Network, "prefix": r.Prefix, "mask": r.Mask, "interface": r.Iface,
+		"gatewayToken": routeGateway(r.Network), "metric": r.Metric, "automatic": nil, "comment": r.Comment, "createdByBROray": true,
 		"managed": true, "routerCommentPersisted": false, "actualStatus": "present", "owners": []any{owner},
 		"createdAt": now, "updatedAt": now}
 }
@@ -84,7 +87,7 @@ func (e *engine) catalogValid(id string) bool {
 	for _, x := range routes {
 		m, _ := x.(obj)
 		p, ok := intOf(orNull(m, "prefix"))
-		if str(m, "family") != "ipv4" || str(m, "network") == "" || !ok || p < 1 || p > 32 {
+		if !ok || !validRouteNetwork(str(m, "family"), str(m, "network"), p) {
 			return false
 		}
 	}
@@ -100,6 +103,10 @@ func (e *engine) catalogValid(id string) bool {
 
 // networkAligned is the build-export alignment check.
 func networkAligned(network string, prefix int) bool {
+	if routeFamily(network) == "ipv6" {
+		p, ok := ipv6Prefix(network + "/" + strconv.Itoa(prefix))
+		return ok && p == p.Masked() && p.Addr().String() == network
+	}
 	n, ok := ipToNum(network)
 	if !ok || prefix < 1 || prefix > 32 {
 		return false
@@ -187,7 +194,7 @@ func (e *engine) runBuildExport(id string) (string, []planRoute, obj, error) {
 	for _, x := range list {
 		m, _ := x.(obj)
 		p, ok := intOf(orNull(m, "prefix"))
-		if str(m, "family") != "ipv4" || !ok || p < 1 || p > 32 {
+		if !ok || !validRouteNetwork(str(m, "family"), str(m, "network"), p) {
 			return "", nil, nil, cliErr("Каталог маршрутов повреждён.")
 		}
 		net := str(m, "network")
@@ -199,9 +206,13 @@ func (e *engine) runBuildExport(id string) (string, []planRoute, obj, error) {
 		if !networkAligned(net, p) {
 			return "", nil, nil, cliErr("Не удалось сформировать файл Keenetic.")
 		}
-		mask := maskString(p)
-		bat.WriteString("route add " + net + " mask " + mask + " 0.0.0.0 metric 1200 :: rem BROray\r\n")
-		routes = append(routes, planRoute{Key: routeKey(net, p, iface), Network: net, Prefix: p, Mask: mask, Iface: iface, Metric: managedMetric, Comment: "BROray"})
+		mask, metric := routeAttributes(net, p)
+		if routeFamily(net) == "ipv6" {
+			bat.WriteString("route -6 add " + d + " :: & rem BROray\r\n")
+		} else {
+			bat.WriteString("route add " + net + " mask " + mask + " 0.0.0.0 metric 1200 :: rem BROray\r\n")
+		}
+		routes = append(routes, planRoute{Key: routeKey(net, p, iface), Network: net, Prefix: p, Mask: mask, Iface: iface, Metric: metric, Comment: "BROray"})
 	}
 	norm, err := os.ReadFile(filepath.Join(cat, "normalized.txt"))
 	if err != nil || sha256Hex(norm) != contentSHA {
@@ -255,7 +266,7 @@ func (e *engine) ensureGlobalRegistry(iface string) bool {
 		for _, x := range routes {
 			m, _ := x.(obj)
 			k, ok := m["key"].(string)
-			if !ok || keys[k] || str(m, "interface") != iface || intOr(m["metric"], managedMetric) != managedMetric ||
+			if !ok || keys[k] || str(m, "interface") != iface || !managedRouteAttributes(m, managedMetric) ||
 				m["createdByBROray"] != true || m["managed"] != true || len(strList(m["owners"])) == 0 {
 				return false
 			}

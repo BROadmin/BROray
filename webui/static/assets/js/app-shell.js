@@ -24,7 +24,7 @@
     var routesSubmenu = null;
 
     function isRoutesPage(page) {
-        return page === "routes" || page === "routes-custom" || page === "routes-import";
+        return page === "routes" || page === "routes-custom" || page === "routes-import" || page === "routes-domains" || page === "routes-blocking";
     }
 
     function isMobile() {
@@ -112,6 +112,8 @@
         routesSubmenu.appendChild(createRouteSubLink("routes", "/routes.html", "Обзор", "status"));
         routesSubmenu.appendChild(createRouteSubLink("routes-custom", "/routes-custom.html", "Свои маршруты", "backup"));
         routesSubmenu.appendChild(createRouteSubLink("routes-import", "/routes-import.html", "Готовые маршруты", "integrations"));
+        routesSubmenu.appendChild(createRouteSubLink("routes-domains", "/routes-domains.html", "По доменам", "routes"));
+        routesSubmenu.appendChild(createRouteSubLink("routes-blocking", "/routes-blocking.html", "Блокировки", "status"));
 
         routeLink.parentNode.insertBefore(group, routeLink);
         row.appendChild(routeLink);

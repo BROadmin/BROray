@@ -27,6 +27,9 @@ func allowRouteCommand(cmd string) bool {
 		return true
 	}
 	f := strings.Split(cmd, " ")
+	if (len(f) == 4 && f[0] == "ipv6" && f[1] == "route") || (len(f) == 5 && f[0] == "no" && f[1] == "ipv6" && f[2] == "route") {
+		return keenetic.Allow(keenetic.AreaRoutes, cmd) == nil
+	}
 	if len(f) == 6 && f[0] == "ip" && f[1] == "route" && isIPv4Token(f[2]) && isIPv4Token(f[3]) && reProxy.MatchString(f[4]) && f[5] == "1200" {
 		return keenetic.Allow(keenetic.AreaRoutes, cmd) == nil
 	}
@@ -37,9 +40,17 @@ func allowRouteCommand(cmd string) bool {
 }
 
 func addCmd(r planRoute) string {
+	if routeFamily(r.Network) == "ipv6" {
+		return "ipv6 route " + r.dest() + " " + r.Iface
+	}
 	return "ip route " + r.Network + " " + r.Mask + " " + r.Iface + " 1200"
 }
-func removeCmd(r planRoute) string { return "no ip route " + r.Network + " " + r.Mask + " " + r.Iface }
+func removeCmd(r planRoute) string {
+	if routeFamily(r.Network) == "ipv6" {
+		return "no ipv6 route " + r.dest() + " " + r.Iface
+	}
+	return "no ip route " + r.Network + " " + r.Mask + " " + r.Iface
+}
 
 // runCommands sends one batch through the transport after the allowlist
 // check. It returns how many leading commands succeeded and the error of

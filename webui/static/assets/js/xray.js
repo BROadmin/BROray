@@ -682,14 +682,15 @@
             var payload = await request("/api/xray/diagnostics.cgi", {method: "GET"});
             var data = payload.data || {};
             var checks = Array.isArray(data.checks) ? data.checks : [];
-            var totals = data.summary || {};
+            var totals = {ok: 0, warning: 0, error: 0};
 
-            summary.textContent = "Успешно: " + (totals.ok || 0) +
-                " · Предупреждения: " + (totals.warning || 0) +
-                " · Ошибки: " + (totals.error || 0);
             list.textContent = "";
 
             checks.forEach(function (check) {
+                if (check.id === "real-device-test") return;
+                var status = check.status === "ok" || check.status === "error" ? check.status : "warning";
+                totals[status]++;
+
                 var item = document.createElement("div");
                 var indicator = document.createElement("span");
                 var copy = document.createElement("div");
@@ -697,7 +698,7 @@
                 var details = document.createElement("small");
 
                 item.className = "diagnostic-item";
-                indicator.className = "diagnostic-indicator diagnostic-" + (check.status || "warning");
+                indicator.className = "diagnostic-indicator diagnostic-" + status;
                 indicator.setAttribute("aria-hidden", "true");
                 title.textContent = check.title || check.id || "Проверка";
                 details.textContent = check.details || "";
@@ -708,9 +709,12 @@
                 list.appendChild(item);
             });
 
+            summary.textContent = "Успешно: " + totals.ok +
+                " · Предупреждения: " + totals.warning +
+                " · Ошибки: " + totals.error;
             window.BROrayUI.toast(
-                (totals.error || 0) === 0 ? "Диагностика завершена." : "Диагностика обнаружила ошибки.",
-                (totals.error || 0) === 0 ? "success" : "error"
+                totals.error === 0 ? "Диагностика завершена." : "Диагностика обнаружила ошибки.",
+                totals.error === 0 ? "success" : "error"
             );
         } catch (error) {
             window.BROrayUI.toast(errorMessage(error), "error");

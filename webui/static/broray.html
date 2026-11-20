@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-build-id="WebUI-3.5.8">
+<html lang="ru" data-build-id="WebUI-3.5.9-c5">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -7,22 +7,22 @@
     <meta name="theme-color" content="#0b1117">
     <meta name="robots" content="noindex,nofollow">
     <title>BROray — О программе</title>
-    <link rel="icon" href="/assets/images/branding/favicon.ico?v=WebUI-3.5.8-c2">
-    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png?v=WebUI-3.5.8-c2">
-    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.5.8-c2">
-    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.5.8-c2">
-    <link rel="manifest" href="/manifest.json?v=WebUI-3.5.8-c2">
-    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.8-c2">
-    <link rel="stylesheet" href="/assets/css/background-operations.css?v=WebUI-3.5.8-c2">
-    <script src="/assets/js/theme-init.js?v=WebUI-3.5.8-c2"></script>
+    <link rel="icon" href="/assets/images/branding/favicon.ico?v=WebUI-3.5.9-c5">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png?v=WebUI-3.5.9-c5">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.5.9-c5">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.5.9-c5">
+    <link rel="manifest" href="/manifest.json?v=WebUI-3.5.9-c5">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c5">
+    <link rel="stylesheet" href="/assets/css/background-operations.css?v=WebUI-3.5.9-c5-journal">
+    <script src="/assets/js/theme-init.js?v=WebUI-3.5.9-c5"></script>
 </head>
-<body class="app-body page-broray" data-page="broray" data-webui-build="WebUI-3.5.8">
+<body class="app-body page-broray" data-page="broray" data-webui-build="WebUI-3.5.9-c5">
     <div id="app" class="app-layout" hidden>
         <aside id="sidebar" class="sidebar" aria-label="Основная навигация">
             <div class="sidebar-header">
                 <a class="sidebar-brand" href="/home.html" aria-label="BROray — Главная">
                     <span class="sidebar-brand-mark" aria-hidden="true">
-                        <img class="sidebar-brand-image" src="/assets/images/branding/broray-logo-64.png?v=WebUI-3.5.8-c2" alt="" width="40" height="40">
+                        <img class="sidebar-brand-image" src="/assets/images/branding/broray-logo-64.png?v=WebUI-3.5.9-c5" alt="" width="40" height="40">
                     </span>
                     <span class="sidebar-brand-copy">
                         <strong>BROray</strong>
@@ -227,7 +227,7 @@
             </div>
             <span id="backup-state" class="status-badge status-neutral" data-icon="backup">Не проверено</span>
         </div>
-        <p class="section-note">В копию входят серверы, подписки, активный сервер, свои наборы маршрутов, выбор готовых наборов, DNS-over-TLS, автовыбор сервера и проверка качества. Квитанции Keenetic, журналы, сеансы, кэши и Xray в копию не входят.</p>
+        <p class="section-note">В копию входят серверы и их настройки DPI, подписки, активный сервер, резервирование и автовыбор, проверка качества, DNS-over-TLS, IP-маршруты, доменные правила и блокировки, выбранные геоданные и настройка их ежедневного обновления. Квитанции Keenetic, журналы, сеансы, кэши и исполняемый файл Xray в копию не входят.</p>
         <div class="broray-backup-grid">
             <div class="broray-backup-panel" aria-labelledby="backup-export-title">
                 <h3 id="backup-export-title">Скачать копию</h3>
@@ -364,7 +364,7 @@
                     </summary>
                     <div class="broray-support-panel">
                         <a class="support-qr-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer" aria-label="Открыть CloudTips для поддержки BROray">
-                            <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=WebUI-3.5.8-c2" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
+                            <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=WebUI-3.5.9-c5" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
                         </a>
                         <div class="broray-support-copy">
                             <p>Поддержка помогает оплачивать инфраструктуру, тестирование и выпуск обновлений BROray.</p>
@@ -394,13 +394,17 @@
         <div class="bg-actions"><button id="bg-stop-all" class="button button-warning" type="button">Остановить фоновые операции</button><button id="bg-resume" class="button button-secondary" type="button" hidden>Возобновить автоматику</button></div>
     </section>
     <section class="card bg-card" aria-labelledby="bg-journal-title">
-        <details id="bg-journal">
-        <summary class="section-heading"><div><span class="eyebrow">Диагностика</span><h2 id="bg-journal-title">Журнал BROray</h2></div><span id="bg-journal-badge" class="status-badge status-neutral">Загрузка</span><span class="bg-journal-chevron" aria-hidden="true">▸</span></summary>
-        <ul id="bg-events" class="bg-events" aria-live="polite"></ul>
-        <div class="bg-actions"><button id="bg-journal-refresh" class="button button-secondary" type="button">Обновить журнал</button><button id="bg-copy" class="button button-secondary" type="button">Скопировать диагностику</button><button id="bg-download" class="button button-secondary" type="button">Скачать диагностический отчёт</button></div>
-        <p id="bg-report-feedback" class="section-note" role="status" aria-live="polite"></p>
-        <textarea id="bg-report-copy" aria-label="Диагностика для копирования" readonly hidden></textarea>
-        </details>
+        <div class="section-heading bg-journal-heading">
+            <div><span class="eyebrow">Диагностика</span><h2 id="bg-journal-title">Журнал BROray</h2></div>
+            <span id="bg-journal-badge" class="status-badge status-warning" role="status" hidden></span>
+            <button id="bg-journal-toggle" class="button button-secondary" type="button" aria-controls="bg-journal" aria-expanded="false">Показать журнал</button>
+        </div>
+        <div id="bg-journal" hidden>
+            <ul id="bg-events" class="bg-events" aria-live="polite"></ul>
+            <div class="bg-actions"><button id="bg-journal-refresh" class="button button-secondary" type="button">Обновить журнал</button><button id="bg-copy" class="button button-secondary" type="button">Скопировать диагностику</button><button id="bg-download" class="button button-secondary" type="button">Скачать диагностический отчёт</button></div>
+            <p id="bg-report-feedback" class="section-note" role="status" aria-live="polite"></p>
+            <textarea id="bg-report-copy" aria-label="Диагностика для копирования" readonly hidden></textarea>
+        </div>
     </section>
 
     <section class="card broray-operation-card" aria-labelledby="operation-title">
@@ -482,7 +486,7 @@
             <h2 id="support-title">Помочь развитию BROray</h2>
             <div class="support-modal-content">
                 <a class="support-qr-link" href="https://pay.cloudtips.ru/p/09b23d0a" target="_blank" rel="noopener noreferrer" aria-label="Открыть CloudTips для поддержки BROray">
-                    <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=WebUI-3.5.8-c2" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
+                    <img class="support-qr-image" src="/assets/images/support/cloudtips-qr.svg?v=WebUI-3.5.9-c5" alt="QR-код CloudTips для поддержки BROray" width="220" height="220">
                 </a>
                 <div class="support-modal-copy">
                     <p id="support-message">BROray развивается как открытый проект. Поддержка помогает оплачивать инфраструктуру, тестирование и выпуск обновлений.</p>
@@ -514,12 +518,12 @@
         </section>
     </div>
 
-    <script src="/assets/js/common.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/icons.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/app-shell.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/theme.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/dialogs.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/broray.js?v=WebUI-3.5.8-c2"></script>
-    <script src="/assets/js/background-operations.js?v=WebUI-3.5.8-c2"></script>
+    <script src="/assets/js/common.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/icons.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/theme.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/dialogs.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/broray.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/background-operations.js?v=WebUI-3.5.9-c5-journal"></script>
 </body>
 </html>

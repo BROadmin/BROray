@@ -25,10 +25,14 @@ func init() { compat.Area("routes", 50, setup) }
 // still be able to remove the routes BROray installed.
 func setup(d *compat.Deps) error {
 	e := newEngine(d)
+	// Register even if preparation fails: saved policy must never disappear
+	// silently from active server configurations after an area setup error.
+	d.Svc.RoutesConfigureXray = e.configureRouting
 	perr := e.prepare()
 	setCurrent(e)
 	registerHandlers()
 	e.defineScheduleQueue()
+	e.defineGeodataQueue()
 	registerBackup(e)
 	if perr != nil {
 		return perr

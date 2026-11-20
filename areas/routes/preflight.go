@@ -15,7 +15,7 @@ const preflightTTL = 120
 // writePolicySHA binds preflight tokens to the static-route write grammar.
 // 3.x required a separately staged Keenetic write-policy carrier; in 3.5.0
 // the grammar is compiled into the binary (allowRouteCommand).
-var writePolicySHA = sha256Hex([]byte("static-routes\nip route <A.B.C.D> <mask> ProxyN 1200\nno ip route <A.B.C.D> <mask> ProxyN\nsystem configuration save\n"))
+var writePolicySHA = sha256Hex([]byte("static-routes\nip route <A.B.C.D> <mask> ProxyN 1200\nno ip route <A.B.C.D> <mask> ProxyN\nipv6 route <IPv6/prefix> ProxyN\nno ipv6 route <IPv6/prefix> ProxyN\nsystem configuration save\n"))
 
 // deletePlan is the in-process delete preflight plan
 // (routes-operation-preflight.sh:89-240).

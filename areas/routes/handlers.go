@@ -63,6 +63,8 @@ func registerHandlers() {
 		cgi.Register("/api/routes/stop.cgi", wrap(hStop), post, cgi.Status(202))
 		registerCustomHandlers()
 		registerScheduleHandlers()
+		registerPolicyHandlers()
+		registerGeodataScheduleHandlers()
 		compat.RegisterSnapshot("routes", func(ctx context.Context) (map[string]any, error) {
 			return current().homeSnapshot(ctx)
 		})

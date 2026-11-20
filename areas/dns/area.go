@@ -174,7 +174,7 @@ func (s *service) handleAutoSettings(c *cgi.Req) (any, error) {
 	if !compat.OriginAllowed(c.R) {
 		return nil, cgi.E(403, "ORIGIN_REJECTED", "Источник запроса не подтверждён.")
 	}
-	req, apiErr := readBody(c)
+	_, apiErr := readBody(c)
 	if apiErr != nil {
 		return nil, apiErr
 	}
@@ -184,10 +184,19 @@ func (s *service) handleAutoSettings(c *cgi.Req) (any, error) {
 	}
 	defer release()
 	op := s.d.Queue.StartOperation("", "dns_operation", "dot:auto-settings", "USER", "protected", "")
-	enabled, isBool := req["enabled"].(bool)
-	if len(req) != 1 || !isBool {
+	enabled, expected, err := decodeAutoSettingsChange(c.Body())
+	if err != nil {
 		op.Finish(errors.New("REQUEST_INVALID: Поле enabled должно быть логическим."))
 		return nil, cgi.E(400, "REQUEST_INVALID", "Поле enabled должно быть логическим.")
+	}
+	settings, valid := s.autoSettingsSnapshot()
+	if !valid {
+		op.Finish(errors.New("DOT_AUTO_SETTINGS_INVALID"))
+		return nil, cgi.E(500, "DOT_AUTO_SETTINGS_INVALID", "Текущие настройки автопроверки повреждены; состояние не изменено.")
+	}
+	if expected != "" && expected != autoSettingsRevision(settings) {
+		op.Finish(errors.New("DOT_SETTINGS_CHANGED"))
+		return nil, cgi.E(409, "DOT_SETTINGS_CHANGED", "Настройка автопроверки изменилась. Обновите состояние.")
 	}
 	op.Phase("committing")
 	if err := s.autoSave(enabled); err != nil {

@@ -9,8 +9,15 @@
     var formDirty = false;
     var formRevision = 0;
     var loadSequence = 0;
+    var formReady = false;
+    var confirmedEnabled = false;
+    var configRevision = null;
+    var formConfigRevision = null;
+    var writeInFlight = false;
+    var toggleUnknown = false;
 
-    function markFormDirty() {
+    function markFormDirty(event) {
+        if (event && event.target === element("quality-refresh-enabled")) return;
         formDirty = true;
         formRevision += 1;
     }
@@ -123,8 +130,9 @@
         var effectiveStatus = !enabled ? "disabled" : paused ? "paused"
             : !serviceKnown ? "unavailable" : !operational ? "stopped" : state.status || "scheduled";
 
+        confirmEnabled({value: config.enabled, revision: payload.revision});
         if (!formDirty) {
-            element("quality-refresh-enabled").checked = enabled;
+            formConfigRevision = payload.revision;
             element("quality-refresh-interval").value = String(
                 config.intervalMinutes || 60
             );
@@ -174,11 +182,14 @@
     }
 
     function loadStatus(showError, savedRevision) {
+        if (writeInFlight) return Promise.resolve();
         var sequence = ++loadSequence;
         return request(STATUS_URL, { method: "GET" }).then(function (payload) {
             if (sequence !== loadSequence) return;
             if (savedRevision === formRevision) formDirty = false;
             render(payload);
+            formReady = true;
+            syncWriteState();
         }).catch(function (error) {
             if (error.status === 401) {
                 BROrayUI.redirectToLogin();
@@ -197,15 +208,75 @@
         if (window.BROrayIcons) window.BROrayIcons.scan(button);
     }
 
+    function syncWriteState() {
+        var locked = writeInFlight || toggleUnknown || !formReady;
+        element("quality-refresh-enabled").disabled = locked;
+        element("quality-refresh-save").disabled = locked;
+        element("quality-refresh-enabled").setAttribute("aria-busy", writeInFlight ? "true" : "false");
+    }
+
+    function confirmEnabled(result) {
+        if (!result || typeof result.value !== "boolean" || typeof result.revision !== "string" || !result.revision) {
+            throw new Error("Состояние переключателя не подтверждено.");
+        }
+        confirmedEnabled = result.value;
+        configRevision = result.revision;
+        toggleUnknown = false;
+        element("quality-refresh-enabled").checked = confirmedEnabled;
+        syncWriteState();
+        syncIntervalState();
+    }
+
+    function saveEnabled() {
+        var wanted = element("quality-refresh-enabled").checked;
+        var beforeRevision = configRevision;
+        if (!formReady || writeInFlight || toggleUnknown) return;
+        writeInFlight = true;
+        ++loadSequence; // Invalidate a status request started before this write.
+        syncWriteState();
+        request("/api/servers/quality-refresh-enabled.cgi", {
+            method: "POST", body: {enabled: wanted, expectedRevision: configRevision}
+        }).then(function (result) {
+            confirmEnabled(result);
+            if (formConfigRevision === beforeRevision) formConfigRevision = result.revision;
+            BROrayUI.toast(wanted ? "Автопроверка качества включён." : "Автопроверка качества выключен.", "success");
+        }).catch(function (error) {
+            var explicit = error.status >= 400 && error.status < 500 && error.payload && error.payload.success === false;
+            BROrayUI.toast(errorMessage(error), "error");
+            if (explicit && error.status !== 409) {
+                element("quality-refresh-enabled").checked = confirmedEnabled;
+                if (error.status === 401) BROrayUI.redirectToLogin();
+                return;
+            }
+            // Network/5xx errors can follow a committed write; never replay it.
+            return request(STATUS_URL, {method: "GET"}).then(function (payload) {
+                confirmEnabled({value: payload.config && payload.config.enabled, revision: payload.revision});
+            }).catch(function () {
+                toggleUnknown = true;
+                element("quality-refresh-enabled").checked = confirmedEnabled;
+                BROrayUI.toast("Состояние не подтверждено. Ожидаем обновления; повторная запись заблокирована.", "error");
+            });
+        }).then(function () {
+            writeInFlight = false;
+            syncWriteState();
+            if (!toggleUnknown) loadStatus(false);
+        });
+    }
+
     function saveSettings(event) {
         var payload;
         var savedRevision = formRevision;
         event.preventDefault();
+        if (!formReady || writeInFlight || toggleUnknown) return;
         payload = {
-            enabled: element("quality-refresh-enabled").checked,
+            enabled: confirmedEnabled,
+            expectedRevision: formConfigRevision,
             intervalMinutes: Number(element("quality-refresh-interval").value)
         };
+        writeInFlight = true;
+        ++loadSequence;
         setSaving(true);
+        syncWriteState();
         request(SAVE_URL, { method: "POST", body: payload }).then(function () {
             BROrayUI.toast(
                 payload.enabled
@@ -213,11 +284,17 @@
                     : "Автоматическая проверка качества выключена.",
                 "success"
             );
+            writeInFlight = false;
             return loadStatus(false, savedRevision);
         }).catch(function (error) {
             BROrayUI.toast(errorMessage(error), "error");
+            writeInFlight = false;
+            toggleUnknown = true;
+            return loadStatus(true);
         }).then(function () {
+            writeInFlight = false;
             setSaving(false);
+            syncWriteState();
         });
     }
 
@@ -265,8 +342,9 @@
         form.addEventListener("change", markFormDirty);
         element("quality-refresh-enabled").addEventListener(
             "change",
-            syncIntervalState
+            saveEnabled
         );
+        syncWriteState();
         document.addEventListener("visibilitychange", onVisibilityChange);
         loadStatus(true).then(schedulePolling);
     }

@@ -16,12 +16,16 @@ import (
 	"syscall"
 	"time"
 
+	keeneticArea "github.com/BROadmin/broray/areas/keenetic"
+	"github.com/BROadmin/broray/areas/servers"
 	"github.com/BROadmin/broray/internal/app"
 	"github.com/BROadmin/broray/internal/compat"
 	"github.com/BROadmin/broray/internal/control"
 	"github.com/BROadmin/broray/internal/keenetic"
 	"github.com/BROadmin/broray/internal/platform"
 	"github.com/BROadmin/broray/internal/web"
+	"github.com/BROadmin/broray/modules/reserve"
+	"github.com/BROadmin/broray/modules/routepolicy"
 )
 
 // devVerifierOverride is set only by the dev build tag (dev_auth.go).
@@ -96,8 +100,60 @@ func runDaemon(root platform.Root) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	deps := compat.NewDeps(ctx, a)
-	if err := deps.Lock.ReconcileDaemonXray(root, lock); err != nil {
-		logger.Printf("startup ownership check: %v", err)
+	deps.DaemonGuard = lock
+	// Restore an interrupted reserve decision before any area's background
+	// work can start a child or reconcile the interface against partial state.
+	pendingReserve, pendingProfile, reserveErr := reserve.PendingTransactions(ctx, root)
+	if reserveErr == nil && pendingReserve && pendingProfile {
+		reserveErr = reserve.ErrTransactionUnconfirmed
+	}
+	if reserveErr == nil {
+		reserveErr = reserve.CheckProbeWorkspaces(root)
+	}
+	// A selection journal must be checked against its owner before a stale
+	// DPI owner can be reconciled without a profile journal.
+	if reserveErr == nil && !pendingReserve {
+		reserveErr = deps.Lock.ReconcileDaemonDPI(root, lock, pendingProfile, func() error {
+			recoveryCtx, cancel := context.WithTimeout(compat.WithFence(ctx), 90*time.Second)
+			defer cancel()
+			if err := servers.RecoverDPIProfile(recoveryCtx, deps, lock); err != nil {
+				return err
+			}
+			if pending, err := reserve.TransactionPending(recoveryCtx, root); err != nil || pending {
+				return errors.Join(reserve.ErrTransactionUnconfirmed, err)
+			}
+			return nil
+		})
+	}
+	if reserveErr == nil {
+		reserveErr = deps.Lock.ReconcileDaemonReserve(root, lock, pendingReserve, func() error {
+			recoveryCtx, cancel := context.WithTimeout(compat.WithFence(ctx), 60*time.Second)
+			defer cancel()
+			return reserve.RecoverTransaction(recoveryCtx, root, lock, func(ctx context.Context, record reserve.TransactionRecord, current []byte) error {
+				return keeneticArea.RestoreReserveInterface(ctx, deps, lock, record, current)
+			})
+		})
+	}
+	if reserveErr == nil {
+		if pending, err := reserve.TransactionPending(ctx, root); err != nil || pending {
+			reserveErr = errors.Join(reserve.ErrTransactionUnconfirmed, err)
+		}
+	}
+	if reserveErr != nil {
+		logger.Printf("reserve recovery required; startup retained pending state: %v", reserveErr)
+		return 1
+	}
+	xrayOwnershipErr := deps.Lock.ReconcileDaemonXray(root, lock)
+	pendingPolicy, err := routepolicy.RecoveryPending(ctx, root)
+	if err != nil {
+		logger.Printf("policy journal check: %v", err)
+		return 1
+	}
+	if err := deps.Lock.ReconcileDaemonPolicy(root, lock, pendingPolicy, func() error {
+		return routepolicy.RecoverPolicy(ctx, root, lock)
+	}); err != nil {
+		logger.Printf("policy recovery aborted startup: %v", errors.Join(xrayOwnershipErr, err))
+		return 1
 	}
 	// Register all area endpoints before opening the listener.
 	if err := compat.StartAreas(deps); err != nil {

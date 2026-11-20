@@ -1058,6 +1058,9 @@ func Validate(rec Record, label string) error {
 }
 
 func validate(rec Record, label string) *ParseError {
+	if err := validateDPIRecord(rec); err != nil {
+		return err
+	}
 	if has(rec, "importProfile") {
 		return validateUnavailableProfile(rec)
 	}

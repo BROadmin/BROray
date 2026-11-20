@@ -439,7 +439,7 @@
         if (!notice) return;
         if (ipv6 && ipv6.state === "global") {
             notice.textContent = typeof ipv6.warning === "string" && ipv6.warning ? ipv6.warning
-                : "На роутере включён IPv6: сервисы с IPv6-адресами могут работать мимо BROray (наборы маршрутов только IPv4).";
+                : "На роутере включён IPv6: трафик вне настроенных IPv6-маршрутов может идти мимо BROray.";
             notice.title = Array.isArray(ipv6.wan) && ipv6.wan.length ? "Интерфейсы с IPv6: " + ipv6.wan.join(", ") : "";
             notice.hidden = false;
         } else {

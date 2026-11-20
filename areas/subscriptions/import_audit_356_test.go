@@ -3,7 +3,6 @@ package subscriptions
 // Audit regressions from 2026-11-12. All endpoints, credentials and profiles
 // are invented. These test requirements, not acceptance of the released build.
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -167,7 +166,7 @@ func TestAudit356WithdrawalAndFailureBoundaries(t *testing.T) {
 				}
 			}
 			before := snapshotAutoCatalog355(t, e)
-			res, err := e.s.syncCatalog(context.Background(), subX, stageLinks(t, true, "trojan://pw@b.example:443#B"), true, "audit", "replace")
+			res, err := e.s.syncCatalog(sourceRefreshContext(), subX, stageLinks(t, true, "trojan://pw@b.example:443#B"), true, "audit", "replace")
 			if err != nil || res.Removed != 1 || servers.RecordExists(e.d, removed) {
 				t.Fatalf("withdrawal: %+v %v", res, err)
 			}
@@ -177,8 +176,12 @@ func TestAudit356WithdrawalAndFailureBoundaries(t *testing.T) {
 					t.Fatal("manual/other subscription changed")
 				}
 			}
-			if active && servers.ActiveID(e.d) != "" {
-				t.Fatal("removed active pointer retained")
+			if active {
+				id := servers.ActiveID(e.d)
+				replacement, readErr := servers.ReadRecord(e.d, id)
+				if id == "" || id == removed || readErr != nil || !belongsTo(replacement, subX) || replacement["address"] != "b.example" {
+					t.Fatal("active replacement is not from refreshed subscription", readErr)
+				}
 			}
 		})
 	}

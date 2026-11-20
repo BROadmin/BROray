@@ -50,6 +50,12 @@ func (s *svc) handleAutoSwitchSave(c *cgi.Req) (any, error) {
 	if !ok {
 		return nil, cgi.E(400, "INVALID_JSON", "Тело запроса должно быть объектом JSON.")
 	}
+	if expected, present := body["expectedRevision"]; present {
+		cur, _ := readObjectFile(autoSwitchFile(s.d))
+		if revision, ok := expected.(string); !ok || revision != autoSwitchRevision(cur) {
+			return nil, cgi.E(409, "SETTINGS_CHANGED", "Настройки изменились. Обновите состояние.")
+		}
+	}
 	enabled := jqText(body, "enabled")
 	threshold := jqText(body, "failureThreshold")
 	cooldown := jqText(body, "cooldownMinutes")
@@ -129,8 +135,19 @@ func (s *svc) handleQualityRefreshSave(c *cgi.Req) (any, error) {
 	body, ok := decodeBody(c)
 	_, enOK := body["enabled"].(bool)
 	_, ivOK := num(body["intervalMinutes"])
-	if !ok || len(body) != 2 || !enOK || !ivOK {
+	expected, hasRevision := body["expectedRevision"]
+	fields := 2
+	if hasRevision {
+		fields++
+	}
+	if !ok || len(body) != fields || !enOK || !ivOK {
 		return nil, cgi.E(400, "INVALID_JSON", "Ожидались поля enabled и intervalMinutes.")
+	}
+	if hasRevision {
+		cur, _ := readObjectFile(autoSwitchFile(s.d))
+		if revision, ok := expected.(string); !ok || revision != autoSwitchRevision(cur) {
+			return nil, cgi.E(409, "SETTINGS_CHANGED", "Настройки изменились. Обновите состояние.")
+		}
 	}
 	interval := jqText(body, "intervalMinutes")
 	if !in(interval, "30", "60", "180", "360") {
@@ -257,7 +274,7 @@ func (s *svc) handleAutoSwitchStatus(c *cgi.Req) (any, error) {
 			logTail = t
 		}
 	}
-	return map[string]any{"config": cfg, "state": s.publicState(), "monitor": monitor, "service": s.serviceStatus(),
+	return map[string]any{"config": cfg, "revision": autoSwitchRevision(cfg), "state": s.publicState(), "monitor": monitor, "service": s.serviceStatus(),
 		"connectionMonitor": map[string]any{"running": s.monitorRunning.Load(), "pid": pid},
 		"automation":        map[string]any{"paused": s.d.Queue.Paused(), "complete": true},
 		"logTail":           logTail, "checkedAt": compat.Stamp(s.now())}, nil
@@ -265,7 +282,8 @@ func (s *svc) handleAutoSwitchStatus(c *cgi.Req) (any, error) {
 
 func (s *svc) handleQualityRefreshStatus(c *cgi.Req) (any, error) {
 	config := map[string]any{"enabled": false, "intervalMinutes": 60, "updatedAt": nil}
-	if m, ok := readObjectFile(autoSwitchFile(s.d)); ok {
+	m, ok := readObjectFile(autoSwitchFile(s.d))
+	if ok {
 		en, _ := m["qualityRefreshEnabled"].(bool)
 		iv := any(int64(60))
 		if v := m["qualityRefreshIntervalMinutes"]; jsonEq(v, 30) || jsonEq(v, 60) || jsonEq(v, 180) || jsonEq(v, 360) {
@@ -277,6 +295,6 @@ func (s *svc) handleQualityRefreshStatus(c *cgi.Req) (any, error) {
 	if st, ok := s.publicState().(map[string]any); ok {
 		state = alt(st["qualityRefresh"], nil)
 	}
-	return map[string]any{"config": config, "state": state, "service": s.serviceStatus(),
+	return map[string]any{"config": config, "revision": autoSwitchRevision(m), "state": state, "service": s.serviceStatus(),
 		"automation": map[string]any{"paused": s.d.Queue.Paused(), "complete": true}, "checkedAt": compat.Stamp(s.now())}, nil
 }

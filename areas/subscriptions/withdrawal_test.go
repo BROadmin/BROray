@@ -31,10 +31,10 @@ func TestSyncActiveWithdrawal(t *testing.T) {
 		t.Fatalf("partial: %+v %v", r, err)
 	}
 	r, err = e.sync(t, "replace", "trojan://pw@b.example:443#B")
-	if err != nil || r.Removed != 1 || r.Total != 1 || r.Impact != "removed-disconnected" {
+	if err != nil || r.Removed != 1 || r.Total != 1 || r.Impact != "removed-replaced" {
 		t.Fatalf("withdrawal: %+v %v", r, err)
 	}
-	if servers.ActiveID(e.d) != "" || len(liveIDs(t, e)) != 1 || len(r.Warnings) != 1 {
+	if servers.ActiveID(e.d) == "" || servers.ActiveID(e.d) == id || len(liveIDs(t, e)) != 1 || len(r.Warnings) != 0 {
 		t.Fatal("inconsistent withdrawal")
 	}
 	if _, err := os.Stat(servers.QualityPath(e.d, id)); !os.IsNotExist(err) {

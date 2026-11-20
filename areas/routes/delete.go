@@ -266,7 +266,7 @@ func (e *engine) runDelete(ctx context.Context, id, opID string) (string, error)
 	managedKeys := strList(breg["managedRouteKeys"])
 	for _, k := range managedKeys {
 		m, ok := regByKey[k]
-		if !ok || str(m, "interface") != iface || intOr(m["metric"], 0) != managedMetric || m["createdByBROray"] != true || m["managed"] != true || !owns(m) {
+		if !ok || str(m, "interface") != iface || !managedRouteAttributes(m, 0) || m["createdByBROray"] != true || m["managed"] != true || !owns(m) {
 			return errOut("Реестр владения не подтверждает все управляемые маршруты.")
 		}
 	}
@@ -353,7 +353,8 @@ func (e *engine) runDelete(ctx context.Context, id, opID string) (string, error)
 			if r.Iface != iface {
 				return d.failOut("План удаления вышел за пределы " + iface + ".")
 			}
-			if r.Metric != managedMetric {
+			_, expectedMetric := routeAttributes(r.Network, r.Prefix)
+			if r.Metric != expectedMetric {
 				return d.failOut("План удаления содержит чужую метрику.")
 			}
 			cmds[i] = removeCmd(r)
