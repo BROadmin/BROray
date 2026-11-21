@@ -37,31 +37,18 @@
 <p>Для обновления и переустановки используйте WebUI BROray. <a href="/broray/update/">Перейти к обновлению</a>.</p>
 </section>
 
-<h2 id="requirements">1. Подготовьте роутер</h2>
-<p>Подключитесь к домашней сети. Убедитесь, что Entware работает и на разделе <code>/opt</code> свободно не менее 60 МиБ. Для подключения VPN нужен компонент KeeneticOS «Клиент прокси». Администратор Keenetic используется для входа в WebUI, а для установки нужны права root в Entware. <a href="/broray/reference/#keeneticos-components">Требования и компоненты KeeneticOS</a>.</p>
-<p>Если Entware ещё нет, сначала установите его по инструкции производителя для вашей модели. <a href="https://support.keenetic.com/hero/kn-1011/en/20980-installing-the-entware-repository-on-a-usb-drive.html">Пример для Keenetic</a> · <a href="https://support.netcraze.ru/ultra/nc-1812/ru/20980-installing-the-entware-repository-on-a-usb-drive.html">Пример для Netcraze</a>.</p>
-<h2 id="web-terminal">2. Откройте терминал Entware</h2>
-<p>Откройте SSH-сеанс Entware или штатный веб-терминал Keenetic. Для веб-терминала нужен компонент «Интерфейс командной строки в браузере» и доступ OPKG для вашей учётной записи. Из приглашения <code>(config)&gt;</code> выполните <code>exec sh</code>. Продолжайте, когда открылась оболочка Entware. Команда <code>id -u</code> должна вывести 0.</p>
-<h2 id="models">3. Выберите сборку</h2>
-<p>Выполните <code>opkg print-architecture</code>. Выберите код сборки по архитектуре Entware. В списке ищите строку архитектуры устройства, например aarch64-3.10. Запись all обозначает общие пакеты. <a href="/broray/reference/#architectures">Архитектуры и модели роутеров</a>.</p>
-<div class="table-wrap"><table><thead><tr><th scope="col">Архитектура Entware</th><th scope="col">Код сборки</th></tr></thead><tbody>
-<tr><td>ARM64 (AArch64)</td><td><code>aarch64</code></td></tr>
-<tr><td>ARMv7, 32 бита</td><td><code>armv7</code></td></tr>
-<tr><td>MIPS Little Endian</td><td><code>mipsel</code></td></tr>
-<tr><td>MIPS Big Endian</td><td><code>mips</code></td></tr>
-</tbody></table></div>
-<h2 id="install">4. Скачайте и установите BROray</h2>
-<p>Если <code>curl</code> отсутствует или на роутере нет актуальных корневых сертификатов, выполните <code>opkg update</code>, затем <code>opkg install curl ca-bundle ca-certificates</code>. В первой строке следующего блока укажите выбранный код сборки. Запустите весь блок в терминале роутера.</p>
-<pre><code>arch=aarch64
-(
+
+<h2 id="requirements">Перед началом</h2>
+<p>Подключитесь к домашней сети. На роутере нужны работающий Entware, 60 МиБ свободного места в <code>/opt</code> и компонент «Клиент прокси». <a href="/broray/reference/#keeneticos-components">Как проверить компоненты KeeneticOS</a>.</p>
+<details class="advanced"><summary>Если Entware ещё не установлен</summary><p>Выберите инструкцию производителя для вашей модели. <a href="https://support.keenetic.com/hero/kn-1011/en/20980-installing-the-entware-repository-on-a-usb-drive.html">Пример для Keenetic</a> · <a href="https://support.netcraze.ru/ultra/nc-1812/ru/20980-installing-the-entware-repository-on-a-usb-drive.html">Пример для Netcraze</a>.</p></details>
+<h2 id="web-terminal">1. Откройте терминал Entware</h2>
+<p>В веб-терминале Keenetic выполните <code>exec sh</code> из приглашения <code>(config)&gt;</code>. Если входите по SSH в Entware, войдите как <code>root</code>.</p>
+<details class="advanced"><summary>Если терминал или загрузка не работают</summary><p>Для веб-терминала нужны компонент «Интерфейс командной строки в браузере» и доступ OPKG для вашей учётной записи. Команда <code>id -u</code> должна показать <code>0</code>. Если отсутствует <code>curl</code> или проверка сертификата не проходит, выполните <code>opkg update</code>, затем <code>opkg install curl ca-bundle ca-certificates</code>.</p></details>
+<h2 id="models">2. Найдите модель и скопируйте команду</h2>
+<p>Раскройте свою группу, нажмите «Скопировать» и вставьте команду целиком в терминал. Она скачает нужный архив, проверит его и установит BROray.</p>
+<div id="install">
+<details class="advanced" id="install-aarch64"><summary>ARM64 · KN-1012, KN-1811, KN-1812, KN-2312, KN-2710, KN-3811, KN-3812, KN-4110, NC-1812</summary><div class="light-code-block"><button type="button" class="copy">Скопировать</button><pre><code>(
 set -eu
-case &quot;$arch&quot; in
-  aarch64) expected=46d8b63c6e06c90d15c1b0da4e6eddff7fe890310b037b684682413b9d2d2a90 ;;
-  armv7) expected=06d44afdb843fc6e888b944371506124ea39d4c0353aaee2d3c60f3aeffd3c57 ;;
-  mipsel) expected=147cd9146fc86e06600859ab7adc3a707367dc428bab98ce1ac0325e627986c1 ;;
-  mips) expected=6040bac59483f52db4fd64ee5b22ca729571478c94f225d4326ad80b90ec3452 ;;
-  *) echo &#x27;Выберите архитектуру из таблицы.&#x27; &gt;&amp;2; exit 1 ;;
-esac
 if [ -e /opt/bin/broray ] || [ -L /opt/bin/broray ]; then
   echo &#x27;BROray уже установлен. Откройте инструкцию обновления.&#x27; &gt;&amp;2
   exit 1
@@ -69,18 +56,67 @@ fi
 work=&quot;$(mktemp -d /tmp/broray-install.XXXXXX)&quot;
 trap &#x27;rm -rf -- &quot;$work&quot;&#x27; EXIT
 cd &quot;$work&quot;
-bundle=&quot;broray-3.5.9-${arch}-r9.tar.gz&quot;
+bundle=&quot;broray-3.5.9-aarch64-r9.tar.gz&quot;
 curl --proto &#x27;=https&#x27; --tlsv1.2 -fS --connect-timeout 15 --max-time 300 -o &quot;$bundle&quot; &quot;https://api.brovibe.cloud/releases/broray/channels/stable/$bundle&quot;
-printf &#x27;%s  %s\n&#x27; &quot;$expected&quot; &quot;$bundle&quot; | sha256sum -c -
+printf &#x27;%s  %s\n&#x27; &#x27;46d8b63c6e06c90d15c1b0da4e6eddff7fe890310b037b684682413b9d2d2a90&#x27; &quot;$bundle&quot; | sha256sum -c -
 tar -xzf &quot;$bundle&quot;
-&quot;./broray-3.5.9-${arch}/broray&quot; installer install
-/opt/bin/broray version
+&quot;./broray-3.5.9-aarch64/broray&quot; installer install
 /opt/bin/broray ctl ping
-)</code></pre>
-<p>Если команда вернула ошибку, сохраните её текст и остановитесь на этом шаге. При несовпадении SHA-256 или архитектуры повторно сверяйте архив и модель. Если на роутере осталась ветка 3.2, сохраните данные и разберите её состояние до первой установки 3.5. <a href="/broray/troubleshooting/">Решение проблем установки и входа</a>.</p>
+)</code></pre></div></details>
+<details class="advanced" id="install-mipsel"><summary>MIPS Little Endian · KN-1011, KN-1810, KN-1910, KN-1912, KN-1913, KN-2310, KN-2311, KN-2910, KN-3810, NC-1913</summary><div class="light-code-block"><button type="button" class="copy">Скопировать</button><pre><code>(
+set -eu
+if [ -e /opt/bin/broray ] || [ -L /opt/bin/broray ]; then
+  echo &#x27;BROray уже установлен. Откройте инструкцию обновления.&#x27; &gt;&amp;2
+  exit 1
+fi
+work=&quot;$(mktemp -d /tmp/broray-install.XXXXXX)&quot;
+trap &#x27;rm -rf -- &quot;$work&quot;&#x27; EXIT
+cd &quot;$work&quot;
+bundle=&quot;broray-3.5.9-mipsel-r9.tar.gz&quot;
+curl --proto &#x27;=https&#x27; --tlsv1.2 -fS --connect-timeout 15 --max-time 300 -o &quot;$bundle&quot; &quot;https://api.brovibe.cloud/releases/broray/channels/stable/$bundle&quot;
+printf &#x27;%s  %s\n&#x27; &#x27;147cd9146fc86e06600859ab7adc3a707367dc428bab98ce1ac0325e627986c1&#x27; &quot;$bundle&quot; | sha256sum -c -
+tar -xzf &quot;$bundle&quot;
+&quot;./broray-3.5.9-mipsel/broray&quot; installer install
+/opt/bin/broray ctl ping
+)</code></pre></div></details>
+<details class="advanced" id="install-mips"><summary>MIPS Big Endian · KN-2112, KN-2410, KN-3610</summary><div class="light-code-block"><button type="button" class="copy">Скопировать</button><pre><code>(
+set -eu
+if [ -e /opt/bin/broray ] || [ -L /opt/bin/broray ]; then
+  echo &#x27;BROray уже установлен. Откройте инструкцию обновления.&#x27; &gt;&amp;2
+  exit 1
+fi
+work=&quot;$(mktemp -d /tmp/broray-install.XXXXXX)&quot;
+trap &#x27;rm -rf -- &quot;$work&quot;&#x27; EXIT
+cd &quot;$work&quot;
+bundle=&quot;broray-3.5.9-mips-r9.tar.gz&quot;
+curl --proto &#x27;=https&#x27; --tlsv1.2 -fS --connect-timeout 15 --max-time 300 -o &quot;$bundle&quot; &quot;https://api.brovibe.cloud/releases/broray/channels/stable/$bundle&quot;
+printf &#x27;%s  %s\n&#x27; &#x27;6040bac59483f52db4fd64ee5b22ca729571478c94f225d4326ad80b90ec3452&#x27; &quot;$bundle&quot; | sha256sum -c -
+tar -xzf &quot;$bundle&quot;
+&quot;./broray-3.5.9-mips/broray&quot; installer install
+/opt/bin/broray ctl ping
+)</code></pre></div></details>
+<details class="advanced" id="install-armv7"><summary>ARMv7 · только для подтверждённого Entware ARMv7</summary><div class="light-code-block"><button type="button" class="copy">Скопировать</button><pre><code>(
+set -eu
+if [ -e /opt/bin/broray ] || [ -L /opt/bin/broray ]; then
+  echo &#x27;BROray уже установлен. Откройте инструкцию обновления.&#x27; &gt;&amp;2
+  exit 1
+fi
+work=&quot;$(mktemp -d /tmp/broray-install.XXXXXX)&quot;
+trap &#x27;rm -rf -- &quot;$work&quot;&#x27; EXIT
+cd &quot;$work&quot;
+bundle=&quot;broray-3.5.9-armv7-r9.tar.gz&quot;
+curl --proto &#x27;=https&#x27; --tlsv1.2 -fS --connect-timeout 15 --max-time 300 -o &quot;$bundle&quot; &quot;https://api.brovibe.cloud/releases/broray/channels/stable/$bundle&quot;
+printf &#x27;%s  %s\n&#x27; &#x27;06d44afdb843fc6e888b944371506124ea39d4c0353aaee2d3c60f3aeffd3c57&#x27; &quot;$bundle&quot; | sha256sum -c -
+tar -xzf &quot;$bundle&quot;
+&quot;./broray-3.5.9-armv7/broray&quot; installer install
+/opt/bin/broray ctl ping
+)</code></pre></div></details>
+</div>
+<details class="advanced" id="other-models"><summary>Если модели нет в списке</summary><p>Выполните <code>opkg print-architecture</code> и выберите группу по архитектуре Entware. <a href="/broray/reference/#architectures">Таблица архитектур</a>.</p></details>
+<p>Если установка завершилась ошибкой, сохраните её текст и проверьте причину. <a href="/broray/troubleshooting/">Решение проблем</a>.</p>
 <section id="remote-webui" aria-labelledby="remote-webui-heading">
-<h2 id="remote-webui-heading">5. Войдите в WebUI</h2>
-<p>Откройте BROray по локальному адресу роутера с портом 8080, например <code>http://192.168.1.1:8080/</code>. Войдите с логином и паролем администратора Keenetic. В WebUI проверьте состояние Xray. Затем добавьте сервер или подписку, проверьте выбранный сервер и нажмите «Подключить». <a href="/broray/scenarios/#first-server">Как подключить первый сервер</a>.</p>
+<h2 id="remote-webui-heading">3. Откройте BROray</h2>
+<p>Откройте в браузере адрес роутера с портом <code>8080</code>, например <code>http://192.168.1.1:8080/</code>. Войдите с логином и паролем администратора Keenetic. <a href="/broray/scenarios/#first-server">Подключение первого сервера</a>.</p>
 <p>Для входа через KeenDNS проверьте внешний адрес в блоке доступа к WebUI на странице «Keenetic». <a href="/broray/scenarios/#keendns">Настройка доступа через KeenDNS</a>.</p>
 </section>
 <p><a href="https://github.com/BROadmin/BROray/releases/tag/v3.5.9">Архивы и подписи на GitHub</a> · <a href="/broray/faq/">FAQ BROray</a></p>
