@@ -1,0 +1,22 @@
+name: FAQ static contracts
+
+on:
+  pull_request:
+    paths:
+      - 'site/docs.brovibe.cloud/**'
+      - 'tests/test_docs_faq.py'
+      - '.github/workflows/faq-static-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  faq-contracts:
+    name: FAQ links, anchors and checksums
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate static FAQ and deploy manifest
+        run: python3 tests/test_docs_faq.py -v
