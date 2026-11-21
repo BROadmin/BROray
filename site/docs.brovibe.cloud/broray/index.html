@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BROray 3.5.9</title>
-<meta name="description" content="Доменные списки Keenetic, резервирование VPN и исправления подписок.">
+<meta name="description" content="Штатная маршрутизация по доменам в Keenetic, резервирование VPN, подписки и диагностика.">
 <link rel="canonical" href="https://docs.brovibe.cloud/broray/">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -31,14 +31,14 @@
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/" aria-current="page">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
 <main class="content" id="content">
 <style>.content [id]{scroll-margin-top:6rem}@media(max-width:760px){.content [id]{scroll-margin-top:13rem}}</style>
-<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.9 · Stable</p><h1>BROray 3.5.9</h1><p class="lead">Доменные списки Keenetic, резервирование VPN и исправления подписок.</p></div></section>
-<div class="note"><span class="note-title">BROray 3.5.9 в Stable</span>Обновите установленную версию 3.5 через WebUI. <a href="/broray/start/">Как обновиться</a> · <a href="/broray/releases/#release-3-5-9">Что изменилось</a>.</div>
+<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.9 r9 · Stable</p><h1>BROray 3.5.9</h1><p class="lead">Штатная маршрутизация по доменам в Keenetic, резервирование VPN, подписки и диагностика.</p></div></section>
+<div class="note"><span class="note-title">BROray 3.5.9 r9 в Stable</span>Обновите установленную версию 3.5 через WebUI. <a href="/broray/start/">Как обновиться</a> · <a href="/broray/releases/#release-3-5-9">Что изменилось</a>.</div>
 
-<p>BROray прошёл испытания на моделях KN-1811, KN-1812, KN-2312, KN-2710, KN-3811, KN-3812, NC-1812. <a href="/broray/reference/#architectures">Сборки и модели</a>.</p>
+<p>В разных выпусках BROray испытан на моделях KN-1811, KN-1812, KN-2312, KN-2710, KN-3811, KN-3812, NC-1812. <a href="/broray/reference/#architectures">Сборки и модели</a>.</p>
 
 <h2 id="getting-started">С чего начать</h2>
 
-<section class="task-entry"><div class="task-grid"><a class="task-card task-card-primary" href="/broray/start/"><span>01</span><strong>Установить BROray</strong><p>Модели роутеров, подключение к Entware и готовые команды.</p></a><a class="task-card " href="/broray/scenarios/"><span>02</span><strong>Настроить подключение</strong><p>Сервер, подписка, маршруты, DNS и KeenDNS по шагам.</p></a><a class="task-card " href="/broray/maintenance/"><span>03</span><strong>Обслужить приложение</strong><p>Обновление 3.5, резервные копии и восстановление.</p></a><a class="task-card task-card-problem" href="/broray/troubleshooting/"><span>!</span><strong>Решить проблему</strong><p>Найдите симптом и начните с проверки состояния.</p></a></div></section>
+<section class="task-entry"><div class="task-grid"><a class="task-card task-card-primary" href="/broray/start/"><span>01</span><strong>Обновить BROray</strong><p>Обновление 3.5 и переустановка текущей ревизии через WebUI.</p></a><a class="task-card " href="/broray/scenarios/"><span>02</span><strong>Настроить подключение</strong><p>Сервер, подписка, маршруты, DNS и KeenDNS по шагам.</p></a><a class="task-card " href="/broray/maintenance/"><span>03</span><strong>Обслужить приложение</strong><p>Обновление 3.5, резервные копии и восстановление.</p></a><a class="task-card task-card-problem" href="/broray/troubleshooting/"><span>!</span><strong>Решить проблему</strong><p>Найдите симптом и начните с проверки состояния.</p></a></div></section>
 
 <h2 id="changes">Основа ветки 3.5: изменения 3.5.0</h2>
 
@@ -46,7 +46,7 @@
 
 <h2 id="features">Возможности BROray</h2>
 
-<ul><li><strong>Серверы:</strong> импорт ссылок, поддерживаемых JSON-профилей и WireGuard INI, качество, проверка активного подключения и резерв.</li><li><strong>Подписки:</strong> автоматическое обнаружение JSON/Clash по основной ссылке, импорт списков URI, Xray JSON и Clash YAML, расписание и сведения провайдера при их наличии.</li><li><strong>Маршруты:</strong> 12 готовых наборов и свои наборы с предварительной проверкой и контролем общих записей.</li><li><strong>DNS-over-TLS:</strong> проверка выбранных DNS и сохранение внешних записей.</li><li><strong>Xray и Keenetic:</strong> версии ядра, совместимость, ProxyN, UDP на поддерживаемой прошивке и KeenDNS.</li><li><strong>Обслуживание:</strong> подписанное обновление, восстановление и резервные копии; повседневная работа через WebUI.</li></ul>
+<ul><li><strong>Серверы:</strong> импорт ссылок, поддерживаемых JSON-профилей и WireGuard INI, качество, проверка активного подключения и резерв.</li><li><strong>Подписки:</strong> дополнительные выгрузки JSON и Clash по настройкам подписки, импорт списков URI, Xray JSON и Clash YAML, расписание и сведения провайдера при их наличии.</li><li><strong>Маршруты:</strong> 12 готовых наборов и свои наборы с предварительной проверкой и контролем общих записей.</li><li><strong>DNS-over-TLS:</strong> проверка выбранных DNS и сохранение внешних записей.</li><li><strong>Xray и Keenetic:</strong> версии ядра, совместимость, ProxyN, UDP на поддерживаемой прошивке и KeenDNS.</li><li><strong>Обслуживание:</strong> подписанное обновление, восстановление и резервные копии; повседневная работа через WebUI.</li></ul>
 
 <h2 id="installation">Установка и совместимость</h2>
 
