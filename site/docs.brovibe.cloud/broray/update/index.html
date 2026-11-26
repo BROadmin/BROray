@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Обновление BROray через WebUI</title>
-<meta name="description" content="Обновление на BROray 3.5.9 выполняется через WebUI установленной версии 3.5.0–3.5.8. Обновитель скачивает сборку для вашего роутера из подписанного канала Stable.">
+<meta name="description" content="Порядок обновления на BROray 3.5.10 через WebUI и проверка после установки.">
 <link rel="canonical" href="https://docs.brovibe.cloud/broray/update/">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -30,13 +30,17 @@
 </header>
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/update/" aria-current="page">Обновление</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/faq/">FAQ</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
 <main class="content" id="content">
-<div class="note"><p><strong>Обновление до BROray 3.5.10</strong></p><p><a href="/broray/releases/3.5.10/#update">Открыть инструкцию 3.5.10</a>. Ниже сохранено руководство для версии 3.5.9.</p></div>
-<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.9 r9 · Stable</p><h1>Обновление BROray через WebUI</h1><p class="lead">Обновление с 3.5.0–3.5.8 и переустановка текущей версии 3.5.9.</p></div></section>
+<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.10 r15 · Stable</p><h1>Обновление BROray через WebUI</h1><p class="lead">Как обновиться с 3.5.9 и проверить VPN после установки 3.5.10.</p></div></section>
 <p>Если BROray на роутере ещё нет, <a href="/broray/start/">начните с первой установки</a>.</p>
 <section id="update-351" aria-labelledby="update-359-heading"><h2 id="update-359-heading">Как обновиться через WebUI</h2>
-<p>Обновление на BROray 3.5.9 выполняется через WebUI установленной версии 3.5.0–3.5.8. Обновитель скачивает сборку для вашего роутера из подписанного канала Stable.</p>
-<ol><li>Откройте действующий WebUI и перейдите на страницу <strong>BROray</strong>.</li><li>Скачайте резервную копию настроек.</li><li>Нажмите <strong>Проверить обновление</strong> и убедитесь, что предлагается <strong>3.5.9</strong>.</li><li>Нажмите <strong>Установить обновление</strong>. Дождитесь завершения, войдите снова и проверьте версию на странице <strong>BROray</strong>.</li></ol><p>Если уже установлена <strong>3.5.9</strong>, скачайте резервную копию настроек. Затем откройте <strong>BROray → Проверить обновление → Переустановить текущую версию</strong>. Эта команда устанавливает актуальную ревизию <strong>r9</strong> из Stable. После завершения войдите снова и проверьте активное подключение. Если используете резервирование VPN, проверьте его состояние на странице «Серверы».</p><p>Встроенное обновление доступно для ветки 3.5. Переход с 3.2 через WebUI не поддерживается.</p></section>
-<section id="remote-webui" aria-labelledby="remote-webui-heading"><h2 id="remote-webui-heading">Где открыть WebUI</h2><p>Используйте привычный адрес BROray в домашней сети или адрес KeenDNS. Для входа нужны данные администратора роутера.</p><p>Если у BROray ещё нет отдельного адреса KeenDNS, откройте локальный WebUI и включите адрес в блоке доступа к WebUI на странице «Keenetic». Проверьте внешний адрес, пока локальная страница открыта. <a href="/broray/scenarios/#keendns">Как открыть BROray через KeenDNS</a>.</p></section><p><a href="https://github.com/BROadmin/BROray/blob/main/docs/USER-GUIDE-3.5.9.md">Руководство со скриншотами</a> · <a href="https://github.com/BROadmin/BROray/releases/download/v3.5.9/broray-3.5.9-guide.zip">Офлайн-гайд к исходному выпуску</a> · <a href="https://github.com/BROadmin/BROray/releases/tag/v3.5.9">Релиз на GitHub</a></p>
+
+<p>Обновитель скачивает сборку для вашей архитектуры из подписанного Stable и проверяет её.</p>
+<ol><li>Откройте страницу <strong>BROray</strong> в WebUI и скачайте резервную копию настроек.</li>
+<li>Нажмите <strong>Проверить обновление</strong>. Если предлагается <strong>3.5.10</strong>, нажмите <strong>Установить обновление</strong>.</li>
+<li>Дождитесь завершения, войдите снова и проверьте <strong>3.5.10 r15</strong> на странице <strong>BROray</strong>. На странице <strong>Серверы</strong> проверьте активный VPN и резервирование.</li></ol>
+<p>Если уже установлена 3.5.10, кнопка <strong>Переустановить текущую версию</strong> позволяет установить доступную ревизию из Stable.</p>
+<p>Встроенное обновление доступно в ветке 3.5. При переходе с 3.2 воспользуйтесь <a href="/broray/start/#from-32">инструкцией по подготовке к чистой установке</a>.</p></section>
+<section id="remote-webui" aria-labelledby="remote-webui-heading"><h2 id="remote-webui-heading">Где открыть WebUI</h2><p>Используйте привычный адрес BROray в домашней сети или адрес KeenDNS. Для входа нужны данные администратора роутера.</p><p>Если у BROray ещё нет отдельного адреса KeenDNS, откройте локальный WebUI и включите адрес в блоке доступа к WebUI на странице «Keenetic». Проверьте внешний адрес, пока локальная страница открыта. <a href="/broray/scenarios/#keendns">Как открыть BROray через KeenDNS</a>.</p></section><p><a href="/broray/releases/3.5.10/">Руководство по 3.5.10</a> · <a href="https://github.com/BROadmin/BROray/releases/tag/v3.5.10">Релиз на GitHub</a></p>
 </main></div>
 <footer class="site-footer"><div class="footer-inner">
 <span>BROvibe Docs · BROray · Обновление</span>

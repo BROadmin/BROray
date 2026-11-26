@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BROray 3.5.9</title>
-<meta name="description" content="Штатная маршрутизация по доменам в Keenetic, резервирование VPN, подписки и диагностика.">
+<title>BROray 3.5.10</title>
+<meta name="description" content="Быстрая настройка VPN, проверка домена и IP, маршруты и резервирование.">
 <link rel="canonical" href="https://docs.brovibe.cloud/broray/">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -31,14 +31,14 @@
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/" aria-current="page">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/update/">Обновление</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/faq/">FAQ</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
 <main class="content" id="content">
 <style>.content [id]{scroll-margin-top:6rem}@media(max-width:760px){.content [id]{scroll-margin-top:13rem}}</style>
-<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.9 r9 · Stable</p><h1>BROray 3.5.9</h1><p class="lead">Штатная маршрутизация по доменам в Keenetic, резервирование VPN, подписки и диагностика.</p></div></section>
-<div class="note"><span class="note-title">BROray 3.5.9 r9 в Stable</span>Обновите установленную версию 3.5 через WebUI. <a href="/broray/update/">Как обновиться</a> · <a href="/broray/releases/#release-3-5-9">Что изменилось</a>.</div>
+<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.10 r15 · Stable</p><h1>BROray 3.5.10</h1><p class="lead">Быстрая настройка VPN, проверка домена и IP, маршруты и резервирование.</p></div></section>
+<div class="note"><span class="note-title">BROray 3.5.10 r15 в Stable</span>Обновите установленную версию 3.5 через WebUI. <a href="/broray/update/">Как обновиться</a> · <a href="/broray/releases/#release-3-5-10">Что изменилось</a>.</div>
 
 <p>В разных выпусках BROray испытан на моделях KN-1811, KN-1812, KN-2312, KN-2710, KN-3811, KN-3812, NC-1812. <a href="/broray/reference/#architectures">Сборки и модели</a>.</p>
 
 <h2 id="getting-started">С чего начать</h2>
 
-<section class="task-entry"><div class="task-grid"><a class="task-card task-card-primary" href="/broray/start/"><span>01</span><strong>Установить BROray</strong><p>Первая установка 3.5.9 r9 через Entware.</p></a><a class="task-card " href="/broray/scenarios/"><span>02</span><strong>Настроить подключение</strong><p>Сервер, подписка, маршруты, DNS и KeenDNS по шагам.</p></a><a class="task-card " href="/broray/maintenance/"><span>03</span><strong>Обслужить приложение</strong><p>Обновление 3.5, резервные копии и восстановление.</p></a><a class="task-card task-card-problem" href="/broray/troubleshooting/"><span>!</span><strong>Решить проблему</strong><p>Найдите симптом и начните с проверки состояния.</p></a></div></section>
+<section class="task-entry"><div class="task-grid"><a class="task-card task-card-primary" href="/broray/start/"><span>01</span><strong>Установить BROray</strong><p>Первая установка в две строки через Entware.</p></a><a class="task-card " href="/broray/scenarios/"><span>02</span><strong>Настроить подключение</strong><p>Сервер, подписка, маршруты, DNS и KeenDNS по шагам.</p></a><a class="task-card " href="/broray/maintenance/"><span>03</span><strong>Обслужить приложение</strong><p>Обновление 3.5, резервные копии и восстановление.</p></a><a class="task-card task-card-problem" href="/broray/troubleshooting/"><span>!</span><strong>Решить проблему</strong><p>Найдите симптом и начните с проверки состояния.</p></a></div></section>
 
 <h2 id="changes">Основа ветки 3.5: изменения 3.5.0</h2>
 
@@ -52,7 +52,7 @@
 
 <p>Для обновления через WebUI Stable содержит сборки ARM64, ARMv7, MIPS LE и MIPS. Сборка выбирается автоматически. <a href="/broray/reference/">Требования и ограничения</a>.</p>
 
-<p><a href="/broray/update/">Обновить BROray до 3.5.9 через WebUI</a> · <a href="https://github.com/BROadmin/BROray/releases/tag/v3.5.9">Релиз на GitHub</a> · <a href="https://docs.brovibe.cloud/broray/releases/">История всех версий</a>.</p>
+<p><a href="/broray/update/">Обновить BROray до 3.5.10 через WebUI</a> · <a href="https://github.com/BROadmin/BROray/releases/tag/v3.5.10">Релиз на GitHub</a> · <a href="https://docs.brovibe.cloud/broray/releases/">История всех версий</a>.</p>
 
 <section id="subscription-options-357"><h2>JSON и Clash по выбору</h2><p>В настройках каждой подписки есть независимые переключатели «Дополнительно загружать JSON» и «Дополнительно загружать Clash». Оба по умолчанию выключены, в том числе у прежних подписок без этих настроек. Включите нужные форматы до обновления, если хотите получать явно объявленные дополнительные выгрузки того же источника. Прямая ссылка на JSON или Clash работает независимо от этих переключателей.</p></section></main></div>
 <footer class="site-footer"><div class="footer-inner">

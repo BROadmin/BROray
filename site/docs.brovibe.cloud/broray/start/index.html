@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Установка BROray 3.5.9 r9 — по шагам</title>
+<title>Установка BROray 3.5.10 — по шагам</title>
 <meta name="description" content="Выберите свою модель, откройте Entware через браузер или SSH, скопируйте готовую команду и войдите в WebUI BROray.">
 <link rel="canonical" href="https://docs.brovibe.cloud/broray/start/">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
@@ -30,9 +30,8 @@
 </header>
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/" aria-current="page">Установка</a><a href="/broray/update/">Обновление</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/faq/">FAQ</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
 <main class="content" id="content">
-<div class="note"><p><strong>Установка BROray 3.5.10</strong></p><p><a href="/broray/releases/3.5.10/#install">Открыть инструкцию 3.5.10</a>. Ниже сохранено руководство для версии 3.5.9.</p></div>
 <style>.content [id]{scroll-margin-top:6rem}@media(max-width:760px){.content [id]{scroll-margin-top:13rem}}</style>
-<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.9 r9 · Stable</p><h1>Установка BROray 3.5.9 r9 — по шагам</h1><p class="lead">Выберите свою модель, откройте Entware через браузер или SSH, скопируйте готовую команду и войдите в знакомый WebUI BROray.</p></div></section>
+<section class="page-hero"><div><p class="eyebrow">BROray · 3.5.10 r15 · Stable</p><h1>Установка BROray 3.5.10 — по шагам</h1><p class="lead">Подготовьте Keenetic или Netcraze, вставьте две строки в терминал Entware и откройте WebUI.</p></div></section>
 <section id="update-351" aria-labelledby="update-359-heading"><h2 id="update-359-heading">Если уже установлена версия 3.5</h2><p>Обновление и переустановка выполняются через WebUI BROray. <a href="/broray/update/">Перейти к обновлению</a>.</p></section>
 <div class="note"><span class="note-title">Переход с 3.2 — только чистой установкой</span>Сначала сохраните ссылки серверов, URL подписок и свои наборы маршрутов. Обновитель и резервная копия 3.2 не предназначены для перехода на 3.5. Entware вручную не удаляйте.</div>
 
@@ -99,112 +98,21 @@
 
 <p>Если opkg завершился ошибкой или не найден, сначала исправьте Entware либо подключение к нему; к следующему шагу пока не переходите.</p>
 
-<h2 id="models">4. Найдите свою модель и выполните её команду</h2>
 
-<p>Скопируйте <strong>один</strong> блок под группой со своим номером KN или NC. Внутри ничего менять не нужно: команда скачивает архив, сверяет SHA-256 и запускает установщик с проверкой окружения. При несовпадении архитектуры или хеша выполнение остановится.</p>
-
-<div class="table-wrap"><table><thead><tr><th scope="col">Модель на наклейке</th><th scope="col">Ниже используйте</th></tr></thead><tbody><tr><td>KN-1012, KN-1811, KN-1812, KN-2312, KN-2710, KN-3811, KN-3812, KN-4110, NC-1812</td><td><a href="#install-aarch64">Команду для первой группы — aarch64</a></td></tr><tr><td>KN-1011, KN-1810, KN-1910, KN-1912, KN-1913, KN-2310, KN-2311, KN-2910, KN-3810, NC-1913</td><td><a href="#install-mipsel">Команду для второй группы — mipsel</a></td></tr><tr><td>KN-2112, KN-2410, KN-3610</td><td><a href="#install-mips">Команду для DSL-группы — mips</a></td></tr></tbody></table></div>
-
+<h2 id="models">4. Установите BROray 3.5.10</h2>
 <span id="install"></span>
-<h3 id="install-aarch64">Первая группа: KN-1012, KN-1811, KN-1812, KN-2312, KN-2710, KN-3811, KN-3812, KN-4110, NC-1812</h3>
+<p>Запустите обе строки в оболочке Entware с правами root. Команда сверит SHA-256 скрипта и архива. Вторая строка использует файл, который скачала первая.</p>
+<p>Скопируйте обе строки и вставьте их в терминал Entware.</p>
+<pre><button class="copy" type="button" aria-label="Скопировать команды установки BROray">Скопировать</button><code>broray_install_dir=; broray_install_dir=$(mktemp -d /tmp/broray-script.XXXXXXXX) &amp;&amp; curl -q -fL --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --connect-timeout 15 --max-time 120 -o &#34;$broray_install_dir/install-broray.sh&#34; &#39;https://github.com/BROadmin/BROray/releases/download/v3.5.10/install-broray.sh&#39; || { if [ -n &#34;$broray_install_dir&#34; ]; then rm -f &#34;$broray_install_dir/install-broray.sh&#34;; rmdir &#34;$broray_install_dir&#34;; fi; unset broray_install_dir; (exit 1); }
+( set -eu; : &#34;${broray_install_dir:?Сначала скачайте скрипт первой строкой}&#34;; trap &#39;rm -f &#34;$broray_install_dir/install-broray.sh&#34;; rmdir &#34;$broray_install_dir&#34;&#39; 0; actual=$(sha256sum &#34;$broray_install_dir/install-broray.sh&#34;); [ &#34;${actual%% *}&#34; = &#39;5d12705dc637ecc52b71d40e4efe451f03758491034ab5ba4917865a689f91ae&#39; ] || { printf &#39;%s\n&#39; &#39;SHA-256 скрипта не совпал.&#39; &gt;&amp;2; exit 1; }; /opt/bin/ash &#34;$broray_install_dir/install-broray.sh&#34; )
+</code></pre>
 
-<p>Готовая команда для aarch64. Скопируйте весь блок:</p>
-
-<div class="code-block"><button class="copy" type="button">Скопировать</button><pre><code>(
-set -eu
-if [ -e /opt/bin/broray ] || [ -L /opt/bin/broray ]; then
-  echo &#x27;BROray уже установлен. Откройте инструкцию обновления.&#x27; &gt;&amp;2
-  exit 1
-fi
-work=&quot;$(mktemp -d /tmp/broray-install.XXXXXX)&quot;
-trap &#x27;rm -rf -- &quot;$work&quot;&#x27; EXIT
-cd &quot;$work&quot;
-bundle=&quot;broray-3.5.9-aarch64-r9.tar.gz&quot;
-curl --proto &#x27;=https&#x27; --tlsv1.2 -fS --connect-timeout 15 --max-time 300 -o &quot;$bundle&quot; &quot;https://api.brovibe.cloud/releases/broray/channels/stable/$bundle&quot;
-printf &#x27;%s  %s\n&#x27; &#x27;46d8b63c6e06c90d15c1b0da4e6eddff7fe890310b037b684682413b9d2d2a90&#x27; &quot;$bundle&quot; | sha256sum -c -
-tar -xzf &quot;$bundle&quot;
-&quot;./broray-3.5.9-aarch64/broray&quot; installer install
-/opt/bin/broray ctl ping
-)</code></pre></div>
-
-<p><strong>Viva KN-1913 и NC-1913:</strong> используйте сборку <code>mipsel</code>. По подтверждению владельца от 15 ноября 2026 года обе модели протестированы полностью. Архитектура указана в инструкциях производителя для <a href="https://support.keenetic.com/skipper/kn-1913/en/20980-installing-the-entware-repository-on-a-usb-drive.html">KN-1913</a> и <a href="https://support.netcraze.ru/viva/nc-1913/en/20980-installing-the-entware-repository-on-a-usb-drive.html">NC-1913</a>.</p>
-
-<h3 id="install-mipsel">Вторая группа: KN-1011, KN-1810, KN-1910, KN-1912, KN-1913, KN-2310, KN-2311, KN-2910, KN-3810, NC-1913</h3>
-
-<p>Готовая команда для mipsel. Скопируйте весь блок:</p>
-
-<div class="code-block"><button class="copy" type="button">Скопировать</button><pre><code>(
-set -eu
-if [ -e /opt/bin/broray ] || [ -L /opt/bin/broray ]; then
-  echo &#x27;BROray уже установлен. Откройте инструкцию обновления.&#x27; &gt;&amp;2
-  exit 1
-fi
-work=&quot;$(mktemp -d /tmp/broray-install.XXXXXX)&quot;
-trap &#x27;rm -rf -- &quot;$work&quot;&#x27; EXIT
-cd &quot;$work&quot;
-bundle=&quot;broray-3.5.9-mipsel-r9.tar.gz&quot;
-curl --proto &#x27;=https&#x27; --tlsv1.2 -fS --connect-timeout 15 --max-time 300 -o &quot;$bundle&quot; &quot;https://api.brovibe.cloud/releases/broray/channels/stable/$bundle&quot;
-printf &#x27;%s  %s\n&#x27; &#x27;147cd9146fc86e06600859ab7adc3a707367dc428bab98ce1ac0325e627986c1&#x27; &quot;$bundle&quot; | sha256sum -c -
-tar -xzf &quot;$bundle&quot;
-&quot;./broray-3.5.9-mipsel/broray&quot; installer install
-/opt/bin/broray ctl ping
-)</code></pre></div>
-
-<h3 id="install-mips">DSL-группа: KN-2112, KN-2410, KN-3610</h3>
-
-<p>Готовая команда для mips. Скопируйте весь блок:</p>
-
-<div class="code-block"><button class="copy" type="button">Скопировать</button><pre><code>(
-set -eu
-if [ -e /opt/bin/broray ] || [ -L /opt/bin/broray ]; then
-  echo &#x27;BROray уже установлен. Откройте инструкцию обновления.&#x27; &gt;&amp;2
-  exit 1
-fi
-work=&quot;$(mktemp -d /tmp/broray-install.XXXXXX)&quot;
-trap &#x27;rm -rf -- &quot;$work&quot;&#x27; EXIT
-cd &quot;$work&quot;
-bundle=&quot;broray-3.5.9-mips-r9.tar.gz&quot;
-curl --proto &#x27;=https&#x27; --tlsv1.2 -fS --connect-timeout 15 --max-time 300 -o &quot;$bundle&quot; &quot;https://api.brovibe.cloud/releases/broray/channels/stable/$bundle&quot;
-printf &#x27;%s  %s\n&#x27; &#x27;6040bac59483f52db4fd64ee5b22ca729571478c94f225d4326ad80b90ec3452&#x27; &quot;$bundle&quot; | sha256sum -c -
-tar -xzf &quot;$bundle&quot;
-&quot;./broray-3.5.9-mips/broray&quot; installer install
-/opt/bin/broray ctl ping
-)</code></pre></div>
-
-<p>Соответствие KN-моделей архитектурам приведено по <a href="https://support.keenetic.com/hero/kn-1011/en/69806-installation-of-the-asterisk-ip-pbx-opkg-package.html">данным Keenetic</a>. NC-1812 добавлена по подтверждённой на устройстве архитектуре aarch64 и успешной чистой установке 3.5.0. BROray прошёл испытания на моделях KN-1811, KN-1812, KN-1913, KN-2312, KN-2710, KN-3811, KN-3812, NC-1812, NC-1913. Перечень относится к испытаниям BROray в целом; объём проверок конкретных выпусков указан в отчётах о приёмке. Требование 60 МиБ свободного места действует для всех групп.</p>
-
-<h3 id="other-models">Если вашей модели нет в списке</h3>
-
-<p>Не выбирайте соседний номер или похожее название наугад. В Entware выполните:</p>
-
-<div class="code-block"><button class="copy" type="button">Скопировать</button><pre><code>opkg print-architecture</code></pre></div>
-
-<p><code>aarch64-…</code> соответствует первой группе; <code>mipsel-…</code> — второй; <code>mips-…</code> — DSL-группе. При <code>armv7-…</code> используйте дополнительный блок ниже. Если определить результат не удалось, сообщите поддержке модель и этот вывод; пароли и ссылки подписок не нужны.</p>
-
-<h3 id="install-armv7">Дополнительная команда: только для Entware armv7</h3>
-
-<p>Используйте этот блок только при подтверждённом <code>armv7-…</code>. Список моделей для этой группы не подтверждён; аппаратные испытания не заявляются.</p>
-
-<div class="code-block"><button class="copy" type="button">Скопировать</button><pre><code>(
-set -eu
-if [ -e /opt/bin/broray ] || [ -L /opt/bin/broray ]; then
-  echo &#x27;BROray уже установлен. Откройте инструкцию обновления.&#x27; &gt;&amp;2
-  exit 1
-fi
-work=&quot;$(mktemp -d /tmp/broray-install.XXXXXX)&quot;
-trap &#x27;rm -rf -- &quot;$work&quot;&#x27; EXIT
-cd &quot;$work&quot;
-bundle=&quot;broray-3.5.9-armv7-r9.tar.gz&quot;
-curl --proto &#x27;=https&#x27; --tlsv1.2 -fS --connect-timeout 15 --max-time 300 -o &quot;$bundle&quot; &quot;https://api.brovibe.cloud/releases/broray/channels/stable/$bundle&quot;
-printf &#x27;%s  %s\n&#x27; &#x27;06d44afdb843fc6e888b944371506124ea39d4c0353aaee2d3c60f3aeffd3c57&#x27; &quot;$bundle&quot; | sha256sum -c -
-tar -xzf &quot;$bundle&quot;
-&quot;./broray-3.5.9-armv7/broray&quot; installer install
-/opt/bin/broray ctl ping
-)</code></pre></div>
-
+<span id="install-aarch64"></span><span id="install-mipsel"></span><span id="install-mips"></span><span id="install-armv7"></span>
+<h3 id="other-models">Как проверить архитектуру Entware</h3>
+<p>Установщик сам выбирает ARM64, ARMv7, MIPS или MIPSEL. Проверить архитектуру можно командой <code>opkg print-architecture</code>. Если модель вам неизвестна, сверьте код KN или NC на роутере и откройте <a href="/broray/reference/#architectures">таблицу моделей и сборок</a>.</p>
 <h2 id="result">5. Дождитесь результата</h2>
 
-<p>Не закрывайте терминал, пока идёт установка. При успехе команда <code>ctl ping</code> вернёт <code>success:true</code>. Команда установки не перезагружает роутер. Xray скачивается при первом запуске; дождитесь окончания загрузки по статусу в WebUI.</p>
+<p>Не закрывайте терминал, пока идёт установка. При успехе установщик выводит <code>BROray 3.5.10</code>. Для дополнительной проверки запустите <code>/opt/bin/broray ctl ping</code>. Команда установки не перезагружает роутер. Xray скачивается при первом запуске; дождитесь окончания загрузки по статусу в WebUI.</p>
 
 <div class="table-wrap"><table><thead><tr><th scope="col">Что вы видите</th><th scope="col">Что делать</th></tr></thead><tbody><tr><td><code>INSTALL_SPACE_REQUIRED</code></td><td>Обеспечить 60 МиБ свободного места на накопителе Entware. Не обходить проверку.</td></tr><tr><td><code>INSTALL_LEGACY_PRESENT</code></td><td>Завершить штатное удаление прежнего BROray. При ошибке старого удалителя остановиться и разобрать причину.</td></tr><tr><td><code>INSTALL_ARCH_MISMATCH</code> или <code>Exec format error</code></td><td>Сверить номер модели и результат <code>opkg print-architecture</code>.</td></tr><tr><td>Ошибка curl / сертификата / SHA-256</td><td>Не продолжать вручную. Проверить интернет, время и сертификаты; сохранить ошибку для поддержки.</td></tr><tr><td><code>opkg: not found</code> или <code>(config)&gt;</code></td><td>Проверить доступ к Entware и переход <code>exec sh</code> по шагу 2.</td></tr></tbody></table></div>
 
@@ -235,17 +143,13 @@ tar -xzf &quot;$bundle&quot;
 <p>Это требование нового механизма NDW4, а не общее ограничение всех старых версий KeeneticOS и авторизации NDW2. <a href="/broray/troubleshooting/#keeneticos-52-short-password">В Keenetic войти получается, а в BROray — нет: порядок действий и ошибки 502/503</a>.</p>
 </div>
 
-<ol><li>Введите имя и пароль <strong>администратора Keenetic или Netcraze</strong>. Здесь нужны данные основной панели роутера, а не root и пароль Entware.</li><li>Если открылась старая страница 3.2, выполните принудительное обновление <strong>Ctrl+F5</strong>; в Firefox также доступно <strong>Ctrl+Shift+R</strong>. Затем на странице «BROray» убедитесь, что установлена 3.5.9. При необходимости откройте адрес в новой приватной вкладке.</li><li>Откройте «Серверы», импортируйте свою ссылку и активируйте подключение. Либо добавьте ссылку в «Подписках», обновите подписку и выберите её сервер.</li><li>Нажмите «Проверить» у активного сервера. Затем выберите нужный способ маршрутизации. <a href="/broray/webui/#routes">Разделы маршрутов</a>. Выбор трафика устройств определяется маршрутами и политиками роутера.</li></ol>
+<ol><li>Введите имя и пароль <strong>администратора Keenetic или Netcraze</strong>. Здесь нужны данные основной панели роутера, а не root и пароль Entware.</li><li>Если открылась старая страница 3.2, выполните принудительное обновление <strong>Ctrl+F5</strong>; в Firefox также доступно <strong>Ctrl+Shift+R</strong>. Затем на странице «BROray» проверьте версию 3.5.10 и ревизию r15. При необходимости откройте адрес в новой приватной вкладке.</li><li>Откройте <strong>Быстрая настройка</strong>. Мастер примет ключ сервера или ссылку на подписку, проверит подключение и поможет установить первый набор маршрутов. <a href="/broray/releases/3.5.10/#setup">Как запустить мастер</a>.</li><li>Нажмите «Проверить» у активного сервера. Затем выберите нужный способ маршрутизации. <a href="/broray/webui/#routes">Разделы маршрутов</a>. Выбор трафика устройств определяется маршрутами и политиками роутера.</li></ol>
 
 <p>После чистой установки список серверов пуст. Xray может быть установлен, но остановлен до выбора сервера и создания его конфигурации; это ожидаемое состояние. Данные 3.2 автоматически не переносятся. После перезапуска или обновления BROray потребуется повторный вход.</p>
 
-<h2 id="manual-verification">Если хотите скачать файлы вручную</h2>
 
-<p>Все архивы, манифест, подпись и открытый ключ доступны в <a href="https://github.com/BROadmin/BROray/releases/tag/v3.5.9">релизе 3.5.9</a>. В готовых командах закреплены SHA-256 из подписанного манифеста. Дополнительная проверка подписи возможна на ПК с minisign:</p>
-
-<div class="code-block"><button class="copy" type="button">Скопировать</button><pre><code>minisign -Vm manifest-r9.json -P RWTcmO2pPYr+FgTRMQHzWjGQeJcTF/iJZQSIQF353UWJUfYEOjaMJgX5 -x manifest-r9.json.minisig</code></pre></div>
-
-<p>Закрытый ключ для установки не нужен. Подпись относится к манифесту с хешами архивов. Архив с несовпавшим хешем не распаковывают и не запускают.</p>
+<h2 id="manual-verification">Архивы и подписанный манифест</h2>
+<p><a href="https://github.com/BROadmin/BROray/releases/tag/v3.5.10">Архивы и SHA256SUMS для 3.5.10</a> доступны на GitHub. Обновитель использует <a href="https://api.brovibe.cloud/releases/broray/channels/stable/manifest.json">манифест Stable</a> и <a href="https://api.brovibe.cloud/releases/broray/channels/stable/manifest.json.sig">отдельную подпись</a>. <a href="https://github.com/BROadmin/BROray/blob/368facc20463db379313e5f619e0a960f943b1da/docs/installation.md">Архивная инструкция 3.5.9</a>.</p>
 
 </main></div>
 <footer class="site-footer"><div class="footer-inner">
