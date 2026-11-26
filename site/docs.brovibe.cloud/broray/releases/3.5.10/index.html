@@ -53,12 +53,12 @@
     <p>Понадобится Keenetic или Netcraze с Entware, компонентом KeeneticOS «Клиент прокси» и минимум 60 МиБ свободного места в <code>/opt</code>. Поддерживаются ARM64, ARMv7, MIPS и MIPSEL.</p>
     <ol class="steps">
       <li>Откройте оболочку Entware с правами root. В веб-терминале KeeneticOS сначала выполните <code>exec sh</code>.</li>
-      <li>Выполните две строки команды 3.5.10 по порядку. Первая загружает скрипт, вторая проверяет его SHA-256 и запускает. Скрипт сам подбирает архив по архитектуре и проверяет его.</li>
+      <li>Выполните две строки в одном сеансе Entware. Первая задаёт Stable и GitHub, вторая скачивает скрипт, сверяет его SHA-256 и запускает. Установщик выбирает архив по архитектуре и сверяет SHA-256. При сбое загрузки или несовпадении хеша Stable используется GitHub.</li>
       <li>Откройте WebUI по локальному адресу роутера с портом 8080, например <code>http://192.168.1.1:8080/</code>. Войдите как администратор Keenetic.</li>
     </ol>
     <p>Скопируйте обе строки и вставьте их в терминал Entware.</p>
-<pre><button class="copy" type="button" aria-label="Скопировать команды установки BROray">Скопировать</button><code>broray_install_dir=; broray_install_dir=$(mktemp -d /tmp/broray-script.XXXXXXXX) &amp;&amp; curl -q -fL --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --connect-timeout 15 --max-time 120 -o &#34;$broray_install_dir/install-broray.sh&#34; &#39;https://github.com/BROadmin/BROray/releases/download/v3.5.10/install-broray.sh&#39; || { if [ -n &#34;$broray_install_dir&#34; ]; then rm -f &#34;$broray_install_dir/install-broray.sh&#34;; rmdir &#34;$broray_install_dir&#34;; fi; unset broray_install_dir; (exit 1); }
-( set -eu; : &#34;${broray_install_dir:?Сначала скачайте скрипт первой строкой}&#34;; trap &#39;rm -f &#34;$broray_install_dir/install-broray.sh&#34;; rmdir &#34;$broray_install_dir&#34;&#39; 0; actual=$(sha256sum &#34;$broray_install_dir/install-broray.sh&#34;); [ &#34;${actual%% *}&#34; = &#39;5d12705dc637ecc52b71d40e4efe451f03758491034ab5ba4917865a689f91ae&#39; ] || { printf &#39;%s\n&#39; &#39;SHA-256 скрипта не совпал.&#39; &gt;&amp;2; exit 1; }; /opt/bin/ash &#34;$broray_install_dir/install-broray.sh&#34; )
+<pre><button class="copy" type="button" aria-label="Скопировать команды установки BROray">Скопировать</button><code>export BRORAY_REPOS=&#x27;https://api.brovibe.cloud/releases/broray/channels/stable https://github.com/BROadmin/BROray/releases/download/v3.5.10&#x27;
+(set -f; f=$(mktemp /tmp/broray.XXXXXX) || exit; trap &#x27;rm -f &quot;$f&quot;&#x27; 0; for u in $BRORAY_REPOS; do curl -q -fsSL --proto &#x27;=https&#x27; --proto-redir &#x27;=https&#x27; --connect-timeout 8 -m 25 -o &quot;$f&quot; -- &quot;$u/install-broray-3.5.10-r15.sh&quot; &amp;&amp; echo &quot;af6a88b07e6a4ca673ba2b49f8c5fb4e9b37639063cbd43555d39bbff231c5f7  $f&quot; | sha256sum -c - &amp;&amp; { /opt/bin/ash &quot;$f&quot;; exit $?; }; done; echo &#x27;Нет установщика с верным SHA-256.&#x27; &gt;&amp;2; exit 1)
 </code></pre>
     <p><a href="/broray/start/">Подготовка роутера и Entware</a></p>
   </section>

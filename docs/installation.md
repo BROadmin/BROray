@@ -127,11 +127,11 @@ opkg update && opkg install ca-bundle ca-certificates curl
 
 ## 4. Установите BROray 3.5.10
 
-Выполните обе строки в оболочке Entware с правами root. Установщик определит архитектуру и сверит контрольную сумму архива.
+Выполните обе строки в одном сеансе Entware с правами root. Первая задаёт Stable и GitHub. Вторая скачивает скрипт, проверяет его SHA-256 и запускает. Установщик определяет архитектуру и проверяет SHA-256 архива. При сбое загрузки или несовпадении хеша со Stable команда пробует GitHub.
 
 ```sh
-broray_install_dir=; broray_install_dir=$(mktemp -d /tmp/broray-script.XXXXXXXX) && curl -q -fL --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 120 -o "$broray_install_dir/install-broray.sh" 'https://github.com/BROadmin/BROray/releases/download/v3.5.10/install-broray.sh' || { if [ -n "$broray_install_dir" ]; then rm -f "$broray_install_dir/install-broray.sh"; rmdir "$broray_install_dir"; fi; unset broray_install_dir; (exit 1); }
-( set -eu; : "${broray_install_dir:?Сначала скачайте скрипт первой строкой}"; trap 'rm -f "$broray_install_dir/install-broray.sh"; rmdir "$broray_install_dir"' 0; actual=$(sha256sum "$broray_install_dir/install-broray.sh"); [ "${actual%% *}" = '5d12705dc637ecc52b71d40e4efe451f03758491034ab5ba4917865a689f91ae' ] || { printf '%s\n' 'SHA-256 скрипта не совпал.' >&2; exit 1; }; /opt/bin/ash "$broray_install_dir/install-broray.sh" )
+export BRORAY_REPOS='https://api.brovibe.cloud/releases/broray/channels/stable https://github.com/BROadmin/BROray/releases/download/v3.5.10'
+(set -f; f=$(mktemp /tmp/broray.XXXXXX) || exit; trap 'rm -f "$f"' 0; for u in $BRORAY_REPOS; do curl -q -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 8 -m 25 -o "$f" -- "$u/install-broray-3.5.10-r15.sh" && echo "af6a88b07e6a4ca673ba2b49f8c5fb4e9b37639063cbd43555d39bbff231c5f7  $f" | sha256sum -c - && { /opt/bin/ash "$f"; exit $?; }; done; echo 'Нет установщика с верным SHA-256.' >&2; exit 1)
 ```
 
 Проверить архитектуру можно командой `opkg print-architecture`. Поддерживаются ARM64, ARMv7, MIPS и MIPSEL. [Сборки и модели](https://docs.brovibe.cloud/broray/reference/#architectures).
