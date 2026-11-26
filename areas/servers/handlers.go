@@ -57,6 +57,7 @@ func register() {
 	cgi.RegisterRaw("/api/servers/dpi-profile.cgi", func(c *cgi.Req) { cur().handleDPIProfile(c) }, cgi.POST(), cgi.Limit(4096))
 	cgi.Register("/api/servers/dpi-status.cgi", func(c *cgi.Req) (any, error) { return cur().dpiStatus(c) })
 	cgi.RegisterRaw("/api/servers/reserve-mode.cgi", func(c *cgi.Req) { cur().handleReserveMode(c) }, cgi.POST(), cgi.Limit(4096))
+	cgi.RegisterRaw("/api/servers/reserve-selection.cgi", func(c *cgi.Req) { cur().handleConfirmedReserveSelection(c) }, cgi.POST(), cgi.Limit(4096))
 	cgi.Register("/api/servers/reserve-status.cgi", func(c *cgi.Req) (any, error) { return cur().reserveStatus() })
 	cgi.Register("/api/servers/reserve-settings.cgi", func(c *cgi.Req) (any, error) { return cur().handleReservePreferences(c) }, cgi.Methods("GET", "POST"), cgi.Limit(4096))
 	cgi.Register("/api/servers/summary.cgi", func(c *cgi.Req) (any, error) { return cur().summary(c.R.Context()) })

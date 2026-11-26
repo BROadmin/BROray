@@ -246,7 +246,7 @@ func TestPolicyJournalRejectsSecondWriterAndRootReplacement(t *testing.T) {
 }
 
 func TestPolicyJournalGeoRollbackAfterRestart(t *testing.T) {
-	for _, damage := range []string{"none", "current", "previous"} {
+	for _, damage := range []string{"none", "current", "previous", "shared"} {
 		t.Run(damage, func(t *testing.T) { testPolicyGeoRecovery(t, damage) })
 	}
 }
@@ -290,12 +290,38 @@ func testPolicyGeoRecovery(t *testing.T, damage string) {
 	if err := j.InstallState(journalContext); err != nil {
 		t.Fatal(err)
 	}
+	if damage == "shared" {
+		currentPath := filepath.Join(geoRoot, next.Assets[0].Path)
+		previousPath := filepath.Join(geoRoot, old.Assets[0].Path)
+		active, activeErr := os.Stat(currentPath)
+		predecessor, predecessorErr := os.Stat(previousPath)
+		if activeErr != nil || predecessorErr != nil || !os.SameFile(active, predecessor) {
+			t.Fatalf("expected immutable shared geodata: %v, %v", activeErr, predecessorErr)
+		}
+		if err := os.WriteFile(currentPath, []byte("truncated shared bytes"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := RecoverPolicy(journalContext, root, guard); err == nil {
+			t.Fatal("recovery accepted damaged shared contents")
+		}
+		if head, err := store.RecoveryHead(journalContext); err != nil || head.Revision != next.Revision {
+			t.Fatalf("failed recovery repointed geodata: %v %v", head, err)
+		}
+		if _, err := store.Load(journalContext); err == nil {
+			t.Fatal("damaged shared geodata passed checksum validation")
+		}
+		if _, err := os.Stat(filepath.Join(root.Routes(), JournalFile)); err != nil {
+			t.Fatal("failed shared rollback lost journal")
+		}
+		return
+	}
 	if damage != "none" {
 		asset := next.Assets[0]
 		if damage == "previous" {
 			asset = old.Assets[0]
 		}
-		if err := os.WriteFile(filepath.Join(geoRoot, asset.Path), []byte("truncated"), 0600); err != nil {
+		// Replace one generation's name without writing through its shared inode.
+		if err := platform.WriteFileAtomicNoFollow(filepath.Join(geoRoot, asset.Path), []byte("truncated"), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}

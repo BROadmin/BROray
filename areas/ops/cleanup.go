@@ -2,6 +2,7 @@ package ops
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -84,6 +85,10 @@ func cleanupAllowed(category, kind, rel string) bool {
 		return match(routeBackupGroup, "file", "directory")
 	case "logs":
 		return match(logGlobs, "file")
+	case "versions":
+		return kind == "directory" && filepath.Dir(rel) == "versions" && cleanupVersionPattern.MatchString(filepath.Base(rel))
+	case "preImport":
+		return kind == "directory" && filepath.Dir(rel) == "data/backup" && reBackupCopyID.MatchString(filepath.Base(rel))
 	}
 	return false
 }
@@ -190,7 +195,7 @@ func (a *area) addPreserved(out *[]cleanupLine, category string, keep int, days 
 type cleanupOptions struct{ Temp, Backups, RouteBackups, Logs bool }
 
 // buildList is broray_cleanup_build_list: the sorted unique list text.
-func (a *area) buildList(o cleanupOptions) []byte {
+func (a *area) buildList(ctx context.Context, o cleanupOptions) []byte {
 	var lines []cleanupLine
 	if o.Temp {
 		a.addAged(&lines, "temp", 0, tempGlobs)
@@ -206,6 +211,7 @@ func (a *area) buildList(o cleanupOptions) []byte {
 	if o.Logs {
 		a.addAged(&lines, "logs", 6, logGlobs)
 	}
+	a.addCleanupOwned(ctx, &lines)
 	set := map[string]bool{}
 	var text []string
 	for _, l := range lines {
@@ -266,10 +272,6 @@ func (a *area) cleanupPlanHandler(c *cgi.Req) {
 			return
 		}
 	}
-	if !opts.Temp && !opts.Backups && !opts.RouteBackups && !opts.Logs {
-		cgi.WriteErr(c.W, cgi.E(400, "CLEANUP_NOTHING_SELECTED", "Выберите хотя бы одну категорию очистки."))
-		return
-	}
 	a.cleanMu.Lock()
 	defer a.cleanMu.Unlock()
 	planDir, err := a.openCleanupPlans(true)
@@ -284,8 +286,12 @@ func (a *area) cleanupPlanHandler(c *cgi.Req) {
 		return
 	}
 	token := compat.RandHex(16)
-	list := a.buildList(opts)
+	list := a.buildList(c.R.Context(), opts)
 	lines := parseList(list)
+	if len(lines) == 0 && !opts.Temp && !opts.Backups && !opts.RouteBackups && !opts.Logs {
+		cgi.WriteErr(c.W, cgi.E(400, "CLEANUP_NOTHING_SELECTED", "Выберите хотя бы одну категорию очистки."))
+		return
+	}
 	now := a.now()
 	var total int64
 	categories := map[string]any{}
@@ -371,12 +377,6 @@ func (a *area) cleanupHandler(c *cgi.Req) {
 	}
 	var o struct{ Temp, Backups, RouteBackups, Logs bool }
 	_ = json.Unmarshal(plan.Options, &o)
-	current := a.buildList(cleanupOptions{o.Temp, o.Backups, o.RouteBackups, o.Logs})
-	if compat.SHA256Hex(current) != plan.Digest || !bytes.Equal(current, list) {
-		removePlan()
-		cgi.WriteErr(c.W, cgi.E(409, "CLEANUP_PLAN_CHANGED", "Состав файлов изменился. Выполните проверку заново."))
-		return
-	}
 	if a.page.running() {
 		cgi.WriteErr(c.W, cgi.E(409, "CLEANUP_OPERATION_BUSY", "Другая конфликтующая операция уже выполняется."))
 		return
@@ -386,11 +386,24 @@ func (a *area) cleanupHandler(c *cgi.Req) {
 		cgi.WriteErr(c.W, cgi.E(409, "CLEANUP_OPERATION_BUSY", "Другая конфликтующая операция уже выполняется."))
 		return
 	}
+	defer release()
+	current := a.buildList(c.R.Context(), cleanupOptions{o.Temp, o.Backups, o.RouteBackups, o.Logs})
+	if compat.SHA256Hex(current) != plan.Digest || !bytes.Equal(current, list) {
+		removePlan()
+		cgi.WriteErr(c.W, cgi.E(409, "CLEANUP_PLAN_CHANGED", "Состав файлов изменился. Выполните проверку заново."))
+		return
+	}
 	op := a.d.Queue.StartOperation("", "unknown", "system:cleanup", "USER", "protected", "")
 	op.Phase("working")
 	var deleted, freed int64
 	failed := ""
+	availableBefore, measuredBefore := cleanupDiskAvailable(a.d.Root.Dir)
+	duplicates := make(map[string]string)
 	for _, l := range parseList(list) {
+		if l.category == "geodata" && l.kind == "consolidate" {
+			duplicates[strings.TrimPrefix(l.rel, cleanupGeodataPrefix)] = l.identity
+			continue
+		}
 		if !cleanupAllowed(l.category, l.kind, l.rel) {
 			failed = l.rel
 			break
@@ -402,16 +415,28 @@ func (a *area) cleanupHandler(c *cgi.Req) {
 		deleted++
 		freed += l.size
 	}
+	consolidated := 0
+	if failed == "" && len(duplicates) > 0 {
+		var err error
+		consolidated, err = a.consolidateCleanupGeodata(c.R.Context(), duplicates)
+		if err != nil {
+			failed = strings.TrimSuffix(cleanupGeodataPrefix, "/")
+		}
+	}
 	if failed != "" {
 		op.Finish(errors.New("OPERATION_FAILED: cleanup stopped"))
 	} else {
 		op.Finish(nil)
 	}
-	release()
 	removePlan()
 	if failed != "" {
 		cgi.WriteErr(c.W, cgi.E(500, "CLEANUP_DELETE_FAILED", "Очистка остановлена на объекте: "+failed))
 		return
 	}
-	cgi.WriteOK(c.W, map[string]any{"ok": true, "deletedCount": deleted, "freedBytes": freed, "completedAt": compat.StampUTC(a.now())})
+	result := map[string]any{"ok": true, "deletedCount": deleted, "freedBytes": freed, "consolidatedCount": consolidated,
+		"completedAt": compat.StampUTC(a.now())}
+	if availableAfter, ok := cleanupDiskAvailable(a.d.Root.Dir); measuredBefore && ok {
+		result["availableChangeBytes"] = availableAfter - availableBefore
+	}
+	cgi.WriteOK(c.W, result)
 }

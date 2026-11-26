@@ -27,6 +27,10 @@ import (
 // (-ldflags -X); release builds never override it.
 var Version = "3.5.9"
 
+// Revision is stamped at link time for a release artifact. It describes
+// these executing bytes independently of installer state or WebUI caches.
+var Revision = ""
+
 type App struct {
 	Root    platform.Root
 	Cfg     platform.Config

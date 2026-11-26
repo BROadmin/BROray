@@ -103,11 +103,19 @@ func (j *Journal) markGapLocked(seq int64, persist bool) {
 func (j *Journal) Append(o *Operation, event, result, message string) {
 	o.mu.Lock()
 	var ec any
-	if o.ErrorCode != "" {
+	if enumHas(o.ErrorCode, publicErrorCodes...) {
 		ec = o.ErrorCode
 	}
 	ev := map[string]any{"eventId": nil, "timestamp": StampUTC(time.Now()), "operationId": o.ID, "operationType": o.Type,
 		"source": o.Source, "event": event, "pid": os.Getpid(), "result": result, "errorCode": ec, "message": message}
+	if event == "failed" {
+		ev["operationAction"] = diagnosticAction(o.ActionName)
+		ev["failureCode"] = o.failureCode
+		ev["failedPhase"] = enumOr(o.failedPhase, "unknown", publicPhases...)
+		if o.rollback != "" {
+			ev["configurationRollback"], ev["vpnRecovery"] = o.rollback, o.vpnRecovery
+		}
+	}
 	o.mu.Unlock()
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -144,6 +152,15 @@ func (j *Journal) Append(o *Operation, event, result, message string) {
 
 // Events returns the events.cgi object.
 func (j *Journal) Events() map[string]any {
+	return j.events(false)
+}
+
+// ReportEvents extends the same journal snapshot with report-only evidence.
+func (j *Journal) ReportEvents() map[string]any {
+	return j.events(true)
+}
+
+func (j *Journal) events(diagnostics bool) map[string]any {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	evs := make([]map[string]any, 0, len(j.tail))
@@ -161,8 +178,18 @@ func (j *Journal) Events() map[string]any {
 	if !complete {
 		errs = append(errs, "JOURNAL_GAP")
 	}
-	return map[string]any{"ok": true, "complete": complete, "truncated": j.total > int64(len(evs)), "nextCursor": nil,
+	out := map[string]any{"ok": true, "complete": complete, "truncated": j.total > int64(len(evs)), "nextCursor": nil,
 		"firstSequence": first, "lastSequence": last, "errors": errs, "events": evs}
+	if diagnostics {
+		failures := make([]map[string]any, 0, 24)
+		for i := len(j.tail) - 1; i >= 0 && len(failures) < 24; i-- {
+			if report := failureReport(j.tail[i]); report != nil {
+				failures = append(failures, report)
+			}
+		}
+		out["failures"] = failures
+	}
+	return out
 }
 
 func asInt64(v any) int64 {
@@ -186,22 +213,27 @@ var (
 	reHex32     = regexp.MustCompile(`^[0-9a-f]{32}$`)
 	reTimestamp = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$`)
 	eventNames  = []string{"started", "lock_acquired", "lock_conflict", "phase_changed", "owner_transferred", "cancel_requested",
-		"completed", "failed", "aborted", "recovered", "ambiguous_owner", "heartbeat_problem", "term", "kill"}
+		"completed", "failed", "aborted", "recovered", "ambiguous_owner", "heartbeat_problem", "term", "kill",
+		"geodata_xray_apply", "geodata_vpn_check", "subscription_xray_apply", "subscription_vpn_check"}
 	eventMessages = map[string]string{
-		"started":           "Операция запущена",
-		"lock_acquired":     "Ресурсы зарезервированы",
-		"lock_conflict":     "Действие отложено: выполняется другая операция",
-		"cancel_requested":  "Запрошена остановка операции",
-		"completed":         "Операция завершена",
-		"failed":            "Операция завершилась с ошибкой",
-		"aborted":           "Операция прервана",
-		"recovered":         "Незавершённая операция восстановлена",
-		"ambiguous_owner":   "Состояние владельца не удалось подтвердить",
-		"heartbeat_problem": "Нет свежего сообщения о ходе операции",
-		"term":              "Управляемому процессу отправлен сигнал завершения",
-		"kill":              "Управляемый процесс принудительно завершён",
-		"phase_changed":     "Этап операции изменился",
-		"owner_transferred": "Операция передана фоновому исполнителю",
+		"started":                 "Операция запущена",
+		"lock_acquired":           "Ресурсы зарезервированы",
+		"lock_conflict":           "Действие отложено: выполняется другая операция",
+		"cancel_requested":        "Запрошена остановка операции",
+		"completed":               "Операция завершена",
+		"failed":                  "Операция завершилась с ошибкой",
+		"aborted":                 "Операция прервана",
+		"recovered":               "Незавершённая операция восстановлена",
+		"ambiguous_owner":         "Состояние владельца не удалось подтвердить",
+		"heartbeat_problem":       "Нет свежего сообщения о ходе операции",
+		"term":                    "Управляемому процессу отправлен сигнал завершения",
+		"kill":                    "Управляемый процесс принудительно завершён",
+		"phase_changed":           "Этап операции изменился",
+		"owner_transferred":       "Операция передана фоновому исполнителю",
+		"geodata_xray_apply":      "Запрошено применение конфигурации Xray с обновлёнными геоданными",
+		"geodata_vpn_check":       "Проверка VPN после применения геоданных",
+		"subscription_xray_apply": "Запрошено применение параметров активного сервера из подписки",
+		"subscription_vpn_check":  "Проверка VPN после применения параметров подписки",
 	}
 )
 
@@ -234,9 +266,25 @@ func EventPublic(ev map[string]any) map[string]any {
 	if s := str("errorCode"); enumHas(s, publicErrorCodes...) {
 		ec = s
 	}
-	return map[string]any{"sequence": seq, "eventId": eventID, "timestamp": PublicTimestamp(ev["timestamp"]),
+	out := map[string]any{"sequence": seq, "eventId": eventID, "timestamp": PublicTimestamp(ev["timestamp"]),
 		"operationId": PublicOperationID(str("operationId")), "operationType": PublicType(str("operationType")),
 		"source": PublicSource(str("source")), "event": name, "pid": pid,
 		"result":    enumOr(str("result"), "unknown", "success", "failure", "cancelled", "pending", "unknown"),
 		"errorCode": ec, "message": msg}
+	switch name {
+	case "geodata_xray_apply":
+		out["restartReason"] = "geodata-update"
+	case "subscription_xray_apply":
+		out["restartReason"] = "subscription-profile-update"
+	case "geodata_vpn_check", "subscription_vpn_check":
+		check := VPNUnconfirmed
+		switch str("result") {
+		case "success":
+			check = VPNVerified
+		case "failure":
+			check = VPNFailed
+		}
+		out["vpnCheck"] = string(check)
+	}
+	return out
 }

@@ -182,7 +182,7 @@ func testColdStoppedSourceOperation(t *testing.T, kind, fault string) {
 		case "replace":
 			err = f.e.s.replaceRemovedSource(f.ctx, sourceID, oldID, nextID)
 		case "same-id":
-			err = f.e.s.replaceSourceCandidateDescription(f.ctx, sourceID, oldID, nextID, true, "BROray - A")
+			err = f.e.s.replaceSourceCandidateDescription(f.ctx, sourceID, oldID, nextID, true, "BROray - A", false, nil)
 		case "refresh":
 			err = f.e.s.replaceSourceCandidate(f.ctx, sourceID, oldID, nextID, true)
 		case "withdraw":

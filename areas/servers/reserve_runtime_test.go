@@ -28,9 +28,14 @@ type reserveRuntimeFixture struct {
 
 func newReserveRuntimeFixture(t *testing.T) reserveRuntimeFixture {
 	t.Helper()
+	return newReserveRuntimeFixtureWithLinks(t, "trojan://pw@127.0.0.1:1#A", "trojan://pw@127.0.0.1:2#B")
+}
+
+func newReserveRuntimeFixtureWithLinks(t *testing.T, primary, backup string) reserveRuntimeFixture {
+	t.Helper()
 	e := newEnv(t)
-	a := e.addServer(t, "trojan://pw@127.0.0.1:1#A")
-	b := e.addServer(t, "trojan://pw@127.0.0.1:2#B")
+	a := e.addServer(t, primary)
+	b := e.addServer(t, backup)
 	if err := compat.WriteJSON(settingsFile(e.d), map[string]any{"listenAddress": "127.0.0.1", "socksPort": freeTCP(t), "logLevel": "none"}); err != nil {
 		t.Fatal(err)
 	}

@@ -9,7 +9,6 @@ import (
 
 	"github.com/BROadmin/broray/internal/cgi"
 	"github.com/BROadmin/broray/internal/compat"
-	"github.com/BROadmin/broray/modules/geodata"
 	"github.com/BROadmin/broray/modules/routepolicy"
 	"golang.org/x/sys/unix"
 )
@@ -29,33 +28,47 @@ func registerGeodataScheduleHandlers() {
 }
 
 func hGeodataSchedule(e *engine, c *cgi.Req) (any, error) {
+	ctx := c.R.Context()
 	var s routepolicy.GeoSchedule
+	var apply routepolicy.GeoApplySchedule
 	var err error
 	if c.R.Method == http.MethodPost {
 		if err := requestGuard(c); err != nil {
 			return nil, err
 		}
-		rev, enabled, err := routepolicy.DecodeGeoScheduleChange(c.Body())
-		if err != nil {
+		if rev, enabled, dailyErr := routepolicy.DecodeGeoScheduleChange(c.Body()); dailyErr == nil {
+			apply, err = routepolicy.ReadGeoApplySchedule(ctx, e.root)
+			if err == nil {
+				s, err = routepolicy.SaveGeoSchedule(ctx, e.root, rev, enabled)
+			}
+		} else if rev, at, applyErr := routepolicy.DecodeGeoApplyScheduleChange(c.Body()); applyErr == nil {
+			s, err = routepolicy.ReadGeoSchedule(ctx, e.root)
+			if err == nil {
+				apply, err = routepolicy.SaveGeoApplySchedule(ctx, e.root, rev, at)
+			}
+		} else {
 			return nil, cgi.E(400, "GEODATA_SCHEDULE_INVALID", "Некорректные настройки обновления геоданных.")
 		}
-		s, err = routepolicy.SaveGeoSchedule(c.R.Context(), e.root, rev, enabled)
-		if err != nil {
-			return nil, geoScheduleError(err)
-		}
 	} else {
-		s, err = routepolicy.ReadGeoSchedule(c.R.Context(), e.root)
-		if err != nil {
-			return nil, geoScheduleError(err)
+		s, err = routepolicy.ReadGeoSchedule(ctx, e.root)
+		if err == nil {
+			apply, err = routepolicy.ReadGeoApplySchedule(ctx, e.root)
 		}
 	}
+	if err != nil {
+		return nil, geoScheduleError(err)
+	}
 	paused := e.queue != nil && e.queue.Paused()
-	return obj{"enabled": s.Enabled, "revision": routepolicy.GeoScheduleRevision(s), "attempts": s.Attempts, "intervalHours": 24, "retryMinutes": 15, "automationPaused": paused}, nil
+	return obj{"enabled": s.Enabled, "revision": routepolicy.GeoScheduleRevision(s), "attempts": s.Attempts,
+		"applyAtUTC": apply.AtUTC, "applyRevision": apply.Revision, "intervalHours": 24, "retryMinutes": 15, "automationPaused": paused}, nil
 }
 
 func geoScheduleError(err error) error {
 	if errors.Is(err, routepolicy.ErrGeoScheduleChanged) {
 		return cgi.E(409, "GEODATA_SCHEDULE_CHANGED", "Настройка уже изменилась. Обновите данные.")
+	}
+	if errors.Is(err, routepolicy.ErrGeoApplyWindow) {
+		return cgi.E(409, "GEODATA_APPLY_WINDOW_EXPIRED", "Выбранная минута уже прошла или использована. Подготовленные данные можно применить вручную.")
 	}
 	if errors.Is(err, unix.EWOULDBLOCK) {
 		return cgi.E(409, "GEODATA_SCHEDULE_BUSY", "Состояние обновляется. Повторите действие.")
@@ -63,9 +76,13 @@ func geoScheduleError(err error) error {
 	return cgi.E(503, "GEODATA_SCHEDULE_UNCONFIRMED", "Не удалось подтвердить настройки обновления геоданных. Обновите данные.")
 }
 
-func geoDue(now time.Time, state routepolicy.State, s routepolicy.GeoSchedule, kind string) time.Time {
+func geoDue(now time.Time, state routepolicy.State, s routepolicy.GeoSchedule, kind string, checkedAt time.Time) time.Time {
 	var due time.Time
-	if last, err := time.Parse(time.RFC3339Nano, state.GeoUpdatedAt[kind]); err == nil && !last.After(now) {
+	last, _ := time.Parse(time.RFC3339Nano, state.GeoUpdatedAt[kind])
+	if !checkedAt.After(now) && checkedAt.After(last) {
+		last = checkedAt
+	}
+	if !last.IsZero() && !last.After(now) {
 		due = last.Add(geoUpdateInterval)
 	}
 	a := s.Attempts[kind]
@@ -78,9 +95,13 @@ func geoDue(now time.Time, state routepolicy.State, s routepolicy.GeoSchedule, k
 	return due
 }
 
-// Uses the existing minute loop and coordinator; selected disabled rules also
-// need their data. Only one kind is queued so the next uses a fresh policy CAS.
 func (e *engine) enqueueDueGeodata() *compat.Request {
+	return e.enqueueScheduledGeodata(true)
+}
+
+// Apply retries only look for prepared changes in the authorized minute.
+// Scheduled source checks keep their own cadence.
+func (e *engine) enqueueScheduledGeodata(checkSources bool) *compat.Request {
 	if e.queue == nil || e.queue.Paused() || e.d.Lock.Busy() {
 		return nil
 	}
@@ -89,8 +110,21 @@ func (e *engine) enqueueDueGeodata() *compat.Request {
 	if _, live := e.queue.FindLive(geodataAction, "policy"); live {
 		return nil
 	}
-	s, err := routepolicy.ReadGeoSchedule(e.ctx, e.root)
-	if err != nil || !s.Enabled {
+	now := e.geoTime()
+	apply, applyErr := routepolicy.ReadGeoApplySchedule(e.ctx, e.root)
+	var applyDay string
+	if applyErr == nil {
+		applyDay = apply.DueDay(now)
+	}
+	var s routepolicy.GeoSchedule
+	if checkSources {
+		var err error
+		s, err = routepolicy.ReadGeoSchedule(e.ctx, e.root)
+		if err != nil {
+			return nil
+		}
+	}
+	if !s.Enabled && applyDay == "" {
 		return nil
 	}
 	pending, err := routepolicy.RecoveryPending(e.ctx, e.d.Root)
@@ -105,36 +139,74 @@ func (e *engine) enqueueDueGeodata() *compat.Request {
 	if err != nil {
 		return nil
 	}
-	sel := policySelection(state)
-	now := e.geoTime()
-	for _, part := range []struct {
-		kind     geodata.Kind
-		selected bool
-	}{{geodata.GeoIP, len(sel.CountryCodes) > 0}, {geodata.GeoSite, len(sel.GeoSiteTags) > 0}} {
-		kind := string(part.kind)
-		if !part.selected || now.Before(geoDue(now, state, s, kind)) || now.Before(e.geoRetryAt[kind]) {
-			continue
-		}
-		body, err := json.Marshal(obj{"expectedRevision": rev, "operation": "geo-update", "id": kind, "kind": kind})
-		if err != nil {
-			return nil
-		}
-		r, err := e.queue.Enqueue(geodataAction, "policy", "SCHEDULER", string(body))
-		if err != nil {
-			e.log.Printf("routes: geodata enqueue failed: %v", err)
-			return nil
-		}
-		return r
+	ready, err := e.readPendingGeodata(e.ctx, rev, state.GeoRevision)
+	if err != nil {
+		return nil
 	}
-	return nil
+	var checkedAt time.Time
+	if ready != nil {
+		checkedAt = ready.CheckedAt
+		if applyDay != "" && !checkedAt.After(now) {
+			return e.enqueueGeodataSchedule(obj{"expectedRevision": rev, "operation": "geo-apply", "id": "geodata",
+				"expectedPendingRevision": ready.Revision, "expectedScheduleRevision": apply.Revision, "applyDayUTC": applyDay})
+		}
+	}
+	if !s.Enabled {
+		return nil
+	}
+	due := false
+	for _, kind := range selectedGeodataKinds(policySelection(state)) {
+		deadline := geoDue(now, state, s, kind, checkedAt)
+		attempt := s.Attempts[kind]
+		if now.Before(e.geoRetryAt[kind]) || ((attempt.Status == "running" || attempt.Status == "failed") && now.Before(deadline)) {
+			return nil
+		}
+		due = due || !now.Before(deadline)
+	}
+	if !due {
+		return nil
+	}
+	return e.enqueueGeodataSchedule(obj{"expectedRevision": rev, "operation": "geo-check", "id": "geodata"})
+}
+
+func (e *engine) enqueueGeodataSchedule(fields obj) *compat.Request {
+	body, err := json.Marshal(fields)
+	if err != nil {
+		return nil
+	}
+	r, err := e.queue.Enqueue(geodataAction, "policy", "SCHEDULER", string(body))
+	if err != nil {
+		e.log.Printf("routes: geodata enqueue failed: %v", err)
+		return nil
+	}
+	return r
 }
 
 func (e *engine) checkGeoAutomation(ctx context.Context, m routepolicy.Mutation, op *compat.Operation) error {
 	if op.Source != "SCHEDULER" {
+		if m.ExpectedScheduleRevision != "" {
+			return errors.New("manual geodata request has scheduled authority")
+		}
 		return nil
 	}
-	if m.Operation != "geo-update" {
-		return errors.New("scheduler may only update selected geodata")
+	if e.queue == nil || e.queue.Paused() {
+		return cgi.E(409, "GEODATA_AUTOMATION_PAUSED", "Автоматические операции приостановлены.")
+	}
+	if m.Operation == "geo-apply" {
+		s, err := routepolicy.ReadGeoApplySchedule(ctx, e.root)
+		if err != nil {
+			return geoScheduleError(err)
+		}
+		if m.ExpectedScheduleRevision == "" || s.Revision != m.ExpectedScheduleRevision {
+			return geoScheduleError(routepolicy.ErrGeoScheduleChanged)
+		}
+		if m.ApplyDayUTC == "" || s.DueDay(e.geoTime()) != m.ApplyDayUTC {
+			return geoScheduleError(routepolicy.ErrGeoApplyWindow)
+		}
+		return nil
+	}
+	if m.Operation != "geo-check" {
+		return errors.New("invalid scheduled geodata operation")
 	}
 	s, err := routepolicy.ReadGeoSchedule(ctx, e.root)
 	if err != nil {
@@ -142,9 +214,6 @@ func (e *engine) checkGeoAutomation(ctx context.Context, m routepolicy.Mutation,
 	}
 	if !s.Enabled {
 		return cgi.E(409, "GEODATA_AUTOMATION_DISABLED", "Автоматическое обновление геоданных выключено.")
-	}
-	if e.queue == nil || e.queue.Paused() {
-		return cgi.E(409, "GEODATA_AUTOMATION_PAUSED", "Автоматические операции приостановлены.")
 	}
 	return nil
 }

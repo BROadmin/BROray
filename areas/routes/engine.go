@@ -41,6 +41,7 @@ type engine struct {
 	geoFetch        geodata.Fetch
 	geoNow          func() time.Time
 	directInterface func() (string, error)
+	premiumProofs   map[string]premiumProof
 	geoScheduleMu   sync.Mutex
 	geoRetryAt      map[string]time.Time
 

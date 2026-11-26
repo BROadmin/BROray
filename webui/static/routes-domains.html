@@ -6,13 +6,13 @@
     <meta name="color-scheme" content="dark light">
     <meta name="theme-color" content="#0b1117">
     <meta name="robots" content="noindex,nofollow">
-    <title>BROray — По доменам</title>
+    <title>BROray — По доменам и IP</title>
     <link rel="icon" href="/assets/images/branding/favicon.ico?v=WebUI-3.5.9-c5">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/branding/favicon-32.png?v=WebUI-3.5.9-c5">
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.5.9-c5">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.5.9-c5">
     <link rel="manifest" href="/manifest.json?v=WebUI-3.5.9-c5">
-    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c5">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c7">
     <script src="/assets/js/theme-init.js?v=WebUI-3.5.9-c5"></script>
     <link rel="stylesheet" href="/assets/css/action-feedback.css?v=WebUI-3.5.9-c5">
 <link rel="stylesheet" href="/assets/css/routing-policy.css?v=WebUI-3.5.9-c5-domain-actions">
@@ -93,7 +93,7 @@
                     <button id="mobile-menu-button" class="sidebar-icon-button mobile-menu-button" data-icon="menu" type="button" aria-label="Открыть меню" aria-controls="sidebar" aria-expanded="false"></button>
                     <div class="workspace-title">
                         <span class="workspace-section">Сеть</span>
-                        <strong>По доменам</strong>
+                        <strong>По доменам и IP</strong>
                     </div>
                 </div>
                 <div class="workspace-header-actions">
@@ -101,10 +101,10 @@
                     <button id="refresh-status" class="button button-secondary button-compact" data-icon="update" type="button" hidden aria-hidden="true" tabindex="-1">Обновить</button>
                 </div>
             </header>
-<main class="workspace-content policy-page"><section class="page-heading" aria-labelledby="policy-title"><div><span class="eyebrow">Маршрутизация</span><h1 id="policy-title">По доменам</h1><p>Выбранные сайты и сервисы — через VPN BROray.</p></div><span id="policy-status" class="status-badge status-loading" role="status">Загрузка…</span></section>
+<main class="workspace-content policy-page"><section class="page-heading" aria-labelledby="policy-title"><div><span class="eyebrow">Маршрутизация</span><h1 id="policy-title">По доменам и IP</h1><p>Выбранные сайты и IP-адреса — через VPN BROray.</p></div><span id="policy-status" class="status-badge status-loading" role="status">Загрузка…</span></section>
 <div class="policy-feedback" role="status"><p id="policy-message">Получение сохранённых правил…</p><button id="policy-refresh" class="button button-secondary" type="button">Обновить данные</button></div><section class="ui-card policy-card" aria-labelledby="presets-title"><h2 id="presets-title">Готовые домены</h2><p id="native-domain-hint" class="policy-hint">Получение доменных наборов…</p><div id="policy-presets" class="policy-two-columns"></div></section>
 <section class="ui-card policy-card" aria-labelledby="own-title"><div class="policy-card-heading"><h2 id="own-title">Свои списки</h2><div class="policy-buttons"><button id="policy-add" class="button button-primary" type="button">Добавить список</button><button id="policy-import" class="button button-secondary" type="button">Импорт</button><input id="policy-file" type="file" accept=".txt,.list,.conf,text/plain" hidden></div></div>
-<form id="policy-editor" class="policy-editor" hidden><h3 id="policy-editor-title">Новый список</h3><label for="policy-name">Название</label><input id="policy-name" maxlength="128" required autocomplete="off"><label for="policy-domains">Домены</label><textarea id="policy-domains" rows="8" spellcheck="false" required placeholder="example.com&#10;full:one.example.com"></textarea><p class="policy-hint">Один домен на строку. Поддерживаются domain:, full: и *. Поддомены включаются для обычной записи. До 2 МБ и 50 000 доменов.</p><p id="policy-editor-error" class="policy-error" role="alert"></p><div class="policy-buttons"><button id="policy-save" class="button button-primary" type="submit">Сохранить список</button><button id="policy-cancel" class="button button-secondary" type="button">Отмена</button></div></form>
+<form id="policy-editor" class="policy-editor" hidden><h3 id="policy-editor-title">Новый список</h3><label for="policy-name">Название</label><input id="policy-name" maxlength="128" required autocomplete="off"><label for="policy-domains">Домены, IPv4 и IPv6</label><textarea id="policy-domains" rows="8" spellcheck="false" required placeholder="example.com&#10;1.1.1.1&#10;2606:4700:4700::1111"></textarea><p class="policy-hint">Одна запись на строку. Обычный домен включает поддомены. В смешанном списке допускается до 4096 записей.</p><p id="policy-editor-error" class="policy-error" role="alert"></p><div class="policy-buttons"><button id="policy-save" class="button button-primary" type="submit">Сохранить список</button><button id="policy-cancel" class="button button-secondary" type="button">Отмена</button></div></form>
 <div id="policy-own" class="policy-two-columns"></div></section>
 <dialog id="policy-domain-dialog" class="policy-domain-dialog" aria-labelledby="policy-domain-dialog-title">
     <div class="policy-domain-dialog-heading">
@@ -168,10 +168,10 @@
     <script src="/assets/js/common.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/action-feedback.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/icons.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c8-premium-ip"></script>
     <script src="/assets/js/theme.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/dialogs.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/routing-policy-client.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/routing-policy-page.js?v=WebUI-3.5.9-c5-domain-actions"></script>
+    <script src="/assets/js/routing-policy-page.js?v=WebUI-3.5.9-c8-dns"></script>
 </body>
 </html>

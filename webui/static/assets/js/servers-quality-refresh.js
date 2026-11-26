@@ -79,6 +79,8 @@
             partial: "Завершена с ошибками",
             paused: "На паузе",
             unavailable: "Состояние не подтверждено",
+            starting: "Запускается",
+            stopping: "Останавливается",
             stopped: "Служба остановлена",
             error: "Ошибка"
         };
@@ -127,8 +129,10 @@
         var paused = payload.automation && payload.automation.paused === true;
         var serviceKnown = service.complete === true && typeof service.running === "boolean";
         var operational = serviceKnown && service.running === true && service.ready === true;
+        var transitioning = serviceKnown && (service.state === "starting" || service.state === "stopping");
         var effectiveStatus = !enabled ? "disabled" : paused ? "paused"
-            : !serviceKnown ? "unavailable" : !operational ? "stopped" : state.status || "scheduled";
+            : !serviceKnown ? "unavailable" : transitioning ? service.state
+            : !operational ? "stopped" : state.status || "scheduled";
 
         confirmEnabled({value: config.enabled, revision: payload.revision});
         if (!formDirty) {
@@ -139,11 +143,14 @@
             syncIntervalState();
         }
 
-        element("quality-refresh-badge").textContent = enabled && !paused && operational
-            ? "Включена" : statusTitle(effectiveStatus);
-        element("quality-refresh-badge").className = enabled && !paused && operational
-            ? "status-badge quality-refresh-badge-enabled"
-            : "status-badge status-badge-neutral";
+        var tone = {
+            disabled: "neutral", scheduled: "success", success: "success",
+            partial: "warning", paused: "warning", unavailable: "unknown",
+            running: "loading", starting: "loading", stopping: "loading",
+            stopped: "error", error: "error"
+        }[effectiveStatus] || "unknown";
+        element("quality-refresh-badge").textContent = tone === "success" ? "Включена" : statusTitle(effectiveStatus);
+        element("quality-refresh-badge").className = "status-badge status-" + tone;
         element("quality-refresh-service").textContent =
             service.complete === false || typeof service.running !== "boolean"
                 ? "Состояние не подтверждено"

@@ -3,6 +3,7 @@ package compat
 import (
 	"context"
 	"errors"
+	"io"
 	"net/netip"
 	"os"
 
@@ -34,6 +35,16 @@ type DPIValidation interface {
 }
 
 var ErrDPIProposalUnhealthy = errors.New("DPI_CONNECTION_FAILED")
+
+// VPNCheck describes the payload result on an owned, configuration-bound VPN
+// path. A listener or ordinary SOCKS connection on its own proves neither state.
+type VPNCheck string
+
+const (
+	VPNUnconfirmed VPNCheck = "unconfirmed"
+	VPNVerified    VPNCheck = "verified"
+	VPNFailed      VPNCheck = "failed"
+)
 
 type Services struct {
 	// routes area: decorate an active server configuration with saved policy.
@@ -73,6 +84,10 @@ type Services struct {
 	// Preview validates the active server without applying it; nil means no active server.
 	ServersPreviewActiveConfig     func(context.Context) ([]byte, error)
 	ServersPreviewBackupBaseConfig func(context.Context, *BackupStage) ([]byte, error)
+	ServersPreparePolicyVPN        func(context.Context, []byte) ([]byte, io.Closer)
+	ServersProbePolicyVPN          func(context.Context, []byte) VPNCheck
+	ServersPremiumVPNIdentity      func() string
+	ServersPremiumVPNProbe         func(context.Context, string, []netip.Addr, func(context.Context, string) bool) (bool, error)
 	// servers area: withdraw an active node removed by its subscription. Caller
 	// holds the global fence. Rollback must restore catalog records first, then
 	// call the returned undo even when withdrawal returned an error.
@@ -83,6 +98,8 @@ type Services struct {
 	ServersPrepareSourceRefresh        func(context.Context, string, []string, []string) (string, error)
 	ServersPrepareSourceRefreshCatalog func(context.Context, string, []string) error
 	ServersReapplySourceRefresh        func(context.Context, string, string, string) (string, error)
+	ServersRenameSourceRefresh         func(context.Context, string, string, string) (string, error)
+	ServersApplyPendingSourceProfile   func(context.Context, SourceProfileApply, *Operation) error
 	ServersValidateSourceDPIProposals  func(context.Context, string, []DPIProposal) (DPIValidation, error)
 }
 
@@ -152,6 +169,25 @@ func (s *Services) ApplyXrayConfig(ctx context.Context, cfg []byte) error {
 		return ErrServiceUnavailable
 	}
 	return s.XrayApplyConfig(ctx, cfg)
+}
+
+// PreparePolicyVPN optionally adds the scoped check path to an already changed
+// candidate. A returned closer holds the TCP port until just before apply.
+func (s *Services) PreparePolicyVPN(ctx context.Context, config []byte) ([]byte, io.Closer) {
+	if s.ServersPreparePolicyVPN == nil {
+		return config, nil
+	}
+	return s.ServersPreparePolicyVPN(ctx, config)
+}
+
+func (s *Services) ProbePolicyVPN(ctx context.Context, config []byte) VPNCheck {
+	if s.ServersProbePolicyVPN != nil {
+		switch result := s.ServersProbePolicyVPN(ctx, config); result {
+		case VPNVerified, VPNFailed:
+			return result
+		}
+	}
+	return VPNUnconfirmed
 }
 
 func (s *Services) ValidateXrayStagedConfig(ctx context.Context, cfg []byte, assets *os.File) error {
@@ -246,6 +282,31 @@ func (s *Services) ReapplySourceRefresh(ctx context.Context, sourceID, id, previ
 		return "", ErrServiceUnavailable
 	}
 	return s.ServersReapplySourceRefresh(ctx, sourceID, id, previousName)
+}
+
+func (s *Services) RenameSourceRefresh(ctx context.Context, sourceID, id, previousName string) (string, error) {
+	if s.ServersRenameSourceRefresh == nil {
+		return "", ErrServiceUnavailable
+	}
+	return s.ServersRenameSourceRefresh(ctx, sourceID, id, previousName)
+}
+
+// SourceProfileApply identifies exact catalog and runtime bytes checked by the
+// protected subscription owner before handing off the application.
+type SourceProfileApply struct {
+	SourceID, ServerID, PreviousName string
+	ConfigSHA256, CandidateSHA256    string
+	PreviousRecord                   []byte
+	RecoveryAuthority                string
+}
+
+var ErrSourceProfileRolledBack = errors.New("SUBSCRIPTION_PROFILE_VPN_ROLLED_BACK")
+
+func (s *Services) ApplyPendingSourceProfile(ctx context.Context, proposal SourceProfileApply, op *Operation) error {
+	if s.ServersApplyPendingSourceProfile == nil {
+		return ErrServiceUnavailable
+	}
+	return s.ServersApplyPendingSourceProfile(ctx, proposal, op)
 }
 
 func (s *Services) ValidateSourceDPIProposals(ctx context.Context, source string, proposals []DPIProposal) (DPIValidation, error) {

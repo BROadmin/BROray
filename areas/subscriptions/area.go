@@ -59,12 +59,16 @@ var schedulerInterval = 60 * time.Second
 func (s *svc) schedulerLoop(ctx context.Context) {
 	t := time.NewTicker(schedulerInterval)
 	defer t.Stop()
+	apply := time.NewTicker(5 * time.Second)
+	defer apply.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 			s.enqueueDue()
+		case <-apply.C:
+			s.enqueueDueProfileApply()
 		}
 	}
 }

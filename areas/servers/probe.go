@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"io"
 	"math"
 	"net"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"github.com/BROadmin/broray/internal/compat"
+	probehealth "github.com/BROadmin/broray/modules/health"
 	"github.com/BROadmin/broray/modules/reserve"
 )
 
@@ -37,52 +37,6 @@ var qualityProbeURLs = []string{
 	"https://www.gstatic.com/generate_204",
 	"https://connectivitycheck.gstatic.com/generate_204",
 	"https://www.cloudflare.com/cdn-cgi/trace",
-}
-
-var activeProbeURLs = []string{
-	"https://cp.cloudflare.com/generate_204",
-	"https://www.gstatic.com/generate_204",
-}
-
-// curlLike classifies a Go HTTP error into a curl exit code (for the 3.x
-// stage mapping and the curlCode field).
-func curlLike(err error) int {
-	if err == nil {
-		return 0
-	}
-	var ne net.Error
-	msg := err.Error()
-	switch {
-	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()):
-		return 28
-	case strings.Contains(msg, "no such host"):
-		return 6
-	case strings.Contains(msg, "socks") && strings.Contains(msg, "connection refused"):
-		return 7
-	case strings.Contains(msg, "socks"):
-		return 97
-	case strings.Contains(msg, "tls:") || strings.Contains(msg, "x509:") || strings.Contains(msg, "certificate"):
-		return 35
-	case strings.Contains(msg, "connection refused"):
-		return 7
-	}
-	return 56
-}
-
-func stageOfCurl(code int) string {
-	switch code {
-	case 5, 6:
-		return "proxy-dns"
-	case 7:
-		return "proxy-connect"
-	case 28:
-		return "proxy-timeout"
-	case 35, 51, 53, 58, 59, 60, 64, 66, 77, 80, 82, 83, 90, 91:
-		return "proxy-tls"
-	case 97:
-		return "socks-handshake"
-	}
-	return "proxy-https"
 }
 
 // socksGet performs one curl-like HTTPS GET through a local SOCKS5 proxy
@@ -259,14 +213,14 @@ func (s *svc) isolatedProbe(ctx context.Context, rec Record, cfg []byte) probeRe
 		if err == nil && code >= 200 && code < 400 {
 			return probeResult{Success: true, Stage: "proxy-https"}
 		}
-		cc := curlLike(err)
+		cc := probehealth.CurlCode(err)
 		msg := ""
 		if err != nil {
 			msg = tailText([]byte(err.Error()), 8, 600)
 		} else {
 			msg = "curl завершился с кодом 0"
 		}
-		lastStage, lastError = stageOfCurl(cc), msg
+		lastStage, lastError = probehealth.ProbeStage(cc), msg
 	}
 	return probeResult{Stage: lastStage, Error: "Реальный HTTPS-запрос через сервер не прошёл: " + lastError}
 }
@@ -290,10 +244,11 @@ func localAddress(host string) bool {
 
 func (s *svc) socksProbe(ctx context.Context, configPath, serverID string) map[string]any {
 	endpoint, attempts, code := "", 0, 0
+	controls := make([]probehealth.ControlObservation, 0, len(probehealth.ActiveControls()))
 	emit := func(status, errorCode string) map[string]any {
 		now := s.now()
 		return map[string]any{"method": "current-socks-https", "serverId": serverID, "status": status, "errorCode": errorCode,
-			"endpoint": endpoint, "attempts": attempts, "curlCode": code, "checkedAt": compat.StampUTC(now), "checkedEpoch": now.Unix()}
+			"endpoint": endpoint, "attempts": attempts, "curlCode": code, "controls": controls, "checkedAt": compat.StampUTC(now), "checkedEpoch": now.Unix()}
 	}
 	config, err := os.ReadFile(configPath)
 	cfg, ok := decodeObject(config)
@@ -358,10 +313,18 @@ func (s *svc) socksProbe(ctx context.Context, configPath, serverID string) map[s
 	if !localAddress(host) {
 		return emit("unknown", "SOCKS_ADDRESS_NOT_LOCAL")
 	}
-	for _, u := range activeProbeURLs {
+	for _, target := range probehealth.ActiveControls() {
+		if ctx.Err() != nil {
+			return emit("unknown", "ACTIVE_PROBE_CANCELLED")
+		}
 		attempts++
-		status, err := socksGet(ctx, endpoint, u, 3*time.Second, 6*time.Second, false, 4096)
-		code = curlLike(err)
+		status, err := socksGet(ctx, endpoint, target.URL, 3*time.Second, 6*time.Second, false, 4096)
+		observation := target.Observe(status, err)
+		controls = append(controls, observation)
+		code = observation.CurlCode
+		if ctx.Err() != nil {
+			return emit("unknown", "ACTIVE_PROBE_CANCELLED")
+		}
 		if err == nil && status == 204 {
 			return emit("healthy", "")
 		}
@@ -377,14 +340,22 @@ func (s *svc) activeMeasure(ctx context.Context, id string) (health string, resu
 		return "unknown", result, ""
 	}
 	pctx, cancel := contextWithTimeout(ctx, 25*time.Second)
+	defer cancel()
 	r := s.activeProbe(pctx, s.d.Root.XrayConfig(), id)
-	cancel()
+	if r["status"] == "unhealthy" && r["errorCode"] == "PROXY_HTTPS_FAILED" &&
+		r["attempts"] == len(probehealth.ActiveControls()) && pctx.Err() == nil && s.readWANOutage(pctx) {
+		r["status"], r["errorCode"] = "unknown", wanUnavailable
+	}
 	after := s.runtimeContext(id)
 	status, _ := r["status"].(string)
 	_, epochOK := num(r["checkedEpoch"])
 	_, atOK := r["checkedAt"].(string)
 	if after != before || r["method"] != "current-socks-https" || r["serverId"] != id || !in(status, "healthy", "unhealthy", "unknown") || !epochOK || !atOK {
 		return "unknown", map[string]any{"method": "current-socks-https", "status": "unknown", "errorCode": "ACTIVE_CONTEXT_CHANGED_OR_INCOMPLETE"}, ""
+	}
+	if pctx.Err() != nil {
+		r["status"], r["errorCode"] = "unknown", "ACTIVE_PROBE_CANCELLED"
+		status = "unknown"
 	}
 	r["context"] = before
 	switch status {

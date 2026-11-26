@@ -142,7 +142,7 @@ func TestStagedAssetValidationDetectsRebindDuringChild(t *testing.T) {
 	}
 	defer dir.Close()
 	started, release := filepath.Join(root, "started"), filepath.Join(root, "release")
-	script := "#!/bin/sh\ncat /proc/self/fd/3 >/dev/null\n: > '" + started + "'\nwhile [ ! -f '" + release + "' ]; do sleep 1; done\nexit 0\n"
+	script := "#!/bin/sh\n[ \"$4\" = 'stdin:' ] || exit 2\ncat >/dev/null\n: > '" + started + "'\nwhile [ ! -f '" + release + "' ]; do sleep 1; done\nexit 0\n"
 	if err = os.WriteFile(h.d.Root.XrayBinary(), []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}

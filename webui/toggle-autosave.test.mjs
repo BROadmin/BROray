@@ -5,9 +5,9 @@ import test from 'node:test';
 
 const code = fs.readFileSync(new URL('./static/assets/js/servers-auto-switch.js', import.meta.url), 'utf8');
 const flush = async () => { for (let i=0;i<10;i++) await new Promise(setImmediate); };
-async function fixture() {
+async function fixture({paused=false, lastError=''} = {}) {
     const els = new Map(), requests = [], messages = [], events = {};
-    let stored = { enabled: false, failureThreshold: 3, cooldownMinutes: 10, minimumRating: 'acceptable', selectionRule: 'best-quality', preferredServerId: null };
+    let stored = { enabled: paused, failureThreshold: 3, cooldownMinutes: 10, minimumRating: 'acceptable', selectionRule: 'best-quality', preferredServerId: null };
     let revision = 'r1', serial = 1, mode = '', release, readFails = false;
     const controls = ['enabled','rule','preferred','threshold','cooldown','minimum','save'];
     function el(id) {
@@ -16,7 +16,7 @@ async function fixture() {
             addEventListener(k,fn){(this.events[k]??=[]).push(fn);}, querySelectorAll(){return controls.map(n=>el('auto-switch-'+n));}, appendChild(){}, click(){} });
         return els.get(id);
     }
-    const document = {readyState:'complete', hidden:false, getElementById:el, addEventListener(k,fn){events[k]=fn;}, querySelector(){return null;},createElement(){return el('option');}};
+    const document = {readyState:'complete', hidden:false, getElementById:id=>id==='auto-switch-badge'?null:el(id), addEventListener(k,fn){events[k]=fn;}, querySelector(){return null;},createElement(){return el('option');}};
     const api = async (url, options={}) => {
         requests.push({url,...options});
         if (url.endsWith('/summary.cgi')) return {servers:[]};
@@ -29,13 +29,21 @@ async function fixture() {
             return {value:stored.enabled,revision};
         }
         if(readFails) throw new Error('offline');
-        return {config:{...stored},revision,state:{},service:{running:false}};
+        return {config:{...stored},revision,state:{lastError},automation:{paused},service:{running:false}};
     };
     vm.runInNewContext(code,{document,window:{setTimeout(){return 1;},clearTimeout(){}},BROrayUI:{apiRequest:api,toast(m){messages.push(m);},redirectToLogin(){}}});
     await flush();
     const dispatch=(target,type)=>{const event={target,preventDefault(){}}; for(const fn of target.events[type]||[]) fn(event); if(target!==el('auto-switch-form')) for(const fn of el('auto-switch-form').events[type]||[]) fn(event);};
     return {el,requests,messages,events,dispatch,stored:()=>stored,external(){stored.cooldownMinutes=40;revision='r'+(++serial);},mode(v){mode=v;},readFails(v){readFails=v;},release(){release();},toggle(v){el('auto-switch-enabled').checked=v;dispatch(el('auto-switch-enabled'),'change');}};
 }
+
+test('pause and error are visible with a plain settings heading',async()=>{
+    const f=await fixture({paused:true,lastError:'Проверка завершилась ошибкой'});
+    assert.equal(f.el('auto-switch-enabled').checked,true);
+    assert.equal(f.el('auto-switch-status').textContent,'На паузе');
+    assert.equal(f.el('auto-switch-error').hidden,false);
+    assert.equal(f.el('auto-switch-error').textContent,'Проверка завершилась ошибкой');
+});
 
 test('standalone switch saves both ways, preserves dirty neighbours, survives reload/status',async()=>{
     const f=await fixture();

@@ -79,23 +79,74 @@ func (e *engine) runCommands(ctx context.Context, cmds []string, perCmd time.Dur
 	return len(cmds), nil
 }
 
+// routeBatchConverged checks only routes from a complete running-config snapshot.
+func routeBatchConverged(s *rcSnapshot, present bool, routes []planRoute) bool {
+	if !s.complete() {
+		return false
+	}
+	if len(routes) == 0 {
+		return true
+	}
+	matches := func(snapshot *rcSnapshot, dest, iface string, metric int) bool {
+		count := snapshot.identityCount(dest, iface)
+		if !present {
+			return count == 0
+		}
+		return count == 1 && snapshot.attributeCount(dest, iface, metric) == 1
+	}
+	// On small snapshots or short removal batches, direct scans cost less than indexing.
+	if len(routes) == 1 || len(s.Routes) < 128 || !present && len(routes) < verifyBatchSize {
+		for _, r := range routes {
+			if !matches(s, r.dest(), r.Iface, r.Metric) {
+				return false
+			}
+		}
+		return true
+	}
+	type routeIdentity struct{ dest, iface string }
+	type routeMatches struct {
+		at    int
+		count int
+	}
+	keys := make([]routeIdentity, len(routes))
+	index := make(map[routeIdentity]routeMatches, len(routes))
+	for i, route := range routes {
+		key := routeIdentity{route.dest(), route.Iface}
+		keys[i] = key
+		index[key] = routeMatches{}
+	}
+	for i := range s.Routes {
+		route := &s.Routes[i]
+		key := routeIdentity{route.Destination, route.Interface}
+		if found, wanted := index[key]; wanted && route.Known && route.Gateway == routeGateway(route.Network) {
+			found.at = i
+			found.count++
+			index[key] = found
+		}
+	}
+	for i, key := range keys {
+		found := index[key]
+		if present {
+			if found.count != 1 {
+				return false
+			}
+			one := rcSnapshot{Routes: s.Routes[found.at : found.at+1]}
+			if one.attributeCount(key.dest, key.iface, routes[i].Metric) != 1 {
+				return false
+			}
+		} else if found.count != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // waitState re-reads running-config (≤ convergeAttempts, 1 s apart) until
-// every route is present with metric 1200 (present) or absent.
+// every route is present with its planned attributes or absent.
 func (e *engine) waitState(ctx context.Context, present bool, routes []planRoute) bool {
 	for attempt := 1; attempt <= convergeAttempts; attempt++ {
-		if s, err := e.fetchConfig(ctx); err == nil && s.complete() {
-			ok := true
-			for _, r := range routes {
-				id := s.identityCount(r.dest(), r.Iface)
-				if present {
-					ok = ok && id == 1 && s.attributeCount(r.dest(), r.Iface, r.Metric) == 1
-				} else {
-					ok = ok && id == 0
-				}
-			}
-			if ok {
-				return true
-			}
+		if s, err := e.fetchConfig(ctx); err == nil && routeBatchConverged(s, present, routes) {
+			return true
 		}
 		if attempt < convergeAttempts {
 			if sleepFn(ctx, time.Second) != nil {

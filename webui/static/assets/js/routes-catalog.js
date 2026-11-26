@@ -466,7 +466,7 @@
         if (state && state.availableVersion) {
             return {text: "Доступно для загрузки", className: "status-badge-neutral", icon: "backup"};
         }
-        return {text: "Источник не проверен", className: "status-badge-neutral", icon: "search"};
+        return {text: "Источник не проверен", className: "status-unknown", icon: "search"};
     }
 
     function fileChangeText(state) {
@@ -1086,9 +1086,9 @@
         }
         busy = Boolean(busyBundles[bundleId]) || Boolean(operationRunning) || Boolean(effectiveOperation && effectiveOperation.active) || progressResumable;
         setStatus(card, progressRunning
-            ? {text: progress && progress.stopRequested ? "Останавливается" : "Выполняется", className: "status-badge-warning", icon: "update"}
+            ? {text: progress && progress.stopRequested ? "Останавливается" : "Выполняется", className: "status-loading", icon: "update"}
             : operationBelongsToCard
-                ? {text: "Подготовка", className: "status-badge-warning", icon: "update"}
+                ? {text: "Подготовка", className: "status-loading", icon: "update"}
                 : globalBusy
                     ? {text: "Временно недоступно", className: "status-badge-neutral", icon: "access"}
                     : statusPresentation(state));
@@ -1282,7 +1282,7 @@
 
         if (status) {
             if (operation && operation.active) {
-                status.className = "status-badge status-badge-warning";
+                status.className = "status-badge " + (operation.resumable ? "status-warning" : "status-loading");
                 status.textContent = operation.resumable ? "Можно продолжить" : "Операция выполняется";
             } else if (loaded < BUNDLES.length) {
                 status.className = "status-badge status-loading";

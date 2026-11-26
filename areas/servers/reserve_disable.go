@@ -16,6 +16,9 @@ func (s *svc) disableReserve(ctx context.Context, binding reserveActiveBinding, 
 	if !s.reserveRuntimeFence(ctx) || revision != binding.plan.revision {
 		return errReserveRuntime
 	}
+	if binding.plan.hotSlot != "" {
+		return s.applyReserveSelection(ctx, revision, reserveSelection{server: binding.plan.node.ID, mode: "disable-hot"})
+	}
 	if pending, err := reserve.TransactionPending(ctx, s.d.Root); err != nil || pending {
 		return errors.Join(errReserveTransactionPending, err)
 	}
@@ -83,12 +86,12 @@ func (s *svc) disableReserve(ctx context.Context, binding reserveActiveBinding, 
 						return errReserveRuntime
 					}
 					return nil
-				})
+				}, nil)
 				if rollbackErr == nil {
 					retErr = errors.Join(errReserveModeRolledBack, retErr)
 					return
 				}
-				retErr = errors.Join(retErr, rollbackErr)
+				retErr = errors.Join(retErr, errReserveRollbackUnconfirmed, rollbackErr)
 			}
 			retErr = errors.Join(errReserveTransactionPending, retErr)
 		}()

@@ -17,6 +17,14 @@ import (
 
 var errReserveProbeCleanup = errors.New("RESERVE_PROBE_CLEANUP_UNCONFIRMED")
 
+func (s *svc) probeReserveSelection(ctx context.Context, id string) (reserve.Sample, error) {
+	prefs, err := readReservePreferences(s.d)
+	if err != nil || !prefs.Enabled {
+		return reserve.Sample{}, errReserveRuntime
+	}
+	return s.probeReserveCandidate(ctx, id, !reserveRosterContains(prefs, id), reserve.Probe)
+}
+
 func (s *svc) probeReserveBackup(ctx context.Context, id string) (reserve.Sample, error) {
 	return s.probeReserveBackupWith(ctx, id, reserve.Probe)
 }

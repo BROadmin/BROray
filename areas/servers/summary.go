@@ -50,11 +50,12 @@ func (s *svc) cachedActiveHealth(id string) map[string]any {
 			continue
 		}
 		ep, ok := num(h["checkedEpoch"])
+		wanOutage := h["status"] == "unknown" && h["errorCode"] == wanUnavailable
 		if !ok || h["method"] != "current-socks-https" || h["serverId"] != id || context == "" || h["context"] != context ||
-			ep > float64(now) || float64(now)-ep > 120 || !(h["status"] == "healthy" || h["status"] == "unhealthy") {
+			ep > float64(now) || float64(now)-ep > 120 || !(h["status"] == "healthy" || h["status"] == "unhealthy" || wanOutage) {
 			continue
 		}
-		if ep > bestEpoch {
+		if ep >= bestEpoch {
 			best, bestEpoch = h, ep
 		}
 	}
@@ -93,10 +94,12 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 		if err != nil || rec["id"] != id {
 			return nil, opFailed("Ошибка: не удалось сформировать данные сервера " + id)
 		}
-		q := s.qualityView(id, stale, expired)
 		support := supportView(rec)
+		var q map[string]any
 		if support["supported"] == false {
 			q = map[string]any{"status": "unsupported", "freshness": "not-applicable", "method": nil}
+		} else {
+			q = s.qualityView(id, stale, expired)
 		}
 		row := map[string]any{
 			"id": rec["id"], "name": alt(rec["name"], rec["id"]), "address": rec["address"], "port": rec["port"],
@@ -106,7 +109,7 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 			"subscriptionName": s.presentationSubscriptionName(rec, subscriptionNames), "displayGroupId": id,
 			"sourceFormats": presentationSourceFormats(rec),
 			"active":        rec["id"] == active, "quality": q, "connectionSupport": support,
-			"importWarnings": MaskRecord(rec)["importWarnings"],
+			"importWarnings": presentedImportWarnings(rec["importWarnings"]),
 		}
 		rows = append(rows, row)
 		if k, err := CanonicalKey(rec); err == nil {
@@ -157,11 +160,14 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 	xrayOperational := xrayRunning && socksActive
 
 	connAvailable, connUp, connFreshness := false, false, "unknown"
-	var verdict any
+	var verdict string
+	var wanOutage bool
 	if prefs, err := readReservePreferences(s.d); err == nil && prefs.Enabled {
-		verdict = s.activeReserveStatus(active)
+		verdict, wanOutage = s.activeReserveStatus(active)
 	} else {
-		verdict = s.cachedActiveHealth(active)["status"]
+		probe := s.cachedActiveHealth(active)
+		verdict, _ = probe["status"].(string)
+		wanOutage = probe["errorCode"] == wanUnavailable
 	}
 	switch verdict {
 	case "healthy":
@@ -206,9 +212,13 @@ func (s *svc) summary(ctx context.Context) (map[string]any, error) {
 	}
 	add(activePresent, "ACTIVE_SERVER_MISSING", "Активный сервер не выбран.")
 	add(xrayOperational, "XRAY_NOT_OPERATIONAL", "Xray или его локальный SOCKS-интерфейс не готовы.")
-	add(connAvailable, "ACTIVE_PROXY_HEALTH_UNAVAILABLE", "Текущий VPN ещё не проверен HTTPS-запросом. Нажмите «Проверить» у активного сервера.")
-	add(connUp, "CONNECTION_DOWN", "Соединение через активный сервер не подтверждено.")
-	add(connCurrent, "CONNECTION_STATUS_STALE", "Состояние соединения устарело.")
+	if wanOutage {
+		reasons = append(reasons, reason(wanUnavailable, wanUnavailableMessage))
+	} else {
+		add(connAvailable, "ACTIVE_PROXY_HEALTH_UNAVAILABLE", "Текущий VPN ещё не проверен HTTPS-запросом. Нажмите «Проверить» у активного сервера.")
+		add(connUp, "CONNECTION_DOWN", "Соединение через активный сервер не подтверждено.")
+		add(connCurrent, "CONNECTION_STATUS_STALE", "Состояние соединения устарело.")
+	}
 	add(kExists, "PROXY0_MISSING", "Управляемый интерфейс ProxyN не создан.")
 	add(kHealthy, "PROXY0_NOT_READY", "Управляемый ProxyN не работает.")
 	add(kConsistent, "PROXY0_MISMATCH", "Управляемый ProxyN не соответствует активному серверу.")

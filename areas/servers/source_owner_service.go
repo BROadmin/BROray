@@ -29,12 +29,12 @@ func (s *svc) PrepareSourceRefresh(ctx context.Context, sourceID string, removed
 }
 
 func (s *svc) prepareSourceOwner(ctx context.Context, sourceID string, removedIDs, candidates []string, refreshed bool) (string, error) {
-	return s.reconcileSourceOwner(ctx, removedIDs, refreshed, func(ctx context.Context) (string, error) {
+	return s.reconcileSourceOwner(ctx, removedIDs, refreshed, false, func(ctx context.Context) (string, error) {
 		return s.prepareSourceChange(ctx, sourceID, removedIDs, candidates, refreshed)
 	})
 }
 
-func (s *svc) reconcileSourceOwner(ctx context.Context, affectedIDs []string, refreshed bool, run func(context.Context) (string, error)) (result string, resultErr error) {
+func (s *svc) reconcileSourceOwner(ctx context.Context, affectedIDs []string, refreshed, renameOnly bool, run func(context.Context) (string, error)) (result string, resultErr error) {
 	phase := "owner/preconditions"
 	defer func() { s.logSourceFailure(phase, resultErr) }()
 	if !s.reserveRuntimeFence(ctx) {
@@ -92,12 +92,16 @@ func (s *svc) reconcileSourceOwner(ctx context.Context, affectedIDs []string, re
 	}
 	phase = "owner/runtime-reconcile"
 	after := process.RuntimeSnapshot()
+	retainedRuntime := next == previous && after == before && (renameOnly || (refreshed && before.Running && before.Wanted))
 	generation := before.Generation
-	if next != "" && before.Wanted {
+	if next != "" && before.Wanted && !retainedRuntime {
 		generation++
 	}
 	wanted := next != "" && before.Wanted
 	intent := before.Intent + 1
+	if retainedRuntime {
+		intent = before.Intent
+	}
 	if cold != nil {
 		intent = before.Intent
 		if after != before || !coldValid() {
@@ -113,6 +117,9 @@ func (s *svc) reconcileSourceOwner(ctx context.Context, affectedIDs []string, re
 	}
 	if !current() {
 		return "", errSourceRemovalState
+	}
+	if retainedRuntime {
+		return next, nil
 	}
 	phase = "owner/display-state"
 	s.mu.Lock()

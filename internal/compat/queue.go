@@ -69,6 +69,7 @@ type Task struct {
 	data      map[string]any
 	req       *Request
 	c         *Coordinator
+	workerCtx context.Context
 }
 
 // Set / Get carry data from one stage to the next.
@@ -422,19 +423,72 @@ func (c *Coordinator) next() (*Request, ActionSpec, *Operation) {
 		c.mu.Unlock()
 		return nil, ActionSpec{}, nil
 	}
-	spec := c.spec[best.Action]
-	best.OperationID = "op-" + best.RequestID // op-q-<32hex>
-	op := c.startOperationLocked(best.OperationID, spec.Type, best.Action, best.Source, "cooperative", best.RequestID)
-	best.State = "running"
-	c.running = best
+	spec, op := c.startRequestLocked(best, "cooperative")
 	c.mu.Unlock()
 	c.journal.Append(op, "started", "pending", "")
 	return best, spec, op
 }
 
-func (c *Coordinator) execute(ctx context.Context, r *Request, s ActionSpec, op *Operation) {
+func (c *Coordinator) startRequestLocked(r *Request, cancelability string) (ActionSpec, *Operation) {
+	spec := c.spec[r.Action]
+	r.OperationID = "op-" + r.RequestID // op-q-<32hex>
+	op := c.startOperationLocked(r.OperationID, spec.Type, r.Action, r.Source, cancelability, r.RequestID)
+	r.State = "running"
+	c.running = r
+	return spec, op
+}
+
+// RunPendingReserveMonitor gives a due monitor one turn on this worker after
+// a scheduled quality probe has finished and published its result.
+func (t *Task) RunPendingReserveMonitor() (bool, error) {
+	c := t.c
+	if t.Action != "servers:quality" || t.Source != "SERVER_CHECK_AUTO" || c.d.Lock.Busy() {
+		return false, nil
+	}
+	c.mu.Lock()
+	if c.running != t.req || c.paused || t.Ctx.Err() != nil || t.Op.CancelRequested() {
+		c.mu.Unlock()
+		return false, nil
+	}
+	var monitor *Request
+	for _, r := range c.live {
+		if r.State == "queued" && r.Action == ReserveSwitchAction && r.Source == "RESERVE_MONITOR" && r.Priority < t.req.Priority {
+			monitor = r
+			break
+		}
+	}
+	if monitor == nil {
+		c.mu.Unlock()
+		return false, nil
+	}
+	parentCancel := c.cancel
+	spec, op := c.startRequestLocked(monitor, "protected")
+	c.cancel = nil
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.running, c.cancel = t.req, parentCancel
+		c.mu.Unlock()
+		if t.Op.CancelRequested() && parentCancel != nil {
+			parentCancel()
+		}
+	}()
+
+	t.Op.Phase("waiting")
+	defer t.Op.Phase("checking")
+	c.journal.Append(op, "started", "pending", "")
+	// An ordinary failed health check does not invalidate quality results.
+	// The monitor owns its separate operation and its protected fence.
+	err := c.execute(t.workerCtx, monitor, spec, op)
+	if errors.Is(err, ErrReserveTransactionPending) || c.d.Lock.Ambiguous() {
+		return true, errors.Join(ErrReserveTransactionPending, err)
+	}
+	return true, nil
+}
+
+func (c *Coordinator) execute(ctx context.Context, r *Request, s ActionSpec, op *Operation) error {
 	t := &Task{RequestID: r.RequestID, Action: r.Action, Target: r.Target, Source: r.Source, Context: r.Context,
-		Op: op, data: map[string]any{}, req: r, c: c}
+		Op: op, data: map[string]any{}, req: r, c: c, workerCtx: ctx}
 	var err error
 	usesReserve := reserveQueueAction(r.Action)
 	if usesReserve && !validReserveQueueShape(r, s) {
@@ -538,6 +592,7 @@ func (c *Coordinator) execute(ctx context.Context, r *Request, s ActionSpec, op 
 	c.running = nil
 	c.mu.Unlock()
 	op.Finish(err)
+	return err
 }
 
 // bindCooperativeCancel closes the window between accepting cancellation and

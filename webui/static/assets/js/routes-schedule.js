@@ -113,7 +113,7 @@
         resultNode.textContent = result;
         resultNode.classList.toggle("is-error", !view.running && view.lastResult === "failed");
 
-        if (view.running) setBadge("Проверка…", "status-badge-warning");
+        if (view.running) setBadge("Проверка…", "status-loading");
         else if (!enabled) setBadge("Выключена", "status-badge-neutral");
         else if (view.automationPaused) setBadge("Приостановлена", "status-badge-warning");
         else setBadge(view.autoApply ? "Автоустановка " + intervalText(view.intervalHours) : "Проверка " + intervalText(view.intervalHours), "status-badge-success");

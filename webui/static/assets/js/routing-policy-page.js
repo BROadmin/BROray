@@ -7,13 +7,16 @@
     var nativePreviewRequests = new Map();
     var nativeListPath = "/api/routes/native-domain-preview.cgi";
     var nativeApplyPath = "/api/routes/native-domain-apply.cgi", nativeStates = null, nativeChangePending = null;
+    var dnsDraftPath = "/api/routes/native-dns-draft.cgi", dnsDrafts = Object.create(null);
     var nativeDialog = null;
     var filters = [{id: "filter-ads", tag: "category-ads", name: "Реклама и рекламные трекеры"}, {id: "filter-telemetry", tag: "category-telemetry", name: "Телеметрия приложений"}];
     var client, state, uiBusy = false, editID = null, editBase = null, draftID = null, editorDirty = false, timer = null;
+    var applyTimeRevision = null;
     function byId(id) { return document.getElementById(id); }
     function node(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
-    function rule(id) { return state && state.policy && state.policy.state.rules.find(function (r) { return r.id === id; }); }
-    function editableSignature(r) { return r ? JSON.stringify([r.name, r.domains]) : null; }
+    function legacyRule(id) { return state && state.policy && state.policy.state.rules.find(function (r) { return r.id === id; }); }
+    function rule(id) { return dnsDrafts[id] || legacyRule(id); }
+    function editableSignature(r) { return r ? JSON.stringify([r.name, r.domains, r.sourceSHA256]) : null; }
     function blocked() { return uiBusy || !state || !state.policy || state.busy || state.uncertain || state.policy.busy || state.policy.pending; }
     function errorMessage(error) {
         if (error.status === 401) { window.BROrayUI.redirectToLogin(); return; }
@@ -81,7 +84,7 @@
         var statuses = {
             enabled: ["Включён", "status-success"], disabled: ["Выключен", "status-badge-neutral"],
             creating: ["Нужно завершить применение", "status-warning"], removing: ["Нужно завершить удаление", "status-warning"],
-            unconfirmed: ["Не подтверждён", "status-warning"], unknown: ["Статус недоступен", "status-badge-neutral"],
+            unconfirmed: ["Не подтверждён", "status-warning"], unknown: ["Статус недоступен", "status-unknown"],
             busy: ["Выполняется", "status-loading"], legacy: ["Прежний маршрут", "status-warning"]
         };
         var badge = statuses[phase] || statuses.unknown;
@@ -90,7 +93,7 @@
         heading.append(node("h3", "", item.name), status);
         row.append(heading);
         if (preview) {
-            row.append(node("p", "policy-hint", "Совместимых доменов: " + preview.domains.length +
+            row.append(node("p", "policy-hint", "Совместимых записей: " + preview.domains.length +
                 (preview.skipped.length ? " · Пропущено правил: " + preview.skipped.length : "")));
         } else if (item.domains) {
             row.append(node("p", "policy-hint", "Правил: " + item.domains.length));
@@ -114,9 +117,9 @@
     }
     function appendNativePreview(content, preview) {
         var matches = node("section"), omitted = node("section"), sections = node("div", "policy-domain-dialog-grid");
-        matches.append(node("h3", "", "Совместимые домены · " + preview.domains.length));
+        matches.append(node("h3", "", "Совместимые записи · " + preview.domains.length));
         matches.append(preview.domains.length ? node("pre", "policy-domain-text", preview.domains.join("\n")) :
-            node("p", "policy-hint", "В этом списке нет совместимых доменов."));
+            node("p", "policy-hint", "В этом списке нет совместимых записей."));
         omitted.append(node("h3", "", "Пропущенные правила · " + preview.skipped.length));
         var reasons = {
             "keenetic-includes-subdomains": "Точное имя: Keenetic включил бы поддомены",
@@ -173,14 +176,14 @@
         var message = byId("policy-domain-dialog-message");
         byId("policy-domain-dialog-title").textContent = item.name;
         var description = {
-            enable: "Keenetic применит совместимые домены этого списка.",
-            disable: "Keenetic удалит правило и доменный список. Набор останется доступен в BROray.",
+            enable: "Keenetic применит совместимые записи этого списка.",
+            disable: "Keenetic удалит маршрут и список. Набор останется доступен в BROray.",
             recover: current && current.phase === "removing" ? "Keenetic завершит удаление правила и доменного списка." :
                 "Keenetic завершит применение существующего доменного списка.",
             legacy: "После отключения прежнего маршрута этот список можно применить в Keenetic."
         }[action] || "";
         if (action === "disable" && !item.domains && !(nativePresets || []).some(function (entry) { return entry.id === item.id; })) {
-            description = "Keenetic удалит правило и доменный список.";
+            description = "Keenetic удалит маршрут и список.";
         }
         var needsPreview = !selection.preview && (!action || action === "enable");
         message.textContent = needsPreview ? "Получение состава…" : description;
@@ -208,6 +211,7 @@
                 throw new Error("Не удалось прочитать состояние списков Keenetic.");
             }
             nativeStates = response.states;
+            dnsDrafts = Object.assign(Object.create(null), response.drafts);
             render();
         }).catch(function (error) { nativeStates = null; render(); errorMessage(error); });
     }
@@ -249,19 +253,36 @@
     function tags(row, values) { var list = node("div", "policy-tags"); values.forEach(function (v) { list.append(node("span", "", v)); }); row.append(list); }
     async function removeRule(r) {
         if (blocked()) return;
+        if (r.sourceSHA256) {
+            var original = legacyRule(r.id);
+            var consent = await window.BROrayDialogs.confirm({title: original ? "Вернуть исходный список?" : "Удалить «" + r.name + "»?",
+                message: original ? "Сохранённые изменения будут удалены, исходный список появится в разделе маршрутов." : "Список будет удалён.",
+                confirmText: original ? "Вернуть" : "Удалить", cancelText: "Отмена", variant: "danger"});
+            if (consent) run(function () { return changeDNSDraft("delete", r.id, r.sourceSHA256); });
+            return;
+        }
         var confirmed = await window.BROrayDialogs.confirm({title: "Удалить «" + r.name + "»?", message: "Правило и его настройки будут удалены. Остальные правила сохранятся.", confirmText: "Удалить", cancelText: "Отмена", variant: "danger"});
         if (confirmed) run(function () { return client.change({operation: "delete", id: r.id}); });
     }
-    function removeButton(r) { var button = node("button", "button button-danger", "Удалить"); button.type = "button"; button.id = "delete-" + r.id; button.disabled = blocked(); button.addEventListener("click", function () { removeRule(r); }); return button; }
+    function removeButton(r) { var button = node("button", "button button-danger", r.sourceSHA256 && legacyRule(r.id) ? "Вернуть исходный список" : "Удалить"); button.type = "button"; button.id = "delete-" + r.id; button.disabled = blocked(); button.addEventListener("click", function () { removeRule(r); }); return button; }
+    async function changeDNSDraft(action, id, hash, details) {
+        var body = Object.assign({action: action, id: id, expectedHash: hash || "", policyRevision: state.policy.revision}, details);
+        await window.BROrayUI.apiRequest(dnsDraftPath, {method: "POST",
+            headers: {"Content-Type": "application/json", "X-BROray-Request": "operations", "X-BROray-Origin": window.location.origin},
+            body: JSON.stringify(body)}).then(nativeEnvelope);
+        nativePreviews.delete(id);
+        await refreshNativeStates();
+    }
     function renderOwn() {
         var root = byId("policy-own"), lists = state.policy ? state.policy.state.rules.filter(function (r) {
             return r.domains && r.domains.length && !(r.countryCodes || []).length && !(r.geoSiteTags || []).length;
-        }) : [];
+        }).filter(function (r) { return !dnsDrafts[r.id]; }) : [];
+        lists = lists.concat(Object.values(dnsDrafts));
         root.replaceChildren();
         var orphaned = Object.entries(nativeStates || {}).filter(function (pair) {
             return pair[1].preview.sourceRevision === "own" && !lists.some(function (r) { return r.id === pair[0]; });
         });
-        if (!lists.length && !orphaned.length) root.append(node("p", "policy-empty", "Своих списков пока нет. Добавьте домены вручную или импортируйте текстовый файл."));
+        if (!lists.length && !orphaned.length) root.append(node("p", "policy-empty", "Своих списков пока нет. Добавьте домены и IP вручную или импортируйте текстовый файл."));
         lists.forEach(function (r) {
             var current = nativeCurrent(r.id), row = renderNativeCard(r);
             var buttons = node("div", "policy-domain-secondary"), edit = node("button", "button button-secondary", "Редактировать"); edit.type = "button"; edit.id = "edit-" + r.id;
@@ -270,7 +291,8 @@
             edit.addEventListener("click", function () { openEditor(r); }); buttons.append(edit, remove); row.append(buttons); root.append(row);
         });
         orphaned.forEach(function (pair) {
-            root.append(renderNativeCard({id: pair[0], name: pair[1].preview.name || pair[0]}, true));
+            var managed = pair[0] === "own-premium-ip" || pair[0] === "own-premium-domains";
+            root.append(renderNativeCard({id: pair[0], name: pair[1].preview.name || pair[0]}, !managed));
         });
         ["policy-add", "policy-import", "policy-save"].forEach(function (id) { byId(id).disabled = Boolean(blocked() || nativeChangePending); });
     }
@@ -301,20 +323,37 @@
         byId("policy-" + kind + "-date").textContent = date ? "Проверено: " + new Date(date).toLocaleString("ru-RU") : "Ещё не обновлялось";
         var attempt = state.schedule && state.schedule.attempts[kind];
         byId("policy-" + kind + "-result").textContent = !attempt ? "" : {ok: "Файлы проверены", failed: "Ошибка последней попытки", running: "Обновление не завершено"}[attempt.status] || "Результат не подтверждён";
-        byId("policy-update-" + kind).disabled = blocked() || !all.length;
     }
     function renderSchedule() {
         if (isDomains) return;
+        var policy = state.policy, ready = policy && policy.geoPending, readError = policy && policy.geoPendingError;
+        var selected = policy && policy.state.rules.some(function (r) {
+            return (r.countryCodes && r.countryCodes.length) || (r.geoSiteTags && r.geoSiteTags.length);
+        });
+        byId("policy-geodata-check").disabled = blocked() || !selected;
+        var apply = byId("policy-geodata-apply");
+        apply.hidden = !ready || !!readError;
+        apply.disabled = blocked() || !ready || !!readError;
+        byId("policy-geodata-pending").textContent = readError ? "Состояние подготовленных геоданных недоступно." :
+            ready ? "Геоданные готовы и ожидают применения." : "";
         var input = byId("policy-daily"); input.checked = Boolean(state.schedule && state.schedule.enabled);
         input.disabled = state.scheduleBusy || state.scheduleUncertain || !state.schedule;
-        byId("policy-daily-status").textContent = state.scheduleBusy ? "Сохранение…" : state.scheduleUncertain ? "Настройка не подтверждена. Обновите данные." : state.schedule.automationPaused ? "Автоматизация приостановлена. Ручное обновление доступно." : state.schedule.enabled ? "Включено · состояние сохраняется автоматически" : "Выключено · ручное обновление доступно";
+        byId("policy-daily-status").textContent = state.scheduleBusy ? "Сохранение…" : state.scheduleUncertain ? "Настройка не подтверждена. Обновите данные." : state.schedule.automationPaused ? "Автоматизация приостановлена. Ручная проверка доступна." : state.schedule.enabled ? "Включено · проверка раз в сутки" : "Выключено · ручная проверка доступна";
+        var time = byId("policy-geo-apply-time"), canSetTime = state.schedule && state.schedule.applyRevision;
+        var stale = applyTimeRevision !== null && canSetTime !== applyTimeRevision;
+        if (applyTimeRevision === null) time.value = canSetTime ? state.schedule.applyAtUTC : "";
+        time.disabled = input.disabled || !canSetTime || stale;
+        byId("policy-geo-apply-save").disabled = time.disabled || applyTimeRevision === null;
+        byId("policy-geo-apply-reset").hidden = applyTimeRevision === null;
+        byId("policy-geo-apply-time-status").textContent = stale ? "Настройка изменилась. Сбросьте введённое время." :
+            canSetTime && state.schedule.applyAtUTC ? "Расписание: " + state.schedule.applyAtUTC + " UTC" : "Применение вручную";
     }
     function render() {
         if (!state) return;
         var focus = document.activeElement && document.activeElement.id, status = byId("policy-status");
         var pending = state.policy && state.policy.pending, busy = state.busy || uiBusy || (state.policy && state.policy.busy);
         status.textContent = pending ? "Нужно восстановление" : busy ? "Выполняется" : state.uncertain ? "Не подтверждено" : "Данные получены";
-        status.className = "status-badge " + (pending || state.uncertain ? "status-warning" : busy ? "status-loading" : "status-success");
+        status.className = "status-badge " + (pending ? "status-warning" : busy ? "status-loading" : state.uncertain ? "status-warning" : "status-success");
         byId("policy-message").textContent = pending ? "Предыдущая операция требует восстановления. Изменения правил пока заблокированы." : state.message || (isDomains ? "" : "Переключатели сохраняются автоматически.");
         byId("policy-refresh").disabled = state.busy || uiBusy;
         if (isDomains) {
@@ -379,6 +418,16 @@
             var id = editID || draftID, isNew = !editID;
             run(async function () {
                 try {
+                    var draft = dnsDrafts[id];
+                    var hasIP = domains.split("\n").some(function (line) {
+                        line = line.trim();
+                        return !line.startsWith("#") && (line.includes(":") && !/^(domain|full):/i.test(line) || /^\d+\.\d+\.\d+\.\d+(?:\/|$)/.test(line));
+                    });
+                    if (draft || hasIP) {
+                        await changeDNSDraft("save", id, draft && draft.sourceSHA256, {name: name, targets: domains});
+                        editorDirty = false; byId("policy-editor").hidden = true;
+                        return;
+                    }
                     await client.change({operation: "upsert", id: id, name: name, domains: domains});
                     nativePreviews.delete(id);
                     // New VPN lists stay off until their Keenetic route is applied.
@@ -402,8 +451,30 @@
         }
         byId("policy-add-country").addEventListener("click", function () { add("geoip", "policy-country"); });
         byId("policy-add-category").addEventListener("click", function () { add("geosite", "policy-category"); });
-        ["geoip", "geosite"].forEach(function (kind) { byId("policy-update-" + kind).addEventListener("click", function () { run(async function () { await client.change({operation: "geo-update", id: kind, kind: kind}); await client.refreshSchedule(); }); }); });
+        byId("policy-geodata-check").addEventListener("click", function () {
+            run(async function () { await client.change({operation: "geo-check", id: "geodata"}); await client.refreshSchedule(); });
+        });
+        byId("policy-geodata-apply").addEventListener("click", async function () {
+            var ready = state.policy && state.policy.geoPending;
+            if (!ready || blocked()) return;
+            if (!await window.BROrayDialogs.confirm({title: "Применить геоданные?", message: "Во время применения Xray может перезапуститься.", confirmText: "Применить", cancelText: "Отмена"})) return;
+            run(function () { return client.change({operation: "geo-apply", id: "geodata", expectedPendingRevision: ready.revision}); });
+        });
         byId("policy-daily").addEventListener("change", async function () { var enabled = this.checked; try { await client.setSchedule(enabled); window.BROrayUI.toast("Сохранено", "success"); } catch (error) { errorMessage(error); } });
+        byId("policy-geo-apply-time").addEventListener("input", function () {
+            if (!state.schedule || !state.schedule.applyRevision) return;
+            if (applyTimeRevision === null) applyTimeRevision = state.schedule.applyRevision;
+            render();
+        });
+        byId("policy-geo-apply-save").addEventListener("click", async function () {
+            try {
+                await client.setApplyTime(byId("policy-geo-apply-time").value, applyTimeRevision);
+                applyTimeRevision = null;
+                render();
+                window.BROrayUI.toast("Время применения сохранено", "success");
+            } catch (error) { errorMessage(error); }
+        });
+        byId("policy-geo-apply-reset").addEventListener("click", function () { applyTimeRevision = null; render(); });
     }
     async function refresh() {
         var jobs = [client.refresh(), client.refreshSchedule()];

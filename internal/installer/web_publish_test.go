@@ -249,6 +249,11 @@ func TestInstallPublishesFreshWebUI(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			intent := filepath.Join(root.State(), "install-statistics", "first-install.json")
+			_, intentErr := os.Lstat(intent)
+			if tc.noStart && !os.IsNotExist(intentErr) || !tc.noStart && intentErr != nil {
+				t.Fatalf("unexpected first install observation intent: %v", intentErr)
+			}
 			mu.Lock()
 			defer mu.Unlock()
 			if len(calls) != tc.wantCalls {

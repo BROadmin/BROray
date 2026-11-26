@@ -129,6 +129,11 @@ func intervalText(v any) (int64, *subErr) {
 
 // validateBody is broray_subscription_validate_body (UA, sendDeviceInfo).
 func validateBody(b map[string]any) *subErr {
+	for key, value := range b {
+		if strings.EqualFold(key, profileApplyTimeField) && (key != profileApplyTimeField || !validProfileApplyTime(value)) {
+			return fail("INVALID_PROFILE_APPLY_TIME", "Укажите время применения в формате ЧЧ:ММ (UTC) или оставьте поле пустым.")
+		}
+	}
 	for _, key := range []string{"fetchJSON", "fetchClash"} {
 		if v, exists := b[key]; exists {
 			if _, ok := v.(bool); !ok {
@@ -200,6 +205,9 @@ func (s *svc) create(op *compat.Operation, release compat.Release, b map[string]
 		"sendDeviceInfo": b["sendDeviceInfo"] == true, "fetchJSON": b["fetchJSON"] == true, "fetchClash": b["fetchClash"] == true, "enabled": enabled, "autoUpdateEnabled": auto, "updateIntervalMinutes": interval,
 		"lastUpdateStatus": "never", "lastUpdatedAt": nil, "lastUpdatedEpoch": nil, "lastError": nil, "serversReceived": 0,
 		"lastUpdateResult": nil, "createdAt": compat.Stamp(t), "updatedAt": compat.Stamp(t)}
+	if at, _ := b[profileApplyTimeField].(string); at != "" {
+		rec[profileApplyTimeField], rec[profileApplyScheduleRevisionField] = at, compat.RandHex(16)
+	}
 	setSchedule(rec, t)
 	if err := s.writeRecord(rec); err != nil {
 		return nil, false, err
@@ -278,6 +286,14 @@ func (s *svc) updateSettings(id string, b map[string]any) (any, error) {
 	}
 	rec["name"], rec["httpUserAgent"], rec["sendDeviceInfo"], rec["url"] = name, ua, sendDevice, url
 	rec["enabled"], rec["autoUpdateEnabled"], rec["updateIntervalMinutes"] = enabled, auto, interval
+	at, _ := pick(profileApplyTimeField).(string)
+	oldAt, _ := old[profileApplyTimeField].(string)
+	if at != oldAt {
+		rec[profileApplyTimeField], rec[profileApplyScheduleRevisionField] = at, compat.RandHex(16)
+	}
+	if pendingInputsOf(old) != pendingInputsOf(rec) {
+		rec[pendingSourceRevisionField] = compat.RandHex(16)
+	}
 	setSchedule(rec, t)
 	rec["updatedAt"] = compat.Stamp(t)
 	if err := s.writeRecord(rec); err != nil {
@@ -389,6 +405,9 @@ func register() {
 		})
 		writeResult(c, data, false, err)
 	}, bodyOpts...)
+	cgi.RegisterRaw("/api/subscriptions/apply-profile.cgi", func(c *cgi.Req) {
+		cur().servePendingProfileApply(c)
+	}, cgi.POST(), cgi.Limit(4096))
 	cgi.RegisterRaw("/api/subscriptions/refresh.cgi", func(c *cgi.Req) {
 		s := cur()
 		if c.Header("X-BROray-Queue") == "1" {

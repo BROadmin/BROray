@@ -12,7 +12,8 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.5.9-c5">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.5.9-c5">
     <link rel="manifest" href="/manifest.json?v=WebUI-3.5.9-c5">
-    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c5">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c7">
+    <link rel="stylesheet" href="/assets/css/setup-wizard.css?v=WebUI-3.5.9-c10">
     <link rel="stylesheet" href="/assets/css/background-operations.css?v=WebUI-3.5.9-c5-journal">
     <script src="/assets/js/theme-init.js?v=WebUI-3.5.9-c5"></script>
 </head>
@@ -110,6 +111,11 @@
         <span id="installation-status" class="status-badge status-loading" data-icon="status">Проверка…</span>
     </section>
 
+    <section class="ui-card setup-entry" aria-labelledby="broray-quick-setup-title">
+        <h2 id="broray-quick-setup-title">Быстрая настройка</h2>
+        <a class="button button-secondary" href="/setup.html">Открыть мастер</a>
+    </section>
+
     <section class="card broray-overview-card" aria-labelledby="broray-version-title">
         <div class="broray-version-panel">
             <span class="broray-product-icon" data-icon="security" aria-hidden="true"></span>
@@ -177,9 +183,9 @@
                 <span class="eyebrow">Свободное место</span>
                 <h2 id="broray-cleanup-title">Безопасная очистка</h2>
             </div>
-            <span id="cleanup-state" class="status-badge status-neutral" data-icon="storage">Не проверено</span>
+            <span id="cleanup-state" class="status-badge status-unknown">Не проверено</span>
         </div>
-        <p class="section-note">BROray удаляет только распознанные старые служебные файлы. Активные журналы, последние резервные копии, неизвестные файлы и внешние симлинки не затрагиваются.</p>
+        <p class="section-note">BROray проверяет старые служебные файлы, версии и копии перед импортом. Одинаковые файлы GeoIP и GeoSite объединяются с сохранением истории отката.</p>
         <div class="broray-cleanup-options" aria-label="Категории очистки">
             <label class="broray-cleanup-option">
                 <input id="cleanup-temp" type="checkbox" checked>
@@ -209,11 +215,11 @@
         <div id="cleanup-result" class="broray-cleanup-result" hidden aria-live="polite">
             <dl class="broray-cleanup-summary">
                 <div><dt>Объектов</dt><dd id="cleanup-count">0</dd></div>
-                <div><dt>Можно освободить</dt><dd id="cleanup-bytes">0 Б</dd></div>
+                <div><dt id="cleanup-bytes-label">Размер выбранных данных</dt><dd id="cleanup-bytes">0 Б</dd></div>
                 <div><dt>Подтверждение</dt><dd id="cleanup-expiry">—</dd></div>
             </dl>
             <details class="broray-cleanup-details">
-                <summary data-icon="logs">Что будет удалено</summary>
+                <summary data-icon="logs">Что будет очищено</summary>
                 <ul id="cleanup-candidates" class="broray-cleanup-candidates"></ul>
             </details>
         </div>
@@ -225,7 +231,7 @@
                 <span class="eyebrow">Обслуживание</span>
                 <h2 id="broray-backup-title">Резервная копия настроек</h2>
             </div>
-            <span id="backup-state" class="status-badge status-neutral" data-icon="backup">Не проверено</span>
+            <span id="backup-state" class="status-badge status-unknown">Не проверено</span>
         </div>
         <p class="section-note">В копию входят серверы и их настройки DPI, подписки, активный сервер, резервирование и автовыбор, проверка качества, DNS-over-TLS, IP-маршруты, доменные правила и блокировки, выбранные геоданные и настройка их ежедневного обновления. Квитанции Keenetic, журналы, сеансы, кэши и исполняемый файл Xray в копию не входят.</p>
         <div class="broray-backup-grid">
@@ -377,7 +383,7 @@
     </div>
 
     <section class="card bg-card" aria-labelledby="bg-title">
-        <div class="section-heading"><div><span class="eyebrow">Управление</span><h2 id="bg-title">Фоновые операции</h2></div><span id="bg-badge" class="status-badge status-neutral">Загрузка</span></div>
+        <div class="section-heading"><div><span class="eyebrow">Управление</span><h2 id="bg-title">Фоновые операции</h2></div><span id="bg-badge" class="status-badge status-loading">Загрузка</span></div>
         <p id="bg-summary" role="status" aria-live="polite">Чтение состояния операций…</p>
         <div id="bg-list"></div>
         <details id="bg-history" class="bg-history" hidden>
@@ -389,7 +395,7 @@
         <p id="bg-feedback" class="section-note" role="status" aria-live="polite"></p>
     </section>
     <section class="card bg-card" aria-labelledby="bg-automation-title">
-        <div class="section-heading"><div><span class="eyebrow">Автоматика</span><h2 id="bg-automation-title">Остановка фоновой работы</h2></div><span id="bg-automation-badge" class="status-badge status-neutral">Состояние неизвестно</span></div>
+        <div class="section-heading"><div><span class="eyebrow">Автоматика</span><h2 id="bg-automation-title">Остановка фоновой работы</h2></div><span id="bg-automation-badge" class="status-badge status-unknown">Состояние неизвестно</span></div>
         <p class="section-note">Остановка управляющих фоновых задач BROray с паузой новых автоматических запусков. Настройки расписаний сохранятся.</p>
         <div class="bg-actions"><button id="bg-stop-all" class="button button-warning" type="button">Остановить фоновые операции</button><button id="bg-resume" class="button button-secondary" type="button" hidden>Возобновить автоматику</button></div>
     </section>
@@ -520,10 +526,10 @@
 
     <script src="/assets/js/common.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/icons.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c8-premium-ip"></script>
     <script src="/assets/js/theme.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/dialogs.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/broray.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/background-operations.js?v=WebUI-3.5.9-c5-journal"></script>
+    <script src="/assets/js/broray.js?v=WebUI-3.5.9-c7-cleanup-r4"></script>
+    <script src="/assets/js/background-operations.js?v=WebUI-3.5.9-c7-journal"></script>
 </body>
 </html>

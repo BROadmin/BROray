@@ -20,7 +20,9 @@ import (
 
 	"github.com/BROadmin/broray/internal/app"
 	"github.com/BROadmin/broray/internal/installer"
+	"github.com/BROadmin/broray/internal/installstats"
 	"github.com/BROadmin/broray/internal/platform"
+	"github.com/BROadmin/broray/internal/update"
 )
 
 func main() {
@@ -44,7 +46,11 @@ func main() {
 	case "diag":
 		os.Exit(runDiag(os.Args[2:]))
 	case "version", "-v", "--version":
-		fmt.Println("BROray " + app.Version)
+		if len(os.Args) == 3 && os.Args[1] == "version" && os.Args[2] == "--build-json" {
+			printJSON(installstats.BinaryBuild{Build: installstats.Build{Version: app.Version, Revision: app.Revision}, Architecture: update.Platform()})
+		} else {
+			fmt.Println("BROray " + app.Version)
+		}
 	case "launcher":
 		os.Exit(runLauncher(root, os.Args[2:]))
 	case "worker":
@@ -88,7 +94,7 @@ func openUninstallLog(opt string, now time.Time) (*os.File, string, error) {
 
 func runInstaller(root platform.Root, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: broray installer install [--no-start] | uninstall [--keep-data] | status | preflight")
+		fmt.Fprintln(os.Stderr, "usage: broray installer install [--first-install] [--no-start] | uninstall [--keep-data] | status | preflight")
 		return 2
 	}
 	switch args[0] {
@@ -98,7 +104,11 @@ func runInstaller(root platform.Root, args []string) int {
 		return boolExit(err == nil)
 	case "install":
 		start := !contains(args, "--no-start")
-		rep, err := installer.Install(root, app.Version, start)
+		install := installer.Install
+		if contains(args, "--first-install") {
+			install = installer.InstallFirst
+		}
+		rep, err := install(root, app.Version, start)
 		printJSON(map[string]any{"ok": err == nil, "error": errString(err), "report": rep, "version": app.Version})
 		return boolExit(err == nil)
 	case "uninstall":

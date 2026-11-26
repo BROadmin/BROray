@@ -78,7 +78,7 @@ func (j *TransactionJournal) restoreConfig(ctx context.Context, id string, expec
 		}
 		wantReceipt := r.Receipt
 		if expected != nil {
-			if r.Intent.Action != "enable" || !reflect.DeepEqual(r, *expected) || len(proof) == 0 || len(proof) > maxTransactionReceiptBytes {
+			if (r.Intent.Action != "enable" && r.Intent.Action != "exit-switch") || !reflect.DeepEqual(r, *expected) || len(proof) == 0 || len(proof) > maxTransactionReceiptBytes {
 				return ErrTransactionUnconfirmed
 			}
 			wantReceipt = transactionImage(proof)

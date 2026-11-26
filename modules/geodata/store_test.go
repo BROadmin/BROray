@@ -80,7 +80,11 @@ func TestStoreRollbackFromDamagedCurrentPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, next.Assets[0].Path), []byte("truncated"), 0600); err != nil {
+	path := filepath.Join(root, next.Assets[0].Path)
+	if err := os.WriteFile(path+".damaged", []byte("truncated"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path+".damaged", path); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Load(testContext); err == nil {

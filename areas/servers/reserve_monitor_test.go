@@ -27,8 +27,12 @@ func TestReserveMonitorPublishesIntentWithExactGuard(t *testing.T) {
 	m.state.Samples[m.state.ActiveID] = reserve.Sample{ServerID: m.state.ActiveID, Fingerprint: m.state.Settings.Primary.Fingerprint, Identity: m.state.ActiveIdentity, Verdict: "unhealthy", Verified: true, StartedAt: now.Add(-15 * time.Second), FinishedAt: now.Add(-14 * time.Second)}
 	b := m.state.Settings.Backups[0]
 	m.state.Samples[b.ID] = reserve.Sample{ServerID: b.ID, Fingerprint: b.Fingerprint, Identity: "fixture-previous-backup-proof", Verdict: "healthy", Verified: true, StartedAt: now.Add(-2 * time.Second), FinishedAt: now.Add(-time.Second)}
-	got, err := f.e.s.monitorReserve(f.ctx, m)
-	if err != nil || got.Intent == nil || got.Intent.To != f.backup || got.Intent.Reason != "active-failed" || got.Guard.snapshot != f.process.RuntimeSnapshot() || got.Guard.identity != got.Sample.Identity || got.Guard.plan.node.ID != f.plan.node.ID {
+	failed, err := f.e.s.monitorReserve(f.ctx, m)
+	if err != nil || failed.Intent != nil || m.state.ActiveFailures != reserve.DefaultPolicy().Failures {
+		t.Fatalf("used old readiness after active failure: %+v %v", failed, err)
+	}
+	got, err := f.e.s.monitorReserveWith(f.ctx, m, reserveVerifiedOutcome)
+	if err != nil || got.Sample.ServerID != f.backup || got.Intent == nil || got.Intent.To != f.backup || got.Intent.Reason != "active-failed" || got.Guard.snapshot != f.process.RuntimeSnapshot() || got.Guard.identity != failed.Sample.Identity || got.Guard.plan.node.ID != f.plan.node.ID {
 		t.Fatalf("intent guard: %+v %v", got, err)
 	}
 	if m.state.Pending == nil || ActiveID(f.e.d) != f.plan.node.ID {

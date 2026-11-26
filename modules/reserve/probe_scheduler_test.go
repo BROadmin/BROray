@@ -197,7 +197,7 @@ func TestProbeSchedulerRejectsForeignCompletionAndInvalidState(t *testing.T) {
 	}
 }
 
-func TestProbeSchedulerFeedsExistingFailoverPolicy(t *testing.T) {
+func TestProbeSchedulerRechecksBackupAfterConfirmedActiveFailure(t *testing.T) {
 	q := &ProbeScheduler{}
 	s := scheduledState()
 	l := beginProbe(t, q, s, base, "p")
@@ -209,12 +209,77 @@ func TestProbeSchedulerFeedsExistingFailoverPolicy(t *testing.T) {
 	l = beginProbe(t, q, s, base.Add(15*time.Second), "p")
 	s, _ = completeProbe(q, l, s, "unhealthy")
 	l = beginProbe(t, q, s, base.Add(30*time.Second), "p")
-	var intents []Intent
+	failed := sample(s, "p", "unhealthy", l.StartedAt).Sample
+	failed.FinishedAt = l.StartedAt.Add(16 * time.Second)
+	s, intents := q.Complete(l, s, failed, failed.FinishedAt, DefaultPolicy(), true)
+	if s.ActiveFailures != 3 || len(intents) != 0 || s.Pending != nil {
+		t.Fatal("old backup proof used at the confirmed failure", s, intents)
+	}
+	l = beginProbe(t, q, s, failed.FinishedAt, "b")
 	s, intents = completeProbe(q, l, s, "unhealthy")
-	if len(intents) != 1 || intents[0].To != "b" || s.ActiveID != "p" || s.Pending == nil {
+	if len(intents) != 0 || AllRosterUnavailable(s, l.StartedAt.Add(time.Second), DefaultPolicy()) {
+		t.Fatal("another backup still needs a fresh check", s, intents)
+	}
+	l = beginProbe(t, q, s, l.StartedAt.Add(time.Second), "c")
+	s, intents = completeProbe(q, l, s, "healthy")
+	if len(intents) != 1 || intents[0].To != "c" || s.ActiveID != "p" || s.Pending == nil {
 		t.Fatal("missing intention or premature active change", s, intents)
 	}
 	if _, ok := q.Begin(s, base.Add(time.Hour), DefaultPolicy()); ok {
 		t.Fatal("pending transaction admitted probe")
+	}
+}
+
+func TestProbeSchedulerRefreshesActiveFailureDuringSlowBackupChecks(t *testing.T) {
+	q := &ProbeScheduler{}
+	s := scheduledState()
+	l := beginProbe(t, q, s, base, "p")
+	s, _ = completeProbe(q, l, s, "unhealthy")
+	for i, id := range []string{"b", "c"} {
+		l = beginProbe(t, q, s, base.Add(time.Duration(i+1)*time.Second), id)
+		s, _ = completeProbe(q, l, s, "healthy")
+	}
+	for _, offset := range []time.Duration{15 * time.Second, 30 * time.Second} {
+		l = beginProbe(t, q, s, base.Add(offset), "p")
+		s, _ = completeProbe(q, l, s, "unhealthy")
+	}
+	l = beginProbe(t, q, s, base.Add(31*time.Second), "b")
+	slow := sample(s, "b", "unhealthy", l.StartedAt).Sample
+	slow.FinishedAt = l.StartedAt.Add(24 * time.Second)
+	s, _ = q.Complete(l, s, slow, slow.FinishedAt, DefaultPolicy(), true)
+	l = beginProbe(t, q, s, slow.FinishedAt, "p")
+	s, _ = completeProbe(q, l, s, "unhealthy")
+	if s.ActiveFailures != DefaultPolicy().Failures {
+		t.Fatal("refresh lost the confirmed active failure")
+	}
+	l = beginProbe(t, q, s, l.StartedAt.Add(time.Second), "c")
+	s, _ = completeProbe(q, l, s, "unhealthy")
+	if !AllRosterUnavailable(s, l.StartedAt.Add(time.Second), DefaultPolicy()) {
+		t.Fatal("slow checks prevented a fresh all-roster decision")
+	}
+}
+
+func TestProbeSchedulerEmergencyRecoveryCadenceAndFairness(t *testing.T) {
+	q := &ProbeScheduler{}
+	s := scheduledState()
+	s.Emergency = Node{ID: "auto", Fingerprint: s.Settings.Primary.Fingerprint}
+	s.ActiveID, s.ActiveIdentity = "auto", "runtime-auto"
+	complete := func(l ProbeLease, verdict string, duration time.Duration) []Intent {
+		v := sample(s, l.Node.ID, verdict, l.StartedAt).Sample
+		v.Fingerprint = l.Node.Fingerprint
+		v.FinishedAt = l.StartedAt.Add(duration)
+		var intents []Intent
+		s, intents = q.Complete(l, s, v, v.FinishedAt, DefaultPolicy(), true)
+		return intents
+	}
+	complete(beginProbe(t, q, s, base, "auto"), "healthy", time.Second)
+	for i, id := range []string{"p", "b", "c"} {
+		complete(beginProbe(t, q, s, base.Add(time.Duration(i+1)*time.Second), id), "unhealthy", time.Second)
+	}
+	complete(beginProbe(t, q, s, base.Add(15*time.Second), "auto"), "healthy", 18*time.Second)
+	l := beginProbe(t, q, s, base.Add(33*time.Second), "p")
+	intents := complete(l, "healthy", time.Second)
+	if len(intents) != 1 || intents[0].To != "p" || intents[0].Reason != "roster-recovered" {
+		t.Fatal("fresh recovery probe did not return to the roster", intents)
 	}
 }

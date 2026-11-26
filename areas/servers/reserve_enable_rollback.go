@@ -25,14 +25,23 @@ type reserveEnableRollback struct {
 // belong to the roster or expose a diagnostic endpoint. A successful guarded
 // replacement is the sole authority for replacing the new child on failure.
 func (s *svc) rollbackReserveEnable(ctx context.Context, j *reserve.TransactionJournal, state reserveEnableRollback) error {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
 	r := state.record
-	if !state.authorized || state.process == nil || r.ID == "" || r.Phase != "prepared" || r.Intent.Action != "enable" ||
+	if !state.authorized || state.process == nil || r.ID == "" || r.Phase != "prepared" ||
+		(r.Intent.Action != "enable" && r.Intent.Action != "exit-switch") ||
 		!r.Previous.Config.Exists || !r.Next.Config.Exists || !r.Previous.Active.Exists || !r.Next.Active.Exists ||
 		!r.Previous.Preferences.Exists || !r.Next.Preferences.Exists || len(state.plans) < 2 {
 		return errReserveRuntime
 	}
+	rollbackTimeout := 15 * time.Second
+	if r.Intent.Action == "enable" && r.Intent.PreviousDescription == r.Intent.NextDescription {
+		if _, diagnostic := reserve.DiagnosticEndpoint(r.Previous.Config.Data); !diagnostic {
+			// Recheck router ownership before replacement and wait for the
+			// original proxy to converge without exhausting the rollback.
+			rollbackTimeout = 24 * time.Second
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, rollbackTimeout)
+	defer cancel()
 	oldID := strings.TrimSpace(string(r.Previous.Active.Data))
 	if !ValidID(oldID) {
 		return errReserveRuntime
@@ -58,8 +67,13 @@ func (s *svc) rollbackReserveEnable(ctx context.Context, j *reserve.TransactionJ
 			return false
 		}
 		revision := reservePreferencesRevision(prefs, true)
+		roster, e := decodeReservePreferences(prefs)
+		if e != nil {
+			return false
+		}
 		for _, p := range state.plans {
 			p.revision = revision
+			p.outsideRoster = !reserveRosterContains(reservePreferencesSnapshot{reservePreferences: roster}, p.node.ID)
 			if !s.reservePlanInputs(ctx, p, false, false) {
 				return false
 			}
@@ -116,12 +130,18 @@ func (s *svc) rollbackReserveEnable(ctx context.Context, j *reserve.TransactionJ
 	} else if !same(s.d.Root.XrayConfig(), r.Previous.Config.Data, 2<<20) {
 		return errReserveRuntime
 	}
+	descriptionUnchanged := r.Intent.PreviousDescription == r.Intent.NextDescription &&
+		r.Receipt.Exists && bytes.Equal(receipt, r.Receipt.Data)
 	return j.RollbackPrepared(ctx, r, func(ctx context.Context, actual reserve.TransactionRecord) error {
 		if !reflect.DeepEqual(actual, r) || !inputs() || !same(receiptPath, receipt, 64<<10) {
 			return errReserveRuntime
 		}
-		if err := s.d.Svc.SyncOwnedInterfaceDescription(ctx); err != nil {
-			return err
+		// An already proven original description needs no metadata write.
+		// The live target and its receipt are still checked below.
+		if !descriptionUnchanged {
+			if err := s.d.Svc.SyncOwnedInterfaceDescription(ctx); err != nil {
+				return err
+			}
 		}
 		restoredReceipt, e := reserveRuntimeFile(receiptPath, 64<<10)
 		if e != nil {
@@ -145,6 +165,12 @@ func (s *svc) rollbackReserveEnable(ctx context.Context, j *reserve.TransactionJ
 					if e == nil && owned.Name == target.Name && owned.Upstream == target.Upstream && previous() {
 						last, e := reserve.VerifyListener(identity, target.Upstream)
 						if e == nil && last == listener && previous() {
+							if plan := state.plans[oldID]; plan.hotSlot != "" {
+								binding, err := s.bindReserveRuntime(ctx, plan, nil)
+								if err != nil || binding.snapshot != state.snapshot || !s.confirmReserveHotTraffic(ctx, binding) || !previous() {
+									return errReserveRuntime
+								}
+							}
 							return nil
 						}
 					}

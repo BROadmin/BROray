@@ -1,0 +1,105 @@
+.setup-document,
+.setup-document body {
+    min-width: 0;
+}
+
+.setup-entry {
+    display: grid;
+    justify-items: start;
+    gap: 10px;
+    padding: 18px 22px;
+}
+
+.setup-entry[hidden],
+.setup-wizard [data-setup-step][hidden] {
+    display: none;
+}
+
+.setup-entry h2,
+.setup-entry p {
+    margin: 0;
+}
+
+.setup-wizard,
+.setup-wizard [data-setup-step] {
+    display: grid;
+    min-width: 0;
+    gap: 14px;
+}
+
+.setup-wizard [data-setup-step],
+.setup-wizard #setup-status {
+    overflow-wrap: anywhere;
+}
+
+.setup-wizard .policy-two-columns {
+    align-items: start;
+    gap: 18px 24px;
+}
+
+.setup-wizard .policy-editor {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.setup-wizard .policy-buttons {
+    gap: 10px;
+}
+
+.setup-wizard .button {
+    min-width: 0;
+    max-width: 100%;
+    text-align: center;
+    white-space: normal;
+}
+
+.setup-wizard > .button,
+.setup-wizard #setup-fetch,
+.setup-wizard #setup-example-site {
+    justify-self: start;
+    align-self: start;
+    max-width: 100%;
+}
+
+.setup-wizard #setup-status:empty,
+.setup-wizard #setup-import-result:empty {
+    display: none;
+}
+
+.setup-wizard .policy-domain-text {
+    margin: 0;
+}
+
+@media (max-width: 440px) {
+    .setup-entry {
+        padding: 16px;
+    }
+
+    .setup-wizard .policy-buttons {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 360px) {
+    .setup-document .workspace-header {
+        gap: 10px;
+        padding-inline: 12px;
+    }
+
+    .setup-document .workspace-header-primary {
+        gap: 8px;
+    }
+
+    .setup-document .workspace-title strong {
+        font-size: 15px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .setup-document .theme-select {
+        min-width: 92px;
+    }
+}

@@ -179,6 +179,14 @@ func validRecord(m map[string]any) bool {
 	if _, ok := m["autoUpdateEnabled"].(bool); !ok {
 		return false
 	}
+	if at, exists := m[profileApplyTimeField]; exists && !validProfileApplyTime(at) {
+		return false
+	}
+	if revision, exists := m[profileApplyScheduleRevisionField]; exists {
+		if token, ok := revision.(string); !ok || !exactApplyHex(token, 32) {
+			return false
+		}
+	}
 	if !isInt(m["updateIntervalMinutes"], minInterval, maxInterval) {
 		return false
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/netip"
 	"os"
 	"os/exec"
 	"strings"
@@ -11,9 +12,62 @@ import (
 
 	"github.com/BROadmin/broray/internal/compat"
 	"github.com/BROadmin/broray/modules/geodata"
+	"github.com/BROadmin/broray/modules/reserve"
 	"github.com/BROadmin/broray/modules/routepolicy"
 	"golang.org/x/sys/unix"
 )
+
+func TestPolicyPreviewPreservesReserveDiagnostic(t *testing.T) {
+	for _, name := range []string{"enabled", "disabled", "enabled-without-diagnostic"} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			id := e.addServer(t, "trojan://pw@a.example:443#Primary")
+			backup := e.addServer(t, "trojan://pw@b.example:443#Backup")
+			if _, err := e.s.activate(id); err != nil {
+				t.Fatal(err)
+			}
+			path := e.d.Root.XrayConfig()
+			prior, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			endpoint := netip.MustParseAddrPort("127.0.0.1:28191")
+			if name == "enabled" {
+				prior, err = reserve.AttachHealthInbound(prior, endpoint)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, prior, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeReserveAutomatic(t, e, id, backup, name != "disabled")
+			e.d.Svc.RoutesConfigureXray = func(_ context.Context, base []byte) ([]byte, error) {
+				rules := []routepolicy.Rule{{ID: "deny", Enabled: true, Action: routepolicy.Deny, Domains: []string{"ads.example"}}}
+				tags := routepolicy.OutboundTags{VPN: "proxy", Direct: "broray-direct", Deny: "broray-deny"}
+				return routepolicy.Render(base, rules, geodata.Snapshot{}, geodata.AssetDirectory, tags, []string{"socks"}, "")
+			}
+			cfg, err := e.d.Svc.PreviewActiveConfig(compat.WithFence(context.Background()))
+			if name == "enabled-without-diagnostic" {
+				if err == nil || cfg != nil {
+					t.Fatal("policy preview can apply a configuration with no reserve diagnostic")
+				}
+				return
+			}
+			if err != nil || !bytes.Contains(cfg, []byte("broray-deny")) {
+				t.Fatalf("policy preview did not render the rule: %v", err)
+			}
+			found, present := reserve.DiagnosticEndpoint(cfg)
+			if present != (name == "enabled") || present && found != endpoint {
+				t.Fatal("policy preview lost or invented the reserve diagnostic")
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(prior, after) || len(e.applied) != 1 || ActiveID(e.d) != id {
+				t.Fatal("policy preview mutated the active connection", err)
+			}
+		})
+	}
+}
 
 func TestPolicyPreviewDoesNotApplyAndValidatesCore(t *testing.T) {
 	e := newEnv(t)

@@ -21,10 +21,18 @@ type deletionImage struct {
 	path         string
 	raw          []byte
 	info, parent os.FileInfo
+	limit        int64
 }
 
 func readDeletionImage(path string, optional bool) (deletionImage, error) {
-	image := deletionImage{path: path}
+	return readDeletionImageLimit(path, optional, 1<<20)
+}
+
+func readDeletionImageLimit(path string, optional bool, limit int64) (deletionImage, error) {
+	if limit == 0 {
+		limit = 1 << 20
+	}
+	image := deletionImage{path: path, limit: limit}
 	parent, err := platform.OpenDirNoFollow(filepath.Dir(path))
 	if err != nil {
 		if optional && errors.Is(err, os.ErrNotExist) {
@@ -50,14 +58,14 @@ func readDeletionImage(path string, optional bool) (deletionImage, error) {
 	if err != nil {
 		return image, err
 	}
-	if !image.info.Mode().IsRegular() || image.info.Size() > 1<<20 {
+	if !image.info.Mode().IsRegular() || image.info.Size() > limit {
 		return image, fmt.Errorf("ambiguous deletion entry")
 	}
-	image.raw, err = io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	image.raw, err = io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return image, err
 	}
-	if len(image.raw) > 1<<20 {
+	if int64(len(image.raw)) > limit {
 		return image, fmt.Errorf("deletion entry too large")
 	}
 	after, err := f.Stat()
@@ -71,7 +79,7 @@ func readDeletionImage(path string, optional bool) (deletionImage, error) {
 }
 
 func (image deletionImage) unchanged() bool {
-	now, err := readDeletionImage(image.path, image.info == nil)
+	now, err := readDeletionImageLimit(image.path, image.info == nil, image.limit)
 	if err != nil || !bytes.Equal(image.raw, now.raw) {
 		return false
 	}

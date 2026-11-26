@@ -56,6 +56,16 @@ func (s *svc) activate(id string) (any, error) {
 
 // Both synchronous CLI callers and the queued WebUI hold the global fence.
 func (s *svc) activateUnderFence(ctx context.Context, op *compat.Operation, id string) (any, error) {
+	prefs, err := readReservePreferences(s.d)
+	if err != nil {
+		return nil, cgi.E(503, "RESERVE_SETTINGS_INVALID", "Не удалось подтвердить настройки резервирования VPN.")
+	}
+	if prefs.Enabled {
+		if !reserveRosterContains(prefs, id) {
+			return nil, reserveOutsideRosterError()
+		}
+		return nil, cgi.E(409, "RESERVE_MODE_ACTIVE", "Для переключения внутри состава используйте кнопку «Подключить» на странице «Серверы».")
+	}
 	if s.coreMaintenanceBlocked() {
 		return nil, cgi.E(409, "XRAY_MAINTENANCE_REQUIRED", "Установите Xray или завершите восстановление ядра на странице Xray.")
 	}
@@ -109,7 +119,7 @@ func (s *svc) applyServer(ctx context.Context, id string, cfg []byte) error {
 	}
 	if err := s.d.Svc.ApplyXrayConfig(ctx, cfg); err != nil {
 		s.logf("SERVER_ACTIVATE=FAIL SERVER=%s ERROR=%v", id, err)
-		return opFailed("Перезапуск завершился ошибкой. Выполняется откат.\nОшибка: не удалось применить сервер")
+		return compat.PreserveXrayRollback(err, opFailed("Перезапуск завершился ошибкой. Выполняется откат.\nОшибка: не удалось применить сервер"))
 	}
 	if err := setActiveID(s.d, id); err != nil {
 		return opFailed("Ошибка: не удалось записать активный сервер")
@@ -144,7 +154,7 @@ func (s *svc) ReapplyActive(ctx context.Context, reason string) error {
 		return errors.New("XRAY_CONFIG_REJECTED: Xray отклонил конфигурацию сервера")
 	}
 	if err := s.d.Svc.ApplyXrayConfig(ctx, cfg); err != nil {
-		return errors.New("XRAY_APPLY_FAILED: не удалось применить сервер")
+		return compat.PreserveXrayRollback(err, errors.New("XRAY_APPLY_FAILED: не удалось применить сервер"))
 	}
 	s.logf("SERVER_REAPPLY=OK SERVER=%s REASON=%s", id, reason)
 	_ = s.ensureInterface(ctx)
@@ -155,6 +165,11 @@ func (s *svc) ReapplyActive(ctx context.Context, reason string) error {
 
 func (s *svc) deactivate() (any, error) {
 	return s.job("deactivate", "USER", func(ctx context.Context, op *compat.Operation) (any, error) {
+		if err := s.ordinarySelectionAllowed(); errors.Is(err, errReserveModeActive) {
+			return nil, cgi.E(409, "RESERVE_MODE_ACTIVE", "Сначала отключите резервирование VPN.")
+		} else if err != nil {
+			return nil, cgi.E(503, "RESERVE_SETTINGS_INVALID", "Не удалось подтвердить настройки резервирования VPN.")
+		}
 		op.SetCancelability("protected")
 		op.Phase("committing")
 		previous := ActiveID(s.d)
@@ -238,6 +253,16 @@ func (s *svc) deleteServer(id string) (any, error) {
 		return nil, opFailed("Ошибка: активный сервер сначала необходимо отключить или заменить")
 	}
 	return s.job("delete", "USER", func(ctx context.Context, op *compat.Operation) (any, error) {
+		prefs, err := readReservePreferences(s.d)
+		if err != nil {
+			return nil, cgi.E(503, "RESERVE_SETTINGS_INVALID", "Не удалось подтвердить настройки резервирования VPN.")
+		}
+		if prefs.Enabled && reserveRosterContains(prefs, id) {
+			return nil, cgi.E(409, "RESERVE_MODE_ACTIVE", "Сначала исключите сервер из состава резервирования VPN.")
+		}
+		if id == ActiveID(s.d) {
+			return nil, opFailed("Ошибка: активный сервер сначала необходимо отключить или заменить")
+		}
 		op.SetCancelability("protected")
 		op.Phase("committing")
 		if err := DeleteRecord(s.d, id); err != nil {

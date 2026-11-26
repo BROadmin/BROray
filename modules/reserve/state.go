@@ -210,18 +210,27 @@ func Advance(state State, event Event, now time.Time, policy Policy) (State, []I
 			return s, nil
 		}
 		active := v.ServerID == s.ActiveID
+		if v.WANUnavailable && (!active || v.Verdict != "unknown") {
+			return s, nil
+		}
 		if active && (v.Identity != s.ActiveIdentity || v.StartedAt.Before(s.LastSwitchAt)) {
 			return s, nil
 		}
-		interval := policy.RecoveryInterval
-		if active {
-			interval = policy.ActiveInterval
-		}
+		interval := probeInterval(s, v.ServerID, policy)
 		previous, seen := s.Samples[v.ServerID]
 		if seen && (v.StartedAt.Sub(previous.StartedAt) < interval || v.StartedAt.Before(previous.FinishedAt)) {
 			return s, nil
 		}
 		continuous := seen && v.StartedAt.Sub(previous.StartedAt) <= 2*interval+2*policy.URLTimeout
+		if v.WANUnavailable {
+			s.Samples = map[string]Sample{v.ServerID: v}
+			s.ActiveFailures, s.PrimarySuccesses = 0, 0
+			s.Reason = "wan-unavailable"
+			return s, nil
+		}
+		if !active && s.Samples[s.ActiveID].WANUnavailable {
+			return s, nil
+		}
 		s.Samples[v.ServerID] = v
 		if active {
 			if v.Verdict == "unhealthy" {
@@ -230,6 +239,11 @@ func Advance(state State, event Event, now time.Time, policy Policy) (State, []I
 				}
 				if s.ActiveFailures < policy.Failures {
 					s.ActiveFailures++
+					if s.ActiveFailures == policy.Failures {
+						// A backup that worked before this outage must be checked again.
+						s.Samples = map[string]Sample{v.ServerID: v}
+						s.PrimarySuccesses = 0
+					}
 				}
 			} else {
 				s.ActiveFailures = 0

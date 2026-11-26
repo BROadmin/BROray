@@ -511,8 +511,8 @@
             warning: "status-badge-warning",
             error: "status-badge-danger",
             busy: "status-loading",
-            unknown: "status-neutral"
-        }[severity] || "status-neutral";
+            unknown: "status-unknown"
+        }[severity] || "status-unknown";
 
         latestStatus = data;
         var maintenance = byId("xray-maintenance-note");
@@ -523,8 +523,9 @@
             ? "Выполняется обслуживание Xray. Дождитесь результата операции; настройки BROray сохраняются."
             : "Установка или удаление Xray прерваны. Автоматический запуск отключён. Откройте диагностику; при утрате RAM-копии потребуется установка ядра заново.";
 
-        live.className = "xray-live-status " + (severity === "ok" ? "is-running" : "is-stopped");
-        byId("xray-live-text").textContent = severity === "ok" ? "Xray работает" : running ? "Xray требует проверки" : "Xray остановлен";
+        live.className = "xray-live-status " + badgeClass;
+        byId("xray-live-text").textContent = severity === "ok" ? "Xray работает" :
+            severity === "busy" ? "Выполняется обслуживание Xray" : running ? "Xray требует проверки" : "Xray остановлен";
 
         badge.textContent = severity === "ok" ? "Работает" : severity === "warning" ? "Требуется внимание" : severity === "busy" ? "Выполняется" : severity === "error" ? "Требуется исправление" : "Не проверено";
         badge.className = "status-badge " + badgeClass;

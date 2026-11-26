@@ -99,6 +99,7 @@ func sourceRefreshTestServices(t *testing.T, e *env) {
 		}
 		return id, nil
 	}
+	e.d.Svc.ServersRenameSourceRefresh = e.d.Svc.ServersReapplySourceRefresh
 }
 
 func assertSourceRefreshPending(t *testing.T, e *env, err error) {

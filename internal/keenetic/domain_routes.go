@@ -53,6 +53,24 @@ func ValidNativeDomainName(name string) bool {
 	return ipErr != nil && len(name) <= 253 && strings.Contains(name, ".") && reSNI.MatchString(name)
 }
 
+// DNSRouteTarget normalizes one object-group destination. Firmware may read
+// back individual numeric addresses as host prefixes.
+func DNSRouteTarget(value string) (string, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if ip, err := netip.ParseAddr(value); err == nil {
+		return ip.Unmap().String(), ip.Zone() == ""
+	}
+	if prefix, err := netip.ParsePrefix(value); err == nil {
+		ip := prefix.Addr()
+		return ip.Unmap().String(), prefix.Bits() == ip.BitLen()
+	}
+	value = strings.TrimSuffix(value, ".")
+	if !ValidNativeDomainName(value) || strings.Trim(value, "0123456789.") == "" {
+		return "", false
+	}
+	return value, true
+}
+
 func (r *RCI) domainCommands(ctx context.Context, commands []any) ([]json.RawMessage, error) {
 	body, err := json.Marshal(commands)
 	if err != nil || len(body) > 2<<20 {
@@ -157,7 +175,11 @@ func (snap DomainRouteSnapshot) groupObjects(group string) (DomainRouteList, boo
 func nativeListMatches(list DomainRouteList, description string, addresses []string) bool {
 	got := make([]string, 0, len(list.Include))
 	for _, d := range list.Include {
-		got = append(got, d.Address)
+		value, ok := DNSRouteTarget(d.Address)
+		if !ok {
+			return false
+		}
+		got = append(got, value)
 	}
 	slices.Sort(got)
 	want := slices.Clone(addresses)
@@ -287,7 +309,7 @@ func (r *RCI) changeDomainRoute(ctx context.Context, group, description, iface s
 	addresses := slices.Clone(domains)
 	slices.Sort(addresses)
 	for i, name := range addresses {
-		if !ValidNativeDomainName(name) ||
+		if value, ok := DNSRouteTarget(name); !ok || value != name ||
 			(i > 0 && addresses[i-1] == name) {
 			return empty, fmt.Errorf("invalid or duplicate native domain name")
 		}

@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRouteSettingsBackupIncludesPolicyAndGeodata(t *testing.T) {
@@ -57,6 +58,20 @@ func TestRouteSettingsBackupOfflineStageAndUndo(t *testing.T) {
 	source, _ := geoAPIEnv(t)
 	geoMustComplete(t, geoSubmit(source, "geo-upsert", "fi", `,"name":"Finland","kind":"geoip","tags":["fi"]`))
 	geoMustComplete(t, geoSubmit(source, "geo-upsert", "video", `,"name":"Video","kind":"geosite","tags":["youtube"]`))
+	configureTime := func(env *testEnv, at string) routepolicy.GeoApplySchedule {
+		t.Helper()
+		ctx := context.Background()
+		current, err := routepolicy.ReadGeoApplySchedule(ctx, env.e.root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next, err := routepolicy.SaveGeoApplySchedule(ctx, env.e.root, current.Revision, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return next
+	}
+	configureTime(source, "09:45")
 	saved, err := source.e.backupExport()
 	if err != nil {
 		t.Fatal(err)
@@ -66,6 +81,11 @@ func TestRouteSettingsBackupOfflineStageAndUndo(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := newEnv(t)
+	targetTime := configureTime(target, "12:30")
+	claimed := time.Date(2026, 11, 24, 12, 30, 0, 0, time.UTC)
+	if err := routepolicy.ClaimGeoApply(context.Background(), target.e.root, targetTime.Revision, "2026-11-24", claimed); err != nil {
+		t.Fatal(err)
+	}
 	target.d.Svc.ServersPreviewBackupBaseConfig = func(context.Context, *compat.BackupStage) ([]byte, error) { return nil, nil }
 	stage, err := compat.NewBackupStage(target.d, t.TempDir())
 	if err != nil {
@@ -97,6 +117,10 @@ func TestRouteSettingsBackupOfflineStageAndUndo(t *testing.T) {
 	}
 	if nativeChecks == 0 || len(plan.Changes) == 0 {
 		t.Fatal("policy import silently ignored", nativeChecks, plan)
+	}
+	stagedTime, err := routepolicy.ReadGeoApplySchedule(ctx, stage.St.Root.Routes())
+	if err != nil || stagedTime.AtUTC != "09:45" || stagedTime.LastAttemptDay != "2026-11-24" || stagedTime.Revision == targetTime.Revision {
+		t.Fatalf("backup did not stage the UTC time with the target's replay ledger: %+v %v", stagedTime, err)
 	}
 	live, err := routepolicy.ReadState(ctx, target.e.root)
 	if err != nil || !reflect.DeepEqual(before, live) {
@@ -136,6 +160,10 @@ func TestRouteSettingsBackupOfflineStageAndUndo(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(next, applied) {
 		t.Fatal("policy apply", err)
 	}
+	actualTime, err := routepolicy.ReadGeoApplySchedule(ctx, target.e.root)
+	if err != nil || actualTime != stagedTime {
+		t.Fatal("backup apply did not install the UTC time", actualTime, err)
+	}
 	undo := t.TempDir()
 	if err = compat.WriteJSON(filepath.Join(undo, "planned.json"), json.RawMessage(manifest)); err != nil {
 		t.Fatal(err)
@@ -147,6 +175,10 @@ func TestRouteSettingsBackupOfflineStageAndUndo(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(before, restored) {
 		t.Fatal("policy undo", err)
 	}
+	restoredTime, err := routepolicy.ReadGeoApplySchedule(ctx, target.e.root)
+	if err != nil || restoredTime.AtUTC != targetTime.AtUTC || restoredTime.LastAttemptDay != "2026-11-24" {
+		t.Fatal("backup undo did not restore the previous UTC setting and attempt", restoredTime, err)
+	}
 }
 
 func TestRouteSettingsBackupStrictNewFieldAndLegacy(t *testing.T) {
@@ -155,6 +187,8 @@ func TestRouteSettingsBackupStrictNewFieldAndLegacy(t *testing.T) {
 		`{"policy":null}`, `{"Policy":` + valid + `}`, `{"policy":` + valid + `,"policy":` + valid + `}`,
 		`{"policy":{"state":{"schemaVersion":1,"rules":[]},"autoUpdate":null,"geodata":null}}`,
 		`{"policy":{"state":{"schemaVersion":1,"rules":[]},"autoUpdate":false,"geodata":null,"extra":true}}`,
+		`{"policy":{"state":{"schemaVersion":1,"rules":[]},"autoUpdate":false,"geodata":null,"autoApplyAtUTC":"24:00"}}`,
+		`{"policy":{"state":{"schemaVersion":1,"rules":[]},"autoUpdate":false,"geodata":null,"autoApplyAtUTC":null}}`,
 		`{"policy":{"state":{"schemaVersion":1,"rules":[]},"autoUpdate":false,"AutoUpdate":true,"geodata":null}}`,
 		`{"policy":{"state":{"schemaVersion":1,"rules":[]},"autoUpdate":false,"autoUpdate":true,"geodata":null}}`,
 		`{"policy":{"state":{"schemaVersion":1,"rules":[]},"autoUpdate":false}}`,

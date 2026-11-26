@@ -266,10 +266,6 @@ func TestQueuedSourceRemovalDistinctSources(t *testing.T) {
 	}
 }
 
-type sourceRemovalFinisher interface {
-	finishSourceRemoval(string, deletionImage, deletionImage) error
-}
-
 func TestSourceRemovalFinalRescan(t *testing.T) {
 	e := newEnv(t)
 	sub := e.create(t, "https://example.com/final", "")
@@ -290,11 +286,13 @@ func TestSourceRemovalFinalRescan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	finish, ok := any(e.s).(sourceRemovalFinisher)
-	if !ok {
-		t.Fatal("SOURCE_FINAL_RESCAN_ABSENT")
+	pending, err := e.s.pendingProfileImage(sub)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := finish.finishSourceRemoval(sub, source, active); err == nil || !exists2(e.s.recPath(sub)) {
+	var blocked *subErr
+	err = e.s.finishSourceRemoval(sub, source, active, pending)
+	if !errors.As(err, &blocked) || blocked.Code != "SERVER_SOURCE_REMOVE_FAILED" || !exists2(e.s.recPath(sub)) {
 		t.Fatal("source removed while an owned record remained", err)
 	}
 }

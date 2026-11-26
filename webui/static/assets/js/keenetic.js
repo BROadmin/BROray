@@ -414,7 +414,7 @@
                 "Интерфейс работает, но параметры отличаются от ожидаемой конфигурации."
             );
         } else {
-            setBadge("Требуется восстановление", "status-error");
+            setBadge("Требуется восстановление", "status-warning");
             text("title", interfaceName);
             text(
                 "description",
@@ -527,10 +527,10 @@
             setWebAccessBadge("Конфликт", "status-error");
             break;
         case "recovery":
-            setWebAccessBadge("Требуется восстановление", "status-error");
+            setWebAccessBadge("Требуется восстановление", "status-warning");
             break;
         default:
-            setWebAccessBadge("Недоступен", "status-warning");
+            setWebAccessBadge("Состояние не подтверждено", "status-unknown");
         }
 
         element("webAccessDescription").textContent =

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -31,7 +32,14 @@ case "$1" in
 version) echo "Xray ` + version + ` (Xray, Penetrates Everything.) 0000000 (go1.25 linux/amd64)"; echo "A unified platform"; exit 0;;
 run)
   if [ "$2" = "-test" ]; then
-    if grep -q INVALID "$4"; then echo "Failed to start: main: failed to load config"; exit 23; fi
+    if [ "$4" = "stdin:" ]; then
+      config="$(cat)"
+    else
+      config="$(cat "$4")"
+    fi
+    case "$config" in
+      *INVALID*) echo "Failed to start: main: failed to load config"; exit 23;;
+    esac
     echo "Configuration OK."; exit 0
   fi
   exec sleep 1000;;
@@ -219,6 +227,10 @@ func TestApplyConfigRollback(t *testing.T) {
 	err = h.s.ApplyConfig(ctx, []byte(other))
 	if err == nil || !strings.Contains(err.Error(), "восстановлена предыдущая") {
 		t.Fatalf("got %v", err)
+	}
+	var rollback *compat.XrayConfigRollback
+	if !errors.As(err, &rollback) || !rollback.Restored {
+		t.Fatal("configuration restoration proof was not carried by the error")
 	}
 	if b, _ := os.ReadFile(h.d.Root.XrayConfig()); string(b) != goodConfig {
 		t.Fatal("rollback must restore the previous config")

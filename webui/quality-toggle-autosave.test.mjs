@@ -5,9 +5,9 @@ import test from 'node:test';
 
 const code = fs.readFileSync(new URL('./static/assets/js/servers-quality-refresh.js', import.meta.url), 'utf8');
 const flush = async () => { for (let i=0;i<10;i++) await new Promise(setImmediate); };
-async function fixture() {
+async function fixture({enabled=false, qualityStatus, paused=false, service={running:false}} = {}) {
     const els = new Map(), requests = [], messages = [], events = {};
-    let stored = { enabled: false, intervalMinutes: 60, cooldownMinutes: 10 };
+    let stored = { enabled, intervalMinutes: 60, cooldownMinutes: 10 };
     let revision = 'r1', serial = 1, mode = '', release, readFails = false;
     const controls = ['enabled','rule','preferred','interval','cooldown','minimum','save'];
     function el(id) {
@@ -29,13 +29,32 @@ async function fixture() {
             return {value:stored.enabled,revision};
         }
         if(readFails) throw new Error('offline');
-        return {config:{...stored},revision,state:{},service:{running:false}};
+        return {config:{...stored},revision,state:{status:qualityStatus},service,automation:{paused}};
     };
     vm.runInNewContext(code,{document,window:{setTimeout(){return 1;},clearTimeout(){}},BROrayUI:{apiRequest:api,toast(m){messages.push(m);},redirectToLogin(){}}});
     await flush();
     const dispatch=(target,type)=>{const event={target,preventDefault(){}}; for(const fn of target.events[type]||[]) fn(event); if(target!==el('server-quality-refresh-form')) for(const fn of el('server-quality-refresh-form').events[type]||[]) fn(event);};
     return {el,requests,messages,events,dispatch,stored:()=>stored,external(){stored.cooldownMinutes=40;revision='r'+(++serial);},mode(v){mode=v;},readFails(v){readFails=v;},release(){release();},toggle(v){el('quality-refresh-enabled').checked=v;dispatch(el('quality-refresh-enabled'),'change');}};
 }
+
+test('quality badge gives work and errors their own tone while the switch stays enabled',async()=>{
+    const service={complete:true,running:true,ready:true};
+    for (const [qualityStatus, label, tone] of [
+        ['error', 'Ошибка', 'status-error'],
+        ['partial', 'Завершена с ошибками', 'status-warning'],
+        ['running', 'Выполняется', 'status-loading'],
+        ['scheduled', 'Включена', 'status-success'],
+    ]) {
+        const f=await fixture({enabled:true,qualityStatus,service});
+        const badge=f.el('quality-refresh-badge');
+        assert.equal(badge.textContent,label);
+        assert.equal(badge.className,'status-badge '+tone);
+        assert.equal(f.el('quality-refresh-enabled').checked,true);
+    }
+    const f=await fixture({enabled:true,qualityStatus:'error',paused:true,service});
+    assert.equal(f.el('quality-refresh-badge').className,'status-badge status-warning');
+    assert.equal(f.el('quality-refresh-badge').textContent,'На паузе');
+});
 
 test('standalone switch saves both ways, preserves dirty neighbours, survives reload/status',async()=>{
     const f=await fixture();

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -22,13 +23,17 @@ func (s *svc) replaceRemovedSource(ctx context.Context, sourceID, activeID, next
 }
 
 func (s *svc) replaceSourceCandidate(ctx context.Context, sourceID, activeID, nextID string, refreshed bool) error {
-	return s.replaceSourceCandidateDescription(ctx, sourceID, activeID, nextID, refreshed, "")
+	return s.replaceSourceCandidateDescription(ctx, sourceID, activeID, nextID, refreshed, "", false, nil)
 }
 
-func (s *svc) replaceSourceCandidateDescription(ctx context.Context, sourceID, activeID, nextID string, refreshed bool, previousDescription string) (retErr error) {
+func (s *svc) replaceSourceCandidateDescription(ctx context.Context, sourceID, activeID, nextID string, refreshed bool, previousDescription string, renameOnly bool, proof *pendingSourceProof) (retErr error) {
 	phase := "replacement/preconditions"
 	defer func() { s.logSourceFailure(phase, retErr) }()
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	budget := 45 * time.Second
+	if proof != nil {
+		budget = 80 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	if !s.reserveRuntimeFence(ctx) || sourceID == "" || len(sourceID) > 256 || !ValidID(activeID) || !ValidID(nextID) || (nextID == activeID && !refreshed) || s.d.App == nil || s.d.App.Xray == nil {
 		return errReserveRuntime
@@ -36,13 +41,17 @@ func (s *svc) replaceSourceCandidateDescription(ctx context.Context, sourceID, a
 	if pending, err := reserve.TransactionPending(ctx, s.d.Root); err != nil || pending {
 		return errors.Join(errReserveTransactionPending, err)
 	}
-	if previousDescription != "" && (!refreshed || nextID != activeID) {
+	if previousDescription != "" && (!refreshed || nextID != activeID) || renameOnly && previousDescription == "" {
 		return errReserveRuntime
 	}
 	phase = "replacement/preferences"
 	prefs, err := readReservePreferences(s.d)
-	if err != nil || prefs.Enabled {
+	if err != nil || (prefs.Enabled && proof == nil) {
 		return errReserveRuntime
+	}
+	emergency := proof != nil && prefs.Enabled && !reserveRosterContains(prefs, activeID)
+	if emergency && (prefs.Emergency == nil || prefs.Emergency.ServerID != activeID) {
+		return compat.ErrXrayCandidateRejected
 	}
 	prefBytes, err := readReservePreferencesBytes(reservePreferencesFile(s.d))
 	if err != nil && (!errors.Is(err, os.ErrNotExist) || prefs.Exists) {
@@ -96,6 +105,26 @@ func (s *svc) replaceSourceCandidateDescription(ctx context.Context, sourceID, a
 	config, err := reserveRuntimeFile(s.d.Root.XrayConfig(), 2<<20)
 	if err != nil {
 		return errReserveRuntime
+	}
+	var hotPlan *pendingSourceHotPlan
+	if proof != nil {
+		if compat.SHA256Hex(config) != proof.configSHA || compat.SHA256Hex(nextRecord) != proof.candidateSHA {
+			return compat.ErrXrayCandidateRejected
+		}
+		if control, hot := reserve.HotLayoutSocket(config); hot {
+			hotPlan, err = s.preparePendingSourceHot(ctx, sourceID, activeID, prefs, config, proof.previousRecord, control)
+			if err != nil {
+				return err
+			}
+		}
+		if _, prepared := reserve.DiagnosticEndpoint(config); prefs.Enabled && !emergency && !prepared {
+			return compat.ErrXrayCandidateRejected
+		}
+		if emergency {
+			if err := s.proveEmergencySourcePredecessor(ctx, sourceID, activeID, prefs.Emergency.Fingerprint, proof.previousRecord, config); err != nil {
+				return err
+			}
+		}
 	}
 	receipt, err := reserveRuntimeFile(s.d.Path("config", "interface.json"), 64<<10)
 	if err != nil {
@@ -156,14 +185,14 @@ func (s *svc) replaceSourceCandidateDescription(ctx context.Context, sourceID, a
 		return e == nil && bytes.Equal(got, want)
 	}
 	// No Process calls here: this check also runs under the supervisor mutex.
-	fixedInputs := func() bool {
+	fixedInputs := func(expectedPrefs []byte) bool {
 		currentSettings, e := s.reserveRuntimeSettings()
 		return coldValid() && e == nil && currentSettings == settings && s.reserveRuntimeFence(ctx) && s.d.App.Xray == p &&
-			same(RecordPath(s.d, activeID), record, 1<<20) && same(reservePreferencesFile(s.d), prefBytes, 4096) &&
-			coreMatches() && same(RecordPath(s.d, nextID), nextRecord, 1<<20)
+			same(RecordPath(s.d, activeID), record, 1<<20) && same(reservePreferencesFile(s.d), expectedPrefs, 4096) &&
+			coreMatches() && same(RecordPath(s.d, nextID), nextRecord, 1<<20) && (hotPlan == nil || hotPlan.current())
 	}
 	beforeFiles := func() bool {
-		return fixedInputs() && same(s.d.Root.XrayConfig(), config, 2<<20) && same(ActiveFile(s.d), active, 4096) && same(s.d.Path("config", "interface.json"), receipt, 64<<10)
+		return fixedInputs(prefBytes) && same(s.d.Root.XrayConfig(), config, 2<<20) && same(ActiveFile(s.d), active, 4096) && same(s.d.Path("config", "interface.json"), receipt, 64<<10)
 	}
 	current := func() bool { return beforeFiles() && p.RuntimeSnapshot() == snapshot }
 	if !current() {
@@ -175,7 +204,7 @@ func (s *svc) replaceSourceCandidateDescription(ctx context.Context, sourceID, a
 	if description == "" {
 		description, descriptionErr = s.d.Svc.OrdinaryInterfaceDescription()
 	}
-	if descriptionErr != nil || description == "" || description == "BROray - mix-auto" {
+	if descriptionErr != nil || description == "" || (description == "BROray - mix-auto") != prefs.Enabled {
 		return errReserveRuntime
 	}
 	phase = "replacement/interface-before"
@@ -192,22 +221,51 @@ func (s *svc) replaceSourceCandidateDescription(ctx context.Context, sourceID, a
 		if _, e = reserve.VerifyListener(identity, target.Upstream); e != nil || !current() {
 			return errReserveRuntime
 		}
+		if hotPlan != nil && (p.VerifyReserveOutboundIfCurrent(ctx, snapshot, hotPlan.slot) != nil || !current()) {
+			return compat.ErrXrayCandidateRejected
+		}
 	}
-	phase = "replacement/render"
-	nextConfig, err := XrayConfig(Record(nextMap), s.genSettings(ctx), RecordPath(s.d, nextID))
-	if err != nil {
-		return err
-	}
-	phase = "replacement/routing"
-	nextConfig, err = s.d.Svc.ConfigureRouting(ctx, nextConfig)
-	if err != nil {
-		return err
-	}
-	phase = "replacement/health-inbound"
-	if endpoint, present := reserve.DiagnosticEndpoint(config); present {
-		nextConfig, err = reserve.AttachHealthInbound(nextConfig, endpoint)
+	nextConfig := config
+	nextPrefs := prefBytes
+	if hotPlan != nil {
+		nextConfig = hotPlan.nextConfig
+	} else if !renameOnly {
+		phase = "replacement/render"
+		nextConfig, err = XrayConfig(Record(nextMap), s.genSettings(ctx), RecordPath(s.d, nextID))
 		if err != nil {
 			return err
+		}
+		if emergency && compat.SHA256Hex(nextConfig) != prefs.Emergency.Fingerprint {
+			updated := prefs.reservePreferences
+			updated.Emergency = &reserveEmergency{ServerID: activeID, Fingerprint: compat.SHA256Hex(nextConfig)}
+			nextPrefs, err = compat.Marshal(updated)
+			if err != nil {
+				return err
+			}
+		}
+		phase = "replacement/routing"
+		nextConfig, err = s.d.Svc.ConfigureRouting(ctx, nextConfig)
+		if err != nil {
+			return err
+		}
+		phase = "replacement/health-inbound"
+		if endpoint, present := reserve.DiagnosticEndpoint(config); present {
+			nextConfig, err = reserve.AttachHealthInbound(nextConfig, endpoint)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	var checkLease io.Closer
+	if proof != nil && snapshot.Wanted && hotPlan == nil {
+		nextConfig, checkLease = s.preparePolicyVPN(ctx, nextConfig)
+		defer func() {
+			if checkLease != nil {
+				_ = checkLease.Close()
+			}
+		}()
+		if _, ok := reserve.DiagnosticEndpoint(nextConfig); !ok {
+			return compat.ErrXrayCandidateRejected
 		}
 	}
 	phase = "replacement/next-runtime-proof"
@@ -219,9 +277,12 @@ func (s *svc) replaceSourceCandidateDescription(ctx context.Context, sourceID, a
 	if name == "" {
 		name = nextID
 	}
-	nextDescription, err := s.d.Svc.PreviewOrdinaryDescription(name)
-	if err != nil || nextDescription == "" || nextDescription == "BROray - mix-auto" {
-		return errReserveRuntime
+	nextDescription := "BROray - mix-auto"
+	if !prefs.Enabled {
+		nextDescription, err = s.d.Svc.PreviewOrdinaryDescription(name)
+		if err != nil || nextDescription == "" || nextDescription == "BROray - mix-auto" {
+			return errReserveRuntime
+		}
 	}
 	phase = "replacement/core-validation"
 	validationErr := s.d.Svc.ValidateXrayConfig(ctx, nextConfig)
@@ -246,14 +307,35 @@ func (s *svc) replaceSourceCandidateDescription(ctx context.Context, sourceID, a
 	}
 	defer j.Close()
 	nextActive := []byte(nextID + "\n")
-	id, err := j.Begin(ctx, reserve.TransactionFiles{Config: nextConfig, Preferences: prefBytes, Active: nextActive}, reserve.TransactionIntent{
-		Action: "source-replace", Authority: compat.SHA256Hex([]byte(sourceID + "\x00" + activeID + nextID + prefs.Revision + compat.SHA256Hex(record) + compat.SHA256Hex(nextRecord) + compat.SHA256Hex(nextConfig))),
+	// Display changes preserve the installed bytes and selected ID. A
+	// retained live profile with equal rendered bytes also needs no restart.
+	keepRuntime := renameOnly || (previousDescription != "" && snapshot.Running && bytes.Equal(nextConfig, config))
+	action := "source-replace"
+	if keepRuntime || proof != nil {
+		nextActive = active
+	}
+	if proof != nil {
+		action = reserve.SourceProfileTransactionAction
+	}
+	emergencyChange := emergency && !bytes.Equal(nextPrefs, prefBytes)
+	if emergencyChange {
+		action = reserve.SourceEmergencyProfileTransactionAction
+	}
+	authority := compat.SHA256Hex([]byte(sourceID + "\x00" + activeID + nextID + prefs.Revision + compat.SHA256Hex(record) + compat.SHA256Hex(nextRecord) + compat.SHA256Hex(nextConfig)))
+	confirm := j.Confirm
+	if proof != nil && proof.recoveryAuthority != "" {
+		authority = proof.recoveryAuthority
+		confirm = j.ConfirmSourceProfile
+	}
+	id, err := j.Begin(ctx, reserve.TransactionFiles{Config: nextConfig, Preferences: nextPrefs, Active: nextActive}, reserve.TransactionIntent{
+		Action: action, Authority: authority,
 		InterfaceName: target.Name, Upstream: target.Upstream.String(), PreviousDescription: description, PreviousDescriptionLine: target.DescriptionLine,
 		NextDescription: nextDescription, ReceiptSHA256: compat.SHA256Hex(receipt),
 	})
+	rolledBack := false
 	if id != "" {
 		defer func() {
-			if retErr != nil {
+			if retErr != nil && !rolledBack {
 				retErr = errors.Join(errReserveTransactionPending, retErr)
 			}
 		}()
@@ -274,40 +356,140 @@ func (s *svc) replaceSourceCandidateDescription(ctx context.Context, sourceID, a
 	}
 	phase = "replacement/install-runtime"
 	wanted := snapshot.Wanted
-	if cold != nil {
+	if checkLease != nil {
+		err = checkLease.Close()
+		checkLease = nil
+		if err != nil {
+			return err
+		}
+	}
+	if proof != nil && proof.op != nil && wanted && !keepRuntime {
+		proof.op.RecordSourceProfileApplyStart()
+	}
+	switch {
+	case keepRuntime:
+		if !current() {
+			return errReserveRuntime
+		}
+	case cold != nil:
 		err = p.InstallIfCold(ctx, snapshot, cold, install)
-	} else if wanted {
+	case wanted:
 		snapshot, err = p.ReplaceIfCurrent(ctx, snapshot, install)
-	} else {
+	default:
 		snapshot, err = p.StopIfCurrent(ctx, snapshot, install)
 	}
 	if err != nil {
 		return err
 	}
-	if !fixedInputs() || p.RuntimeSnapshot() != snapshot || snapshot.Wanted != wanted || snapshot.Running != wanted {
+	if !fixedInputs(prefBytes) || p.RuntimeSnapshot() != snapshot || snapshot.Wanted != wanted || snapshot.Running != wanted {
 		return errReserveRuntime
 	}
 	phase = "replacement/install-selection"
-	if err := j.InstallSelection(ctx, id); err != nil {
-		return err
+	if !emergencyChange {
+		if err := j.InstallSelection(ctx, id); err != nil {
+			return err
+		}
 	}
+	expectedPrefs := prefBytes
 	installed := func() bool {
-		return fixedInputs() && p.RuntimeSnapshot() == snapshot &&
+		return fixedInputs(expectedPrefs) && p.RuntimeSnapshot() == snapshot &&
 			same(s.d.Root.XrayConfig(), nextConfig, 2<<20) && same(ActiveFile(s.d), nextActive, 4096)
 	}
 	if !installed() {
 		return errReserveRuntime
 	}
+	if proof != nil && wanted {
+		phase = "replacement/vpn-check"
+		preDescription := func() bool {
+			return installed() && same(s.d.Path("config", "interface.json"), receipt, 64<<10)
+		}
+		check := compat.VPNUnconfirmed
+		if hotPlan == nil || s.selectPendingSourceHot(ctx, p, snapshot, nextConfig, hotPlan, preDescription) {
+			check = s.pendingSourceVPNCheck(ctx, nextConfig, preDescription, proof)
+		}
+		if proof.op != nil {
+			proof.op.RecordSourceProfileVPNCheck(check)
+		}
+		if check != compat.VPNVerified {
+			phase = "replacement/vpn-rollback"
+			if proof.op != nil {
+				proof.op.Phase("recovering")
+				proof.op.RecordRollback(false, false)
+			}
+			if !preDescription() {
+				return errReserveRuntime
+			}
+			if hotPlan != nil {
+				// The new process is about to be replaced. Blocking is best
+				// effort since an unconfirmed selector can already be absent.
+				_ = p.SelectReserveOutboundIfCurrent(ctx, snapshot, reserve.HotBlockedTag)
+			}
+			if !keepRuntime {
+				snapshot, err = p.ReplaceIfCurrent(ctx, snapshot, func() error {
+					if !fixedInputs(prefBytes) || !same(s.d.Root.XrayConfig(), nextConfig, 2<<20) ||
+						!same(ActiveFile(s.d), active, 4096) || !same(s.d.Path("config", "interface.json"), receipt, 64<<10) {
+						return errReserveRuntime
+					}
+					return j.RestoreConfig(ctx, id)
+				})
+				if err != nil {
+					return err
+				}
+			}
+			oldCurrent := func() bool { return beforeFiles() && p.RuntimeSnapshot() == snapshot }
+			oldListener := func() bool {
+				processID, e := reserve.CaptureProcess(snapshot.PID, s.d.Root.XrayBinary())
+				if e != nil {
+					return false
+				}
+				_, e = reserve.VerifyListener(processID, target.Upstream)
+				return e == nil
+			}
+			if !waitPendingSourceReady(ctx, oldCurrent, oldListener) {
+				return errReserveRuntime
+			}
+			if hotPlan != nil && !s.selectPendingSourceHot(ctx, p, snapshot, config, hotPlan, oldCurrent) {
+				return errReserveRuntime
+			}
+			if err = j.RollbackPrepared(ctx, r, func(ctx context.Context, _ reserve.TransactionRecord) error {
+				owned, e := s.d.Svc.VerifyOwnedInterfaceTarget(ctx, description)
+				if e != nil || owned != target || !oldCurrent() || !oldListener() {
+					return errReserveRuntime
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			rolledBack = true
+			restoredVPN := s.pendingSourceVPNCheck(ctx, config, oldCurrent, proof)
+			if proof.op != nil {
+				proof.op.RecordRollback(true, restoredVPN == compat.VPNVerified)
+			}
+			return compat.ErrSourceProfileRolledBack
+		}
+	}
+	if emergencyChange {
+		phase = "replacement/install-emergency-fingerprint"
+		if !installed() || !same(s.d.Path("config", "interface.json"), receipt, 64<<10) {
+			return errReserveRuntime
+		}
+		if err := j.InstallSelection(ctx, id); err != nil {
+			return err
+		}
+		expectedPrefs = nextPrefs
+	}
 	phase = "replacement/sync-description"
-	if err := s.d.Svc.SyncOwnedInterfaceDescription(ctx); err != nil {
-		return err
+	if proof == nil || nextDescription != description {
+		if err := s.d.Svc.SyncOwnedInterfaceDescription(ctx); err != nil {
+			return err
+		}
 	}
 	acceptedReceipt, err := reserveRuntimeFile(s.d.Path("config", "interface.json"), 64<<10)
 	if err != nil || !installed() {
 		return errReserveRuntime
 	}
 	phase = "replacement/confirm"
-	return j.Confirm(ctx, id, func(ctx context.Context, r reserve.TransactionRecord) error {
+	return confirm(ctx, id, func(ctx context.Context, r reserve.TransactionRecord) error {
 		valid := func() bool { return installed() && same(s.d.Path("config", "interface.json"), acceptedReceipt, 64<<10) }
 		deadline := time.Now().Add(10 * time.Second)
 		for {
@@ -329,7 +511,8 @@ func (s *svc) replaceSourceCandidateDescription(ctx context.Context, sourceID, a
 					if e == nil {
 						final, e := s.d.Svc.VerifyOwnedInterfaceTarget(ctx, nextDescription)
 						last, le := reserve.VerifyListener(identity, target.Upstream)
-						if e == nil && le == nil && final == after && last == listener && valid() {
+						if e == nil && le == nil && final == after && last == listener && valid() &&
+							(hotPlan == nil || p.VerifyReserveOutboundIfCurrent(ctx, snapshot, hotPlan.slot) == nil && valid()) {
 							return nil
 						}
 					}

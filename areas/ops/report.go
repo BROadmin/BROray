@@ -1,26 +1,75 @@
 package ops
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BROadmin/broray/internal/app"
 	"github.com/BROadmin/broray/internal/cgi"
 	"github.com/BROadmin/broray/internal/compat"
+	"github.com/BROadmin/broray/internal/keenetic"
 	"golang.org/x/sys/unix"
 )
 
 // The diagnostics report (lib/operation-report.sh + operation-report-facts.sh):
-// read-only, bounded facts that 3.5.0 actually knows. complete is always
-// false like 3.x (network continuity and KeeneticOS are never probed).
+// read-only, bounded facts. The report does not test continuity itself.
 
 const reportLimit = 1 << 20
 
-var reKernel = regexp.MustCompile(`^[0-9][A-Za-z0-9._+-]{0,63}$`)
+var (
+	reKernel       = regexp.MustCompile(`^[0-9][A-Za-z0-9._+-]{0,63}$`)
+	reportRevision = regexp.MustCompile(`^r[0-9]{1,8}(c[0-9]{1,8})?$`)
+	reportModel    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._+()-]{0,79}$`)
+	reportFirmware = regexp.MustCompile(`^[0-9][A-Za-z0-9 ._+()-]{0,63}$`)
+)
+
+func (a *area) addReportRouter(ctx context.Context, platform map[string]any) {
+	for _, key := range []string{"routerModel", "routerModelCode", "keeneticOS"} {
+		platform[key] = nil
+	}
+	if a.d.App == nil || a.d.App.K == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	version, err := a.d.App.K.Version(ctx)
+	if err != nil || ctx.Err() != nil {
+		return
+	}
+	text := func(key string) string { value, _ := version[key].(string); return value }
+	model, code := text("model"), text("hw_id")
+	if !reportModel.MatchString(model) {
+		model = ""
+	}
+	if !keenetic.IsRouterModelCode(code) {
+		code = ""
+	}
+	if suffix := keenetic.RouterModelSuffix(model); suffix != "" {
+		if code == "" {
+			code = suffix
+		} else if code != suffix {
+			model, code = "", ""
+		}
+	}
+	if model != "" {
+		platform["routerModel"] = model
+	}
+	if code != "" {
+		platform["routerModelCode"] = code
+	}
+	for _, key := range []string{"release", "title"} {
+		if value := text(key); reportFirmware.MatchString(value) {
+			platform["keeneticOS"] = value
+			break
+		}
+	}
+}
 
 func uname() (machine, release string) {
 	var u unix.Utsname
@@ -165,9 +214,9 @@ func (a *area) reportUpdater() map[string]any {
 	return out
 }
 
-func (a *area) report() map[string]any {
+func (a *area) report(ctx context.Context) map[string]any {
 	snap := a.d.Queue.Snapshot()
-	journal := a.d.Queue.Journal().Events()
+	journal := a.d.Queue.Journal().ReportEvents()
 	automation := a.reportAutomation()
 	services := a.reportServices()
 	xr := a.reportXray()
@@ -196,7 +245,24 @@ func (a *area) report() map[string]any {
 			okServices++
 		}
 	}
-	unavailable := []string{"keeneticOS", "vpnContinuity", "updaterLiveIdentity"}
+	var k any
+	if kernel != "" {
+		k = kernel
+	}
+	platform := map[string]any{"architecture": machine, "kernel": k, "uptimeSeconds": uptimeSeconds()}
+	a.addReportRouter(ctx, platform)
+	unavailable := []string{"vpnContinuity", "updaterLiveIdentity"}
+	for _, field := range []string{"routerModel", "routerModelCode", "keeneticOS"} {
+		if platform[field] == nil {
+			unavailable = append(unavailable, field)
+		}
+	}
+	var revision any
+	if reportRevision.MatchString(app.Revision) {
+		revision = app.Revision
+	} else {
+		unavailable = append(unavailable, "appRevision")
+	}
 	if okServices != len(services) {
 		unavailable = append(unavailable, "serviceStates")
 	}
@@ -239,10 +305,6 @@ func (a *area) report() map[string]any {
 		errs = append(errs, e)
 	}
 	sort.Strings(errs)
-	var k any
-	if kernel != "" {
-		k = kernel
-	}
 	updaterRequest := "absent"
 	if a.page.running() {
 		updaterRequest = "present"
@@ -267,14 +329,15 @@ func (a *area) report() map[string]any {
 		"summary": strconv.Itoa(len(active)) + " активных операций; " + strconv.Itoa(okServices) + " из " + strconv.Itoa(len(services)) +
 			" фоновых служб проверены. Сетевая непрерывность этим отчётом не проверяется.",
 		"unavailable":       unavailable,
-		"build":             map[string]any{"appVersion": app.Version, "candidateId": app.Version, "webuiBuild": webUIBuild},
-		"platform":          map[string]any{"architecture": machine, "kernel": k, "uptimeSeconds": uptimeSeconds()},
+		"build":             map[string]any{"appVersion": app.Version, "appRevision": revision, "candidateId": app.Version, "webuiBuild": webUIBuild},
+		"platform":          platform,
 		"services":          map[string]any{"xray": xr["state"], "scheduler": scheduler, "updater": "unknown"},
 		"serviceDetails":    services,
 		"runtimeDetails":    map[string]any{"xray": xr, "updater": upd, "proxyInterface": a.reportProxyInterface()},
 		"automation":        map[string]any{"paused": snap["automationPaused"], "subscriptionUpdate": automation["subscriptionUpdate"], "serverCheck": automation["serverCheck"], "autoSwitch": automation["autoSwitch"]},
 		"automationDetails": automationDetails,
 		"operations":        append(active, terminal...),
+		"operationFailures": journal["failures"],
 		"fences":            map[string]any{"global": snap["globalFence"], "updaterRequest": updaterRequest, "domainPending": domain},
 		"events":            journal["events"],
 		"journal":           map[string]any{"complete": journal["complete"], "truncated": journal["truncated"]},
@@ -284,7 +347,7 @@ func (a *area) report() map[string]any {
 }
 
 func (a *area) reportHandler(c *cgi.Req) {
-	rep := a.report()
+	rep := a.report(c.R.Context())
 	b, err := compat.Marshal(rep)
 	if err != nil || len(b) > reportLimit {
 		compat.WriteOpsError(c.W, &compat.QueueError{Code: "REPORT_UNAVAILABLE"})

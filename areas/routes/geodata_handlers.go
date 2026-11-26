@@ -35,14 +35,21 @@ func (e *engine) defineGeodataQueue() {
 			defer cancel()
 			_, err = e.runPolicy(ctx, m, t.Op)
 			if err == nil {
-				t.Result("Геоданные проверены и сохранены.", "")
+				switch m.Operation {
+				case "geo-check":
+					t.Result("Проверка геоданных завершена.", "")
+				case "geo-apply":
+					t.Result("Подготовленные геоданные применены.", "")
+				default:
+					t.Result("Геоданные проверены и сохранены.", "")
+				}
 			}
 			return err
 		}}}})
 }
 
 func geoMutation(m routepolicy.Mutation) bool {
-	return m.Operation == "geo-upsert" || m.Operation == "geo-update"
+	return m.Operation == "geo-upsert" || m.Operation == "geo-update" || m.Operation == "geo-check" || m.Operation == "geo-apply"
 }
 
 func (e *engine) queueGeodata(c *cgi.Req) (any, error) {
@@ -67,6 +74,17 @@ func policySelection(state routepolicy.State) geodata.Selection {
 		sel.GeoSiteTags = append(sel.GeoSiteTags, rule.GeoSiteTags...)
 	}
 	return sel
+}
+
+func selectedGeodataKinds(sel geodata.Selection) []string {
+	var kinds []string
+	if len(sel.CountryCodes) != 0 {
+		kinds = append(kinds, string(geodata.GeoIP))
+	}
+	if len(sel.GeoSiteTags) != 0 {
+		kinds = append(kinds, string(geodata.GeoSite))
+	}
+	return kinds
 }
 
 func (e *engine) openManagedGeodata() (*geodata.Store, error) {
@@ -113,6 +131,9 @@ func (e *engine) openManagedGeodata() (*geodata.Store, error) {
 // pointer. The caller journals the candidate before commit and config apply.
 func (e *engine) preparePolicyGeodata(ctx context.Context, next *routepolicy.State, previous geodata.Snapshot, m routepolicy.Mutation) (*geodata.Store, *geodata.Candidate, error) {
 	sel := policySelection(*next)
+	if m.Operation == "geo-check" && len(sel.CountryCodes)+len(sel.GeoSiteTags) == 0 {
+		return nil, nil, cgi.E(400, "POLICY_RULE_INVALID", "Сначала добавьте набор или страну.")
+	}
 	if (m.Kind == geodata.GeoIP && len(sel.CountryCodes) == 0) || (m.Kind == geodata.GeoSite && len(sel.GeoSiteTags) == 0) {
 		return nil, nil, cgi.E(400, "POLICY_RULE_INVALID", "Сначала добавьте набор или страну.")
 	}
@@ -136,7 +157,7 @@ func (e *engine) preparePolicyGeodata(ctx context.Context, next *routepolicy.Sta
 		if !part.selected {
 			continue
 		}
-		if part.kind == m.Kind || *part.revision == "" {
+		if m.Operation == "geo-check" || part.kind == m.Kind || *part.revision == "" {
 			rev, err := e.geoResolve(ctx, part.kind)
 			if err != nil {
 				return nil, nil, err
@@ -144,17 +165,6 @@ func (e *engine) preparePolicyGeodata(ctx context.Context, next *routepolicy.Sta
 			*part.revision = rev
 			dates[string(part.kind)] = e.geoTime().Format(time.RFC3339Nano)
 		}
-	}
-	validate := func(ctx context.Context, snapshot geodata.Snapshot) error {
-		// Always load every selected asset in the real core, even if all rules
-		// are off and no active server exists. This config never handles traffic.
-		state := routepolicy.State{SchemaVersion: 1, Rules: []routepolicy.Rule{{ID: "geodata-validation", Enabled: true, Action: routepolicy.Deny, CountryCodes: snapshot.Selection.CountryCodes, GeoSiteTags: snapshot.Selection.GeoSiteTags}}}
-		base := []byte(`{"inbounds":[{"tag":"socks","protocol":"socks","listen":"127.0.0.1","port":1080}],"outbounds":[{"tag":"proxy","protocol":"blackhole"}]}`)
-		cfg, err := e.renderRouting(base, state, snapshot)
-		if err != nil {
-			return err
-		}
-		return e.d.Svc.ValidateXrayConfig(ctx, cfg)
 	}
 	plan, err := geodata.SourcePlan(sel, revs)
 	if err != nil {
@@ -165,7 +175,7 @@ func (e *engine) preparePolicyGeodata(ctx context.Context, next *routepolicy.Sta
 		oldPlan = append(oldPlan, asset.Source)
 	}
 	if previous.Revision != "" && reflect.DeepEqual(plan, oldPlan) {
-		if err := validate(ctx, previous); err != nil {
+		if err := e.validatePolicyGeodata(ctx, previous); err != nil {
 			return nil, nil, err
 		}
 		next.GeoUpdatedAt = dates
@@ -175,7 +185,7 @@ func (e *engine) preparePolicyGeodata(ctx context.Context, next *routepolicy.Sta
 	if err != nil {
 		return nil, nil, err
 	}
-	candidate, err := store.PrepareReusing(ctx, sel, revs, e.geoFetch, validate)
+	candidate, err := store.PrepareReusing(ctx, sel, revs, e.geoFetch, e.validatePolicyGeodata)
 	if err != nil {
 		store.Close()
 		return nil, nil, err
@@ -184,6 +194,95 @@ func (e *engine) preparePolicyGeodata(ctx context.Context, next *routepolicy.Sta
 		cleanup := store.Abort(context.WithoutCancel(ctx), candidate)
 		store.Close()
 		return nil, nil, errors.Join(errors.New("geodata changed before preparation"), cleanup)
+	}
+	if (m.Operation == "geo-update" || m.Operation == "geo-check") && previous.Revision != "" {
+		var used geodata.Selection
+		for _, rule := range next.Rules {
+			if rule.Enabled {
+				used.CountryCodes = append(used.CountryCodes, rule.CountryCodes...)
+				used.GeoSiteTags = append(used.GeoSiteTags, rule.GeoSiteTags...)
+			}
+		}
+		if len(used.CountryCodes)+len(used.GeoSiteTags) > 0 {
+			same, compareErr := store.SameUsedData(ctx, candidate, used)
+			if same || compareErr != nil {
+				cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+				defer cancel()
+				if err := errors.Join(compareErr, store.Abort(cleanup, candidate), store.Close()); err != nil {
+					return nil, nil, err
+				}
+				next.GeoUpdatedAt = dates
+				return nil, nil, nil
+			}
+		}
+	}
+	next.GeoUpdatedAt = dates
+	return store, candidate, nil
+}
+
+func (e *engine) validatePolicyGeodata(ctx context.Context, snapshot geodata.Snapshot) error {
+	// Load every selected asset in the real core, including disabled rules.
+	// This validation config never handles traffic.
+	state := routepolicy.State{SchemaVersion: 1, Rules: []routepolicy.Rule{{ID: "geodata-validation", Enabled: true, Action: routepolicy.Deny, CountryCodes: snapshot.Selection.CountryCodes, GeoSiteTags: snapshot.Selection.GeoSiteTags}}}
+	base := []byte(`{"inbounds":[{"tag":"socks","protocol":"socks","listen":"127.0.0.1","port":1080}],"outbounds":[{"tag":"proxy","protocol":"blackhole"}]}`)
+	cfg, err := e.renderRouting(base, state, snapshot)
+	if err != nil {
+		return err
+	}
+	return e.d.Svc.ValidateXrayConfig(ctx, cfg)
+}
+
+type geoPendingView struct {
+	Revision  string    `json:"revision"`
+	CheckedAt time.Time `json:"checkedAt"`
+}
+
+func pendingGeoView(p *geodata.PendingUpdate) *geoPendingView {
+	if p == nil {
+		return nil
+	}
+	return &geoPendingView{Revision: p.Revision, CheckedAt: p.CheckedAt}
+}
+
+func (e *engine) readPendingGeodata(ctx context.Context, policy, base string) (*geoPendingView, error) {
+	store, err := geodata.Open(filepath.Join(e.d.Root.Runtime(), geodata.AssetDirectory))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	p, err := store.Pending(ctx, policy, base)
+	return pendingGeoView(p), err
+}
+
+func (e *engine) reopenPolicyGeodata(ctx context.Context, next *routepolicy.State, m routepolicy.Mutation) (*geodata.Store, *geodata.Candidate, error) {
+	changed := cgi.E(409, "GEODATA_PENDING_CHANGED", "Подготовленные данные изменились. Проверьте геоданные заново.")
+	store, err := geodata.Open(filepath.Join(e.d.Root.Runtime(), geodata.AssetDirectory))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil, changed
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	candidate, p, err := store.ReopenPending(ctx, m.ExpectedRevision, m.ExpectedPendingRevision)
+	if errors.Is(err, geodata.ErrPendingChanged) {
+		err = changed
+	}
+	if err == nil {
+		err = e.validatePolicyGeodata(ctx, candidate.Snapshot())
+	}
+	if err != nil {
+		store.Close()
+		return nil, nil, err
+	}
+	dates := make(map[string]string, len(next.GeoUpdatedAt))
+	for kind, at := range next.GeoUpdatedAt {
+		dates[kind] = at
+	}
+	for _, asset := range candidate.Snapshot().Assets {
+		dates[string(asset.Kind)] = p.CheckedAt.Format(time.RFC3339Nano)
 	}
 	next.GeoUpdatedAt = dates
 	return store, candidate, nil

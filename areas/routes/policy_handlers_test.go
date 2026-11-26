@@ -126,6 +126,17 @@ func TestPolicyAPIApplyRollbackAndUnknownOutcome(t *testing.T) {
 			}
 			rev := policyView(env)["revision"].(string)
 			r := policyPost(env, rev, "action", `,"action":"direct"`)
+			if mode == "rollback" || mode == "unknown" {
+				rows, _ := env.d.Queue.Journal().ReportEvents()["failures"].([]map[string]any)
+				expected := "unconfirmed"
+				if mode == "rollback" {
+					expected = "restored"
+				}
+				if len(rows) != 1 || rows[0]["action"] != "routes:policy" ||
+					rows[0]["configurationRollback"] != expected || rows[0]["vpnRecovery"] != "unconfirmed" {
+					t.Fatal("rollback outcome should distinguish config and traffic evidence", rows)
+				}
+			}
 			if mode == "success" {
 				env.mustOK(r)
 				cfg, _ := os.ReadFile(env.d.Root.XrayConfig())

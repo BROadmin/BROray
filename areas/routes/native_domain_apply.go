@@ -135,7 +135,11 @@ func hNativeDomainApply(e *engine, c *cgi.Req) (result any, resultErr error) {
 				states[id] = map[string]any{"phase": phase, "preview": record.Preview}
 			}
 		}
-		return map[string]any{"states": states}, nil
+		drafts, err := e.dnsDrafts(c.R.Context())
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"states": states, "drafts": drafts}, nil
 	}
 	if err := requestGuard(c); err != nil {
 		return nil, err
@@ -176,6 +180,13 @@ func hNativeDomainApply(e *engine, c *cgi.Req) (result any, resultErr error) {
 	}
 	defer release()
 	ctx = compat.WithFence(ctx)
+	for _, list := range []premiumListSpec{premiumDomainList, premiumIPList} {
+		if id == list.id {
+			if _, err := os.Lstat(e.p(list.pending)); !errors.Is(err, os.ErrNotExist) {
+				return nil, cgi.E(409, "PREMIUM_RECOVERY_REQUIRED", "Сначала восстановите список через раздел Premium.")
+			}
+		}
+	}
 	op := e.d.Queue.StartOperation("", "route_policy", "routes:native-domain", "USER", "protected", "")
 	defer func() { op.Finish(resultErr) }()
 	path := nativeDomainRecordPath(e.root, id)

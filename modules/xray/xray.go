@@ -447,6 +447,12 @@ func (p *Process) launchRawLocked() error {
 	if err != nil {
 		return fmt.Errorf("XRAY_CHILD_OWNER_UNCONFIRMED: %w", err)
 	}
+	if p.Args == nil {
+		if err := prepareReserveControlLaunch(p.root, cfg); err != nil {
+			_ = guard.Close()
+			return err
+		}
+	}
 	cmd.ExtraFiles = []*os.File{guard}
 	var logf *os.File
 	if f, err := os.OpenFile(filepath.Join(p.root.Logs(), "xray.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {

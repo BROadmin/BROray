@@ -43,6 +43,8 @@ func main() {
 		err = verify(os.Args[2:])
 	case "channel":
 		err = channel(os.Args[2:])
+	case "bootstrap":
+		err = bootstrap(os.Args[2:])
 	default:
 		usage()
 	}
@@ -53,7 +55,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: release keygen|sign|verify|channel (see docs/RELEASE-CHANNEL.md)")
+	fmt.Fprintln(os.Stderr, "usage: release keygen|sign|verify|channel|bootstrap (see docs/RELEASE-CHANNEL.md)")
 	os.Exit(2)
 }
 
@@ -152,31 +154,38 @@ func verify(args []string) error {
 	if *pub == "" || fs.NArg() != 1 {
 		return errors.New("usage: release verify -p <public key> <file>")
 	}
-	ps := *pub
-	if b, err := os.ReadFile(ps); err == nil {
-		ps = string(b)
-	}
-	pk, err := update.ParsePublicKey(ps)
+	_, keyID, comment, err := readSignedFile(fs.Arg(0), *pub)
 	if err != nil {
 		return err
 	}
-	msg, err := os.ReadFile(fs.Arg(0))
-	if err != nil {
-		return err
+	fmt.Printf("signature OK (key %s); trusted comment: %s\n", keyID, comment)
+	return nil
+}
+
+func readSignedFile(file, publicKey string) (message []byte, keyID, comment string, err error) {
+	if b, err := os.ReadFile(publicKey); err == nil {
+		publicKey = string(b)
 	}
-	sb, err := os.ReadFile(fs.Arg(0) + ".sig")
+	pk, err := update.ParsePublicKey(publicKey)
 	if err != nil {
-		return err
+		return nil, "", "", err
+	}
+	msg, err := os.ReadFile(file)
+	if err != nil {
+		return nil, "", "", err
+	}
+	sb, err := os.ReadFile(file + ".sig")
+	if err != nil {
+		return nil, "", "", err
 	}
 	sig, err := update.ParseSignature(sb)
 	if err != nil {
-		return err
+		return nil, "", "", err
 	}
 	if err := sig.Verify(pk, msg); err != nil {
-		return err
+		return nil, "", "", err
 	}
-	fmt.Printf("signature OK (key %s); trusted comment: %s\n", pk.IDString(), sig.TrustedComment)
-	return nil
+	return msg, pk.IDString(), sig.TrustedComment, nil
 }
 
 type multi []string

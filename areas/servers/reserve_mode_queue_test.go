@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,7 +20,11 @@ import (
 
 func reserveModeQueueFixture(t *testing.T) (reserveRuntimeFixture, *string) {
 	t.Helper()
-	f := newReserveRuntimeFixture(t)
+	return reserveModeQueueFromRuntime(t, newReserveRuntimeFixture(t))
+}
+
+func reserveModeQueueFromRuntime(t *testing.T, f reserveRuntimeFixture) (reserveRuntimeFixture, *string) {
+	t.Helper()
 	writeReserveAutomatic(t, f.e, f.plan.node.ID, f.backup, false)
 	rec, err := ReadRecord(f.e.d, f.plan.node.ID)
 	if err != nil {
@@ -247,6 +252,86 @@ func TestReserveModeQueueRejectsUnsafeRequest(t *testing.T) {
 	}
 }
 
+func TestReserveRepairRollbackPreservesUnchangedOwnedDescription(t *testing.T) {
+	f, description := reserveModeQueueFixture(t)
+	writeReserveAutomatic(t, f.e, f.plan.node.ID, f.backup, true)
+	*description = "BROray - mix-auto"
+	prefs, err := readReservePreferences(f.e.d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := f.e.d.Root.XrayConfig()
+	originalConfig, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptPath := f.e.d.Path("config", "interface.json")
+	originalReceipt, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := f.process.RuntimeSnapshot()
+	var rejectReplacement atomic.Bool
+	rejectReplacement.Store(true)
+	verify := f.e.d.Svc.KeeneticVerifyInterfaceTarget
+	f.e.d.Svc.KeeneticVerifyInterfaceTarget = func(ctx context.Context, name string) (compat.OwnedInterfaceTarget, error) {
+		config, err := os.ReadFile(configPath)
+		if err != nil {
+			return compat.OwnedInterfaceTarget{}, err
+		}
+		if _, diagnostic := reserve.DiagnosticEndpoint(config); diagnostic && rejectReplacement.Load() {
+			return compat.OwnedInterfaceTarget{}, errors.New("new runtime readback unavailable")
+		}
+		return verify(ctx, name)
+	}
+	var syncCalls atomic.Int32
+	f.e.d.Svc.KeeneticSyncOwnedDescription = func(context.Context) error {
+		syncCalls.Add(1)
+		return errors.New("concurrent interface read owns the metadata mutex")
+	}
+	nonce := strings.Repeat("d8", 16)
+	if r := reserveModeRequest(t, true, prefs.Revision, nonce); r.Code != 202 {
+		t.Fatalf("repair not queued: %d %s", r.Code, r.Raw)
+	}
+	go f.e.d.Queue.Run(f.e.d.Ctx)
+	deadline := time.Now().Add(35 * time.Second)
+	for {
+		result, ok := f.e.d.Queue.Request("q-" + nonce)
+		if ok && result.State == "failed" {
+			if result.ErrorCode != "RESERVE_MODE_ROLLED_BACK" {
+				t.Fatalf("previous connection restored, but repair did not finalize its rollback: %s, metadata sync calls %d", result.ErrorCode, syncCalls.Load())
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("repair never ended with rollback: %+v", result)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	current := f.process.RuntimeSnapshot()
+	config, configErr := os.ReadFile(configPath)
+	receipt, receiptErr := os.ReadFile(receiptPath)
+	after, prefsErr := readReservePreferences(f.e.d)
+	pending, journalErr := reserve.TransactionPending(context.Background(), f.e.d.Root)
+	if configErr != nil || receiptErr != nil || prefsErr != nil || journalErr != nil ||
+		!current.Running || current.Generation <= before.Generation ||
+		!bytes.Equal(config, originalConfig) || !bytes.Equal(receipt, originalReceipt) ||
+		after.Revision != prefs.Revision || ActiveID(f.e.d) != f.plan.node.ID ||
+		*description != "BROray - mix-auto" || syncCalls.Load() != 0 || pending || f.e.d.Lock.Busy() {
+		t.Fatal("rollback did not preserve the working connection, its identity and a clear queue")
+	}
+	rejectReplacement.Store(false)
+	secondNonce := strings.Repeat("e8", 16)
+	if r := reserveModeRequest(t, true, prefs.Revision, secondNonce); r.Code != 202 {
+		t.Fatalf("a later repair was blocked: %d %s", r.Code, r.Raw)
+	}
+	waitReq(t, f.e, "q-"+secondNonce, "completed")
+	config, err = os.ReadFile(configPath)
+	if _, diagnostic := reserve.DiagnosticEndpoint(config); err != nil || !diagnostic || f.e.d.Lock.Busy() {
+		t.Fatal("later repair did not restore diagnostic runtime", err)
+	}
+}
+
 func TestReserveModeMonitorEnqueuesWithoutOrdinaryAutoConfig(t *testing.T) {
 	e := newEnv(t)
 	a := e.addServer(t, "trojan://pw@127.0.0.1:1#A")
@@ -261,6 +346,66 @@ func TestReserveModeMonitorEnqueuesWithoutOrdinaryAutoConfig(t *testing.T) {
 	again, _ := e.d.Queue.FindLive(compat.ReserveSwitchAction, compat.ReserveOperationTarget)
 	if again.RequestID != r.RequestID {
 		t.Fatal("monitor overlap")
+	}
+}
+
+func TestReserveRepairAllowsMeasuredReadbackAfterTransientNotReady(t *testing.T) {
+	f, description := reserveModeQueueFixture(t)
+	writeReserveAutomatic(t, f.e, f.plan.node.ID, f.backup, true)
+	*description = "BROray - mix-auto"
+	prefs, err := readReservePreferences(f.e.d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verify := f.e.d.Svc.KeeneticVerifyInterfaceTarget
+	var observations atomic.Int32
+	f.e.d.Svc.KeeneticVerifyInterfaceTarget = func(ctx context.Context, name string) (compat.OwnedInterfaceTarget, error) {
+		config, err := os.ReadFile(f.e.d.Root.XrayConfig())
+		if err != nil {
+			return compat.OwnedInterfaceTarget{}, err
+		}
+		if _, diagnostic := reserve.DiagnosticEndpoint(config); !diagnostic {
+			return verify(ctx, name)
+		}
+		// A full live target proof includes two native running-config reads.
+		timer := time.NewTimer(4400 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return compat.OwnedInterfaceTarget{}, ctx.Err()
+		case <-timer.C:
+		}
+		if observations.Add(1) == 1 {
+			return compat.OwnedInterfaceTarget{}, errors.New("proxy not ready after child replacement")
+		}
+		return verify(ctx, name)
+	}
+	nonce := strings.Repeat("f8", 16)
+	if r := reserveModeRequest(t, true, prefs.Revision, nonce); r.Code != 202 {
+		t.Fatalf("repair not queued: %d %s", r.Code, r.Raw)
+	}
+	go f.e.d.Queue.Run(f.e.d.Ctx)
+	deadline := time.Now().Add(36 * time.Second)
+	for {
+		result, ok := f.e.d.Queue.Request("q-" + nonce)
+		if ok && result.State == "completed" {
+			break
+		}
+		if ok && result.State == "failed" {
+			t.Fatalf("repair rolled back despite an eventually ready owned interface: %s after %d observations", result.ErrorCode, observations.Load())
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("slow repair never completed: %+v", result)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	config, err := os.ReadFile(f.e.d.Root.XrayConfig())
+	after, prefsErr := readReservePreferences(f.e.d)
+	pending, journalErr := reserve.TransactionPending(context.Background(), f.e.d.Root)
+	if _, diagnostic := reserve.DiagnosticEndpoint(config); err != nil || !diagnostic || prefsErr != nil ||
+		journalErr != nil || pending || f.e.d.Lock.Busy() || observations.Load() != 3 ||
+		after.Revision != prefs.Revision || ActiveID(f.e.d) != f.plan.node.ID || *description != "BROray - mix-auto" {
+		t.Fatal("successful repair did not preserve the active primary, roster, interface and clear journal")
 	}
 }
 
@@ -307,10 +452,10 @@ func TestReserveModeQueuedMonitorUsesOwnedProbe(t *testing.T) {
 
 func TestReserveModeQueuedMonitorSwitchesUnderSameFence(t *testing.T) {
 	f, m, _ := reserveSwitchFixture(t)
-	// Synthetic prior readiness is labelled in reserveSwitchFixture. The new
-	// active probe, exact replacement, config validation and listeners are real.
+	// The fixture already rechecked the backup after confirming the third
+	// failure. The new active probe and the runtime switch are real.
 	m.state.Pending = nil
-	m.state.ActiveFailures = 2
+	m.state.ActiveFailures = reserve.DefaultPolicy().Failures
 	m.scheduler = reserve.ProbeScheduler{}
 	prior := m.state.Samples[m.state.ActiveID]
 	prior.StartedAt = time.Now().Add(-15 * time.Second)

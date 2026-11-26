@@ -22,11 +22,17 @@ func setup(d *compat.Deps) error {
 	d.Svc.ServersReapplyActive = s.ReapplyActive
 	d.Svc.ServersPreviewActiveConfig = s.PreviewActiveConfig
 	d.Svc.ServersPreviewBackupBaseConfig = s.PreviewBackupBaseConfig
+	d.Svc.ServersPreparePolicyVPN = s.preparePolicyVPN
+	d.Svc.ServersProbePolicyVPN = s.probeAppliedPolicyVPN
+	d.Svc.ServersPremiumVPNIdentity = s.premiumVPNIdentity
+	d.Svc.ServersPremiumVPNProbe = s.premiumVPNProbe
 	d.Svc.ServersWithdrawActive = s.WithdrawActive
 	d.Svc.ServersPrepareSourceRemoval = s.PrepareSourceRemoval
 	d.Svc.ServersPrepareSourceRefresh = s.PrepareSourceRefresh
 	d.Svc.ServersPrepareSourceRefreshCatalog = s.PrepareSourceRefreshCatalog
 	d.Svc.ServersReapplySourceRefresh = s.ReapplySourceRefresh
+	d.Svc.ServersRenameSourceRefresh = s.RenameSourceRefresh
+	d.Svc.ServersApplyPendingSourceProfile = s.ApplyPendingSourceProfile
 	d.Svc.ServersValidateSourceDPIProposals = s.ValidateSourceDPIProposals
 	d.Svc.ServersInterfaceDescription = s.reserveInterfaceDescription
 	registerBackup(s)

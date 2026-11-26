@@ -24,13 +24,16 @@ func TestSourceRefreshCatalogUsesNativeOwner(t *testing.T) {
 			for _, member := range e.s.liveServers() {
 				before[member.path] = member.raw
 			}
-			pre, replace, reapply, legacy := 0, 0, 0, 0
+			pre, replace, reapply, rename, legacy := 0, 0, 0, 0, 0
 			e.d.Svc.ServersReapplyActive = func(context.Context, string) error { legacy++; return nil }
 			e.d.Svc.KeeneticEnsureInterface = func(context.Context) error { legacy++; return nil }
 			e.d.Svc.ServersPrepareSourceRefreshCatalog = func(ctx context.Context, source string, ids []string) error {
 				pre++
 				if !compat.FenceHeld(ctx) || source != subX {
 					t.Fatal("pre-stage owner scope")
+				}
+				if kind == "rename" && len(ids) != 0 {
+					t.Fatal("rename-only record reached reserve pre-disable set", ids)
 				}
 				got, err := os.ReadFile(oldPath)
 				if err != nil || !bytes.Equal(got, oldBytes) || servers.ActiveID(e.d) != old {
@@ -94,8 +97,7 @@ func TestSourceRefreshCatalogUsesNativeOwner(t *testing.T) {
 				}
 				return next, nil
 			}
-			e.d.Svc.ServersReapplySourceRefresh = func(ctx context.Context, source, id, previousName string) (string, error) {
-				reapply++
+			checkRetained := func(ctx context.Context, source, id, previousName string) (string, error) {
 				if !compat.FenceHeld(ctx) || source != subX || id != old || previousName != "A" || servers.ActiveID(e.d) != old {
 					t.Fatal("same-ID owner scope")
 				}
@@ -104,6 +106,14 @@ func TestSourceRefreshCatalogUsesNativeOwner(t *testing.T) {
 					t.Fatal("new profile not staged", err)
 				}
 				return old, nil
+			}
+			e.d.Svc.ServersReapplySourceRefresh = func(ctx context.Context, source, id, previousName string) (string, error) {
+				reapply++
+				return checkRetained(ctx, source, id, previousName)
+			}
+			e.d.Svc.ServersRenameSourceRefresh = func(ctx context.Context, source, id, previousName string) (string, error) {
+				rename++
+				return checkRetained(ctx, source, id, previousName)
 			}
 			links := []string{"trojan://pw@b.example:443#B"}
 			policy := "replace"
@@ -176,7 +186,11 @@ func TestSourceRefreshCatalogUsesNativeOwner(t *testing.T) {
 				if replace != 0 || reapply != 0 || result.Retained != 1 || servers.ActiveID(e.d) != old {
 					t.Fatal("partial response treated as disappearance", result)
 				}
-			} else if reapply != 1 || replace != 0 || servers.ActiveID(e.d) != old {
+			} else if kind == "rename" {
+				if rename != 1 || reapply != 0 || replace != 0 || servers.ActiveID(e.d) != old {
+					t.Fatal("rename did not use the display-only owner", rename, reapply, replace)
+				}
+			} else if rename != 0 || reapply != 1 || replace != 0 || servers.ActiveID(e.d) != old {
 				t.Fatal("retained active owner not called", reapply, replace)
 			}
 			markers, _ := filepath.Glob(filepath.Join(e.d.Root.Tmp(), "server-subscription-sync.*", "rollback-required"))

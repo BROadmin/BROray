@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -13,12 +14,16 @@ import (
 	"github.com/BROadmin/broray/internal/strictjson"
 )
 
+const SourceProfileTransactionAction = "source-profile-apply"
+const SourceEmergencyProfileTransactionAction = "source-emergency-profile-apply"
+
 const maxTransactionConfigBytes = 2 << 20
 const maxTransactionReceiptBytes = 64 << 10
 const maxTransactionJournalBytes = 6 << 20
 
 var transactionHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var transactionInterfacePattern = regexp.MustCompile(`^Proxy[0-9]{1,5}$`)
+var transactionServerID = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$`)
 
 // Every field is mandatory, including explicit existence flags. An omitted
 // predecessor must never become permission to delete a file during rollback.
@@ -170,6 +175,31 @@ func (r TransactionRecord) validate() error {
 		if i.PreviousDescription != "BROray - mix-auto" || i.NextDescription != "BROray - mix-auto" {
 			return ErrTransactionUnconfirmed
 		}
+	case "exit-switch":
+		previousEnabled, known := transactionReserveEnabled(r.Previous.Preferences)
+		if i.PreviousDescription != "BROray - mix-auto" || i.NextDescription == "BROray - mix-auto" ||
+			!r.Previous.Config.Exists || !transactionActive(r.Previous.Active) ||
+			!known || !previousEnabled || !r.Next.Preferences.Exists || !transactionReserveOff(r.Next.Preferences) {
+			return ErrTransactionUnconfirmed
+		}
+	case SourceProfileTransactionAction:
+		if !r.Previous.Config.Exists || !transactionActive(r.Previous.Active) ||
+			!r.Previous.Active.equal(r.Next.Active) || !r.Previous.Preferences.equal(r.Next.Preferences) {
+			return ErrTransactionUnconfirmed
+		}
+	case SourceEmergencyProfileTransactionAction:
+		if !r.Previous.Config.Exists || !r.Next.Config.Exists || !transactionActive(r.Previous.Active) ||
+			!r.Previous.Active.equal(r.Next.Active) || i.PreviousDescription != "BROray - mix-auto" ||
+			i.NextDescription != i.PreviousDescription || !transactionEmergencyProfileChange(r.Previous.Preferences, r.Next.Preferences,
+			strings.TrimSpace(string(r.Previous.Active.Data))) {
+			return ErrTransactionUnconfirmed
+		}
+		enabled, known := transactionReserveEnabled(r.Previous.Preferences)
+		if r.Previous.Preferences.Exists && !known ||
+			(i.PreviousDescription == "BROray - mix-auto") != enabled ||
+			(i.NextDescription == "BROray - mix-auto") != enabled {
+			return ErrTransactionUnconfirmed
+		}
 	case "source-replace", "source-withdraw":
 		// Source removal first disables reserve through its own confirmed
 		// transaction. It may not borrow a live roster or mix-auto ownership.
@@ -201,7 +231,7 @@ func (r TransactionRecord) validate() error {
 	if i.Action != "source-withdraw" && (!r.Next.Config.Exists || !transactionActive(r.Next.Active)) {
 		return ErrTransactionUnconfirmed
 	}
-	if i.Action != "source-withdraw" && i.Action != "source-replace" && !r.Next.Preferences.Exists {
+	if i.Action != "source-withdraw" && i.Action != "source-replace" && i.Action != SourceProfileTransactionAction && !r.Next.Preferences.Exists {
 		return ErrTransactionUnconfirmed
 	}
 	return nil
@@ -211,17 +241,63 @@ func transactionActive(image TransactionImage) bool {
 	return image.Exists && utf8.Valid(image.Data) && strings.TrimSpace(string(image.Data)) != "" && !bytes.ContainsRune(image.Data, 0)
 }
 
+type transactionEmergencyScope struct {
+	primary, fingerprint string
+	backups              []string
+}
+
+func transactionEmergencyProfileChange(previous, next TransactionImage, active string) bool {
+	before, ok := transactionEmergencyPreferences(previous, active)
+	after, okNext := transactionEmergencyPreferences(next, active)
+	return ok && okNext && before.primary == after.primary && slices.Equal(before.backups, after.backups) &&
+		before.fingerprint != after.fingerprint
+}
+
+func transactionEmergencyPreferences(image TransactionImage, active string) (transactionEmergencyScope, bool) {
+	if !image.Exists || !transactionServerID.MatchString(active) {
+		return transactionEmergencyScope{}, false
+	}
+	v, err := strictjson.Decode(image.Data)
+	m, _ := v.(map[string]any)
+	emergency, _ := m["emergency"].(map[string]any)
+	fp, _ := emergency["fingerprint"].(string)
+	primary, _ := m["primaryServerId"].(string)
+	raw, _ := m["backupServerIds"].([]any)
+	if err != nil || len(m) != 5 || m["schemaVersion"] != json.Number("1") || m["enabled"] != true ||
+		len(emergency) != 2 || emergency["serverId"] != active || !transactionHashPattern.MatchString(fp) ||
+		!transactionServerID.MatchString(primary) || primary == active || len(raw) == 0 || len(raw) > 2 {
+		return transactionEmergencyScope{}, false
+	}
+	scope := transactionEmergencyScope{primary: primary, fingerprint: fp}
+	for _, value := range raw {
+		id, _ := value.(string)
+		if !transactionServerID.MatchString(id) || id == active || id == primary || slices.Contains(scope.backups, id) {
+			return transactionEmergencyScope{}, false
+		}
+		scope.backups = append(scope.backups, id)
+	}
+	return scope, true
+}
+
 // Absence is the existing default-off state; a present file needs an explicit
 // boolean. Full roster schema and catalog identity remain caller obligations.
 func transactionReserveOff(image TransactionImage) bool {
 	if !image.Exists {
 		return true
 	}
+	enabled, ok := transactionReserveEnabled(image)
+	return ok && !enabled
+}
+
+func transactionReserveEnabled(image TransactionImage) (bool, bool) {
+	if !image.Exists {
+		return false, false
+	}
 	v, err := strictjson.Decode(image.Data)
 	m, ok := v.(map[string]any)
 	if err != nil || !ok {
-		return false
+		return false, false
 	}
 	enabled, ok := m["enabled"].(bool)
-	return ok && !enabled
+	return enabled, ok
 }

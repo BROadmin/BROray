@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/BROadmin/broray/internal/compat"
+	"github.com/BROadmin/broray/modules/reserve"
 )
 
 // svc is the servers area runtime (one per daemon).
@@ -28,14 +29,18 @@ type svc struct {
 	mu sync.Mutex
 
 	// hooks (replaced in tests)
-	now            func() time.Time
-	xrayTest       func(ctx context.Context, configPath string) error
-	measure        func(ctx context.Context, rec Record, cfg []byte) probeResult
-	activeProbe    func(ctx context.Context, configPath, serverID string) map[string]any
-	ping           func(ctx context.Context, address string, count int, wait int) string
-	xrayProcess    func() (pid int, start string, ok bool)
-	socksListening func(address string, port int) bool
-	stopXray       func(ctx context.Context) error
+	now                   func() time.Time
+	xrayTest              func(ctx context.Context, configPath string) error
+	measure               func(ctx context.Context, rec Record, cfg []byte) probeResult
+	activeProbe           func(ctx context.Context, configPath, serverID string) map[string]any
+	readWANOutage         func(context.Context) bool
+	ping                  func(ctx context.Context, address string, count int, wait int) string
+	xrayProcess           func() (pid int, start string, ok bool)
+	socksListening        func(address string, port int) bool
+	stopXray              func(ctx context.Context) error
+	reserveSelectionProbe func(context.Context, string) (reserve.Sample, error)
+	reserveHotExperiment  bool
+	reserveHotProbe       func(context.Context, reserve.ProbeTarget) reserve.ProbeOutcome
 
 	loopRunning    atomic.Bool
 	monitorRunning atomic.Bool
@@ -48,6 +53,9 @@ func newSvc(d *compat.Deps) *svc {
 	s.xrayTest = s.execXrayTest
 	s.measure = s.isolatedProbe
 	s.activeProbe = s.socksProbe
+	s.readWANOutage = confirmedWANOutage
+	s.reserveSelectionProbe = s.probeReserveSelection
+	s.reserveHotProbe = reserve.Probe
 	s.ping = execPing
 	s.xrayProcess = s.findXray
 	s.socksListening = procSocksListening

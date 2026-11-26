@@ -1,6 +1,7 @@
 package xray
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -223,12 +224,17 @@ func (s *service) ApplyConfig(ctx context.Context, config []byte) error {
 	}
 	// Roll back to the previous configuration.
 	if prevErr == nil {
+		restored := false
 		if werr := platform.WriteFileAtomic(path, previous, 0o600); werr == nil {
+			visible, readErr := os.ReadFile(path)
+			restored = readErr == nil && bytes.Equal(previous, visible)
 			if rerr := restart(); rerr == nil && s.waitSocks(ctx, socksWait) {
-				return fmt.Errorf("XRAY_APPLY_FAILED: Новая конфигурация Xray не запустилась; восстановлена предыдущая. %v", err)
+				return &compat.XrayConfigRollback{Restored: restored,
+					Err: fmt.Errorf("XRAY_APPLY_FAILED: Новая конфигурация Xray не запустилась; восстановлена предыдущая. %v", err)}
 			}
 		}
-		return fmt.Errorf("XRAY_APPLY_FAILED: Новая конфигурация Xray не запустилась; восстановление не подтверждено. %v", err)
+		return &compat.XrayConfigRollback{Restored: restored,
+			Err: fmt.Errorf("XRAY_APPLY_FAILED: Новая конфигурация Xray не запустилась; восстановление не подтверждено. %v", err)}
 	}
 	_ = s.d.App.Xray.Stop(ctx)
 	_ = os.Remove(path)

@@ -161,6 +161,9 @@ func (h *cleanupHandle) describe() (os.FileInfo, int64, string, error) {
 }
 
 func (a *area) removeCleanup(l cleanupLine) error {
+	if (l.category == "versions" || l.category == "preImport") && !cleanupUnmounted(filepath.Join(a.d.Root.Dir, l.rel)) {
+		return errors.New("cleanup entry contains a mount point")
+	}
 	h, err := a.openCleanup(l.rel)
 	if err != nil {
 		return err

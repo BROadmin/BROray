@@ -147,20 +147,20 @@ func (s *svc) planNativeRefresh(subID string, stage []servers.Record, enabled bo
 			p.result.Removed++
 		}
 		removed := !kept || (!enabled && o.side == "live")
-		changed := removed || (kept && (configHash(o.file.rec) != configHash(next) || nameOrID(o.file.rec) != nameOrID(next)))
+		settingsChanged := kept && configHash(o.file.rec) != configHash(next)
 		if removed {
 			p.removed = append(p.removed, o.file.id)
 		}
-		if changed {
+		if removed || settingsChanged {
 			p.changed = append(p.changed, o.file.id)
 		}
 		if o.file.id == id {
 			if !kept {
 				p.result.Impact = "removed-replaced"
-			} else if changed {
+			} else if settingsChanged || nameOrID(o.file.rec) != nameOrID(next) {
 				p.reapply = true
 				p.result.Impact = "display-name-changed"
-				if configHash(o.file.rec) != configHash(next) {
+				if settingsChanged {
 					p.result.Impact = "configuration-changed"
 				}
 			}
@@ -178,7 +178,7 @@ func (s *svc) planNativeRefresh(subID string, stage []servers.Record, enabled bo
 // syncCatalogCommit owns strict catalog bytes. Protected refresh delegates runtime
 // selection to the server service. Legacy refresh can only change proven inactive,
 // non-reserve members and never borrows or fabricates runtime authority.
-func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []servers.Record, enabled bool, policy string) (*syncResult, error) {
+func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []servers.Record, enabled bool, policy string, apply *pendingApplyObservation, op *compat.Operation) (*syncResult, error) {
 	failRefresh := func(err error) error {
 		var existing *subErr
 		if errors.As(err, &existing) {
@@ -193,9 +193,24 @@ func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []serve
 	if ctx.Err() != nil {
 		return nil, failRefresh(errors.New("refresh fence required"))
 	}
-	p, err := s.planNativeRefresh(subID, stage, enabled, policy)
+	var p *refreshCatalogPlan
+	var err error
+	if apply != nil {
+		p, err = s.planPendingProfileApply(ctx, subID, apply)
+	} else {
+		p, err = s.planNativeRefresh(subID, stage, enabled, policy)
+	}
 	if err != nil {
 		return nil, failRefresh(err)
+	}
+	var pendingProfile *pendingProfileWrite
+	if apply != nil {
+		pendingProfile = &pendingProfileWrite{before: apply.binding.image, source: apply.binding.source}
+	} else if protected {
+		pendingProfile, err = s.planPendingActiveProfile(subID, p)
+		if err != nil {
+			return nil, failRefresh(err)
+		}
 	}
 	// Changed managed profiles require a protected native validation provider.
 	// Missing service remains a safe refusal before any catalog mutation.
@@ -216,7 +231,8 @@ func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []serve
 		allIDs = append(allIDs, jqRaw(rec["id"]))
 	}
 	allowed := func() bool {
-		if ctx.Err() != nil || (dpiValidation != nil && dpiValidation.Check(ctx) != nil) {
+		if ctx.Err() != nil || (dpiValidation != nil && dpiValidation.Check(ctx) != nil) ||
+			(pendingProfile != nil && pendingProfile.source.path != "" && !pendingProfile.source.unchanged()) {
 			return false
 		}
 		if protected {
@@ -271,6 +287,13 @@ func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []serve
 		}
 		writes = append(writes, &writeEntry{before: image, data: data})
 		expected[path] = image
+	}
+	if pendingProfile != nil {
+		before := pendingProfile.before
+		expected[before.path] = before
+		if !bytes.Equal(before.raw, pendingProfile.data) {
+			writes = append(writes, &writeEntry{before: before, data: pendingProfile.data})
+		}
 	}
 	// The complete original snapshot is rechecked after planning and before any
 	// backup/owner/catalog mutation; permissive display scans are never used.
@@ -340,6 +363,11 @@ func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []serve
 			return nil, failRefresh(errors.New("DPI validation authority changed"))
 		}
 	}
+	if apply != nil && apply.schedule != nil {
+		if err := s.claimPendingProfileWindow(ctx, subID, apply); err != nil {
+			return nil, failRefresh(err)
+		}
+	}
 	tmp, err := platform.OpenDirNoFollow(s.d.Root.Tmp())
 	if err != nil {
 		return nil, failRefresh(err)
@@ -370,21 +398,46 @@ func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []serve
 		backup.Images = append(backup.Images, backupImage{m.record.path, m.record.raw, true}, backupImage{m.quality.path, m.quality.raw, m.quality.info != nil})
 	}
 	for _, w := range writes {
-		if w.before.info == nil {
-			backup.Images = append(backup.Images, backupImage{w.before.path, nil, false})
+		if w.before.info == nil || (pendingProfile != nil && w.before.path == pendingProfile.before.path) {
+			backup.Images = append(backup.Images, backupImage{w.before.path, w.before.raw, w.before.info != nil})
 		}
 	}
 	for _, w := range writes {
-		backup.Proposed = append(backup.Proposed, backupImage{w.before.path, w.data, true})
+		backup.Proposed = append(backup.Proposed, backupImage{w.before.path, w.data, w.data != nil})
 	}
 	data, err := json.Marshal(backup)
 	if err != nil {
 		return nil, failRefresh(err)
 	}
-	if err = platform.WriteNewRegularAtNoFollow(work, "backup.json", data, 0600); err != nil {
+	if apply == nil {
+		err = platform.WriteNewRegularAtNoFollow(work, "backup.json", data, 0600)
+	}
+	if err != nil {
 		return nil, failRefresh(err)
 	}
-	if err = platform.WriteNewRegularAtNoFollow(work, "rollback-required", []byte(subID+"\n"), 0600); err != nil {
+	recoveryAuthority := ""
+	var recipe deletionImage
+	if apply != nil {
+		recoveryBytes, err := s.prepareProfileRecovery(subID, apply)
+		if err != nil {
+			return nil, failRefresh(err)
+		}
+		if err := platform.WriteFileAtomicNoFollow(filepath.Join(workPath, profileRecoveryFile), recoveryBytes, 0600); err != nil {
+			return nil, failRefresh(err)
+		}
+		recipe, err = readDeletionImageLimit(filepath.Join(workPath, profileRecoveryFile), false, 3<<20)
+		if err != nil || !bytes.Equal(recipe.raw, recoveryBytes) {
+			return nil, failRefresh(errors.New("profile recovery preparation unconfirmed"))
+		}
+		recoveryAuthority = compat.SHA256Hex(recoveryBytes)
+	}
+	markerBytes := []byte(subID + "\n")
+	if apply != nil {
+		err = platform.WriteFileAtomicNoFollow(filepath.Join(workPath, sourceRecoveryMarker), markerBytes, 0600)
+	} else {
+		err = platform.WriteNewRegularAtNoFollow(work, sourceRecoveryMarker, markerBytes, 0600)
+	}
+	if err != nil {
 		return nil, failRefresh(err)
 	}
 	pending := func(cause error) (*syncResult, error) {
@@ -424,12 +477,14 @@ func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []serve
 		}
 		return info, nil
 	}
-	markerBytes := []byte(subID + "\n")
-	backupInfo, err := readWork("backup.json", data)
-	if err != nil {
-		return pending(err)
+	var backupInfo os.FileInfo
+	if apply == nil {
+		backupInfo, err = readWork("backup.json", data)
+		if err != nil {
+			return pending(err)
+		}
 	}
-	markerInfo, err := readWork("rollback-required", markerBytes)
+	markerInfo, err := readWork(sourceRecoveryMarker, markerBytes)
 	if err != nil {
 		return pending(err)
 	}
@@ -437,13 +492,32 @@ func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []serve
 		if !sameWork() {
 			return errors.New("refresh workspace changed")
 		}
+		currentMarker, e := readWork(sourceRecoveryMarker, markerBytes)
+		if e != nil || !os.SameFile(markerInfo, currentMarker) {
+			return errors.Join(e, errors.New("refresh marker replaced"))
+		}
+		if apply != nil {
+			if !recipe.unchanged() {
+				return errors.New("profile recovery record replaced")
+			}
+			// Retire the catalog marker before discarding the native commit.
+			// If startup finds only a committed native journal it can safely
+			// acknowledge it, because the catalog was verified first.
+			if e := unix.Unlinkat(int(work.Fd()), sourceRecoveryMarker, 0); e != nil {
+				return e
+			}
+			if e := work.Sync(); e != nil {
+				return e
+			}
+			if sameWork() {
+				s.cleanupRecoveredProfileArtifacts(recipe)
+				_ = unix.Unlinkat(int(tmp.Fd()), name, unix.AT_REMOVEDIR)
+			}
+			return tmp.Sync()
+		}
 		currentBackup, e := readWork("backup.json", data)
 		if e != nil || !os.SameFile(backupInfo, currentBackup) {
 			return errors.Join(e, errors.New("refresh backup replaced"))
-		}
-		currentMarker, e := readWork("rollback-required", markerBytes)
-		if e != nil || !os.SameFile(markerInfo, currentMarker) {
-			return errors.Join(e, errors.New("refresh marker replaced"))
 		}
 		if e := unix.Unlinkat(int(work.Fd()), "backup.json", 0); e != nil {
 			return e
@@ -500,7 +574,7 @@ func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []serve
 	if !verify(p.active) {
 		return rollback(errors.New("source snapshot changed before owner preparation"))
 	}
-	if protected {
+	if protected && apply == nil {
 		if err := s.d.Svc.PrepareSourceRefreshCatalog(ctx, subID, p.changed); err != nil {
 			if errors.Is(err, compat.ErrServiceUnavailable) {
 				return rollback(err)
@@ -516,11 +590,16 @@ func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []serve
 		if !allowed() || !p.active.unchanged() || !w.before.unchanged() {
 			return rollback(errors.New("refresh destination changed"))
 		}
-		if err := platform.WriteFileAtomicNoFollow(w.before.path, w.data, 0600); err != nil {
+		if w.data == nil {
+			err = platform.RemoveRegularNoFollow(w.before.path)
+		} else {
+			err = platform.WriteFileAtomicNoFollow(w.before.path, w.data, 0600)
+		}
+		if err != nil {
 			return pending(err)
 		}
-		image, err := readDeletionImage(w.before.path, false)
-		if err != nil || !bytes.Equal(image.raw, w.data) {
+		image, err := readDeletionImage(w.before.path, w.data == nil)
+		if err != nil || !bytes.Equal(image.raw, w.data) || (image.info == nil) != (w.data == nil) {
 			return pending(errors.Join(err, errors.New("staged profile unconfirmed")))
 		}
 		w.after = image
@@ -562,7 +641,27 @@ func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []serve
 		}
 	}
 	if protected && p.reapply {
-		selected, e := s.d.Svc.ReapplySourceRefresh(ctx, subID, p.activeID, p.previousName)
+		var selected string
+		var e error
+		if apply != nil {
+			if !apply.config.unchanged() || s.d.App == nil || s.d.App.Xray == nil || s.d.App.Xray.RuntimeSnapshot() != apply.snapshot {
+				return rollback(errPendingProfileChanged)
+			}
+			e = s.d.Svc.ApplyPendingSourceProfile(ctx, compat.SourceProfileApply{
+				SourceID: subID, ServerID: p.activeID, PreviousName: p.previousName,
+				ConfigSHA256: compat.SHA256Hex(apply.config.raw), CandidateSHA256: apply.binding.profile.CandidateSHA256,
+				PreviousRecord:    bytes.Clone(apply.binding.working.raw),
+				RecoveryAuthority: recoveryAuthority,
+			}, op)
+			if e != nil && !errors.Is(e, compat.ErrReserveTransactionPending) {
+				return rollback(e)
+			}
+			selected = p.activeID
+		} else if p.result.Impact == "display-name-changed" {
+			selected, e = s.d.Svc.RenameSourceRefresh(ctx, subID, p.activeID, p.previousName)
+		} else {
+			selected, e = s.d.Svc.ReapplySourceRefresh(ctx, subID, p.activeID, p.previousName)
+		}
 		if e != nil {
 			// Pruning may already have committed; catalog rollback is safe only for a
 			// provable pre-mutation rejection with unchanged selection and no journal.
@@ -622,8 +721,27 @@ func (s *svc) syncCatalogCommit(ctx context.Context, subID string, stage []serve
 			return pending(errors.New("committed source image mismatch"))
 		}
 	}
+	if pendingProfile != nil && !expected[pendingProfile.before.path].unchanged() {
+		return pending(errors.New("pending profile changed at catalog commit"))
+	}
+	var journal *reserve.TransactionJournal
+	if apply != nil {
+		journal, err = reserve.OpenTransactionJournal(s.d.Root)
+		if err != nil {
+			return pending(err)
+		}
+		defer journal.Close()
+		if err := journal.CheckSourceProfileCommit(ctx, recoveryAuthority); err != nil {
+			return pending(err)
+		}
+	}
 	if err := cleanup(); err != nil {
 		return pending(err)
+	}
+	if journal != nil {
+		if err := journal.FinishSourceProfile(ctx, recoveryAuthority); err != nil {
+			return pending(err)
+		}
 	}
 	return p.result, nil
 }

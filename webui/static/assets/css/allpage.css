@@ -54,8 +54,9 @@ html[data-theme="broray"] {
     --ui-on-error: #ffffff;
     --ui-neutral: #9aa8b3;
     --ui-neutral-soft: rgba(154, 168, 179, 0.11);
-    --ui-loading: #32b379;
-    --ui-loading-soft: rgba(50, 179, 121, 0.11);
+    --ui-loading: #93c5fd;
+    --ui-loading-soft: rgba(96, 165, 250, 0.13);
+    --ui-loading-border: rgba(96, 165, 250, 0.33);
 
     --ui-shadow-card: 0 18px 48px rgba(0, 0, 0, 0.22);
     --ui-shadow-dialog: 0 30px 90px rgba(0, 0, 0, 0.50);
@@ -121,8 +122,9 @@ html[data-theme="night"] {
     --ui-on-error: #ffffff;
     --ui-neutral: #a8afb7;
     --ui-neutral-soft: rgba(168, 175, 183, 0.11);
-    --ui-loading: #cdd3db;
-    --ui-loading-soft: rgba(205, 211, 219, 0.10);
+    --ui-loading: #93c5fd;
+    --ui-loading-soft: rgba(96, 165, 250, 0.13);
+    --ui-loading-border: rgba(96, 165, 250, 0.33);
 
     --ui-shadow-card: 0 18px 48px rgba(0, 0, 0, 0.24);
     --ui-shadow-dialog: 0 30px 90px rgba(0, 0, 0, 0.56);
@@ -176,8 +178,9 @@ html[data-theme="day"] {
     --ui-on-error: #ffffff;
     --ui-neutral: #657789;
     --ui-neutral-soft: rgba(101, 119, 137, 0.10);
-    --ui-loading: #5f7697;
-    --ui-loading-soft: rgba(95, 118, 151, 0.10);
+    --ui-loading: #315f9e;
+    --ui-loading-soft: rgba(49, 95, 158, 0.10);
+    --ui-loading-border: rgba(49, 95, 158, 0.28);
 
     --ui-shadow-card: 0 12px 34px rgba(31, 51, 70, 0.065);
     --ui-shadow-dialog: 0 26px 72px rgba(31, 51, 70, 0.22);
@@ -589,6 +592,7 @@ pre {
 .keenetic-status-badge,
 .servers-live-status,
 .xray-live-status {
+    --ui-status-mark: none;
     display: inline-flex;
     min-width: 0;
     max-width: 100%;
@@ -607,10 +611,27 @@ pre {
     overflow-wrap: anywhere;
 }
 
+:where(.status-badge, .home-card-status, .keenetic-status-badge, .servers-live-status, .xray-live-status)::before {
+    content: var(--ui-status-mark);
+    content: var(--ui-status-mark) / "";
+    flex: none;
+    width: 1em;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1;
+    text-align: center;
+}
+
+/* The tone controls the mark. Existing context icons must not duplicate it. */
+:is(.status-badge, .home-card-status, .keenetic-status-badge, .servers-live-status, .xray-live-status) > .ui-icon {
+    display: none;
+}
+
 .status-success,
 .status-badge-success,
 .status-connected,
 .keenetic-status-ok {
+    --ui-status-mark: "✓";
     border-color: var(--ui-success-border);
     color: var(--ui-success);
     background: var(--ui-success-soft);
@@ -619,6 +640,7 @@ pre {
 .status-warning,
 .status-badge-warning,
 .keenetic-status-warning {
+    --ui-status-mark: "△";
     border-color: var(--ui-warning-border);
     color: var(--ui-warning);
     background: var(--ui-warning-soft);
@@ -628,6 +650,7 @@ pre {
 .status-danger,
 .status-badge-danger,
 .keenetic-status-error {
+    --ui-status-mark: "×";
     border-color: var(--ui-error-border);
     color: var(--ui-error);
     background: var(--ui-error-soft);
@@ -635,15 +658,21 @@ pre {
 
 .status-neutral,
 .status-badge-neutral,
+.status-unknown,
 .keenetic-status-neutral {
     border-color: var(--ui-border);
     color: var(--ui-neutral);
     background: var(--ui-neutral-soft);
 }
 
+.status-unknown {
+    --ui-status-mark: "?";
+}
+
 .status-loading,
 .status-checking {
-    border-color: var(--ui-active-border);
+    --ui-status-mark: "◷";
+    border-color: var(--ui-loading-border);
     color: var(--ui-loading);
     background: var(--ui-loading-soft);
 }
@@ -1453,16 +1482,10 @@ label,
     pointer-events: none;
 }
 
-.status-badge > .ui-icon,
 .broray-link-card > .ui-icon,
 .broray-log-details summary > .ui-icon,
 .broray-capability-icon > .ui-icon {
     order: -1;
-}
-
-.status-badge > .ui-icon {
-    width: 16px;
-    height: 16px;
 }
 
 .modal-input-group {
@@ -1750,37 +1773,6 @@ pre {
 
 .page-xray .xray-live-status {
     flex: 0 0 auto;
-}
-
-.page-xray .xray-live-dot {
-    width: 9px;
-    height: 9px;
-    flex: 0 0 auto;
-    border-radius: 50%;
-    background: var(--ui-loading);
-    box-shadow: 0 0 0 4px var(--ui-loading-soft);
-}
-
-.page-xray .xray-live-status.is-running {
-    border-color: var(--ui-success-border);
-    color: var(--ui-success);
-    background: var(--ui-success-soft);
-}
-
-.page-xray .xray-live-status.is-running .xray-live-dot {
-    background: var(--ui-success);
-    box-shadow: 0 0 0 4px var(--ui-success-soft);
-}
-
-.page-xray .xray-live-status.is-stopped {
-    border-color: var(--ui-border);
-    color: var(--ui-neutral);
-    background: var(--ui-neutral-soft);
-}
-
-.page-xray .xray-live-status.is-stopped .xray-live-dot {
-    background: var(--ui-neutral);
-    box-shadow: 0 0 0 4px var(--ui-neutral-soft);
 }
 
 .page-xray .xray-overview {
@@ -3457,30 +3449,6 @@ body.modal-open {
     flex: 0 0 auto;
 }
 
-.page-servers .servers-live-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: currentColor;
-    box-shadow: 0 0 0 4px var(--ui-neutral-soft);
-}
-
-.page-servers .servers-live-status.is-running {
-    border-color: var(--ui-success-border);
-    color: var(--ui-success);
-    background: var(--ui-success-soft);
-}
-
-.page-servers .servers-live-status.is-running .servers-live-dot {
-    box-shadow: 0 0 0 4px var(--ui-success-soft);
-}
-
-.page-servers .servers-live-status.is-stopped {
-    border-color: var(--ui-border);
-    color: var(--ui-neutral);
-    background: var(--ui-neutral-soft);
-}
-
 .page-servers .servers-overview {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -3761,8 +3729,7 @@ body.modal-open {
 }
 
 .page-servers .servers-data-times span,
-.page-servers .servers-refresh-note,
-.page-servers .servers-legend-item {
+.page-servers .servers-refresh-note {
     color: var(--ui-text-muted);
     font-size: 12px;
 }
@@ -3770,43 +3737,6 @@ body.modal-open {
 .page-servers .servers-refresh-note {
     margin: 0;
     line-height: 1.55;
-}
-
-.page-servers .servers-legend-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-}
-
-.page-servers .servers-legend-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: currentColor;
-}
-
-.page-servers .servers-state-unchecked {
-    border-color: var(--ui-border);
-    color: var(--ui-neutral);
-    background: var(--ui-neutral-soft);
-}
-
-.page-servers .servers-state-checking {
-    border-color: var(--ui-active-border);
-    color: var(--ui-loading);
-    background: var(--ui-loading-soft);
-}
-
-.page-servers .servers-state-available {
-    border-color: var(--ui-success-border);
-    color: var(--ui-success);
-    background: var(--ui-success-soft);
-}
-
-.page-servers .servers-state-unavailable {
-    border-color: var(--ui-error-border);
-    color: var(--ui-error);
-    background: var(--ui-error-soft);
 }
 
 .page-servers .servers-list {
@@ -4238,14 +4168,6 @@ body.modal-open {
 
 .page-servers .auto-switch-actions {
     justify-content: flex-end;
-}
-
-.page-servers .auto-switch-badge-enabled,
-.page-servers .quality-refresh-badge-enabled,
-.page-servers .reserve-badge-enabled {
-    border-color: var(--ui-success-border);
-    color: var(--ui-success);
-    background: var(--ui-success-soft);
 }
 
 .page-servers .quality-refresh-form {
@@ -7545,6 +7467,10 @@ body.modal-open {
 .reserve-roster-form { display:grid; gap:1rem; }
 .reserve-actions { display:flex; gap:.75rem; flex-wrap:wrap; }
 .reserve-policy-note,.reserve-optional,#reserve-draft-note { font-size:.875rem; }
+.reserve-selection-preview { margin-block:.75rem; overflow-wrap:anywhere; }
+.reserve-selection-preview dl { display:grid; gap:.5rem; margin:.5rem 0 0; }
+.reserve-selection-preview dt { font-weight:600; }
+.reserve-selection-preview dd { margin:0; }
 @media (max-width:720px) { .reserve-roster-grid { grid-template-columns:1fr; } .reserve-actions .button { width:100%; } }
 
 /* Independent per-server DPI control. */

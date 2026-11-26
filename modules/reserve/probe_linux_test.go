@@ -32,12 +32,13 @@ import (
 func configHash(b []byte) string { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
 
 type httpsFixture struct {
-	roots   *x509.CertPool
-	address string
-	status  atomic.Int32
-	calls   atomic.Int32
-	mu      sync.Mutex
-	during  func()
+	roots            *x509.CertPool
+	address          string
+	status           atomic.Int32
+	cloudflareStatus atomic.Int32
+	calls            atomic.Int32
+	mu               sync.Mutex
+	during           func()
 }
 
 func localControlTLS(t *testing.T) *httpsFixture {
@@ -71,6 +72,10 @@ func localControlTLS(t *testing.T) *httpsFixture {
 			return
 		}
 		w.Header().Set("Location", "https://cp.cloudflare.com/redirected")
+		if status := f.cloudflareStatus.Load(); r.Host == "cp.cloudflare.com" && status != 0 {
+			w.WriteHeader(int(status))
+			return
+		}
 		w.WriteHeader(int(f.status.Load()))
 	}))
 	s.Config.ErrorLog = log.New(io.Discard, "", 0)
@@ -206,6 +211,14 @@ func TestReserveHTTPSActualTrafficAndValidation(t *testing.T) {
 				t.Fatal("validated HTTPS204 not healthy", result, f.calls.Load())
 			}
 			identity := result.Identity
+			f.cloudflareStatus.Store(503)
+			result = probeWithRoots(context.Background(), target, f.roots)
+			if result.Verdict != "healthy" || result.Identity != identity || len(result.Controls) != 2 ||
+				result.Controls[0].Target != "cloudflare" || result.Controls[0].HTTPStatus != 503 ||
+				result.Controls[1].Target != "google" || result.Controls[1].HTTPStatus != 204 {
+				t.Fatal("second control should confirm traffic and retain the first status", result)
+			}
+			f.cloudflareStatus.Store(0)
 			for _, status := range []int{200, 302, 500} {
 				f.status.Store(int32(status))
 				before := f.calls.Load()

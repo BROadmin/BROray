@@ -34,6 +34,7 @@ type ApplyOptions struct {
 	OperationID  string
 	Operation    string // update | reinstall (informational; the mode follows from the versions)
 	Version      string // version of this binary = the target
+	Revision     string // exact revision stamped into this installer
 	Self         string // path of this binary
 	Progress     *update.Emitter
 	Log          io.Writer
@@ -116,6 +117,7 @@ func Apply(o ApplyOptions) (res ApplyResult) {
 			return failed(JFailed, update.Errorf("UPDATE_RECOVERY_FAILED", err, "Не удалось завершить предыдущую операцию обновления; новая операция не начата."))
 		}
 	}
+	drainCommittedStatistics(o.Root, pj)
 	if _, err := os.Lstat(o.Root.Current() + ".new"); err == nil {
 		return failed(JFailed, update.Errorf("UPDATE_LAYOUT_INVALID", nil,
 			"Временный объект current.new уже существует; обновление не начато, объект сохранён для проверки."))
@@ -138,6 +140,7 @@ func Apply(o ApplyOptions) (res ApplyResult) {
 	to := o.Version
 	j := &Journal{OperationID: o.OperationID, Operation: o.Operation, Mode: "switch", From: from, To: to, Channel: o.Channel,
 		PreviousTarget: prev, NewTarget: filepath.Join("versions", to), InitBackup: filepath.Join(o.Root.UpdateState(), "S24broray.prev")}
+	j.DeferredStatistics = carryCommittedStatistics(pj)
 	if j.Operation == "" {
 		j.Operation = "update"
 	}
@@ -194,6 +197,7 @@ func Apply(o ApplyOptions) (res ApplyResult) {
 			update.Errorf("UPDATE_STAGING_FAILED", err, "Скопированная версия %s не запускается.", to),
 			cleanupStaged(o.Root, j)))
 	}
+	prepareUpdateStatistics(o, j, oldBin)
 	if j.Mode == "switch" {
 		if err := os.Rename(staged, filepath.Join(verDir, "broray")); err != nil {
 			return failed(JFailed, errors.Join(err, cleanupStaged(o.Root, j)))
@@ -858,9 +862,11 @@ func commit(root platform.Root, j *Journal) error {
 	} else if j.Mode != "switch" {
 		return fmt.Errorf("unknown commit mode %q", j.Mode)
 	}
+	confirmUpdateStatistics(root, j)
 	if err := j.set(root, JCommitted); err != nil {
 		return err
 	}
+	drainCommittedStatistics(root, j)
 	_, err := cleanupCommitted(root, j)
 	return err
 }
@@ -1040,6 +1046,7 @@ func Recover(o ApplyOptions) (RecoverOutcome, error) {
 		return RecoverNothing, nil
 	}
 	if j.State == JCommitted {
+		drainCommittedStatistics(o.Root, j)
 		cleaned, err := cleanupCommitted(o.Root, j)
 		if err != nil {
 			return "", err

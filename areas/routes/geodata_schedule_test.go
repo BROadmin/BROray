@@ -156,7 +156,7 @@ func TestGeodataScheduleAPIIndependentToggle(t *testing.T) {
 	}
 }
 
-func TestGeodataScheduleDuePerKindAndPause(t *testing.T) {
+func TestGeodataScheduleChecksBothKindsAndRespectsPause(t *testing.T) {
 	env, _ := geoAPIEnv(t)
 	now := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
 	env.e.geoNow = func() time.Time { return now }
@@ -189,19 +189,45 @@ func TestGeodataScheduleDuePerKindAndPause(t *testing.T) {
 	}
 	geoMustComplete(t, geoWait(env, r.RequestID))
 	s := geoScheduleDisk(t, env)
-	if s.Attempts["geoip"].Source != "SCHEDULER" || s.Attempts["geoip"].Status != "ok" {
-		t.Fatalf("no durable result: %+v", s)
+	for _, kind := range []string{"geoip", "geosite"} {
+		if s.Attempts[kind].Source != "SCHEDULER" || s.Attempts[kind].Status != "ok" || s.Attempts[kind].OperationID != s.Attempts["geoip"].OperationID {
+			t.Fatalf("missing durable batch result: %+v", s)
+		}
 	}
-	r = env.e.enqueueDueGeodata()
-	if r == nil {
-		t.Fatal("second kind not scheduled with fresh revision")
-	}
-	geoMustComplete(t, geoWait(env, r.RequestID))
 	if r := env.e.enqueueDueGeodata(); r != nil {
 		t.Fatal("successful check immediately repeated")
 	}
 	if policyState(t, env).Rules[0].Enabled {
 		t.Fatal("scheduled update enabled rule")
+	}
+}
+
+func TestGeodataScheduleCheckLeavesChangedBatchPending(t *testing.T) {
+	env, _ := geoAPIEnv(t)
+	now := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
+	env.e.geoNow = func() time.Time { return now }
+	geoMustComplete(t, geoSubmit(env, "geo-upsert", "fi", `,"name":"Finland","kind":"geoip","tags":["fi"]`))
+	before := geoLoad(t, env)
+	env.d.Svc.XrayApplyConfig = func(context.Context, []byte) error {
+		t.Fatal("scheduled check applied VPN configuration")
+		return nil
+	}
+	geoToggle(env, true)
+	now = now.Add(24 * time.Hour)
+	env.e.geoResolve = func(context.Context, geodata.Kind) (string, error) { return strings.Repeat("b", 40), nil }
+	env.e.geoFetch = func(context.Context, geodata.Source) ([]byte, error) {
+		return []byte{0x0a, 0x0e, 0x0a, 0x02, 'F', 'I', 0x12, 0x08, 0x0a, 0x04, 192, 0, 2, 0, 0x10, 24}, nil
+	}
+	r := env.e.enqueueDueGeodata()
+	if r == nil {
+		t.Fatal("due check absent")
+	}
+	geoMustComplete(t, geoWait(env, r.RequestID))
+	if geoLoad(t, env).Revision != before.Revision || policyView(env)["geoPending"] == nil {
+		t.Fatal("schedule changed active files instead of publishing a ready batch")
+	}
+	if more := env.e.enqueueDueGeodata(); more != nil {
+		t.Fatal("scheduler repeated a just-completed pending check")
 	}
 }
 

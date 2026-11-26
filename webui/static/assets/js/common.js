@@ -116,16 +116,25 @@
         return {queued:"В очереди",running:"Выполняется",completed:"Завершено",failed:"Ошибка",cancelled:"Отменено"}[result && result.state] ||
             "Результат запроса не подтверждён";
     }
-    function submitQueued(url, id) {
+    function submitQueued(url, id, selection) {
+        var reserveSelection = url === "/api/servers/reserve-selection.cgi";
+        var profileApply = url === "/api/subscriptions/apply-profile.cgi";
         if (!["/api/servers/check.cgi", "/api/servers/activate.cgi",
-            "/api/subscriptions/refresh.cgi", "/api/subscriptions/delete.cgi"].includes(url) ||
-            typeof id !== "string" || !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,95}$/.test(id)) {
+            "/api/subscriptions/refresh.cgi", "/api/subscriptions/delete.cgi", "/api/subscriptions/apply-profile.cgi",
+            "/api/servers/reserve-selection.cgi"].includes(url) ||
+            typeof id !== "string" || !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,95}$/.test(id) ||
+            (reserveSelection && (!selection || !["promote", "ordinary"].includes(selection.mode) ||
+                !/^[a-f0-9]{64}$/.test(selection.expectedRevision) || typeof selection.removeServerId !== "string" ||
+                (selection.removeServerId !== "" && !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,95}$/.test(selection.removeServerId))))) {
             return Promise.reject(new Error("Некорректное задание."));
         }
         var key="broray.queue.v1:"+url+":"+id;
         if (queueInFlight.has(key)) return queueInFlight.get(key);
         var promise=Promise.resolve().then(async function () {
             var saved=sessionStorage.getItem(key),nonce;
+            if (profileApply && !saved && (!selection || !/^[0-9a-f]{64}$/.test(selection.revision))) {
+                throw new Error("Текущая ревизия ожидающих параметров не подтверждена.");
+            }
             if (saved) {
                 nonce=saved;
                 if (!/^[0-9a-f]{32}$/.test(nonce)) throw new Error("Сохранённый запрос повреждён. Обновите состояние операций.");
@@ -148,7 +157,14 @@
             var result;
             if (saved) result=await lookup();
             else {
-                try { result=await queuePost(url,{id:id,nonce:nonce},true); }
+                var body = {id:id, nonce:nonce};
+                if (profileApply) body.revision = selection.revision;
+                if (reserveSelection) {
+                    body.mode = selection.mode;
+                    body.expectedRevision = selection.expectedRevision;
+                    body.removeServerId = selection.removeServerId;
+                }
+                try { result=await queuePost(url,body,true); }
                 catch (error) {
                     if ([400,401,403,404,409,413,415,422].includes(error.status)) {
                         sessionStorage.removeItem(key);throw error;
@@ -201,7 +217,7 @@
             } finally { clearTimeout(timeout);queueSchedule(); }
         },5000);
     }
-    function followQueued(url,id,listener) {
+    function followQueued(url,id,listener,selection) {
         var key=url+":"+id,watch=queueWatches.get(key);
         if (watch) {
             watch.listeners.add(listener);
@@ -210,7 +226,7 @@
         }
         watch={url:url,id:id,listeners:new Set([listener]),last:null,promise:null};
         queueWatches.set(key,watch);
-        watch.promise=submitQueued(url,id).then(function (result) {
+        watch.promise=submitQueued(url,id,selection).then(function (result) {
             queueNotify(key,watch,result);queueSchedule();return result;
         },function (error) { queueWatches.delete(key);throw error; });
         return watch.promise;

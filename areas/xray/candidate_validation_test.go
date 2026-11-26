@@ -47,8 +47,8 @@ func probeCandidateDescriptor(t *testing.T, bin string) {
 	defer r.Close()
 	defer w.Close()
 	go func() { _, _ = w.Write([]byte(goodConfig)); w.Close() }()
-	cmd := exec.Command(bin, "run", "-test", "-c", "/proc/self/fd/3", "-format", "json")
-	cmd.ExtraFiles = []*os.File{r}
+	cmd := exec.Command(bin, "run", "-test", "-c", "stdin:", "-format", "json")
+	cmd.Stdin = r
 	out, err := cmd.CombinedOutput()
 	r.Close()
 	if len(out) > 8192 {

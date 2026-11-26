@@ -166,22 +166,27 @@ func (s *svc) switchReserve(ctx context.Context, m *reserveMonitor, result reser
 	})
 	var replaced xray.RuntimeSnapshot
 	var rollbackRecord reserve.TransactionRecord
+	hot := guard.plan.hotSlot != "" && next.hotSlot != "" && bytes.Equal(guard.plan.config, next.config) &&
+		guard.process.RuntimeSnapshot() == guard.snapshot
 	if id != "" {
 		defer func() {
 			if retErr == nil {
 				return
 			}
 			if replaced.Running {
-				restored, rollbackErr := s.rollbackReserveSwitch(ctx, j, rollbackRecord, guard, replaced, target, func() bool {
+				restored, rollbackErr := s.rollbackReserveSwitch(ctx, j, rollbackRecord, guard, replaced, target, hot, func() bool {
 					return (inputs("", prefs.Revision) || inputs("", nextRevision)) && sameReceipt()
 				})
 				if rollbackErr == nil {
 					m.state, _ = reserve.Advance(m.state, reserve.Event{Kind: "switch-result", Token: intent.Token, Verified: true, Success: false, CurrentID: intent.From, CurrentIdentity: restored.identity}, time.Now(), reserve.DefaultPolicy())
 					m.binding, m.lastFailure = &restored, nil
 					retErr = errors.Join(errReserveSwitchRolledBack, retErr)
+					if restored.plan.hotSlot != "" || s.probeRestoredReserveTraffic(ctx, restored) {
+						retErr = errors.Join(errReserveRollbackVPNVerified, retErr)
+					}
 					return
 				}
-				retErr = errors.Join(retErr, rollbackErr)
+				retErr = errors.Join(retErr, errReserveRollbackUnconfirmed, rollbackErr)
 			}
 			retErr = errors.Join(errReserveTransactionPending, retErr)
 		}()
@@ -194,14 +199,19 @@ func (s *svc) switchReserve(ctx context.Context, m *reserveMonitor, result reser
 		return errReserveRuntime
 	}
 	rollbackRecord = r
-	snapshot, err := guard.process.ReplaceIfCurrent(ctx, guard.snapshot, func() error {
-		if !inputs(intent.From, prefs.Revision) || !autoPolicyCurrent() || !ready() || !sameReceipt() || !s.reserveCoreMatches(guard.target.Process) {
-			return errReserveRuntime
+	snapshot := guard.snapshot
+	if !hot {
+		snapshot, err = guard.process.ReplaceIfCurrent(ctx, guard.snapshot, func() error {
+			if !inputs(intent.From, prefs.Revision) || !autoPolicyCurrent() || !ready() || !sameReceipt() || !s.reserveCoreMatches(guard.target.Process) {
+				return errReserveRuntime
+			}
+			return j.InstallConfig(ctx, id)
+		})
+		if err != nil {
+			return err
 		}
-		return j.InstallConfig(ctx, id)
-	})
-	if err != nil {
-		return err
+	} else if guard.process.RuntimeSnapshot() != snapshot {
+		return errReserveRuntime
 	}
 	replaced = snapshot
 	if err := j.InstallSelection(ctx, id); err != nil {
@@ -235,7 +245,8 @@ func (s *svc) switchReserve(ctx context.Context, m *reserveMonitor, result reser
 		if !inputs(intent.To, nextRevision) || !autoPolicyCurrent() || !sameReceipt() || r.ID != id {
 			return errReserveRuntime
 		}
-		if err := s.verifyReserveSwitchCommit(ctx, committedGuard, binding, target); err != nil || !inputs(intent.To, nextRevision) || !sameReceipt() {
+		if err := s.verifyReserveSwitchCommit(ctx, committedGuard, binding, target); err != nil ||
+			!s.confirmReserveHotTraffic(ctx, binding) || !inputs(intent.To, nextRevision) || !sameReceipt() {
 			return errReserveRuntime
 		}
 		return nil

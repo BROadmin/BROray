@@ -107,12 +107,15 @@ func (s *service) validateConfig(ctx context.Context, config []byte, assets *os.
 	}()
 	cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, "/proc/self/fd/4", "run", "-test", "-c", "/proc/self/fd/3", "-format", "json")
-	cmd.ExtraFiles = []*os.File{reader, core}
+	// Xray requires a recognized extension for file names, even with -format.
+	// stdin: keeps the configuration in the pipe without exposing a path.
+	cmd := exec.CommandContext(cctx, "/proc/self/fd/3", "run", "-test", "-c", "stdin:", "-format", "json")
+	cmd.Stdin = reader
+	cmd.ExtraFiles = []*os.File{core}
 	cmd.Env = childEnv(s.d.Root.Runtime())
 	if ownedAssets != nil {
 		cmd.ExtraFiles = append(cmd.ExtraFiles, ownedAssets)
-		cmd.Env = childEnv("/proc/self/fd/5")
+		cmd.Env = childEnv("/proc/self/fd/4")
 	}
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard

@@ -115,7 +115,15 @@ func (s *svc) public(rec map[string]any, includeURL bool, live []srvFile) map[st
 	if !includeURL {
 		delete(out, "url")
 	}
+	if pending := s.pendingActiveProfileStatus(id); pending != nil {
+		out["pendingActiveProfile"] = pending
+	} else {
+		delete(out, "pendingActiveProfile")
+	}
 	delete(out, "clientHwid")
+	delete(out, pendingSourceRevisionField)
+	delete(out, profileApplyScheduleRevisionField)
+	out[profileApplyTimeField], _ = rec[profileApplyTimeField].(string)
 	delete(out, "lastUpdatedEpoch")
 	delete(out, "nextUpdateEpoch")
 	return out

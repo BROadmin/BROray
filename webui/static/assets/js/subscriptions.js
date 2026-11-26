@@ -12,6 +12,7 @@
         create: "/api/subscriptions/create.cgi",
         update: "/api/subscriptions/update.cgi",
         refresh: "/api/subscriptions/refresh.cgi",
+        applyProfile: "/api/subscriptions/apply-profile.cgi",
         remove: "/api/subscriptions/delete.cgi",
         servers: "/api/subscriptions/servers.cgi",
         summary: "/api/subscriptions/summary.cgi",
@@ -30,6 +31,7 @@
         catalogGeneration: 0,
         foregroundLoad: null,
         queued: {},
+        applying: {},
         removing: {},
         polling: null
     };
@@ -136,12 +138,12 @@
 
     function statusPresentation(status) {
         return ({
-            never: {label: "Не обновлено", tone: "neutral"},
+            never: {label: "Не обновлено", tone: "unknown"},
             running: {label: "Обновляется", tone: "loading"},
             success: {label: "Обновлено", tone: "success"},
             partial: {label: "Обновлено частично", tone: "warning"},
             error: {label: "Ошибка", tone: "error"}
-        })[status] || {label: "Не определено", tone: "neutral"};
+        })[status] || {label: "Не определено", tone: "unknown"};
     }
 
     function setButtonBusy(button, busy, busyLabel) {
@@ -285,7 +287,9 @@
             var queued=state.queued[item.id];
             var pending=queued && ["queued","running"].includes(queued.state);
             var removal = state.removing[item.id];
-            var running = item.lastUpdateStatus === "running" || pending || !!removal;
+            var applying = state.applying[item.id];
+            var applyUnknown = applying && applying.state === "unknown";
+            var running = item.lastUpdateStatus === "running" || pending || !!removal || !!applying;
             var operation = item.updateOperation || {};
             var phase = ({fetching: "Загрузка подписки…", parsing: "Разбор серверов…", committing: "Сохранение серверов…", waiting: "Ожидание запуска…"})[operation.phase] || "Обновление подписки…";
             var progress = item.parseProgress || {};
@@ -293,9 +297,13 @@
             if (operation.phase === "parsing" && Number.isInteger(progress.processed) && Number.isInteger(progress.total)) {
                 phase += " Обработано " + progress.processed + " из " + progress.total + ".";
             }
+            if (applying) phase = applyUnknown ? "Результат применения не подтверждён." : "Применяются параметры VPN…";
             if (removal) phase = removal.state === "unknown" ? "Удаление не подтверждено. Проверьте состояние." :
                 removal.state === "queued" ? "Удаление ожидает запуска…" : "Удаление подписки…";
-            var update = removal ? {label: removal.state === "unknown" ? "Удаление не подтверждено" : "Удаление…", tone: "warning"} : statusPresentation(item.lastUpdateStatus);
+            var update = removal ? removal.state === "unknown"
+                ? {label: "Удаление не подтверждено", tone: "warning"}
+                : {label: "Удаление…", tone: "loading"}
+                : statusPresentation(item.lastUpdateStatus);
             var enabled = item.enabled
                 ? {label: "Активна", tone: "success"}
                 : {label: "Отключена", tone: "neutral"};
@@ -315,6 +323,7 @@
                         '<span class="status-badge status-' + update.tone + '">' + escapeHtml(update.label) + '</span>' +
                         '<span class="status-badge status-' + enabled.tone + '">' + enabled.label + '</span>' +
                         '<span class="status-badge status-' + auto.tone + '">' + auto.label + '</span>' +
+                        (item.pendingActiveProfile ? '<span class="status-badge status-warning">Параметры VPN ожидают применения</span>' : '') +
                     '</div>' +
                 '</div>' +
                 '<dl class="subscription-card-meta">' +
@@ -322,6 +331,7 @@
                     '<div><dt>Интервал</dt><dd>' + escapeHtml(item.updateIntervalMinutes) + ' мин.</dd></div>' +
                     '<div><dt>Последнее обновление</dt><dd>' + escapeHtml(formatDate(item.lastUpdatedAt)) + '</dd></div>' +
                     '<div><dt>Следующее обновление</dt><dd>' + escapeHtml(formatDate(item.nextUpdateAt)) + '</dd></div>' +
+                    (item.applyProfileAtUTC ? '<div><dt>Применение параметров VPN</dt><dd>' + escapeHtml(item.applyProfileAtUTC) + ' UTC</dd></div>' : '') +
                 '</dl>' +
                 '<div class="subscription-result" role="status">' + (running ? escapeHtml(phase) : renderResult(item)) + '</div>' +
                 (window.BRORAYSubscriptionProvider ? window.BRORAYSubscriptionProvider.render(item) : "") +
@@ -329,8 +339,10 @@
                 (item.lastError ? '<div class="subscription-error"><strong>Ошибка обновления</strong><span>' + escapeHtml(item.lastError) + '</span></div>' : '') +
                 '<div class="subscription-card-actions">' +
                     actionButton('button-primary', 'refresh', 'update', removal ? 'Обновить' : pending ? BROrayUI.queueLabel(queued) : running ? 'Обновляется' : 'Обновить', running, running && !pending) +
-                    (!removal && pending && queued.state === "queued" ? actionButton('button-danger-outline', 'cancel-update', 'stop', 'Отменить ожидание', false, false) :
-                        !removal && running && operation.id ? actionButton('button-danger-outline', 'cancel-update', 'stop', operation.cancelRequested ? 'Останавливается…' : (operation.canCancel ? 'Остановить обновление' : 'Применяются изменения'), !operation.canCancel, false) : '') +
+                    (item.pendingActiveProfile || applying ? actionButton('button-secondary', 'apply-profile', 'update',
+                        applyUnknown ? 'Проверить применение' : 'Применить параметры VPN', running && !applyUnknown, !!applying && !applyUnknown) : '') +
+                    (!removal && !applying && pending && queued.state === "queued" ? actionButton('button-danger-outline', 'cancel-update', 'stop', 'Отменить ожидание', false, false) :
+                        !removal && !applying && running && operation.id ? actionButton('button-danger-outline', 'cancel-update', 'stop', operation.cancelRequested ? 'Останавливается…' : (operation.canCancel ? 'Остановить обновление' : 'Применяются изменения'), !operation.canCancel, false) : '') +
                     actionButton('button-secondary', 'servers', 'servers', serversOpen ? 'Скрыть серверы' : 'Серверы', false, false) +
                     actionButton('button-secondary', 'edit', 'edit', 'Изменить', running, false) +
                     actionButton('button-secondary', 'toggle-enabled', 'settings', item.enabled ? 'Отключить' : 'Включить', running, false) +
@@ -369,6 +381,10 @@
             if (state.openServersId !== null) loadServerNodes(String(state.openServersId));
             state.subscriptions.forEach(function (item) {
                 if (state.removing[item.id]) return;
+                if (BROrayUI.hasQueuedRequest(paths.applyProfile,item.id)) {
+                    if (!state.applying[item.id]) applyPendingProfile(item,true);
+                    return;
+                }
                 if (BROrayUI.hasQueuedRequest(paths.remove,item.id)) { watchSourceRemoval(String(item.id)); return; }
                 if (state.queued[item.id] || !BROrayUI.hasQueuedRequest(paths.refresh,item.id)) return;
                 var card=Array.from(listElement.querySelectorAll("[data-id]")).find(function (element) { return element.dataset.id === item.id; });
@@ -404,6 +420,7 @@
         byId("subscription-fetch-clash").checked = false;
         byId("subscription-immediate").checked = true;
         byId("subscription-interval").value = "360";
+        byId("subscription-profile-apply-time").value = "";
         byId("subscription-immediate-row").hidden = false;
         formPanel.hidden = true;
     }
@@ -419,6 +436,7 @@
             byId("subscription-url").value = item.url || "";
             byId("subscription-user-agent").value = item.httpUserAgent || "";
             byId("subscription-interval").value = item.updateIntervalMinutes || 360;
+            byId("subscription-profile-apply-time").value = item.applyProfileAtUTC || "";
             byId("subscription-enabled").checked = item.enabled === true;
             byId("subscription-auto").checked = item.autoUpdateEnabled === true;
             byId("subscription-device-info").checked = item.sendDeviceInfo === true;
@@ -454,6 +472,7 @@
             fetchJSON: byId("subscription-fetch-json").checked,
             fetchClash: byId("subscription-fetch-clash").checked,
             updateIntervalMinutes: Number(byId("subscription-interval").value),
+            applyProfileAtUTC: byId("subscription-profile-apply-time").value,
             enabled: byId("subscription-enabled").checked,
             autoUpdateEnabled: byId("subscription-auto").checked
         };
@@ -515,6 +534,55 @@
         } catch (error) {
             toast(error.message, "error");
             setButtonBusy(button,false);
+        }
+    }
+
+    async function applyPendingProfile(item, resume) {
+        var id = item.id;
+        var existing = state.applying[id];
+        if (existing && existing.state !== "unknown") return;
+        var revision = (item.pendingActiveProfile || {}).revision;
+        if (!resume && !/^[0-9a-f]{64}$/.test(revision)) return;
+        state.applying[id] = {state: "admitting"};
+        try {
+            if (!resume) {
+                var confirmed = await window.BROrayDialogs.confirm({
+                    title: "Применить параметры VPN?",
+                    message: "Подключение может кратковременно прерваться.",
+                    confirmText: "Применить"
+                });
+                if (!confirmed) {
+                    delete state.applying[id];
+                    return;
+                }
+                var current = state.subscriptions.find(function (row) { return row.id === id; });
+                if (!current || (current.pendingActiveProfile || {}).revision !== revision) {
+                    delete state.applying[id];
+                    toast("Ожидающие параметры изменились. Повторите действие с актуальной ревизией.", "warning");
+                    return;
+                }
+            }
+            renderSubscriptions();
+            await BROrayUI.followQueued(paths.applyProfile, id, function (result) {
+                if (["queued", "running", "unknown"].includes(result.state)) {
+                    state.applying[id] = result;
+                    renderSubscriptions();
+                    return;
+                }
+                delete state.applying[id];
+                renderSubscriptions();
+                toast(result.message || BROrayUI.queueLabel(result), result.state === "completed" ? "success" : "warning");
+                loadAll(true);
+            }, resume ? undefined : {revision: revision});
+        } catch (error) {
+            if (BROrayUI.hasQueuedRequest(paths.applyProfile, id)) {
+                state.applying[id] = {state: "unknown"};
+            } else {
+                delete state.applying[id];
+            }
+            renderSubscriptions();
+            toast(error.message, "warning");
+            if (!state.applying[id] && error.status === 409) loadAll(true);
         }
     }
 
@@ -717,6 +785,9 @@
                     break;
                 case "refresh":
                     refreshSubscription(item.id, button);
+                    break;
+                case "apply-profile":
+                    applyPendingProfile(item, BROrayUI.hasQueuedRequest(paths.applyProfile, item.id));
                     break;
                 case "servers":
                     toggleServers(item.id);

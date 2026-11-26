@@ -71,19 +71,30 @@ func (q *ProbeScheduler) Begin(state State, now time.Time, policy Policy) (Probe
 	}
 	nodes := []Node{active}
 	for _, n := range append([]Node{state.Settings.Primary}, state.Settings.Backups...) {
-		if n.ID != active.ID {
+		if n.ID != active.ID && !state.Samples[active.ID].WANUnavailable {
 			nodes = append(nodes, n)
 		}
 	}
-	// A slow first backup must not repeatedly displace the second one.
-	sort.SliceStable(nodes[1:], func(i, j int) bool {
-		return lastAttempt(nodes[i+1].ID).Before(lastAttempt(nodes[j+1].ID))
-	})
-	for _, n := range nodes {
-		interval := policy.RecoveryInterval
-		if n.ID == state.ActiveID {
-			interval = policy.ActiveInterval
+	byOldest := func(group []Node) {
+		sort.SliceStable(group, func(i, j int) bool {
+			return lastAttempt(group[i].ID).Before(lastAttempt(group[j].ID))
+		})
+	}
+	if state.Emergency.ID != "" {
+		// The temporary connection cannot keep a recovered member waiting.
+		byOldest(nodes)
+	} else {
+		byOldest(nodes[1:])
+		// Check backups immediately while the confirmed active failure is fresh.
+		// A long backup check can make another active probe due before the next.
+		failureAge := now.Sub(state.Samples[active.ID].FinishedAt)
+		if len(nodes) > 1 && state.ActiveFailures >= policy.Failures && failureAge < policy.ActiveInterval &&
+			lastAttempt(nodes[1].ID).IsZero() {
+			nodes = append(nodes[1:], active)
 		}
+	}
+	for _, n := range nodes {
+		interval := probeInterval(state, n.ID, policy)
 		last := lastAttempt(n.ID)
 		if !last.IsZero() && now.Sub(last) < interval {
 			continue
@@ -95,6 +106,13 @@ func (q *ProbeScheduler) Begin(state State, now time.Time, policy Policy) (Probe
 		return lease, true
 	}
 	return ProbeLease{}, false
+}
+
+func probeInterval(state State, id string, policy Policy) time.Duration {
+	if id == state.ActiveID || state.Emergency.ID != "" {
+		return policy.ActiveInterval
+	}
+	return policy.RecoveryInterval
 }
 
 // Complete may release a lease only after the adapter confirms owned cleanup.
@@ -127,7 +145,9 @@ func probeBoundary(state State, policy Policy) ([32]byte, bool) {
 		Emergency                   Node
 		ActiveID, ActiveIdentity    string
 		EvidenceSince, LastSwitchAt time.Time
+		FailureConfirmed            bool
 		Policy                      Policy
-	}{state.Settings, state.Emergency, state.ActiveID, state.ActiveIdentity, state.EvidenceSince, state.LastSwitchAt, policy})
+	}{state.Settings, state.Emergency, state.ActiveID, state.ActiveIdentity, state.EvidenceSince, state.LastSwitchAt,
+		state.ActiveFailures >= policy.Failures, policy})
 	return sha256.Sum256(data), err == nil
 }

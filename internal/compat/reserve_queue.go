@@ -12,7 +12,7 @@ import (
 var ErrReserveTransactionPending = errors.New("RESERVE_TRANSACTION_RECOVERY_REQUIRED")
 
 func reserveQueueAction(action string) bool {
-	return action == ReserveModeAction || action == ReserveSwitchAction || action == SourceRemovalAction || action == SourceRefreshAction || action == DPIProfileAction
+	return action == ReserveModeAction || action == ReserveSwitchAction || action == ReserveSelectAction || action == SourceRemovalAction || action == SourceRefreshAction || action == SourceProfileApplyAction || action == DPIProfileAction
 }
 
 // Check both the in-process generation and the exact persisted owner. Never
@@ -82,7 +82,12 @@ func (c *Coordinator) finishReserveQueue(ctx context.Context, action string, tok
 // durable reserve transactions; the request target remains the source ID.
 func validReserveQueueShape(r *Request, s ActionSpec) bool {
 	if r.Action != SourceRefreshAction {
-		return r.Target == ReserveOperationTarget && len(s.Stages) == 1 && s.Stages[0].Global && s.Stages[0].Protected
+		targetValid := r.Target == ReserveOperationTarget
+		if r.Action == ReserveSelectAction || r.Action == SourceProfileApplyAction {
+			sourceValid := r.Source == "USER" || (r.Action == SourceProfileApplyAction && r.Source == "SCHEDULER")
+			targetValid = sourceValid && r.Target != ReserveOperationTarget && reQueueID.MatchString(r.Target)
+		}
+		return targetValid && len(s.Stages) == 1 && s.Stages[0].Global && s.Stages[0].Protected
 	}
 	if !reQueueID.MatchString(r.Target) || len(s.Stages) != 3 {
 		return false

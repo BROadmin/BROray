@@ -167,17 +167,23 @@ func TestGeodataAPIFailuresPreserveWorkingState(t *testing.T) {
 			if mode == "missing-preview" {
 				env.d.Svc.ServersPreviewActiveConfig = nil
 			}
+			applyCalls := 0
+			if mode == "missing-preview" || mode == "apply" || mode == "unknown" {
+				// A different live CIDR is required to preview and apply.
+				env.e.geoFetch = func(context.Context, geodata.Source) ([]byte, error) {
+					return []byte{0x0a, 0x0e, 0x0a, 0x02, 'F', 'I', 0x12, 0x08, 0x0a, 0x04, 192, 0, 2, 0, 0x10, 24}, nil
+				}
+			}
 			if mode == "apply" || mode == "unknown" {
-				calls := 0
 				env.d.Svc.XrayApplyConfig = func(ctx context.Context, cfg []byte) error {
-					calls++
-					if calls > 1 && mode == "unknown" {
+					applyCalls++
+					if applyCalls > 1 && mode == "unknown" {
 						return errors.New("rollback unknown")
 					}
 					if err := platform.WriteFileAtomicNoFollow(env.d.Root.XrayConfig(), cfg, 0600); err != nil {
 						return err
 					}
-					if calls == 1 {
+					if applyCalls == 1 {
 						return errors.New("apply failed")
 					}
 					return nil
@@ -186,6 +192,9 @@ func TestGeodataAPIFailuresPreserveWorkingState(t *testing.T) {
 			r := geoSubmit(env, "geo-update", "geoip", `,"kind":"geoip"`)
 			if r.State != "failed" {
 				t.Fatal("failed update reported success")
+			}
+			if (mode == "apply" || mode == "unknown") && applyCalls != 2 {
+				t.Fatalf("expected apply and rollback attempts, got %d", applyCalls)
 			}
 			if geoLoad(t, env).Revision != old.Revision || policyView(env)["revision"] != stateRev {
 				t.Fatal("failed update lost working state")
@@ -249,6 +258,84 @@ func TestGeodataAPIUnchangedRevisionKeepsActiveGeneration(t *testing.T) {
 	after := geoLoad(t, env)
 	if after.Revision != before.Revision || applies != beforeApply || len(*calls) != 1 || checks != 1 {
 		t.Fatalf("unchanged update caused mutation: generationChanged=%v applies=%d->%d fetches=%d checks=%d", after.Revision != before.Revision, beforeApply, applies, len(*calls), checks)
+	}
+}
+
+func TestGeodataAPIUpdatedRevisionUsesWorkingData(t *testing.T) {
+	siteEntry := func(tag, domain string) []byte {
+		matcher := append([]byte{0x08, 0x03, 0x12, byte(len(domain))}, domain...)
+		entry := append([]byte{0x0a, byte(len(tag))}, tag...)
+		entry = append(append(entry, 0x12, byte(len(matcher))), matcher...)
+		return append([]byte{0x0a, byte(len(entry))}, entry...)
+	}
+	for _, tc := range []struct {
+		name, used, unused string
+		changed, drift     bool
+	}{
+		{"same bytes", "old.example", "old.other", false, false},
+		{"unused category", "old.example", "new.other", false, false},
+		{"unused with live config drift", "old.example", "new.other", false, true},
+		{"used category", "new.example", "old.other", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, _ := geoAPIEnv(t)
+			data := append(siteEntry("youtube", "old.example"), siteEntry("other", "old.other")...)
+			fetches := 0
+			env.e.geoFetch = func(context.Context, geodata.Source) ([]byte, error) {
+				fetches++
+				return data, nil
+			}
+			now := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
+			env.e.geoNow = func() time.Time { return now }
+			if err := os.WriteFile(env.d.Root.XrayConfig(), []byte(policyTestBase), 0600); err != nil {
+				t.Fatal(err)
+			}
+			env.d.Svc.ServersPreviewActiveConfig = func(ctx context.Context) ([]byte, error) {
+				return env.e.configureRouting(ctx, []byte(policyTestBase))
+			}
+			applies := 0
+			env.d.Svc.XrayApplyConfig = func(_ context.Context, cfg []byte) error {
+				applies++
+				return platform.WriteFileAtomicNoFollow(env.d.Root.XrayConfig(), cfg, 0600)
+			}
+			geoMustComplete(t, geoSubmit(env, "geo-upsert", "own", `,"name":"YouTube","kind":"geosite","tags":["youtube"]`))
+			env.mustOK(policyPost(env, policyView(env)["revision"].(string), "enabled", `,"enabled":true`))
+			before := geoLoad(t, env)
+			beforeApply := applies
+			readConfig := func() string {
+				t.Helper()
+				b, err := os.ReadFile(env.d.Root.XrayConfig())
+				if err != nil {
+					t.Fatal(err)
+				}
+				return string(b)
+			}
+			beforeConfig := readConfig()
+			if !strings.Contains(beforeConfig, before.Generation) || beforeApply == 0 {
+				t.Fatal("fixture did not activate managed geodata")
+			}
+			if tc.drift {
+				beforeConfig += "\n"
+				if err := os.WriteFile(env.d.Root.XrayConfig(), []byte(beforeConfig), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			env.e.geoResolve = func(context.Context, geodata.Kind) (string, error) { return strings.Repeat("b", 40), nil }
+			data = append(siteEntry("youtube", tc.used), siteEntry("other", tc.unused)...)
+			now = now.Add(time.Hour)
+			geoMustComplete(t, geoSubmit(env, "geo-update", "geosite", `,"kind":"geosite"`))
+			after := geoLoad(t, env)
+			wantApplies := beforeApply
+			if tc.changed {
+				wantApplies++
+			}
+			if fetches != 2 || policyState(t, env).GeoUpdatedAt["geosite"] != now.Format(time.RFC3339Nano) {
+				t.Fatal("new revision was not checked or check time was lost")
+			}
+			if (before.Revision != after.Revision) != tc.changed || (beforeConfig != readConfig()) != tc.changed || applies != wantApplies {
+				t.Fatalf("changed=%v, generation changed=%v, config changed=%v, applies=%d want %d", tc.changed, before.Revision != after.Revision, beforeConfig != readConfig(), applies, wantApplies)
+			}
+		})
 	}
 }
 

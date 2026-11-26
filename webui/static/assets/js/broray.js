@@ -763,8 +763,7 @@
         state.cleanupPlan = null;
         byId("cleanup-result").hidden = true;
         byId("cleanup-state").textContent = "Не проверено";
-        byId("cleanup-state").className = "status-badge status-neutral";
-        byId("cleanup-state").setAttribute("data-icon", "storage");
+        byId("cleanup-state").className = "status-badge status-unknown";
         applyControlState();
     }
 
@@ -774,6 +773,7 @@
 
         state.cleanupPlan = plan;
         setText("cleanup-count", plan.candidateCount || 0);
+        setText("cleanup-bytes-label", "Размер выбранных данных");
         setText("cleanup-bytes", formatBytes(plan.estimatedBytes));
         setText("cleanup-expiry", "действует " + (plan.ttlSeconds || 120) + " секунд");
         list.replaceChildren();
@@ -782,7 +782,9 @@
             var path = document.createElement("code");
             var size = document.createElement("span");
 
-            path.textContent = candidate.path;
+            path.textContent = candidate.kind === "consolidate"
+                ? "Объединить геоданные · " + candidate.path
+                : candidate.path;
             size.textContent = formatBytes(candidate.sizeBytes);
             item.append(path, size);
             list.appendChild(item);
@@ -795,7 +797,6 @@
         }
         badge.textContent = plan.candidateCount > 0 ? "Готово к очистке" : "Очистка не требуется";
         badge.className = "status-badge " + (plan.candidateCount > 0 ? "status-warning" : "status-success");
-        badge.setAttribute("data-icon", plan.candidateCount > 0 ? "storage" : "status");
         byId("cleanup-result").hidden = false;
         applyControlState();
     }
@@ -845,10 +846,13 @@
         if (!plan || state.busy) {
             return;
         }
+        var duplicates = plan.categories && plan.categories.geodata;
         confirmed = await confirmAction({
             eyebrow: "Безопасная очистка",
-            title: "Удалить найденные служебные файлы?",
-            message: "Будет удалено объектов: " + plan.candidateCount + ". Ожидаемое освобождение: " + formatBytes(plan.estimatedBytes) + ". Неизвестные файлы и последние резервные копии не затрагиваются.",
+            title: "Выполнить очистку?",
+            message: "Служебных объектов к удалению: " + (plan.candidateCount - (duplicates ? duplicates.count : 0)) +
+                (duplicates ? ". Файлов геоданных к объединению: " + duplicates.count : "") +
+                ". Размер выбранных данных — " + formatBytes(plan.estimatedBytes) + ".",
             confirmText: "Очистить",
             variant: "primary",
             icon: "delete"
@@ -874,11 +878,15 @@
             byId("cleanup-state").textContent = "Очищено";
             byId("cleanup-state").className = "status-badge status-success";
             byId("cleanup-state").setAttribute("data-icon", "status");
-            setText("cleanup-count", result.deletedCount || 0);
-            setText("cleanup-bytes", formatBytes(result.freedBytes));
+            var measured = typeof result.availableChangeBytes === "number";
+            var delta = measured ? result.availableChangeBytes : (result.freedBytes || 0);
+            var space = (delta < 0 ? "−" : "") + formatBytes(Math.abs(delta));
+            setText("cleanup-count", (result.deletedCount || 0) + (result.consolidatedCount || 0));
+            setText("cleanup-bytes-label", measured ? "Изменение свободного места" : "Размер удалённых файлов");
+            setText("cleanup-bytes", space);
             setText("cleanup-expiry", "завершено");
             byId("cleanup-candidates").replaceChildren();
-            toast("Очистка завершена: освобождено " + formatBytes(result.freedBytes) + ".", "success");
+            toast(measured ? "Очистка завершена. Изменение свободного места: " + space + "." : "Очистка завершена.", "success");
         } catch (error) {
             invalidateCleanupPlan();
             showPageError(errorMessage(error));
@@ -1113,7 +1121,7 @@
     function resetBackupPlan() {
         state.backupPlan = null;
         byId("backup-result").hidden = true;
-        setBackupBadge("Не проверено", "neutral");
+        setBackupBadge("Не проверено", "unknown");
         applyControlState();
     }
 

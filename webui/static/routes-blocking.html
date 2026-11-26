@@ -12,7 +12,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.5.9-c5">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.5.9-c5">
     <link rel="manifest" href="/manifest.json?v=WebUI-3.5.9-c5">
-    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c5">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c7">
     <script src="/assets/js/theme-init.js?v=WebUI-3.5.9-c5"></script>
     <link rel="stylesheet" href="/assets/css/action-feedback.css?v=WebUI-3.5.9-c5">
 <link rel="stylesheet" href="/assets/css/routing-policy.css?v=WebUI-3.5.9-c5-domain-actions">
@@ -104,9 +104,20 @@
 <main class="workspace-content policy-page"><section class="page-heading" aria-labelledby="policy-title"><div><span class="eyebrow">Маршрутизация</span><h1 id="policy-title">Блокировки</h1><p>Правила — для трафика, который иначе проходил бы через VPN BROray.</p></div><span id="policy-status" class="status-badge status-loading" role="status">Загрузка…</span></section>
 <div class="policy-feedback" role="status"><p id="policy-message">Получение сохранённых правил…</p><button id="policy-refresh" class="button button-secondary" type="button">Обновить данные</button></div><section class="ui-card policy-card" aria-labelledby="filters-title"><h2 id="filters-title">Реклама и телеметрия</h2><p class="policy-hint">Выберите действие и включите нужное правило. Эти списки не блокируют все способы определения местоположения.</p><div id="policy-filters" class="policy-two-columns"></div></section>
 <div class="policy-two-columns policy-card-grid">
-<section class="ui-card policy-card" aria-labelledby="geosite-title"><h2 id="geosite-title">GeoSite · категории доменов</h2><p class="policy-hint">Правила для доменов выбранных категорий.</p><div class="policy-add-row"><label for="policy-category" class="policy-sr-only">Категория доменов</label><select id="policy-category"><option value="">Выберите категорию</option><option value="category-porn">Контент 18+</option><option value="youtube">YouTube</option><option value="telegram">Telegram</option><option value="discord">Discord</option><option value="whatsapp">WhatsApp</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option></select><button id="policy-add-category" class="button button-secondary" type="button">Добавить</button></div><div id="policy-geosite"></div><div class="policy-update"><p id="policy-geosite-date" class="policy-hint">Ещё не обновлялось</p><button id="policy-update-geosite" class="button button-secondary" type="button">Обновить GeoSite</button><span id="policy-geosite-result" role="status"></span></div></section>
-<section class="ui-card policy-card" aria-labelledby="geoip-title"><h2 id="geoip-title">GeoIP · страны назначения</h2><p class="policy-hint">Правила для IP-диапазонов выбранных стран. Загружаются только добавленные страны.</p><div class="policy-add-row"><label for="policy-country" class="policy-sr-only">Страна назначения</label><select id="policy-country"><option value="">Выберите страну</option></select><button id="policy-add-country" class="button button-secondary" type="button">Добавить</button></div><div id="policy-geoip"></div><div class="policy-update"><p id="policy-geoip-date" class="policy-hint">Ещё не обновлялось</p><button id="policy-update-geoip" class="button button-secondary" type="button">Обновить GeoIP</button><span id="policy-geoip-result" role="status"></span></div></section></div>
-<section class="ui-card policy-card" aria-labelledby="daily-title"><div class="policy-card-heading"><div><h2 id="daily-title">Ежедневное обновление геоданных</h2><p class="policy-hint">Раз в сутки. При ошибке сохраняются рабочие данные, повторная попытка — через 15 минут.</p></div><label class="policy-switch"><input id="policy-daily" type="checkbox" role="switch" aria-label="Ежедневное обновление геоданных" disabled><span aria-hidden="true"></span></label></div><p id="policy-daily-status" role="status">Получение настройки…</p></section>
+<section class="ui-card policy-card" aria-labelledby="geosite-title"><h2 id="geosite-title">GeoSite · категории доменов</h2><p class="policy-hint">Правила для доменов выбранных категорий.</p><div class="policy-add-row"><label for="policy-category" class="policy-sr-only">Категория доменов</label><select id="policy-category"><option value="">Выберите категорию</option><option value="category-porn">Контент 18+</option><option value="youtube">YouTube</option><option value="telegram">Telegram</option><option value="discord">Discord</option><option value="whatsapp">WhatsApp</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option></select><button id="policy-add-category" class="button button-secondary" type="button">Добавить</button></div><div id="policy-geosite"></div><div class="policy-update"><p id="policy-geosite-date" class="policy-hint">Ещё не обновлялось</p><span id="policy-geosite-result" role="status"></span></div></section>
+<section class="ui-card policy-card" aria-labelledby="geoip-title"><h2 id="geoip-title">GeoIP · страны назначения</h2><p class="policy-hint">Правила для IP-диапазонов выбранных стран. Загружаются только добавленные страны.</p><div class="policy-add-row"><label for="policy-country" class="policy-sr-only">Страна назначения</label><select id="policy-country"><option value="">Выберите страну</option></select><button id="policy-add-country" class="button button-secondary" type="button">Добавить</button></div><div id="policy-geoip"></div><div class="policy-update"><p id="policy-geoip-date" class="policy-hint">Ещё не обновлялось</p><span id="policy-geoip-result" role="status"></span></div></section></div>
+<section class="ui-card policy-card" aria-labelledby="daily-title"><div class="policy-card-heading"><div><h2 id="daily-title">Обновление геоданных</h2><p class="policy-hint">Ежедневная проверка готовит новую версию. При ошибке повторяет проверку через 15 минут.</p></div><label class="policy-switch"><input id="policy-daily" type="checkbox" role="switch" aria-label="Ежедневная проверка геоданных" disabled><span aria-hidden="true"></span></label></div><p id="policy-daily-status" role="status">Получение настройки…</p><div class="policy-update">
+    <button id="policy-geodata-check" class="button button-secondary" type="button" disabled>Проверить геоданные</button>
+    <button id="policy-geodata-apply" class="button button-primary" type="button" hidden disabled>Применить</button>
+    <p id="policy-geodata-pending" class="policy-hint" role="status"></p>
+</div><div class="policy-update">
+    <label for="policy-geo-apply-time">Время автоматического применения, UTC</label>
+    <input id="policy-geo-apply-time" type="time" aria-describedby="policy-geo-apply-time-hint" disabled>
+    <button id="policy-geo-apply-save" class="button button-secondary" type="button" disabled>Сохранить время</button>
+    <button id="policy-geo-apply-reset" class="button button-secondary" type="button" hidden>Сбросить ввод</button>
+    <p id="policy-geo-apply-time-hint" class="policy-hint">Пустое поле оставляет ручное применение. Если минута пропущена, автоматическое применение ждёт следующего дня.</p>
+    <span id="policy-geo-apply-time-status" role="status"></span>
+</div></section>
 <p class="policy-hint">При пересечении правил: блокировка, затем напрямую, затем VPN. Источники: V2Fly GeoIP (CC BY-SA 4.0) и Domain List Community (MIT).</p></main>
             <footer class="workspace-footer">
                 <span>BROray · Менеджер Xray для Keenetic</span>
@@ -161,10 +172,10 @@
     <script src="/assets/js/common.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/action-feedback.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/icons.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c8-premium-ip"></script>
     <script src="/assets/js/theme.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/dialogs.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/routing-policy-client.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/routing-policy-page.js?v=WebUI-3.5.9-c5-domain-actions"></script>
+    <script src="/assets/js/routing-policy-page.js?v=WebUI-3.5.9-c7-domain-actions"></script>
 </body>
 </html>

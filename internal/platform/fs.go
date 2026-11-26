@@ -311,6 +311,10 @@ func TryLock(path string) (*Lock, error) {
 	if err != nil {
 		return nil, err
 	}
+	return lockFile(f)
+}
+
+func lockFile(f *os.File) (*Lock, error) {
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {

@@ -35,6 +35,10 @@ type Operation struct {
 	ErrorCode     string
 	RequestID     string
 	ResourceLocks []string
+	failureCode   string
+	failedPhase   string
+	rollback      string
+	vpnRecovery   string
 }
 
 // StartOperation registers a running operation. id "" → a fresh op-… id.
@@ -109,6 +113,50 @@ func (o *Operation) SetCancel(fn context.CancelFunc) {
 // CancelRequested reports whether a stop was requested.
 func (o *Operation) CancelRequested() bool { o.mu.Lock(); defer o.mu.Unlock(); return o.cancelReq }
 
+// RecordRollback is called by the owner after an attempted rollback. A config
+// proof alone never validates the VPN; only a separate traffic check can.
+func (o *Operation) RecordRollback(configurationRestored, vpnVerified bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !o.FinishedAt.IsZero() {
+		return
+	}
+	o.rollback, o.vpnRecovery = "unconfirmed", "unconfirmed"
+	if configurationRestored {
+		o.rollback = "restored"
+		if vpnVerified {
+			o.vpnRecovery = "verified"
+		}
+	}
+}
+
+func (o *Operation) RecordGeoApplyStart() {
+	o.c.journal.Append(o, "geodata_xray_apply", "pending", "")
+}
+
+func (o *Operation) RecordGeoVPNCheck(check VPNCheck) {
+	o.recordVPNCheck("geodata_vpn_check", check)
+}
+
+func (o *Operation) RecordSourceProfileApplyStart() {
+	o.c.journal.Append(o, "subscription_xray_apply", "pending", "")
+}
+
+func (o *Operation) RecordSourceProfileVPNCheck(check VPNCheck) {
+	o.recordVPNCheck("subscription_vpn_check", check)
+}
+
+func (o *Operation) recordVPNCheck(event string, check VPNCheck) {
+	result := "pending"
+	switch check {
+	case VPNVerified:
+		result = "success"
+	case VPNFailed:
+		result = "failure"
+	}
+	o.c.journal.Append(o, event, result, "")
+}
+
 // Finish marks the operation completed (err nil), aborted (cancelled) or failed.
 func (o *Operation) Finish(err error) {
 	o.mu.Lock()
@@ -125,6 +173,16 @@ func (o *Operation) Finish(err error) {
 	default:
 		o.State = "failed"
 		o.ErrorCode = codeOf(err)
+		budget := 24
+		o.failureCode = diagnosticCause(err, &budget)
+		o.failedPhase = o.PhaseName
+		var configRollback *XrayConfigRollback
+		if o.rollback == "" && errors.As(err, &configRollback) {
+			o.rollback, o.vpnRecovery = "unconfirmed", "unconfirmed"
+			if configRollback.Restored {
+				o.rollback = "restored"
+			}
+		}
 	}
 	o.PhaseName, o.FinishedAt, o.UpdatedAt = "finished", time.Now(), time.Now()
 	o.Revision++

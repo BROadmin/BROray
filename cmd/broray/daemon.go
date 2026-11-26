@@ -18,6 +18,7 @@ import (
 
 	keeneticArea "github.com/BROadmin/broray/areas/keenetic"
 	"github.com/BROadmin/broray/areas/servers"
+	"github.com/BROadmin/broray/areas/subscriptions"
 	"github.com/BROadmin/broray/internal/app"
 	"github.com/BROadmin/broray/internal/compat"
 	"github.com/BROadmin/broray/internal/control"
@@ -110,9 +111,10 @@ func runDaemon(root platform.Root) int {
 	if reserveErr == nil {
 		reserveErr = reserve.CheckProbeWorkspaces(root)
 	}
+	sourceCatalogPending := reserveErr == nil && compat.CheckSourceSyncWorkspaces(root) != nil
 	// A selection journal must be checked against its owner before a stale
 	// DPI owner can be reconciled without a profile journal.
-	if reserveErr == nil && !pendingReserve {
+	if reserveErr == nil && !pendingReserve && !sourceCatalogPending {
 		reserveErr = deps.Lock.ReconcileDaemonDPI(root, lock, pendingProfile, func() error {
 			recoveryCtx, cancel := context.WithTimeout(compat.WithFence(ctx), 90*time.Second)
 			defer cancel()
@@ -125,13 +127,24 @@ func runDaemon(root platform.Root) int {
 			return nil
 		})
 	}
-	if reserveErr == nil {
+	restoreReserve := func(ctx context.Context, record reserve.TransactionRecord, current []byte) error {
+		return keeneticArea.RestoreReserveInterface(ctx, deps, lock, record, current)
+	}
+	if reserveErr == nil && sourceCatalogPending {
+		if pendingProfile {
+			reserveErr = reserve.ErrTransactionUnconfirmed
+		} else {
+			reserveErr = deps.Lock.ReconcileDaemonSourceProfile(root, lock, func() error {
+				recoveryCtx, cancel := context.WithTimeout(compat.WithFence(ctx), 60*time.Second)
+				defer cancel()
+				return subscriptions.RecoverPendingProfileCatalog(recoveryCtx, deps, lock, restoreReserve)
+			})
+		}
+	} else if reserveErr == nil {
 		reserveErr = deps.Lock.ReconcileDaemonReserve(root, lock, pendingReserve, func() error {
 			recoveryCtx, cancel := context.WithTimeout(compat.WithFence(ctx), 60*time.Second)
 			defer cancel()
-			return reserve.RecoverTransaction(recoveryCtx, root, lock, func(ctx context.Context, record reserve.TransactionRecord, current []byte) error {
-				return keeneticArea.RestoreReserveInterface(ctx, deps, lock, record, current)
-			})
+			return reserve.RecoverTransaction(recoveryCtx, root, lock, restoreReserve)
 		})
 	}
 	if reserveErr == nil {
@@ -185,6 +198,9 @@ func runDaemon(root platform.Root) int {
 		default:
 		}
 	})
+	control.MountBuildObservation(ctlMux, func(ctx context.Context, expected string) (control.BuildObservation, bool) {
+		return observeInstallStatisticsBuild(ctx, a, expected)
+	})
 	ctlMux.Handle("/", ctl)
 	ctlSrv := &http.Server{Handler: ctlMux, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = ctlSrv.Serve(sock) }()
@@ -216,6 +232,7 @@ func runDaemon(root platform.Root) int {
 	// whole operation (3.x contract; the page waits up to 8 h).
 	webSrv := &http.Server{Handler: web.NewServer(a, verifier), ReadHeaderTimeout: 15 * time.Second, ReadTimeout: 120 * time.Second, MaxHeaderBytes: 32 << 10}
 	go serveWeb(ctx, webSrv, ln, logger)
+	go runInstallStatistics(ctx, a, ln.Addr().String())
 	logger.Printf("WebUI on http://%s/", addr)
 
 	// dev1 App.Boot/App.Loops are replaced by the areas (Xray start and

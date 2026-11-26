@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/BROadmin/broray/modules/health"
 	"github.com/BROadmin/broray/modules/reserve"
 )
 
@@ -33,30 +34,30 @@ type reserveConnectionEvidence struct {
 
 // activeReserveStatus reads the last verified probe without waiting for the
 // monitor, which can hold its lock while checking another server.
-func (s *svc) activeReserveStatus(id string) string {
+func (s *svc) activeReserveStatus(id string) (string, bool) {
 	m := s.reserveMon
 	if m == nil || s.d.Lock.Ambiguous() {
-		return "unknown"
+		return "unknown", false
 	}
 	evidence := m.activeEvidence.Load()
 	if evidence == nil || evidence.sample.ServerID != id {
-		return "unknown"
+		return "unknown", false
 	}
 	sample, binding := evidence.sample, evidence.binding
 	age := s.now().Sub(sample.FinishedAt)
 	if !sample.Verified || sample.Fingerprint != binding.plan.node.Fingerprint || sample.Identity != binding.identity ||
 		age < 0 || age > reserve.DefaultPolicy().SampleAge ||
-		(sample.Verdict != "healthy" && sample.Verdict != "unhealthy") ||
+		(sample.Verdict != "healthy" && sample.Verdict != "unhealthy" && !sample.WANUnavailable) ||
 		s.d.App == nil || s.d.App.Xray != binding.process ||
 		!s.reservePlanCurrent(binding.plan, true, true) || !s.reserveCoreMatches(binding.target.Process) {
-		return "unknown"
+		return "unknown", false
 	}
 	snapshot := binding.process.RuntimeSnapshot()
 	if m.activeEvidence.Load() != evidence ||
 		(snapshot != binding.snapshot && (sample.Verdict != "unhealthy" || !snapshot.ConfirmsUnexpectedExit(binding.snapshot))) {
-		return "unknown"
+		return "unknown", false
 	}
-	return sample.Verdict
+	return sample.Verdict, sample.WANUnavailable
 }
 
 type reserveMonitorResult struct {
@@ -181,8 +182,18 @@ func (s *svc) monitorReserveWith(ctx context.Context, m *reserveMonitor, probe f
 	}
 	result.Probed = true
 	var observed reserve.Sample
+	var activeProbe reserve.ProbeOutcome
 	if lease.Node.ID == active {
-		observed = s.probeReserveRuntimeWith(ctx, binding, probe)
+		observed = s.probeReserveRuntimeWith(ctx, binding, func(ctx context.Context, target reserve.ProbeTarget) reserve.ProbeOutcome {
+			activeProbe = probe(ctx, target)
+			return activeProbe
+		})
+		if observed.Verified && observed.Verdict == "unhealthy" && activeProbe.ErrorCode == "RESERVE_CONTROL_FAILED" &&
+			len(activeProbe.Controls) == len(health.ActiveControls()) && binding.process.RuntimeSnapshot() == binding.snapshot {
+			if s.readWANOutage(ctx) {
+				observed.Verdict, observed.WANUnavailable = "unknown", true
+			}
+		}
 	} else {
 		observed, err = s.probeReserveBackupWith(ctx, lease.Node.ID, probe)
 	}
@@ -201,6 +212,7 @@ func (s *svc) monitorReserveWith(ctx context.Context, m *reserveMonitor, probe f
 		observed.Verified = false
 		observed.Verdict = "unknown"
 		observed.Identity = ""
+		observed.WANUnavailable = false
 	}
 	var intents []reserve.Intent
 	m.state, intents = m.scheduler.Complete(lease, m.state, observed, time.Now(), reserve.DefaultPolicy(), true)
@@ -213,6 +225,9 @@ func (s *svc) monitorReserveWith(ctx context.Context, m *reserveMonitor, probe f
 		return result, err
 	}
 	if lease.Node.ID == active {
+		if observed.Verdict != "healthy" && len(activeProbe.Controls) > 0 {
+			s.logf("RESERVE_ACTIVE_CONTROLS=%+v WAN_UNAVAILABLE=%t", activeProbe.Controls, observed.WANUnavailable)
+		}
 		if observed.Verified && m.state.Samples[active] == observed {
 			m.activeEvidence.Store(&reserveConnectionEvidence{binding: binding, sample: observed})
 		} else {
@@ -223,7 +238,7 @@ func (s *svc) monitorReserveWith(ctx context.Context, m *reserveMonitor, probe f
 		if observed.Verdict == "unhealthy" {
 			failed := binding
 			m.lastFailure = &failed
-		} else if observed.Verdict == "healthy" {
+		} else if observed.Verdict == "healthy" || observed.WANUnavailable {
 			m.lastFailure = nil
 		}
 	}

@@ -199,12 +199,18 @@ func geoJSONFields(data []byte, required, optional []string) error {
 }
 
 func editGeoSchedule(ctx context.Context, root string, edit func(*GeoSchedule) error) (GeoSchedule, error) {
+	initial := GeoSchedule{SchemaVersion: 1, Attempts: map[string]GeoAttempt{}}
+	return editGeoMetadata(ctx, root, GeoScheduleFile, initial, decodeGeoSchedule, edit)
+}
+
+func editGeoMetadata[T any](ctx context.Context, root, name string, initial T, decode func([]byte) (T, error), edit func(*T) error) (T, error) {
+	var zero T
 	if err := ctx.Err(); err != nil {
-		return GeoSchedule{}, err
+		return zero, err
 	}
 	dir, err := platform.OpenDirNoFollow(root)
 	if err != nil {
-		return GeoSchedule{}, err
+		return zero, err
 	}
 	defer dir.Close()
 	check := func() error {
@@ -224,51 +230,51 @@ func editGeoSchedule(ctx context.Context, root string, edit func(*GeoSchedule) e
 		return nil
 	}
 	if err = unix.Flock(int(dir.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		return GeoSchedule{}, err
+		return zero, err
 	}
 	defer unix.Flock(int(dir.Fd()), unix.LOCK_UN)
 	if err = check(); err != nil {
-		return GeoSchedule{}, err
+		return zero, err
 	}
-	before, err := readImage(dir, GeoScheduleFile, maxGeoScheduleBytes)
+	before, err := readImage(dir, name, maxGeoScheduleBytes)
 	if err != nil {
-		return GeoSchedule{}, err
+		return zero, err
 	}
-	s := GeoSchedule{SchemaVersion: 1, Attempts: map[string]GeoAttempt{}}
+	s := initial
 	if before.Exists {
-		s, err = decodeGeoSchedule(before.Data)
+		s, err = decode(before.Data)
 		if err != nil {
-			return GeoSchedule{}, err
+			return zero, err
 		}
 	}
 	if edit != nil {
 		if err = edit(&s); err != nil {
-			return GeoSchedule{}, err
+			return zero, err
 		}
 		data, err := json.Marshal(s)
 		if err != nil {
-			return GeoSchedule{}, err
+			return zero, err
 		}
-		if _, err = decodeGeoSchedule(data); err != nil {
-			return GeoSchedule{}, err
+		if _, err = decode(data); err != nil {
+			return zero, err
 		}
 		if err = check(); err != nil {
-			return GeoSchedule{}, err
+			return zero, err
 		}
 		next := makeImage(data)
-		if err = replaceImage(dir, GeoScheduleFile, next, before, maxGeoScheduleBytes); err != nil {
-			return GeoSchedule{}, err
+		if err = replaceImage(dir, name, next, before, maxGeoScheduleBytes); err != nil {
+			return zero, err
 		}
 		if err = check(); err != nil {
-			return GeoSchedule{}, fmt.Errorf("%w: %v", ErrJournalUncertain, err)
+			return zero, fmt.Errorf("%w: %v", ErrJournalUncertain, err)
 		}
-		after, err := readImage(dir, GeoScheduleFile, maxGeoScheduleBytes)
+		after, err := readImage(dir, name, maxGeoScheduleBytes)
 		if err != nil || !after.equal(next) {
-			return GeoSchedule{}, fmt.Errorf("%w: schedule readback mismatch", ErrJournalUncertain)
+			return zero, fmt.Errorf("%w: schedule readback mismatch", ErrJournalUncertain)
 		}
 	}
 	if err = check(); err != nil {
-		return GeoSchedule{}, err
+		return zero, err
 	}
 	return s, nil
 }

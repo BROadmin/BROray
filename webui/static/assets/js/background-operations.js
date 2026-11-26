@@ -102,7 +102,9 @@
             fingerprint=nextFingerprint;
         }
         var paused=data && data.automationPaused;
-        badge("bg-automation-badge",stale || typeof paused !== "boolean" ? "Состояние неизвестно" : paused ? "На паузе" : "Включена",stale || paused ? "warning" : "neutral");
+        var automationUnknown = stale || typeof paused !== "boolean";
+        badge("bg-automation-badge",automationUnknown ? "Состояние неизвестно" : paused ? "На паузе" : "Включена",
+            automationUnknown ? "unknown" : paused ? "warning" : "success");
         byId("bg-resume").hidden=paused !== true;
         ["bg-stop-all","bg-resume","bg-recover"].forEach(function (id) { byId(id).disabled=busy; });
     }

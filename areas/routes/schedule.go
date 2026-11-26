@@ -488,6 +488,8 @@ func (e *engine) defineScheduleQueue() {
 func (e *engine) scheduleLoop(ctx context.Context) {
 	t := time.NewTicker(ScheduleTick)
 	defer t.Stop()
+	apply := time.NewTicker(5 * time.Second)
+	defer apply.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -495,6 +497,8 @@ func (e *engine) scheduleLoop(ctx context.Context) {
 		case <-t.C:
 			e.enqueueDueCheck()
 			e.enqueueDueGeodata()
+		case <-apply.C:
+			e.enqueueScheduledGeodata(false)
 		}
 	}
 }

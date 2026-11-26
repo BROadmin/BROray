@@ -81,6 +81,7 @@ func TestReserveDisabledPendingCompletionAndRollback(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			s, _ = observe(s, "p", "unhealthy", base.Add(time.Duration(i)*15*time.Second))
 		}
+		s, _ = observe(s, "b", "healthy", base.Add(31*time.Second))
 		if s.Pending == nil {
 			t.Fatal("missing switch")
 		}
@@ -137,6 +138,7 @@ func TestReserveCompletionCannotPredateIntent(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		s, _ = observe(s, "p", "unhealthy", base.Add(time.Duration(i)*15*time.Second))
 	}
+	s, _ = observe(s, "b", "healthy", base.Add(31*time.Second))
 	if s.Pending == nil {
 		t.Fatal("missing pending switch")
 	}
@@ -168,9 +170,13 @@ func TestReserveThreeFailuresAndSinglePendingIntent(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		var out []Intent
 		s, out = observe(s, "p", "unhealthy", base.Add(time.Duration(i)*15*time.Second))
-		if (i == 2) != (len(out) == 1) {
+		if len(out) != 0 {
 			t.Fatalf("round%d intents=%v state=%+v", i, out, s)
 		}
+	}
+	s, out := observe(s, "b", "healthy", base.Add(31*time.Second))
+	if len(out) != 1 {
+		t.Fatal("fresh backup readiness did not authorize switch", out)
 	}
 	if s.ActiveID != "p" || s.Pending == nil || s.Pending.To != "b" {
 		t.Fatal("intent is not confirmed activation", s)
@@ -244,7 +250,11 @@ func TestReserveEmergencyIgnoresReturnGuard(t *testing.T) {
 	var out []Intent
 	for i := 0; i < 3; i++ {
 		s, out = observe(s, "b", "unhealthy", base.Add(time.Duration(i)*15*time.Second))
+		if len(out) != 0 {
+			t.Fatal("used pre-failure readiness", out)
+		}
 	}
+	s, out = observe(s, "c", "healthy", base.Add(31*time.Second))
 	if len(out) != 1 || out[0].To != "c" || out[0].Reason != "active-failed" {
 		t.Fatal("emergency delayed", out)
 	}
@@ -309,7 +319,7 @@ func TestReserveAutoChoiceAndReturn(t *testing.T) {
 	s, _ = observe(s, "b", "unhealthy", base)
 	s, _ = observe(s, "c", "unhealthy", base)
 	standby := Node{"auto", strings.Repeat("d", 64)}
-	at := base.Add(32 * time.Second)
+	at := base.Add(34 * time.Second)
 	ev := Event{Kind: "auto-choice", Sample: Sample{
 		ServerID: standby.ID, Fingerprint: standby.Fingerprint, Identity: "probe-auto",
 		Verdict: "healthy", StartedAt: at, FinishedAt: at.Add(time.Second), Verified: true,
@@ -321,6 +331,11 @@ func TestReserveAutoChoiceAndReturn(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		s, _ = observe(s, "p", "unhealthy", base.Add(time.Duration(i)*15*time.Second))
 	}
+	if _, out := Advance(s, ev, now, DefaultPolicy()); len(out) != 0 {
+		t.Fatal("auto-choice used pre-failure unavailability")
+	}
+	s, _ = observe(s, "b", "unhealthy", base.Add(31*time.Second))
+	s, _ = observe(s, "c", "unhealthy", base.Add(32*time.Second))
 	bad := ev
 	bad.Sample.Verified = false
 	if _, out := Advance(s, bad, now, DefaultPolicy()); len(out) != 0 {

@@ -401,6 +401,9 @@ var errPrepTimeout = fail("PREPARATION_TIMEOUT", "Превышено время 
 
 func (s *svc) defineActions() {
 	s.defineSourceRemovalAction()
+	s.d.Queue.Define(compat.ActionSpec{Name: actionPendingProfileApply, Type: "subscription_update",
+		Priority: map[string]int{"USER": 2, "SCHEDULER": 3},
+		Stages:   []compat.Stage{{Name: "apply", Phase: "committing", Protected: true, Global: true, Run: s.stagePendingProfileApply}}})
 	s.d.Queue.Define(compat.ActionSpec{Name: actionRefresh, Type: "subscription_update",
 		Priority: map[string]int{"USER": 2, "SUBSCRIPTION_AUTO": 4, "*": 4},
 		Stages: []compat.Stage{

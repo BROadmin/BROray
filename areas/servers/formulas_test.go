@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/BROadmin/broray/internal/compat"
+	"github.com/BROadmin/broray/modules/health"
 )
 
 func TestRating(t *testing.T) {
@@ -151,7 +152,7 @@ func TestCurlStageMapping(t *testing.T) {
 		{errors.New("socks connect tcp 127.0.0.1:1: connect: connection refused"), "proxy-connect"},
 		{errors.New("EOF"), "proxy-https"},
 	} {
-		if got := stageOfCurl(curlLike(c.err)); got != c.stage {
+		if got := health.ProbeStage(health.CurlCode(c.err)); got != c.stage {
 			t.Errorf("%v: %s want %s", c.err, got, c.stage)
 		}
 	}

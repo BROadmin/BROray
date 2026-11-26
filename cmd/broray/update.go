@@ -85,7 +85,7 @@ func runInstallerApply(args []string) int {
 		return 1
 	}
 	o := installer.ApplyOptions{
-		Root: platform.Root{Dir: *state}, ABI: *abi, From: *from, Channel: *channel, Version: app.Version, Self: self,
+		Root: platform.Root{Dir: *state}, ABI: *abi, From: *from, Channel: *channel, Version: app.Version, Revision: app.Revision, Self: self,
 		OperationID: os.Getenv("BRORAY_UPDATE_OPERATION_ID"), Operation: os.Getenv("BRORAY_UPDATE_OPERATION"),
 		Progress: update.NewEmitter(os.Stdout, "installer"), Log: os.Stderr,
 		StopTimeout: envSeconds("BRORAY_UPDATE_STOP_TIMEOUT"), ReadyTimeout: envSeconds("BRORAY_UPDATE_READY_TIMEOUT"),

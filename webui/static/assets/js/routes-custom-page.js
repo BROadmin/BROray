@@ -245,7 +245,7 @@
         var progress = operationProgress(state);
         var global = effectiveGlobalOperation();
         if (progress && progress.running) {
-            return {text: progress.stopRequested ? "Останавливается" : "Выполняется", className: "status-badge-warning", icon: "update"};
+            return {text: progress.stopRequested ? "Останавливается" : "Выполняется", className: "status-loading", icon: "update"};
         }
         if (progress && progress.resumable) {
             return {text: "Можно продолжить", className: "status-badge-warning", icon: "restore"};
@@ -256,7 +256,7 @@
         if (!state) return {text: "Загрузка…", className: "status-loading", icon: "status"};
         if (state.lastError) return {text: "Ошибка", className: "status-badge-danger", icon: "status"};
         if (state && state.installedVersion && (!presence(state) || presence(state).available !== true || presence(state).registered !== true)) {
-            return {text: "Не подтверждено", className: "status-badge-warning", icon: "warning"};
+            return {text: "Не подтверждено", className: "status-badge-warning", icon: "status"};
         }
         if (hasDrift(state)) return {text: "Требуется восстановление", className: "status-badge-warning", icon: "restore"};
         if (needsExport(state)) {
@@ -506,7 +506,7 @@
         }
         if (status) {
             if (operation && operation.active) {
-                status.className = "status-badge status-badge-warning";
+                status.className = "status-badge " + (operation.resumable ? "status-warning" : "status-loading");
                 status.textContent = operation.resumable ? "Можно продолжить" : "Операция выполняется";
             } else if (Number(totals.attentionCount || 0) > 0) {
                 status.className = "status-badge status-badge-warning";

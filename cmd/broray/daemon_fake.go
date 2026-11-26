@@ -31,7 +31,9 @@ import (
 //	BRORAY_FAKE_CRASH_AFTER=<version>:<journal state>  installer exits right after writing that state
 //	BRORAY_FAKE_TRUSTED_KEY=<minisign public key>     trusted for the test channel
 func init() {
-	daemonOverride = fakeDaemon
+	if os.Getenv("BRORAY_E2E_USE_NATIVE_DAEMON") != "1" {
+		daemonOverride = fakeDaemon
+	}
 	if st := fakeSetting("BRORAY_FAKE_CRASH_AFTER"); st != "" {
 		installer.CrashAfter = st
 	}

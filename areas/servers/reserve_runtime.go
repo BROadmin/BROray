@@ -30,6 +30,7 @@ type reserveRuntimePlan struct {
 	config                                      []byte
 	endpoint                                    netip.AddrPort
 	outsideRoster                               bool
+	hotSlot                                     string
 }
 
 type reserveActiveBinding struct {
@@ -45,6 +46,21 @@ func (s *svc) prepareReserveRuntime(ctx context.Context, id string, endpoint net
 }
 
 func (s *svc) prepareReserveRuntimeFor(ctx context.Context, id string, endpoint netip.AddrPort, candidate bool) (reserveRuntimePlan, error) {
+	plan, err := s.prepareReserveStockRuntime(ctx, id, endpoint, candidate)
+	if err != nil || plan.outsideRoster {
+		return plan, err
+	}
+	config, err := reserveRuntimeFile(s.d.Root.XrayConfig(), 2<<20)
+	if errors.Is(err, os.ErrNotExist) {
+		return plan, nil
+	}
+	if err != nil {
+		return reserveRuntimePlan{}, errReserveRuntime
+	}
+	return s.currentReserveHotPlan(ctx, plan, config)
+}
+
+func (s *svc) prepareReserveStockRuntime(ctx context.Context, id string, endpoint netip.AddrPort, candidate bool) (reserveRuntimePlan, error) {
 	if !s.reserveRuntimeFence(ctx) || !ValidID(id) {
 		return reserveRuntimePlan{}, errReserveRuntime
 	}
@@ -92,6 +108,26 @@ func (s *svc) prepareReserveRuntimeFor(ctx context.Context, id string, endpoint 
 }
 
 func (s *svc) bindReserveRuntime(ctx context.Context, plan reserveRuntimePlan, previous *reserveActiveBinding) (reserveActiveBinding, error) {
+	binding, err := s.observeReserveRuntime(ctx, plan, previous)
+	if err != nil {
+		return reserveActiveBinding{}, err
+	}
+	if plan.hotSlot != "" && (previous == nil || previous.process != binding.process || previous.snapshot != binding.snapshot ||
+		!sameReservePlan(previous.plan, plan) || previous.proofIdentity != binding.proofIdentity) {
+		if err := binding.process.SelectReserveOutboundIfCurrent(ctx, binding.snapshot, plan.hotSlot); err != nil {
+			return reserveActiveBinding{}, err
+		}
+		final, err := reserve.VerifyProbeTarget(binding.target)
+		if err != nil || final != binding.proofIdentity || !s.reservePlanInputs(ctx, plan, false, true) ||
+			s.d.App.Xray != binding.process || binding.process.RuntimeSnapshot() != binding.snapshot {
+			return reserveActiveBinding{}, errReserveRuntime
+		}
+	}
+	return binding, nil
+}
+
+// Observe the exact running configuration without selecting an outbound.
+func (s *svc) observeReserveRuntime(ctx context.Context, plan reserveRuntimePlan, previous *reserveActiveBinding) (reserveActiveBinding, error) {
 	if !s.reservePlanInputs(ctx, plan, false, true) || s.d.App == nil || s.d.App.Xray == nil {
 		return reserveActiveBinding{}, errReserveRuntime
 	}
@@ -126,6 +162,13 @@ func (s *svc) bindReserveRuntime(ctx context.Context, plan reserveRuntimePlan, p
 
 func (s *svc) probeReserveRuntime(ctx context.Context, binding reserveActiveBinding) reserve.Sample {
 	return s.probeReserveRuntimeWith(ctx, binding, reserve.Probe)
+}
+
+func (s *svc) probeRestoredReserveTraffic(ctx context.Context, binding reserveActiveBinding) bool {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	sample := s.probeReserveRuntime(ctx, binding)
+	return verifiedReserveSelection(sample, binding.plan) && sample.Identity == binding.identity
 }
 
 func (s *svc) probeReserveRuntimeWith(ctx context.Context, binding reserveActiveBinding, probe func(context.Context, reserve.ProbeTarget) reserve.ProbeOutcome) reserve.Sample {
@@ -200,7 +243,7 @@ func reserveRosterContains(p reservePreferencesSnapshot, id string) bool {
 func sameReservePlan(a, b reserveRuntimePlan) bool {
 	return a.owner == b.owner && a.node == b.node && a.revision == b.revision && a.recordSHA == b.recordSHA &&
 		a.settingsSHA == b.settingsSHA && a.configSHA == b.configSHA && a.endpoint == b.endpoint &&
-		a.outsideRoster == b.outsideRoster
+		a.outsideRoster == b.outsideRoster && a.hotSlot == b.hotSlot
 }
 
 // Keep missing settings distinct from an empty file and cover the daemon's

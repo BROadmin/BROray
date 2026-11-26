@@ -12,12 +12,19 @@
     }
     function validPolicy(p) {
         return p && hash.test(p.revision) && typeof p.busy === "boolean" && typeof p.pending === "boolean" &&
+            (!p.geoPending || (typeof p.geoPending.revision === "string" && hash.test(p.geoPending.revision) &&
+                typeof p.geoPending.checkedAt === "string" && Number.isFinite(Date.parse(p.geoPending.checkedAt)))) &&
             p.state && p.state.schemaVersion === 1 && Array.isArray(p.state.rules) && p.state.rules.every(function (r) {
                 return r && typeof r.id === "string" && typeof r.name === "string" && typeof r.enabled === "boolean" &&
                     ["vpn", "direct", "deny"].includes(r.action);
             });
     }
-    function validSchedule(s) { return s && typeof s.enabled === "boolean" && hash.test(s.revision) && s.attempts && typeof s.attempts === "object"; }
+    function validApplyTime(value) { return typeof value === "string" && /^(?:|(?:[01]\d|2[0-3]):[0-5]\d)$/.test(value); }
+    function validSchedule(s) {
+        return s && typeof s.enabled === "boolean" && hash.test(s.revision) && s.attempts && typeof s.attempts === "object" &&
+            ((s.applyRevision === undefined && s.applyAtUTC === undefined) ||
+                (typeof s.applyRevision === "string" && hash.test(s.applyRevision) && validApplyTime(s.applyAtUTC)));
+    }
     function createClient(options) {
         var api = options.api, storage = options.storage || root.sessionStorage;
         var wait = options.wait || function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); };
@@ -113,12 +120,17 @@
             if (view.busy || view.uncertain || !view.policy || view.policy.busy || view.policy.pending) {
                 throw new Error("Сначала дождитесь завершения операции и обновите состояние правил.");
             }
+            var pending = view.policy.geoPending;
+            if (fields.operation === "geo-apply" &&
+                (view.policy.geoPendingError || !pending || fields.expectedPendingRevision !== pending.revision)) {
+                throw new Error("Подготовленные данные изменились. Обновите страницу и проверьте геоданные.");
+            }
             if (record()) throw new Error("Сначала проверьте результат предыдущего задания.");
             var token = ++seq, saved = null, result, failure = null, unknown = false;
             view.busy = true; view.message = "Сохранение…"; emit();
             try {
                 var body = Object.assign({}, fields, {expectedRevision: view.policy.revision});
-                if (fields.operation === "geo-upsert" || fields.operation === "geo-update") {
+                if (["geo-upsert", "geo-update", "geo-check", "geo-apply"].includes(fields.operation)) {
                     saved = {nonce: newNonce()};
                     if (!noncePattern.test(saved.nonce)) throw new Error("Не удалось создать номер задания.");
                     storage.setItem(RECEIPT, JSON.stringify(saved));
@@ -134,7 +146,8 @@
             try { await loadPolicy(token); }
             catch (error) { unknown = true; if (!failure) failure = error; }
             view.busy = false; view.uncertain = unknown;
-            view.message = failure ? failure.message : "Сохранено"; emit();
+            var success = {"geo-check": "Проверка геоданных завершена.", "geo-apply": "Подготовленные геоданные применены."};
+            view.message = failure ? failure.message : success[fields.operation] || "Сохранено"; emit();
             if (failure) throw failure;
             return result;
         }
@@ -152,16 +165,26 @@
             if (view.scheduleBusy || view.scheduleUncertain || !view.schedule || typeof enabled !== "boolean") {
                 throw new Error("Сначала обновите настройку ежедневного обновления.");
             }
+            return saveSchedule({enabled: enabled, expectedRevision: view.schedule.revision});
+        }
+        async function setApplyTime(value, expectedRevision) {
+            if (view.scheduleBusy || view.scheduleUncertain || !view.schedule || !view.schedule.applyRevision ||
+                expectedRevision !== view.schedule.applyRevision || !validApplyTime(value)) {
+                throw new Error("Укажите время применения в UTC или обновите данные расписания.");
+            }
+            return saveSchedule({applyAtUTC: value, expectedRevision: expectedRevision});
+        }
+        async function saveSchedule(fields) {
             ++scheduleSeq; view.scheduleBusy = true; emit();
             var failure;
-            try { envelope(await request(SCHEDULE, {enabled: enabled, expectedRevision: view.schedule.revision})); }
+            try { envelope(await request(SCHEDULE, fields)); }
             catch (error) { failure = error; }
             view.scheduleBusy = false;
             try { await refreshSchedule(); } catch (error) { failure = failure || error; }
             emit(); if (failure) throw failure;
             return snapshot();
         }
-        return {snapshot: snapshot, refresh: refresh, change: change, refreshSchedule: refreshSchedule, setSchedule: setSchedule};
+        return {snapshot: snapshot, refresh: refresh, change: change, refreshSchedule: refreshSchedule, setSchedule: setSchedule, setApplyTime: setApplyTime};
     }
     root.BROrayPolicy = {createClient: createClient};
 })(typeof window === "undefined" ? globalThis : window);

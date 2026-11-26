@@ -112,7 +112,7 @@
         routesSubmenu.appendChild(createRouteSubLink("routes", "/routes.html", "Обзор", "status"));
         routesSubmenu.appendChild(createRouteSubLink("routes-custom", "/routes-custom.html", "Свои маршруты", "backup"));
         routesSubmenu.appendChild(createRouteSubLink("routes-import", "/routes-import.html", "Готовые маршруты", "integrations"));
-        routesSubmenu.appendChild(createRouteSubLink("routes-domains", "/routes-domains.html", "По доменам", "routes"));
+        routesSubmenu.appendChild(createRouteSubLink("routes-domains", "/routes-domains.html", "По доменам и IP", "routes"));
         routesSubmenu.appendChild(createRouteSubLink("routes-blocking", "/routes-blocking.html", "Блокировки", "status"));
 
         routeLink.parentNode.insertBefore(group, routeLink);
@@ -165,6 +165,53 @@
             parent.removeAttribute("aria-current");
             parent.classList.toggle("sidebar-route-family-active", isRoutesPage(currentPage));
         }
+    }
+
+    function enhancePremiumNavigation() {
+        var routes = document.querySelector(".sidebar-route-group");
+        if (!routes) return;
+        var style = document.createElement("link");
+        style.rel = "stylesheet";
+        style.href = "/assets/css/premium-domain.css?v=WebUI-3.5.9-c7-premium";
+        document.head.appendChild(style);
+        var group = document.createElement("div");
+        var row = document.createElement("div");
+        var submenu = document.createElement("div");
+        var parent = document.createElement("button");
+        var icon = document.createElement("span");
+        var label = document.createElement("span");
+        var arrow = document.createElement("span");
+        group.className = "sidebar-route-group";
+        row.className = "sidebar-route-parent-row";
+        submenu.className = "sidebar-route-submenu";
+        submenu.id = "sidebar-premium-submenu";
+        parent.type = "button";
+        parent.className = "sidebar-link sidebar-route-parent-link premium-nav-toggle";
+        parent.title = "Premium";
+        parent.setAttribute("aria-controls", submenu.id);
+        icon.className = "sidebar-link-icon premium-nav-icon";
+        icon.setAttribute("aria-hidden", "true");
+        label.className = "sidebar-link-label";
+        label.textContent = "Premium";
+        arrow.className = "premium-nav-arrow";
+        arrow.setAttribute("data-icon", "chevron");
+        arrow.setAttribute("aria-hidden", "true");
+        parent.append(icon, label, arrow);
+        row.appendChild(parent);
+        submenu.appendChild(createRouteSubLink("premium-domain", "/premium-domain.html", "Проверка домена", "search"));
+        submenu.appendChild(createRouteSubLink("premium-ip", "/premium-ip.html", "Проверка IP", "search"));
+        group.append(row, submenu);
+        routes.after(group);
+        function expand(show) {
+            submenu.hidden = !show;
+            group.classList.toggle("is-expanded", show);
+            parent.setAttribute("aria-expanded", String(show));
+        }
+        parent.addEventListener("click", function () { expand(submenu.hidden); });
+        var active = currentPage === "premium-domain" || currentPage === "premium-ip";
+        expand(active);
+        if (active) parent.classList.add("sidebar-route-family-active");
+        if (window.BROrayIcons) window.BROrayIcons.scan(group);
     }
 
     function setDesktopCollapsed(collapsed) {
@@ -272,6 +319,7 @@
     }
 
     enhanceRoutesNavigation();
+    enhancePremiumNavigation();
     activateNavigation();
     bindShell();
     bindSupport();

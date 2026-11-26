@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -195,12 +196,8 @@ func MaskRecord(rec Record) Record {
 	out["dpi"] = dpiPresentation(rec)
 	delete(out, "hysteriaMasquerade")
 	// Refresh presentation of old metadata without migrating saved profiles.
-	if warnings, ok := out["importWarnings"].([]any); ok {
-		for i, warning := range warnings {
-			if text, ok := warning.(string); ok && text == legacyMLKEMMetadataWarning {
-				warnings[i] = mlkemMetadataWarning
-			}
-		}
+	if warnings, ok := out["importWarnings"]; ok {
+		out["importWarnings"] = presentedImportWarnings(warnings)
 	}
 	for _, k := range []string{"uri", "uuid", "password", "auth", "privateKey", "amneziawg", "wireguard", "streamOptions", "xdrive", "masque", "httpHeaders", "accountEmail", "accountLevel", "proxyAccount", "protocolExtensions", "importProfile"} {
 		delete(out, k)
@@ -237,6 +234,26 @@ func MaskRecord(rec Record) Record {
 		}
 	}
 	return out
+}
+
+func presentedImportWarnings(value any) any {
+	warnings, ok := value.([]any)
+	if !ok {
+		return value
+	}
+	var updated []any
+	for i, warning := range warnings {
+		if text, ok := warning.(string); ok && text == legacyMLKEMMetadataWarning {
+			if updated == nil {
+				updated = slices.Clone(warnings)
+			}
+			updated[i] = mlkemMetadataWarning
+		}
+	}
+	if updated != nil {
+		return updated
+	}
+	return value
 }
 
 // ---------- quality records ----------

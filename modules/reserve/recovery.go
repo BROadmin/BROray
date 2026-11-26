@@ -13,6 +13,22 @@ import (
 type RestoreTransactionInterface func(context.Context, TransactionRecord, []byte) error
 
 func RecoverTransaction(ctx context.Context, root platform.Root, guard *platform.Lock, restore RestoreTransactionInterface) error {
+	return recoverTransaction(ctx, root, guard, restore, nil)
+}
+
+// SourceCatalogRecovery runs while the daemon and native recovery guards are
+// held. The callback must preflight its own authority before invoking recover.
+type SourceCatalogRecovery func(record *TransactionRecord, check, recover func() error) error
+
+func RecoverSourceProfileTransaction(ctx context.Context, root platform.Root, guard *platform.Lock,
+	restore RestoreTransactionInterface, catalog SourceCatalogRecovery) error {
+	if catalog == nil {
+		return ErrTransactionUnconfirmed
+	}
+	return recoverTransaction(ctx, root, guard, restore, catalog)
+}
+
+func recoverTransaction(ctx context.Context, root platform.Root, guard *platform.Lock, restore RestoreTransactionInterface, catalog SourceCatalogRecovery) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -65,6 +81,9 @@ func RecoverTransaction(ctx context.Context, root platform.Root, guard *platform
 		return err
 	}
 	if !pending {
+		if catalog != nil {
+			return catalog(nil, check, check)
+		}
 		return check()
 	}
 	j, err := OpenTransactionJournal(root)
@@ -80,7 +99,7 @@ func RecoverTransaction(ctx context.Context, root platform.Root, guard *platform
 	if r.Phase == "prepared" && restore == nil {
 		return ErrTransactionUnconfirmed
 	}
-	return j.Rollback(ctx, r.ID, func(ctx context.Context, r TransactionRecord) error {
+	restoreNative := func(ctx context.Context, r TransactionRecord) error {
 		if err := j.checkRoots(); err != nil {
 			return err
 		}
@@ -123,7 +142,12 @@ func RecoverTransaction(ctx context.Context, root platform.Root, guard *platform
 			return ErrTransactionUnconfirmed
 		}
 		return j.checkRoots()
-	})
+	}
+	recover := func() error { return j.Rollback(ctx, r.ID, restoreNative) }
+	if catalog != nil {
+		return catalog(&r, check, recover)
+	}
+	return recover()
 }
 
 func reserveRecoveryGuard(parent *os.File, name string) (*os.File, error) {

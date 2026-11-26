@@ -1,14 +1,20 @@
 package subscriptions
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/BROadmin/broray/areas/servers"
+	"github.com/BROadmin/broray/internal/app"
 	"github.com/BROadmin/broray/internal/compat"
+	"github.com/BROadmin/broray/internal/platform"
+	"github.com/BROadmin/broray/modules/reserve"
 )
 
 func activeReplacementFixture(t *testing.T) (*env, string) {
@@ -110,4 +116,161 @@ func TestSyncRemovedActiveReplacementRollsBackFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLiveSubscriptionRefreshDefersActiveConnectionParameters(t *testing.T) {
+	e, id := activeReplacementFixture(t)
+	source := e.record(t, e.create(t, "https://pending.example/source", ""))
+	source["id"] = subX
+	if err := e.s.writeRecord(source); err != nil {
+		t.Fatal(err)
+	}
+	core, err := os.ReadFile(os.Getenv("BRORAY_XRAY_BIN"))
+	if err != nil {
+		t.Fatal("pinned Xray fixture:", err)
+	}
+	if err := os.WriteFile(e.d.Root.XrayBinary(), core, 0700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := listener.Addr().(*net.TCPAddr).AddrPort()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	e.d.App = app.New(e.d.Root, platform.DefaultConfig(), e.d.Log)
+	rec, err := servers.ReadRecord(e.d, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := servers.XrayConfig(rec, servers.GenSettings{Listen: "127.0.0.1", SocksPort: int(endpoint.Port()), LogLevel: "none"}, "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(e.d.Root.XrayConfig(), config, 0600); err != nil {
+		t.Fatal(err)
+	}
+	process := e.d.App.Xray
+	if err := process.Start(e.d.Ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := process.Stop(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	before := process.RuntimeSnapshot()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		owned, err := reserve.CaptureProcess(before.PID, e.d.Root.XrayBinary())
+		if err == nil {
+			if _, err = reserve.VerifyListener(owned, endpoint); err == nil {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("working local fixture did not own its SOCKS listener", err)
+		}
+	}
+	runtimeApplies := 0
+	e.d.Svc.ServersReapplySourceRefresh = func(context.Context, string, string, string) (string, error) {
+		runtimeApplies++
+		return id, nil
+	}
+	oldRecord, err := os.ReadFile(servers.RecordPath(e.d, id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, c := "trojan://pw@b.example:443#B", "trojan://pw@c.example:443#C"
+	refresh := func(policy, credential, impact string) {
+		t.Helper()
+		result, err := e.sync(t, policy, "trojan://"+credential+"@a.example:443#A", b, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Impact != impact || len(e.s.liveServers()) != 3 {
+			t.Fatalf("catalog did not refresh with the expected impact: %s", result.Impact)
+		}
+		working, err := os.ReadFile(servers.RecordPath(e.d, id))
+		if err != nil || !bytes.Equal(working, oldRecord) || runtimeApplies != 0 || process.RuntimeSnapshot() != before || servers.ActiveID(e.d) != id {
+			t.Fatal("background refresh changed the working profile or its process before apply")
+		}
+	}
+	pending := func(credential string) deletionImage {
+		t.Helper()
+		image, change, err := e.s.readPendingActiveProfile(subX)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if credential == "" {
+			if change != nil {
+				t.Fatal("unexpected pending candidate")
+			}
+			return image
+		}
+		if change == nil || change.ServerID != id || change.ActiveSHA256 != compat.SHA256Hex(oldRecord) || image.info.Mode().Perm() != 0600 {
+			t.Fatal("missing or unbound pending candidate")
+		}
+		record, ok := decodeObject(change.Candidate)
+		if !ok || record["password"] != credential {
+			t.Fatal("pending candidate does not represent the complete response")
+		}
+		return image
+	}
+	refresh("retain-unmatched", "partial", "configuration-retained")
+	pending("")
+	refresh("replace", "rotated", "configuration-pending")
+	first := pending("rotated")
+	refresh("replace", "rotated", "configuration-pending")
+	if !first.unchanged() {
+		t.Fatal("same pending profile acquired a new revision")
+	}
+	refresh("retain-unmatched", "partial", "configuration-retained")
+	refresh("retain-unmatched", "pw", "configuration-retained")
+	if !first.unchanged() {
+		t.Fatal("partial response changed pending profile")
+	}
+	defaultReplace := e.d.Svc.ServersPrepareSourceRefresh
+	e.d.Svc.ServersPrepareSourceRefresh = func(context.Context, string, []string, []string) (string, error) {
+		pending("newer")
+		return "", compat.ErrXrayCandidateRejected
+	}
+	if _, err := e.sync(t, "replace", "trojan://newer@a.example:443#A", b); !errors.Is(err, compat.ErrXrayCandidateRejected) {
+		t.Fatal("catalog rejection was not preserved", err)
+	}
+	e.d.Svc.ServersPrepareSourceRefresh = defaultReplace
+	if restored := pending("rotated"); !bytes.Equal(first.raw, restored.raw) {
+		t.Fatal("catalog rollback did not restore the previous pending revision")
+	}
+	if err := process.Stop(e.d.Ctx); err != nil {
+		t.Fatal(err)
+	}
+	before = process.RuntimeSnapshot()
+	refresh("replace", "newest", "configuration-pending")
+	newest := pending("newest")
+	details, err := e.s.details(subX)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, ok := details["pendingActiveProfile"].(map[string]string)
+	if !ok || len(status) != 2 || status["serverId"] != id || status["revision"] != compat.SHA256Hex(newest.raw) {
+		t.Fatal("current pending projection did not expose just the exact revision and selected profile")
+	}
+	if _, found := details[pendingSourceRevisionField]; found {
+		t.Fatal("private source authority leaked")
+	}
+	originalAgent, _ := source["httpUserAgent"].(string)
+	for _, agent := range []string{"new-agent", originalAgent} {
+		view, err := e.s.updateSettings(subX, map[string]any{"httpUserAgent": agent})
+		if err != nil || view.(map[string]any)["pendingActiveProfile"] != nil {
+			t.Fatalf("source input change exposed stale pending status: %v", err)
+		}
+	}
+	refresh("replace", "newest", "configuration-pending")
+	if rebound := pending("newest"); bytes.Equal(rebound.raw, newest.raw) {
+		t.Fatal("source generation was not rebound after an authoritative refresh")
+	}
+	refresh("replace", "pw", "none")
+	pending("")
 }

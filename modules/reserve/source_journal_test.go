@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/BROadmin/broray/internal/platform"
@@ -18,6 +19,17 @@ func sourceTransactionFixture(t *testing.T, action string, absentPrefs bool) *tr
 	f.intent.Action = action
 	f.intent.NextDescription = f.intent.PreviousDescription
 	f.next.Preferences = append([]byte(nil), f.before.Preferences...)
+	if action == SourceEmergencyProfileTransactionAction {
+		f.intent.PreviousDescription = "BROray - mix-auto"
+		f.intent.PreviousDescriptionLine = `    description "BROray - mix-auto"`
+		f.intent.NextDescription = f.intent.PreviousDescription
+		f.next.Active = f.before.Active
+		prefs := `{"schemaVersion":1,"enabled":true,"primaryServerId":"primary","backupServerIds":["backup-a","backup-b"],"emergency":{"serverId":"old-server","fingerprint":"` +
+			strings.Repeat("a", 64) + `"}}`
+		f.before.Preferences = []byte(prefs)
+		f.next.Preferences = []byte(strings.Replace(prefs, strings.Repeat("a", 64), strings.Repeat("b", 64), 1))
+		transactionWrite(t, filepath.Join(f.root.Data(), "config/system/server-reserve.json"), f.before.Preferences)
+	}
 	if action == "source-withdraw" {
 		f.next.Config = nil
 		f.next.Active = nil
@@ -86,11 +98,11 @@ func TestSourceJournalDurableTransitionAndCommit(t *testing.T) {
 	}
 }
 func TestSourceJournalColdRecoveryAtEveryCut(t *testing.T) {
-	for _, action := range []string{"source-withdraw", "source-replace"} {
+	for _, action := range []string{"source-withdraw", "source-replace", SourceEmergencyProfileTransactionAction} {
 		t.Run(action, func(t *testing.T) {
 			for _, cut := range []string{"prepared", "config", "selection", "committed"} {
 				t.Run(cut, func(t *testing.T) {
-					f := sourceTransactionFixture(t, action, true)
+					f := sourceTransactionFixture(t, action, action != SourceEmergencyProfileTransactionAction)
 					f.begin(t)
 					if cut != "prepared" {
 						if err := f.j.InstallConfig(context.Background(), f.id); err != nil {
@@ -142,6 +154,30 @@ func TestSourceJournalColdRecoveryAtEveryCut(t *testing.T) {
 					assertSourceFiles(t, f, want)
 				})
 			}
+		})
+	}
+}
+
+func TestEmergencySourceJournalRejectsUnrelatedChanges(t *testing.T) {
+	for _, pair := range []struct{ before, after string }{
+		{`"primary"`, `"other"`},
+		{`"backup-a","backup-b"`, `"backup-b","backup-a"`},
+		{`"backup-a","backup-b"`, `"backup-a","old-server"`},
+		{`"backup-a","backup-b"`, `"backup-a","backup-a"`},
+		{`"old-server"`, `"different-emergency"`},
+		{`"enabled":true`, `"enabled":false`},
+		{`"schemaVersion":1`, `"schemaVersion":2`},
+		{strings.Repeat("b", 64), strings.Repeat("a", 64)},
+		{strings.Repeat("b", 64), strings.Repeat("B", 64)},
+	} {
+		t.Run(pair.after, func(t *testing.T) {
+			f := sourceTransactionFixture(t, SourceEmergencyProfileTransactionAction, false)
+			f.next.Preferences = []byte(strings.Replace(string(f.next.Preferences), pair.before, pair.after, 1))
+			if _, err := f.j.Begin(context.Background(), f.next, f.intent); !errors.Is(err, ErrTransactionUnconfirmed) {
+				t.Fatalf("journal accepted unrelated emergency change: %v", err)
+			}
+			f.assertPending(t, false)
+			assertSourceFiles(t, f, f.before)
 		})
 	}
 }

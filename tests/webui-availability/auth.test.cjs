@@ -14,7 +14,8 @@ function harness(fetch) {
     const el={id,hidden:true,disabled:false,value:'',type:'password',textContent:'',dataset:{},childNodes:[],children:[],
       classList:{add(){},remove(){},toggle(){},contains(){return false;}},
       addEventListener(name,fn){bindingCount++;handlers[name]=fn;},dispatch(name){return handlers[name]?.({preventDefault(){},currentTarget:el});},
-      querySelector(){return null;},querySelectorAll(){return [];},getAttribute(){return null;},setAttribute(){},
+      querySelector(){return null;},querySelectorAll(){return [];},getAttribute(){return null;},setAttribute(){},removeAttribute(){},
+      replaceChildren(...children){el.children=children;},
       appendChild(child){el.children.push(child);},append(child){el.children.push(child);},focus(){},remove(){}};
     if(id)elements.set(id,el);return el;
   }
@@ -86,6 +87,42 @@ test('BROray page authentication has a deadline too',async()=>{
   for(const timer of [...h.timers.values()])timer.fn();
   await flush();
   assert.deepEqual(h.redirects,[]);
+});
+
+test('cleanup uses the matching label for a preview, measured delta, and size-only result',async()=>{
+  const mb=1024*1024, requests=[], confirmations=[];
+  let result;
+  const h=harness(async(url,options)=>{
+    assert.equal(url,'/api/broray/cleanup.cgi');
+    assert.equal(options.method,'POST');
+    requests.push(JSON.parse(options.body));
+    return {ok:true,status:200,text:async()=>JSON.stringify({success:true,data:result})};
+  });
+  h.document.readyState='loading';
+  h.window.BROrayDialogs={async confirm(options){confirmations.push(options.message);return true;}};
+  h.window.BROrayUI.toast=(...args)=>h.toasts.push(args);
+  const source=fs.readFileSync(path.join(scripts,'broray.js'),'utf8');
+  vm.runInContext(source.replace(/\}\)\(\);\s*$/,'window.cleanupFixture={renderCleanupPlan,runCleanup};})();'),h.ctx);
+  const flow=h.window.cleanupFixture;
+  const html=fs.readFileSync(path.join(scripts,'../../broray.html'),'utf8');
+  assert.match(html,/<dt id="cleanup-bytes-label">Размер выбранных данных<\/dt>/);
+  const scenarios=[
+    [6*mb,'Изменение свободного места','6 МБ'],
+    [0,'Изменение свободного места','0 Б'],
+    [-mb,'Изменение свободного места','−1 МБ'],
+    [undefined,'Размер удалённых файлов','15 МБ'],
+  ];
+  for(const [availableChangeBytes,label,value] of scenarios){
+    result={deletedCount:1,freedBytes:15*mb,availableChangeBytes};
+    flow.renderCleanupPlan({token:'fixture-token',estimatedBytes:15*mb,candidateCount:1,candidates:[]});
+    assert.equal(h.element('cleanup-bytes-label').textContent,'Размер выбранных данных');
+    assert.equal(h.element('cleanup-bytes').textContent,'15 МБ');
+    await flow.runCleanup({currentTarget:h.element('cleanup-run')});
+    assert.match(confirmations.at(-1),/Размер выбранных данных — 15 МБ/);
+    assert.equal(h.element('cleanup-bytes-label').textContent,label);
+    assert.equal(h.element('cleanup-bytes').textContent,value);
+  }
+  assert.deepEqual(requests,scenarios.map(()=>({token:'fixture-token'})));
 });
 
 test('Subscriptions initial transport failure preserves session and offers retry',async()=>{

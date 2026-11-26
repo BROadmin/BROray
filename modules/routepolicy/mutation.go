@@ -13,15 +13,18 @@ import (
 // Mutation edits one concern only. Upsert cannot carry enabled/action values
 // from a dirty form; these controls have their own compare-and-swap commands.
 type Mutation struct {
-	ExpectedRevision string
-	Operation        string
-	ID               string
-	Name             string
-	Domains          []string
-	Enabled          bool
-	Action           Action
-	Kind             geodata.Kind
-	Tags             []string
+	ExpectedRevision         string
+	ExpectedPendingRevision  string
+	ExpectedScheduleRevision string
+	ApplyDayUTC              string
+	Operation                string
+	ID                       string
+	Name                     string
+	Domains                  []string
+	Enabled                  bool
+	Action                   Action
+	Kind                     geodata.Kind
+	Tags                     []string
 }
 
 func DecodeMutation(data []byte) (Mutation, error) {
@@ -74,6 +77,24 @@ func DecodeMutation(data []byte) (Mutation, error) {
 			return m, invalid
 		}
 	case "delete":
+	case "geo-check", "geo-apply":
+		if m.ID != "geodata" {
+			return m, invalid
+		}
+		if m.Operation == "geo-apply" {
+			allowed["expectedPendingRevision"] = true
+			if json.Unmarshal(raw["expectedPendingRevision"], &m.ExpectedPendingRevision) != nil || !hashPattern.MatchString(m.ExpectedPendingRevision) {
+				return m, invalid
+			}
+			if raw["expectedScheduleRevision"] != nil || raw["applyDayUTC"] != nil {
+				allowed["expectedScheduleRevision"], allowed["applyDayUTC"] = true, true
+				if json.Unmarshal(raw["expectedScheduleRevision"], &m.ExpectedScheduleRevision) != nil ||
+					json.Unmarshal(raw["applyDayUTC"], &m.ApplyDayUTC) != nil ||
+					!hashPattern.MatchString(m.ExpectedScheduleRevision) || !validGeoApplyDay(m.ApplyDayUTC) {
+					return m, invalid
+				}
+			}
+		}
 	case "geo-upsert", "geo-update":
 		if len(data) > 64<<10 {
 			return m, invalid
@@ -126,7 +147,7 @@ func DecodeMutation(data []byte) (Mutation, error) {
 
 func (m Mutation) Apply(state State) (State, error) {
 	state.Rules = append([]Rule{}, state.Rules...)
-	if m.Operation == "geo-update" {
+	if m.Operation == "geo-update" || m.Operation == "geo-check" || m.Operation == "geo-apply" {
 		return state, nil
 	}
 	index := -1

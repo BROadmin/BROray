@@ -12,8 +12,8 @@ import (
 )
 
 // A confirmed exited child needs no live listener to turn reserve mode off.
-// This path changes only preferences and owned interface metadata. It never
-// starts, stops or signals a process, and does not claim that traffic works.
+// The stopped path also removes an installed hot selector from the config.
+// It preserves stopped intent and confirms only files and interface metadata.
 func (s *svc) disableReserveStopped(ctx context.Context, plan reserveRuntimePlan, revision string) (retErr error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -22,6 +22,10 @@ func (s *svc) disableReserveStopped(ctx context.Context, plan reserveRuntimePlan
 	}
 	p := s.d.App.Xray
 	snapshot := p.RuntimeSnapshot()
+	hot := plan.hotSlot != ""
+	if hot && snapshot.Wanted {
+		return errReserveRuntime
+	}
 	var cold *reserve.StoppedProfileLease
 	if snapshot.ColdStopped() {
 		var err error
@@ -57,17 +61,29 @@ func (s *svc) disableReserveStopped(ctx context.Context, plan reserveRuntimePlan
 	if err != nil {
 		return err
 	}
+	owner := func() bool { return coldValid() && s.d.App != nil && s.d.App.Xray == p }
+	runtimeCurrent := func() bool { return owner() && p.RuntimeSnapshot() == snapshot }
 	current := func(plan reserveRuntimePlan, enabled bool) bool {
-		return coldValid() && s.d.App != nil && s.d.App.Xray == p && p.RuntimeSnapshot() == snapshot &&
-			s.reservePlanInputs(ctx, plan, enabled, true)
+		return runtimeCurrent() && s.reservePlanInputs(ctx, plan, enabled, true)
 	}
 	same := func(path string, expected []byte, limit int64) bool {
 		actual, err := reserveRuntimeFile(path, limit)
 		return err == nil && bytes.Equal(actual, expected)
 	}
-	unchanged := func() bool {
-		return current(plan, true) && same(reservePreferencesFile(s.d), prefBytes, 64<<10) &&
+	beforeFiles := func() bool {
+		return owner() && s.reservePlanInputs(ctx, plan, true, true) && same(reservePreferencesFile(s.d), prefBytes, 64<<10) &&
 			same(ActiveFile(s.d), active, 4096) && same(s.d.Path("config", "interface.json"), receipt, 64<<10)
+	}
+	unchanged := func() bool { return runtimeCurrent() && beforeFiles() }
+	installStopped := func(ctx context.Context, install func() error) error {
+		if cold != nil {
+			return p.InstallIfCold(ctx, snapshot, cold, install)
+		}
+		next, err := p.StopIfCurrent(ctx, snapshot, install)
+		if err == nil {
+			snapshot = next
+		}
+		return err
 	}
 	if !unchanged() {
 		return errReserveRuntime
@@ -80,6 +96,21 @@ func (s *svc) disableReserveStopped(ctx context.Context, plan reserveRuntimePlan
 	if err != nil || description == "" {
 		return errors.Join(errReserveRuntime, err)
 	}
+	action, after := "disable", plan
+	if hot {
+		action = "exit-switch"
+		record, err := ReadRecord(s.d, plan.node.ID)
+		if err != nil || description == "BROray - mix-auto" {
+			return errors.Join(errReserveRuntime, err)
+		}
+		after, err = s.ordinaryReserveRuntime(ctx, plan, record)
+		if err != nil || !reservePrimaryMatches(after.config, before.Upstream) || bytes.Equal(after.config, plan.config) {
+			return errors.Join(errReserveRuntime, err)
+		}
+		if err := s.d.Svc.ValidateXrayConfig(ctx, after.config); err != nil {
+			return err
+		}
+	}
 	target, err := s.d.Svc.VerifyOwnedInterfaceConfiguration(ctx, "BROray - mix-auto")
 	if err != nil || target != before || !unchanged() {
 		return errors.Join(errReserveRuntime, err)
@@ -91,37 +122,37 @@ func (s *svc) disableReserveStopped(ctx context.Context, plan reserveRuntimePlan
 	if err != nil {
 		return err
 	}
+	after.revision = reservePreferencesRevision(nextBytes, true)
 	j, err := reserve.OpenTransactionJournal(s.d.Root)
 	if err != nil {
 		return err
 	}
 	defer j.Close()
-	id, err := j.Begin(ctx, reserve.TransactionFiles{Config: plan.config, Preferences: nextBytes, Active: active}, reserve.TransactionIntent{
-		Action: "disable", Authority: compat.SHA256Hex([]byte(revision + plan.configSHA + plan.recordSHA)),
+	id, err := j.Begin(ctx, reserve.TransactionFiles{Config: after.config, Preferences: nextBytes, Active: active}, reserve.TransactionIntent{
+		Action: action, Authority: compat.SHA256Hex([]byte(revision + plan.configSHA + plan.recordSHA)),
 		InterfaceName: before.Name, Upstream: before.Upstream.String(), PreviousDescription: "BROray - mix-auto",
 		PreviousDescriptionLine: before.DescriptionLine, NextDescription: description, ReceiptSHA256: compat.SHA256Hex(receipt),
 	})
 	var rollbackRecord reserve.TransactionRecord
+	var restoreConfig func(context.Context, []byte) error
 	if id != "" {
 		defer func() {
 			if retErr == nil {
 				return
 			}
 			if rollbackRecord.ID != "" {
-				rollbackErr := s.rollbackReserveMetadata(ctx, j, rollbackRecord, plan, func() bool {
-					return coldValid() && s.d.App != nil && s.d.App.Xray == p && p.RuntimeSnapshot() == snapshot
-				}, func(ctx context.Context) error {
+				rollbackErr := s.rollbackReserveMetadata(ctx, j, rollbackRecord, plan, runtimeCurrent, func(ctx context.Context) error {
 					target, err := s.d.Svc.VerifyOwnedInterfaceConfiguration(ctx, "BROray - mix-auto")
 					if err != nil || target.Name != before.Name || target.Upstream != before.Upstream {
 						return errReserveRuntime
 					}
 					return nil
-				})
+				}, restoreConfig)
 				if rollbackErr == nil {
 					retErr = errors.Join(errReserveModeRolledBack, retErr)
 					return
 				}
-				retErr = errors.Join(retErr, rollbackErr)
+				retErr = errors.Join(retErr, errReserveRollbackUnconfirmed, rollbackErr)
 			}
 			retErr = errors.Join(errReserveTransactionPending, retErr)
 		}()
@@ -134,12 +165,29 @@ func (s *svc) disableReserveStopped(ctx context.Context, plan reserveRuntimePlan
 		!bytes.Equal(r.Previous.Active.Data, active) || !unchanged() {
 		return errors.Join(errReserveRuntime, err)
 	}
+	if hot {
+		if err := installStopped(ctx, func() error {
+			if !beforeFiles() {
+				return errReserveRuntime
+			}
+			return j.InstallConfig(ctx, id)
+		}); err != nil {
+			return err
+		}
+		restoreConfig = func(ctx context.Context, acceptedReceipt []byte) error {
+			return installStopped(ctx, func() error {
+				if !owner() || (!s.reservePlanInputs(ctx, plan, false, false) &&
+					!s.reservePlanInputs(ctx, after, false, false)) {
+					return errReserveRuntime
+				}
+				return j.RestoreConfigAfterMetadataProof(ctx, r, acceptedReceipt)
+			})
+		}
+	}
 	rollbackRecord = r
 	if err := j.InstallSelection(ctx, id); err != nil {
 		return err
 	}
-	after := plan
-	after.revision = reservePreferencesRevision(nextBytes, true)
 	if !current(after, false) {
 		return errReserveRuntime
 	}
@@ -147,7 +195,7 @@ func (s *svc) disableReserveStopped(ctx context.Context, plan reserveRuntimePlan
 		return err
 	}
 	return j.Confirm(ctx, id, func(ctx context.Context, r reserve.TransactionRecord) error {
-		if r.ID != id || r.Intent.Action != "disable" || !bytes.Equal(r.Previous.Config.Data, r.Next.Config.Data) ||
+		if r.ID != id || r.Intent.Action != action || r.Next.Config.SHA256 != after.configSHA ||
 			!bytes.Equal(r.Previous.Active.Data, r.Next.Active.Data) || !current(after, false) {
 			return errReserveRuntime
 		}

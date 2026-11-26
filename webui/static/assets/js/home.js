@@ -55,8 +55,8 @@
             warning: "warning",
             error: "error",
             busy: "loading",
-            unknown: "neutral"
-        }[severity] || "neutral";
+            unknown: "unknown"
+        }[severity] || "unknown";
     }
     function labelOf(severity) {
         return {
@@ -147,6 +147,8 @@
 
     function renderServers(data) {
         var active, severity, qualityText;
+        var setup = byId("home-quick-setup");
+        if (setup) setup.hidden = !(data && data.total === 0 && data.health && data.health.availability === "available");
         if (!data) {
             renderUnavailable("home-servers", "Сводка серверов недоступна.");
             setText("home-server-name", "Сводка серверов недоступна.");
@@ -418,8 +420,8 @@
             warning: "status-warning",
             error: "status-error",
             busy: "status-loading",
-            unknown: "status-neutral"
-        }[severity] || "status-neutral");
+            unknown: "status-unknown"
+        }[severity] || "status-unknown");
 
         if (severity !== "ok") {
             message = reasons.slice(0, 3).map(function (reason) { return reason.message; }).filter(Boolean).join(" ");

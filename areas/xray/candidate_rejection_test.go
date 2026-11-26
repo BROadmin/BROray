@@ -36,22 +36,22 @@ func TestCandidateRejectionClassification(t *testing.T) {
 					config = []byte(`{"inbounds":[{"protocol":"not-a-protocol"}]}`)
 				}
 			} else {
-				script := "#!/bin/sh\ncat < /proc/self/fd/3 > /dev/null\nexit 23\n"
+				script := "#!/bin/sh\ncat >/dev/null\nexit 23\n"
 				switch kind {
 				case "cancelled":
 					cancel()
 				case "signal":
-					script = "#!/bin/sh\ncat < /proc/self/fd/3 > /dev/null\nkill -TERM $$\n"
+					script = "#!/bin/sh\ncat >/dev/null\nkill -TERM $$\n"
 				case "launch":
 					script = "#!/missing-interpreter\n"
 				case "short-input":
 					script = "#!/bin/sh\nexit 23\n"
 					config = []byte(strings.Repeat("x", 1<<20))
 				case "other-exit":
-					script = "#!/bin/sh\ncat < /proc/self/fd/3 > /dev/null\nexit 2\n"
+					script = "#!/bin/sh\ncat >/dev/null\nexit 2\n"
 				case "core-drift":
 					ready := filepath.Join(h.d.Root.Dir, "validation-ready")
-					script = "#!/bin/sh\ncat < /proc/self/fd/3 > /dev/null\necho ready > '" + ready + "'\nsleep 1\nexit 23\n"
+					script = "#!/bin/sh\ncat >/dev/null\necho ready > '" + ready + "'\nsleep 1\nexit 23\n"
 					done := make(chan error, 1)
 					go func() {
 						for {

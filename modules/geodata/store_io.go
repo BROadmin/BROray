@@ -97,6 +97,17 @@ func snapshotPlan(snapshot Snapshot) ([]Source, error) {
 	return plan, nil
 }
 
+func readVerifiedAsset(dir *os.File, asset Asset) ([]byte, error) {
+	data, err := readBounded(dir, asset.Name, MaxAssetBytes)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) != asset.Bytes || digest(data) != asset.SHA256 {
+		return nil, errors.New("asset checksum changed")
+	}
+	return data, nil
+}
+
 func (s *Store) verify(ctx context.Context, snapshot Snapshot) error {
 	plan, err := snapshotPlan(snapshot)
 	if err != nil {
@@ -111,13 +122,9 @@ func (s *Store) verify(ctx context.Context, snapshot Snapshot) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		asset := snapshot.Assets[i]
-		data, err := readBounded(dir, source.Name, MaxAssetBytes)
+		data, err := readVerifiedAsset(dir, snapshot.Assets[i])
 		if err != nil {
 			return err
-		}
-		if int64(len(data)) != asset.Bytes || digest(data) != asset.SHA256 {
-			return errors.New("asset checksum changed")
 		}
 		if err := Validate(source.Kind, data, source.Tags); err != nil {
 			return err

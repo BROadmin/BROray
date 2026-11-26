@@ -161,12 +161,22 @@ func (j *TransactionJournal) InstallSelection(ctx context.Context, id string) er
 	})
 }
 func (j *TransactionJournal) Confirm(ctx context.Context, id string, verify func(context.Context, TransactionRecord) error) error {
+	return j.confirm(ctx, id, false, verify)
+}
+
+// ConfirmSourceProfile retains the commit decision until the catalog owner
+// has durably retired its recovery marker.
+func (j *TransactionJournal) ConfirmSourceProfile(ctx context.Context, id string, verify func(context.Context, TransactionRecord) error) error {
+	return j.confirm(ctx, id, true, verify)
+}
+
+func (j *TransactionJournal) confirm(ctx context.Context, id string, retainSource bool, verify func(context.Context, TransactionRecord) error) error {
 	return j.locked(ctx, func() error {
 		r, owner, err := j.loadID(id)
 		if err != nil {
 			return err
 		}
-		if r.Phase != "prepared" || verify == nil {
+		if r.Phase != "prepared" || verify == nil || retainSource && !r.IsSourceProfile() {
 			return ErrTransactionUnconfirmed
 		}
 		if err := j.current(r.Next); err != nil {
@@ -189,8 +199,45 @@ func (j *TransactionJournal) Confirm(ctx context.Context, id string, verify func
 		if err != nil {
 			return err
 		}
+		if retainSource {
+			return nil
+		}
 		return j.clear(committed)
 	})
+}
+
+func (r TransactionRecord) IsSourceProfile() bool {
+	return r.Intent.Action == SourceProfileTransactionAction || r.Intent.Action == SourceEmergencyProfileTransactionAction
+}
+
+func (j *TransactionJournal) CheckSourceProfileCommit(ctx context.Context, authority string) error {
+	return j.locked(ctx, func() error {
+		_, err := j.sourceProfileCommit(authority)
+		return err
+	})
+}
+
+// FinishSourceProfile clears only the exact committed native decision after
+// its outer catalog owner has removed the recovery marker.
+func (j *TransactionJournal) FinishSourceProfile(ctx context.Context, authority string) error {
+	return j.locked(ctx, func() error {
+		owner, err := j.sourceProfileCommit(authority)
+		if err != nil {
+			return err
+		}
+		return j.clear(owner)
+	})
+}
+
+func (j *TransactionJournal) sourceProfileCommit(authority string) (TransactionImage, error) {
+	r, owner, err := j.load()
+	if err != nil {
+		return owner, err
+	}
+	if !r.IsSourceProfile() || r.Phase != "committed" || r.Intent.Authority != authority {
+		return owner, ErrTransactionUnconfirmed
+	}
+	return owner, j.current(r.Next)
 }
 func (j *TransactionJournal) Rollback(ctx context.Context, id string, restore func(context.Context, TransactionRecord) error) error {
 	return j.rollback(ctx, id, nil, restore)

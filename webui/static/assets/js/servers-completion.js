@@ -4,7 +4,6 @@
     var SUMMARY_PATH = "/api/servers/summary.cgi";
     var lastSummaryPayload = null;
     var observer = null;
-    var normalizing = false;
 
     function text(value) {
         if (value === null || value === undefined) {
@@ -230,204 +229,10 @@
         return latest;
     }
 
-    function stateFromText(value) {
-        var normalized = trim(value).toLowerCase();
-
-        if (!normalized) {
-            return null;
-        }
-
-        if (
-            normalized.indexOf("не провер") !== -1 ||
-            normalized.indexOf("нет данных") !== -1
-        ) {
-            return "unchecked";
-        }
-
-        if (
-            normalized.indexOf("проверяется") !== -1 ||
-            normalized === "проверка" ||
-            normalized.indexOf("проверяем") !== -1
-        ) {
-            return "checking";
-        }
-
-        if (
-            normalized.indexOf("недоступ") !== -1 ||
-            normalized.indexOf("ошиб") !== -1 ||
-            normalized.indexOf("таймаут") !== -1 ||
-            normalized.indexOf("отказ") !== -1
-        ) {
-            return "unavailable";
-        }
-
-        if (
-            normalized.indexOf("доступен") !== -1 ||
-            normalized.indexOf("доступна") !== -1 ||
-            normalized.indexOf("успеш") !== -1
-        ) {
-            return "available";
-        }
-
-        return null;
-    }
-
-    function stateTitle(state) {
-        switch (state) {
-        case "unchecked":
-            return "Не проверялся";
-
-        case "checking":
-            return "Проверяется";
-
-        case "available":
-            return "Доступен";
-
-        case "unavailable":
-            return "Недоступен";
-
-        default:
-            return "";
-        }
-    }
-
-    function removeStateClasses(element) {
-        [
-            "servers-state-unchecked",
-            "servers-state-checking",
-            "servers-state-available",
-            "servers-state-unavailable"
-        ].forEach(function (className) {
-            element.classList.remove(className);
-        });
-    }
-
-    function applyState(element, state) {
-        var title;
-
-        if (!element || !state) {
-            return;
-        }
-
-        title = stateTitle(state);
-
-        removeStateClasses(element);
-
-        element.classList.add(
-            "servers-state-" + state
-        );
-
-        element.setAttribute(
-            "data-server-state",
-            state
-        );
-
-        element.setAttribute(
-            "title",
-            title
-        );
-
-        element.setAttribute(
-            "aria-label",
-            title
-        );
-
-        if (trim(element.textContent) !== title) {
-            element.textContent = title;
-        }
-    }
-
-    function statusElements(root) {
-        if (!root) {
-            return [];
-        }
-
-        return root.querySelectorAll(
-            [
-                ".status-badge",
-                ".server-status-badge",
-                ".server-card-status",
-                "[class*=\"server-status-\"]",
-                "[data-server-status]"
-            ].join(",")
-        );
-    }
-
-    function normalizeStatuses() {
-        var root;
-        var elements;
-
-        if (normalizing) {
-            return;
-        }
-
-        root =
-            document.getElementById("servers-list") ||
-            document.querySelector(".servers-list");
-
-        if (!root) {
-            return;
-        }
-
-        normalizing = true;
-        elements = statusElements(root);
-
-        Array.prototype.forEach.call(
-            elements,
-            function (element) {
-                var currentText =
-                    trim(element.textContent);
-
-                var state =
-                    element.getAttribute(
-                        "data-server-state"
-                    ) ||
-                    stateFromText(currentText);
-
-                if (state) {
-                    applyState(element, state);
-                }
-            }
-        );
-
-        normalizing = false;
-    }
-
-    function findStatusInCard(card) {
-        var candidates;
-
-        if (!card) {
-            return null;
-        }
-
-        candidates = statusElements(card);
-
-        return candidates.length
-            ? candidates[0]
-            : null;
-    }
-
-    function createLegendItem(
-        state,
-        title
-    ) {
+    function createLegendItem(tone, title) {
         var item = document.createElement("span");
-        var dot = document.createElement("span");
-        var label = document.createElement("span");
-
-        item.className =
-            "servers-legend-item " +
-            "servers-state-" +
-            state;
-
-        dot.className = "servers-legend-dot";
-        dot.setAttribute("aria-hidden", "true");
-
-        label.textContent = title;
-
-        item.appendChild(dot);
-        item.appendChild(label);
-
+        item.className = "status-badge status-" + tone;
+        item.textContent = title;
         return item;
     }
 
@@ -539,28 +344,28 @@
 
         legend.appendChild(
             createLegendItem(
-                "unchecked",
-                "Не проверялся"
+                "unknown",
+                "Не проверен"
             )
         );
 
         legend.appendChild(
             createLegendItem(
-                "checking",
+                "loading",
                 "Проверяется"
             )
         );
 
         legend.appendChild(
             createLegendItem(
-                "available",
+                "success",
                 "Доступен"
             )
         );
 
         legend.appendChild(
             createLegendItem(
-                "unavailable",
+                "error",
                 "Недоступен"
             )
         );
@@ -642,21 +447,6 @@
                 "Последняя проверка: нет данных"
             );
         }
-
-        window.setTimeout(
-            normalizeStatuses,
-            0
-        );
-
-        window.setTimeout(
-            normalizeStatuses,
-            120
-        );
-
-        window.setTimeout(
-            normalizeStatuses,
-            450
-        );
     }
 
     function wrapFetch() {
@@ -711,52 +501,9 @@
     }
 
     function handleClick(event) {
-        var button;
-        var card;
-        var status;
-
-        button = closest(
-            event.target,
-            "button"
-        );
-
-        if (!button) {
-            return;
-        }
-
-        if (button.id === "refresh-servers") {
-            setText(
-                "servers-data-updated",
-                "Обновление данных…"
-            );
-
-            return;
-        }
-
-        if (
-            trim(button.textContent)
-                .toLowerCase()
-                .indexOf("провер") === -1
-        ) {
-            return;
-        }
-
-        card = closest(
-            button,
-            ".server-card"
-        );
-
-        if (!card) {
-            return;
-        }
-
-        status = findStatusInCard(card);
-
-        if (status) {
-            applyState(
-                status,
-                "checking"
-            );
+        var button = closest(event.target, "button");
+        if (button && button.id === "refresh-servers") {
+            setText("servers-data-updated", "Обновление данных…");
         }
     }
 
@@ -777,7 +524,6 @@
         observer = new MutationObserver(
             function () {
                 ensureCompletionPanel();
-                normalizeStatuses();
             }
         );
 
@@ -794,7 +540,6 @@
     function initialize() {
         replaceHeaderLabel();
         ensureCompletionPanel();
-        normalizeStatuses();
         startObserver();
 
         document.addEventListener(

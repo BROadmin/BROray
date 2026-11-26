@@ -20,6 +20,43 @@ func confinedName(name string) error {
 	return nil
 }
 
+// TryLockNoFollow acquires the same flock as TryLock through a regular
+// file in a confined directory. A replaced lock path is never accepted.
+func TryLockNoFollow(path string) (*Lock, error) {
+	parent, err := OpenDirNoFollow(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer parent.Close()
+	name := filepath.Base(path)
+	if err := confinedName(name); err != nil {
+		return nil, err
+	}
+	fd, err := unix.Openat(int(parent.Fd()), name, unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0600)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), path)
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, errors.New("installer lock is not regular")
+	}
+	lock, err := lockFile(f)
+	if err != nil {
+		return nil, err
+	}
+	if !lock.Owns(path) {
+		_ = lock.Release()
+		return nil, errors.New("installer lock path changed")
+	}
+	return lock, nil
+}
+
 // OpenDirAtNoFollow opens one child of an already held directory. It cannot
 // follow a replacement symlink or a renamed ancestor into another tree.
 func OpenDirAtNoFollow(parent *os.File, name string) (*os.File, error) {

@@ -462,3 +462,74 @@ func TestBackupAreasRejectsTraversalAndConflicts(t *testing.T) {
 		t.Fatalf("active conflict: %d %s", r.code, r.raw)
 	}
 }
+
+func TestBackupImportInvalidatesOnlyTouchedPendingProfile(t *testing.T) {
+	w := newWorld(t)
+	const source = "sub-aaaa"
+	w.subscription(t, source, true, "trojan://s1@s1.example:443#S1")
+	exported := do(t, "POST", "/api/broray/backup-export.cgi", map[string]any{"encrypt": false, "acknowledgeUnencrypted": true})
+	if exported.code != 200 {
+		t.Fatal(exported.code, exported.raw)
+	}
+	w.subscription(t, "sub-bbbb", true, "trojan://s2@s2.example:443#S2")
+	before := preview(t, exported.raw, "")
+	if before.code != 200 || before.data()["hasChanges"] != false {
+		t.Fatalf("identical imported subscription already changed: %s", before.raw)
+	}
+	digest := compat.SHA256Hex([]byte(source))
+	touched := w.d.Path("config", "subscriptions", ".pending-active-"+digest+".json")
+	foreign := w.d.Path("config", "subscriptions", ".pending-active-"+compat.SHA256Hex([]byte("sub-bbbb"))+".json")
+	day := w.d.Path("config", ".profile-apply-attempt-"+digest+".json")
+	files := map[string]string{touched: "previous pending bytes", foreign: "unrelated pending bytes", day: `{"dayUTC":"2026-11-24","schemaVersion":1}`}
+	for path, value := range files {
+		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(path string) {
+		t.Helper()
+		if got, err := os.ReadFile(path); err != nil || string(got) != files[path] {
+			t.Fatalf("private state changed: %s, %v", filepath.Base(path), err)
+		}
+	}
+	apply := func(token any) res {
+		return do(t, "POST", "/api/broray/backup-import.cgi", map[string]any{"file": exported.raw, "confirmToken": token})
+	}
+	if stale := apply(before.data()["confirmToken"]); stale.code == 200 {
+		t.Fatalf("old confirmation authorized a newly pending change: %s", stale.raw)
+	}
+	for path := range files {
+		check(path)
+	}
+	fresh := preview(t, exported.raw, "")
+	if fresh.code != 200 || fresh.data()["hasChanges"] != true || count(fresh, "subscriptions", "replace") != 1 {
+		t.Fatalf("pending invalidation did not appear for review: %s", fresh.raw)
+	}
+	check(touched)
+	good := apply(fresh.data()["confirmToken"])
+	if good.code != 200 || good.data()["applied"] != true {
+		t.Fatalf("confirmed import failed: %s", good.raw)
+	}
+	if _, err := os.Lstat(touched); !os.IsNotExist(err) {
+		t.Fatalf("successful import left touched pending data: %v", err)
+	}
+	check(foreign)
+	check(day)
+	if again := preview(t, exported.raw, ""); again.code != 200 || again.data()["hasChanges"] != false {
+		t.Fatalf("repeat preview found another pending change: %s", again.raw)
+	}
+
+	// A scheduled attempt for a newer date can happen between import and
+	// explicit undo. Restoring settings must not rewind that runtime guard.
+	files[day] = `{"dayUTC":"2026-11-25","schemaVersion":1}`
+	if err := os.WriteFile(day, []byte(files[day]), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	copy := good.data()["preImportCopy"].(map[string]any)["id"].(string)
+	if result := undo(t, copy); result.code != 200 {
+		t.Fatalf("undo failed: %s", result.raw)
+	}
+	check(day)
+	check(touched)
+	check(foreign)
+}

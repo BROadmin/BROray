@@ -16,7 +16,11 @@ import (
 
 func reserveSwitchFixture(t *testing.T) (reserveRuntimeFixture, *reserveMonitor, reserveMonitorResult) {
 	t.Helper()
-	f := newReserveRuntimeFixture(t)
+	return reserveSwitchFixtureFromRuntime(t, newReserveRuntimeFixture(t))
+}
+
+func reserveSwitchFixtureFromRuntime(t *testing.T, f reserveRuntimeFixture) (reserveRuntimeFixture, *reserveMonitor, reserveMonitorResult) {
+	t.Helper()
 	m := &reserveMonitor{}
 	if _, err := f.e.s.monitorReserveWith(f.ctx, m, reserveVerifiedOutcome); err != nil {
 		t.Fatal(err)
@@ -30,7 +34,10 @@ func reserveSwitchFixture(t *testing.T) (reserveRuntimeFixture, *reserveMonitor,
 	// Prior readiness history is synthetic. Runtime generation, configuration,
 	// actual core validation and both owned SOCKS listeners are exercised below.
 	m.state.Samples[b.ID] = reserve.Sample{ServerID: b.ID, Fingerprint: b.Fingerprint, Identity: "fixture-ready", Verdict: "healthy", Verified: true, StartedAt: now.Add(-2 * time.Second), FinishedAt: now.Add(-time.Second)}
-	result, err := f.e.s.monitorReserve(f.ctx, m)
+	if failed, err := f.e.s.monitorReserve(f.ctx, m); err != nil || failed.Intent != nil || m.state.ActiveFailures != reserve.DefaultPolicy().Failures {
+		t.Fatal("fixture active failure did not require a fresh backup check", failed, err)
+	}
+	result, err := f.e.s.monitorReserveWith(f.ctx, m, reserveVerifiedOutcome)
 	if err != nil || result.Intent == nil {
 		t.Fatal("fixture intent", err)
 	}

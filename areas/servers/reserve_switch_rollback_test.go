@@ -134,7 +134,7 @@ func TestReserveSwitchLiveRollbackPreservesChangedAuthority(t *testing.T) {
 func TestReserveSwitchLiveRollbackQueueRetainsConfirmedState(t *testing.T) {
 	f, m, _ := reserveSwitchFixture(t)
 	m.state.Pending = nil
-	m.state.ActiveFailures = 2
+	m.state.ActiveFailures = reserve.DefaultPolicy().Failures
 	m.scheduler = reserve.ProbeScheduler{}
 	prior := m.state.Samples[m.state.ActiveID]
 	prior.StartedAt = time.Now().Add(-15 * time.Second)

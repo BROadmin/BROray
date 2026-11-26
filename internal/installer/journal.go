@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/BROadmin/broray/internal/installstats"
 	"github.com/BROadmin/broray/internal/platform"
 )
 
@@ -16,25 +17,28 @@ import (
 // loss `broray ctl recover` (run by S24broray before start) reads it and
 // leaves exactly one version current.
 type Journal struct {
-	SchemaVersion    int            `json:"schemaVersion"`
-	OperationID      string         `json:"operationId"`
-	Operation        string         `json:"operation"` // update | reinstall
-	Mode             string         `json:"mode"`      // switch (current → versions/<to>) | replace (same version, binary swap)
-	From             string         `json:"from"`
-	To               string         `json:"to"`
-	Channel          string         `json:"channel"`
-	PreviousTarget   string         `json:"previousTarget"` // readlink(current) before the operation
-	NewTarget        string         `json:"newTarget"`
-	CreatedDir       bool           `json:"createdVersionDir"`
-	PreviousSHA256   string         `json:"previousSha256,omitempty"`
-	StagedSHA256     string         `json:"stagedSha256,omitempty"`
-	OwnedVersions    []OwnedVersion `json:"ownedVersions,omitempty"`
-	InitBackup       string         `json:"initBackup,omitempty"`
-	DaemonWasRunning bool           `json:"daemonWasRunning"`
-	State            string         `json:"state"`
-	Error            string         `json:"error,omitempty"`
-	History          []JournalStep  `json:"history"`
-	UpdatedAt        string         `json:"updatedAt"`
+	SchemaVersion      int                  `json:"schemaVersion"`
+	OperationID        string               `json:"operationId"`
+	Operation          string               `json:"operation"` // update | reinstall
+	Mode               string               `json:"mode"`      // switch (current → versions/<to>) | replace (same version, binary swap)
+	From               string               `json:"from"`
+	To                 string               `json:"to"`
+	Channel            string               `json:"channel"`
+	PreviousTarget     string               `json:"previousTarget"` // readlink(current) before the operation
+	NewTarget          string               `json:"newTarget"`
+	CreatedDir         bool                 `json:"createdVersionDir"`
+	PreviousSHA256     string               `json:"previousSha256,omitempty"`
+	StagedSHA256       string               `json:"stagedSha256,omitempty"`
+	OwnedVersions      []OwnedVersion       `json:"ownedVersions,omitempty"`
+	InitBackup         string               `json:"initBackup,omitempty"`
+	DaemonWasRunning   bool                 `json:"daemonWasRunning"`
+	State              string               `json:"state"`
+	Error              string               `json:"error,omitempty"`
+	History            []JournalStep        `json:"history"`
+	UpdatedAt          string               `json:"updatedAt"`
+	Statistics         *installstats.Event  `json:"statistics,omitempty"`
+	StatisticsReady    bool                 `json:"statisticsReady,omitempty"`
+	DeferredStatistics []committedStatistic `json:"deferredStatistics,omitempty"`
 }
 
 // OwnedVersion records a version that was current during an installer

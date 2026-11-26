@@ -12,7 +12,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.5.9-c5">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.5.9-c5">
     <link rel="manifest" href="/manifest.json?v=WebUI-3.5.9-c5">
-    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c5">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c7">
     <script src="/assets/js/theme-init.js?v=WebUI-3.5.9-c5"></script>
 </head>
 <body class="app-body page-subscriptions" data-page="subscriptions" data-webui-build="WebUI-3.5.9-c5">
@@ -147,6 +147,11 @@
                 <span>Интервал, минут</span>
                 <input id="subscription-interval" name="interval" type="number" min="5" max="10080" step="1" value="360" required>
             </label>
+            <label class="subscription-field" for="subscription-profile-apply-time">
+                <span>Применять параметры VPN в это время (UTC)</span>
+                <input id="subscription-profile-apply-time" name="applyProfileAtUTC" type="time" step="60" aria-describedby="subscription-profile-apply-help">
+                <small id="subscription-profile-apply-help">Оставьте поле пустым для ручного применения.</small>
+            </label>
             <label class="subscription-field subscription-field-wide" for="subscription-url">
                 <span>URL подписки</span>
                 <small>URI/Base64, Xray JSON, Clash/Mihomo YAML: импорт отдельных серверов.</small>
@@ -255,12 +260,12 @@
         </section>
     </div>
 
-    <script src="/assets/js/common.js?v=WebUI-3.5.9-c5-subscription-removal"></script>
+    <script src="/assets/js/common.js?v=WebUI-3.5.9-c5-subscription-apply"></script>
     <script src="/assets/js/icons.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c8-premium-ip"></script>
     <script src="/assets/js/theme.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/dialogs.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/subscription-provider.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/subscriptions.js?v=WebUI-3.5.9-c5-labels"></script>
+    <script src="/assets/js/subscriptions.js?v=WebUI-3.5.9-c7-profile-schedule"></script>
 </body>
 </html>

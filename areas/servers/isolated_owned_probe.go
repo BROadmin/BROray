@@ -9,6 +9,7 @@ import (
 	"github.com/BROadmin/broray/modules/xray"
 	"golang.org/x/sys/unix"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"time"
@@ -18,6 +19,17 @@ import (
 // own repeatedly checked input authority; a DPI proposal never borrows reserve
 // roster membership, main-process intent, or a saved profile's configuration.
 func (s *svc) probeIsolatedOwned(ctx context.Context, id, fingerprint string, base []byte, started time.Time, valid func() bool, probe func(context.Context, reserve.ProbeTarget) reserve.ProbeOutcome) (sample reserve.Sample, resultErr error) {
+	var run func(context.Context, reserve.ProbeTarget, netip.AddrPort) reserve.ProbeOutcome
+	if probe != nil {
+		run = func(ctx context.Context, target reserve.ProbeTarget, _ netip.AddrPort) reserve.ProbeOutcome {
+			return probe(ctx, target)
+		}
+	}
+	return s.probeIsolatedOwnedEndpoint(ctx, id, fingerprint, base, started, valid, false, run)
+}
+
+func (s *svc) probeIsolatedOwnedEndpoint(ctx context.Context, id, fingerprint string, base []byte, started time.Time, valid func() bool,
+	useOrdinary bool, probe func(context.Context, reserve.ProbeTarget, netip.AddrPort) reserve.ProbeOutcome) (sample reserve.Sample, resultErr error) {
 	unknown := func() reserve.Sample {
 		return reserve.Sample{ServerID: id, Fingerprint: fingerprint, Verdict: "unknown", StartedAt: started, FinishedAt: time.Now()}
 	}
@@ -121,6 +133,7 @@ func (s *svc) probeIsolatedOwned(ctx context.Context, id, fingerprint string, ba
 	}
 	var snapshot xray.RuntimeSnapshot
 	var proof string
+	var ordinaryProof reserve.ListenerProof
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(20 * time.Millisecond)
@@ -137,6 +150,12 @@ func (s *svc) probeIsolatedOwned(ctx context.Context, id, fingerprint string, ba
 		if err == nil {
 			target = reserve.ProbeTarget{Process: identity, ConfigPath: root.XrayConfig(), ConfigSHA256: compat.SHA256Hex(data), Endpoint: endpoint}
 			proof, _ = reserve.VerifyProbeTarget(target)
+			if proof != "" && useOrdinary {
+				ordinaryProof, err = reserve.VerifyListener(identity, mainEndpoint)
+				if err != nil {
+					proof = ""
+				}
+			}
 			if child.RuntimeSnapshot() != snapshot {
 				return unknown(), nil
 			}
@@ -155,8 +174,14 @@ func (s *svc) probeIsolatedOwned(ctx context.Context, id, fingerprint string, ba
 	if !workValid() || !s.reserveCoreMatches(target.Process) {
 		return unknown(), nil
 	}
-	out := probe(ctx, target)
+	out := probe(ctx, target, mainEndpoint)
 	afterProof, err := reserve.VerifyProbeTarget(target)
+	if useOrdinary {
+		after, err := reserve.VerifyListener(target.Process, mainEndpoint)
+		if err != nil || ordinaryProof != after {
+			return unknown(), nil
+		}
+	}
 	finished := time.Now()
 	if err != nil || afterProof != proof || out.Identity != proof || (out.Verdict != "healthy" && out.Verdict != "unhealthy") ||
 		out.StartedAt.Before(started) || out.FinishedAt.Before(out.StartedAt) || out.FinishedAt.After(finished) ||

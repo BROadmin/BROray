@@ -12,7 +12,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/branding/favicon-16.png?v=WebUI-3.5.9-c5">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/branding/apple-touch-icon.png?v=WebUI-3.5.9-c5">
     <link rel="manifest" href="/manifest.json?v=WebUI-3.5.9-c5">
-    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c5">
+    <link rel="stylesheet" href="/assets/css/allpage.css?v=WebUI-3.5.9-c7">
     <script src="/assets/js/theme-init.js?v=WebUI-3.5.9-c5"></script>
 </head>
 <body class="app-body page-servers" data-page="servers" data-webui-build="WebUI-3.5.9-c5">
@@ -110,7 +110,6 @@
             </p>
         </div>
         <div id="servers-live-status" class="servers-live-status status-loading" role="status">
-            <span id="servers-live-dot" class="servers-live-dot" aria-hidden="true"></span>
             <span id="servers-live-text">Загрузка…</span>
         </div>
     </section>
@@ -119,7 +118,7 @@
         <article class="server-active-card ui-card">
             <div class="server-active-top">
                 <div class="server-active-copy">
-                    <span id="connection-state-badge" class="status-badge status-badge-neutral" data-icon="connection">
+                    <span id="connection-state-badge" class="status-badge status-unknown">
                         Проверяется
                     </span>
                     <span class="server-card-label">Активное подключение</span>
@@ -253,21 +252,23 @@
         <summary class="servers-disclosure-summary">
             <span class="servers-disclosure-icon" data-icon="servers" aria-hidden="true"></span>
             <span class="servers-disclosure-copy">
-                <span class="eyebrow">Резервирование</span>
-                <strong id="server-reserve-title">Резервирование VPN</strong>
-                <small>Основной сервер и до двух резервных</small>
+                <strong id="server-reserve-title">Автовыбор и резервирование</strong>
+                <small id="reserve-active">Текущий сервер: —</small>
             </span>
-            <span id="reserve-mode-label" class="status-badge status-badge-neutral">Получение состояния…</span>
+            <span id="server-automation-mode" class="status-badge status-loading" aria-live="polite">Получение состояния…</span>
         </summary>
         <div class="reserve-content">
-            <p>Основной сервер и до двух резервных. При потере связи BROray выберет проверенный резерв, а после восстановления вернётся на основной.</p>
+            <label class="auto-switch-master">
+                <span><strong>Автовыбор без резервирования</strong><small>Подбирать замену при подтверждённом сбое, если резервирование выключено.</small></span>
+                <input id="auto-switch-enabled" type="checkbox" disabled>
+                <span class="auto-switch-toggle" aria-hidden="true"></span>
+            </label>
             <label class="auto-switch-master reserve-mode-control">
-                <span><strong>Включить резервирование</strong><small>Переключать VPN на проверенный резерв при потере связи.</small></span>
+                <span><strong>Резервирование</strong><small>Переключать VPN на проверенный резерв при потере связи.</small></span>
                 <input id="reserve-enabled" type="checkbox" disabled>
                 <span class="auto-switch-toggle" aria-hidden="true"></span>
             </label>
             <p id="reserve-status" role="status" aria-live="polite">Получение состояния…</p>
-            <p id="reserve-active">Текущий сервер: —</p>
             <form id="reserve-roster-form" class="reserve-roster-form">
                 <div class="reserve-roster-grid">
                     <div>
@@ -304,10 +305,54 @@
             <div class="reserve-actions">
                 <button id="reserve-refresh" class="button button-secondary" type="button">Проверить состояние</button>
                 <button id="reserve-repair" class="button button-primary" type="button" hidden disabled>Восстановить резервирование</button>
+                <button id="reserve-selection-open" class="button button-secondary" type="button" hidden disabled>Действия с сервером</button>
+            </div>
+            <div id="reserve-selection-panel" class="reserve-settings" aria-labelledby="reserve-selection-title" hidden>
+                <h3 id="reserve-selection-title">Действия с сервером</h3>
+                <div class="reserve-selects">
+                    <div>
+                        <label for="reserve-selection-target">Сервер</label>
+                        <select id="reserve-selection-target"></select>
+                    </div>
+                    <div id="reserve-selection-remove-control" hidden>
+                        <label for="reserve-selection-remove">Кого исключить при смене основного</label>
+                        <select id="reserve-selection-remove"></select>
+                    </div>
+                </div>
+                <div id="reserve-selection-preview" class="reserve-policy-note reserve-selection-preview" role="status"></div>
+                <div class="reserve-actions">
+                    <button id="reserve-selection-now" class="button button-primary" type="button" hidden disabled>Подключить сейчас</button>
+                    <button id="reserve-selection-promote" class="button button-primary" type="button" disabled>Сделать основным</button>
+                    <button id="reserve-selection-ordinary" class="button button-secondary" type="button" hidden disabled>Отключить резервирование и подключить</button>
+                    <button id="reserve-selection-close" class="button button-secondary" type="button">Закрыть</button>
+                </div>
             </div>
             <p class="reserve-policy-note">Проверка соединения каждые 15 секунд. Переключение после трёх неудачных проверок. Обычный возврат с резерва на основной происходит после трёх успешных проверок и не раньше чем через 10 минут после переключения.</p>
             <p class="reserve-policy-note">Если основной и все резервы недоступны, BROray временно подключает проверенный сервер из автовыбора. После восстановления одного из серверов состава BROray возвращается к нему. Прямое подключение не включается.</p>
-            <p class="reserve-policy-note">При включении имя интерфейса — «BROray - mix-auto». Отключение сохраняет текущий сервер и состав резерва. Обновление качества и автоматическое переключение по качеству настраиваются отдельно.</p>
+            <p class="reserve-policy-note">При включении имя интерфейса — «BROray - mix-auto». Отключение сохраняет текущий сервер и состав резерва.</p>
+        </div>
+        <div id="server-auto-switch-section">
+            <form id="auto-switch-form" class="auto-switch-form">
+                <div class="auto-switch-description">
+                    <p>Настройки автовыбора</p>
+                </div>
+                <div class="auto-switch-grid">
+                    <label class="auto-switch-field"><span>Правило выбора</span><select id="auto-switch-rule"><option value="best-quality">Лучшее качество</option><option value="lowest-ping">Минимальный пинг</option><option value="preferred">Предпочтительный сервер</option></select></label>
+                    <label class="auto-switch-field"><span>Предпочтительный сервер</span><select id="auto-switch-preferred"><option value="">Не задан</option></select></label>
+                    <label class="auto-switch-field"><span>Ошибок до переключения</span><input id="auto-switch-threshold" type="number" min="1" max="10" value="3"></label>
+                    <label class="auto-switch-field"><span>Защита после переключения</span><div class="auto-switch-number-unit"><input id="auto-switch-cooldown" type="number" min="1" max="120" value="10"><small>мин.</small></div></label>
+                    <label class="auto-switch-field"><span>Минимальное качество</span><select id="auto-switch-minimum"><option value="excellent">Отличное</option><option value="good">Хорошее</option><option value="acceptable">Приемлемое</option><option value="poor">Любое доступное</option></select></label>
+                </div>
+                <div class="auto-switch-state">
+                    <div><span>Сервис</span><strong id="auto-switch-service">—</strong></div>
+                    <div><span>Последнее состояние автовыбора</span><strong id="auto-switch-status">—</strong></div>
+                    <div><span>Ошибки соединения</span><strong id="auto-switch-failures">0</strong></div>
+                    <div><span>Последнее переключение</span><strong id="auto-switch-last-switch">Не выполнялось</strong></div>
+                </div>
+                <p id="auto-switch-reason" class="auto-switch-reason">Ожидание данных.</p>
+                <p id="auto-switch-error" class="auto-switch-error" hidden></p>
+                <div class="auto-switch-actions"><button id="auto-switch-save" class="button button-primary" data-icon="settings" type="submit">Сохранить настройки</button></div>
+            </form>
         </div>
     </details>
 
@@ -319,6 +364,12 @@
                 <p id="servers-list-description">Получение списка…</p>
             </div>
             <div class="servers-section-actions">
+                <select id="servers-sort-order" aria-label="Сортировка серверов">
+                    <option value="current">Текущий порядок</option>
+                    <option value="name">По имени</option>
+                    <option value="availability">По доступности</option>
+                    <option value="latency">По задержке</option>
+                </select>
                 <button id="refresh-servers" class="button button-secondary" data-icon="update" type="button">
                     Обновить данные
                 </button>
@@ -390,18 +441,18 @@
         </section>
     </div>
 
-    <script src="/assets/js/common.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/common.js?v=WebUI-3.5.9-c5&amp;reserve=4"></script>
     <script src="/assets/js/icons.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/app-shell.js?v=WebUI-3.5.9-c8-premium-ip"></script>
     <script src="/assets/js/theme.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/dialogs.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/servers-completion.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/servers-reserve.js?v=WebUI-3.5.9-c5&amp;reserve=2"></script>
+    <script src="/assets/js/servers-completion.js?v=WebUI-3.5.9-c7"></script>
+    <script src="/assets/js/servers-reserve.js?v=WebUI-3.5.9-c7&amp;reserve=4&amp;unified=3"></script>
     <script src="/assets/js/servers-dpi.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/servers.js?v=WebUI-3.5.9-c5&amp;reserve=2"></script>
+    <script src="/assets/js/servers.js?v=WebUI-3.5.9-c7&amp;reserve=4&amp;sort=2"></script>
     <script src="/assets/js/servers-import-preflight.js?v=WebUI-3.5.9-c5"></script>
     <script src="/assets/js/servers-check-all.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/servers-auto-switch.js?v=WebUI-3.5.9-c5"></script>
-    <script src="/assets/js/servers-quality-refresh.js?v=WebUI-3.5.9-c5"></script>
+    <script src="/assets/js/servers-auto-switch.js?v=WebUI-3.5.9-c5&amp;unified=2"></script>
+    <script src="/assets/js/servers-quality-refresh.js?v=WebUI-3.5.9-c7"></script>
 </body>
 </html>

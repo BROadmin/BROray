@@ -24,7 +24,7 @@ import (
 // validation are real. The subscription HTTP server and owned router interface
 // are fixtures; this is not a physical-router or online-proxy health test.
 func TestColdCatalogNativeOwnerAcceptance(t *testing.T) {
-	for _, kind := range []string{"refresh-removed", "refresh-same-id", "refresh-pending", "delete-replace", "delete-withdraw", "keep-active"} {
+	for _, kind := range []string{"refresh-removed", "refresh-same-id", "refresh-rename", "refresh-pending", "delete-replace", "delete-withdraw", "keep-active"} {
 		t.Run(kind, func(t *testing.T) {
 			e := newEnv(t)
 			must := func(err error) {
@@ -103,6 +103,9 @@ func TestColdCatalogNativeOwnerAcceptance(t *testing.T) {
 			must(err)
 			config, err := servers.XrayConfig(rec, servers.GenSettings{Listen: "127.0.0.1", SocksPort: 2080, LogLevel: "none"}, "cold catalog fixture")
 			must(err)
+			if kind == "refresh-rename" {
+				config = append(config, '\n')
+			}
 			must(os.WriteFile(e.d.Root.XrayConfig(), config, 0600))
 			if kind == "delete-replace" || kind == "keep-active" {
 				manual, err := servers.ParseLink("trojan://pw@127.0.0.1:3443?security=tls&sni=localhost#C", "manual-c", nil)
@@ -152,6 +155,9 @@ func TestColdCatalogNativeOwnerAcceptance(t *testing.T) {
 					payload := "trojan://pw@127.0.0.1:2443?security=tls&sni=localhost#B\n"
 					if kind == "refresh-same-id" {
 						payload = "trojan://rotated@127.0.0.1:1443?security=tls&sni=localhost#A\n" + payload
+					}
+					if kind == "refresh-rename" {
+						payload = "trojan://pw@127.0.0.1:1443?security=tls&sni=localhost#Renamed\n" + payload
 					}
 					provider.set(payload)
 					body, err := json.Marshal(map[string]string{"id": sub, "nonce": nonce})
@@ -217,6 +223,18 @@ func TestColdCatalogNativeOwnerAcceptance(t *testing.T) {
 				must(err)
 				if rec["password"] != "rotated" {
 					t.Fatal("same-ID credentials not refreshed")
+				}
+			case "refresh-rename":
+				wantCount = 2
+				rec, err := servers.ReadRecord(e.d, active)
+				must(err)
+				if rec["name"] != "Renamed" || description != "BROray - Renamed" {
+					t.Fatal("cold profile name and owned description did not advance together")
+				}
+				installed, err := os.ReadFile(e.d.Root.XrayConfig())
+				must(err)
+				if !bytes.Equal(installed, config) {
+					t.Fatal("cold rename altered installed bytes")
 				}
 			case "delete-replace":
 				wantActive = "manual-c"

@@ -198,6 +198,13 @@ func (s *svc) resolveActivation(id string) (string, string, *cgi.APIError) {
 	if validateID(id) != nil || !RecordExists(s.d, id) {
 		return "", "", cgi.E(404, "SERVER_NOT_FOUND", "Сервер не найден.")
 	}
+	prefs, err := readReservePreferences(s.d)
+	if err != nil {
+		return "", "", cgi.E(503, "RESERVE_SETTINGS_INVALID", "Не удалось подтвердить настройки резервирования VPN.")
+	}
+	if prefs.Enabled && !reserveRosterContains(prefs, id) {
+		return "", "", reserveOutsideRosterError()
+	}
 	rec, err := ReadRecord(s.d, id)
 	if err != nil {
 		return "", "", cgi.E(503, "STATE_UNAVAILABLE", "Не удалось прочитать сервер.")
@@ -208,6 +215,9 @@ func (s *svc) resolveActivation(id string) (string, string, *cgi.APIError) {
 	hash, err := fileSHA256(RecordPath(s.d, id))
 	if err != nil {
 		return "", "", cgi.E(503, "STATE_UNAVAILABLE", "Не удалось подтвердить сервер.")
+	}
+	if prefs.Enabled {
+		return compat.ReserveSelectAction, prefs.Revision + ":" + hash, nil
 	}
 	return actionActivation, hash, nil
 }
@@ -305,6 +315,23 @@ func (s *svc) qualityStep(t *compat.Task) error {
 		}
 		if err := publish(); err != nil {
 			return err
+		}
+		if origin == "SERVER_CHECK_AUTO" && checked < total {
+			if err := s.enqueueReserveDue(); err != nil {
+				s.logf("RESERVE_MONITOR_ENQUEUE=UNCONFIRMED")
+			}
+			ran, err := t.RunPendingReserveMonitor()
+			if err != nil {
+				return err
+			}
+			if ran {
+				if t.Ctx.Err() != nil {
+					return t.Ctx.Err()
+				}
+				if c, err := s.qualityContext(t.Target, origin); err != nil || c != t.Context {
+					return changed(t)
+				}
+			}
 		}
 	}
 	return nil
@@ -459,6 +486,8 @@ func (s *svc) healthStep(t *compat.Task) error {
 		if count >= ac.threshold {
 			reasonText = "Порог отказов достигнут; ожидается проверка резервных серверов"
 		}
+	case result["errorCode"] == wanUnavailable:
+		status, reasonText = "paused", wanUnavailableMessage
 	case health != "true":
 		status, reasonText = "paused", "Не удалось проверить трафик через активный VPN"
 	}

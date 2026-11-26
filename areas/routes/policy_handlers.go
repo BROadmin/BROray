@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,9 @@ import (
 )
 
 func registerPolicyHandlers() {
+	cgi.Register("/api/routes/premium-domain.cgi", wrap(hPremiumDomain), cgi.Methods(http.MethodGet, http.MethodPost), cgi.Limit(1024))
+	cgi.Register("/api/routes/premium-ip.cgi", wrap(hPremiumIP), cgi.Methods(http.MethodGet, http.MethodPost), cgi.Limit(1024))
+	cgi.Register("/api/routes/native-dns-draft.cgi", wrap(hNativeDNSDraft), cgi.Methods(http.MethodPost), cgi.Limit(2<<20))
 	cgi.Register("/api/routes/policy.cgi", wrap(hPolicy), cgi.Methods(http.MethodGet, http.MethodPost), cgi.Limit(routepolicy.MaxStateBytes))
 	cgi.Register("/api/routes/native-domain-preview.cgi", wrap(hNativeDomainPreview), cgi.Methods(http.MethodGet, http.MethodPost), cgi.Limit(1024))
 	cgi.Register("/api/routes/native-domain-apply.cgi", wrap(hNativeDomainApply), cgi.Methods(http.MethodGet, http.MethodPost), cgi.Limit(1024))
@@ -30,8 +34,11 @@ func hPolicy(e *engine, c *cgi.Req) (any, error) {
 		return nil, err
 	}
 	m, err := routepolicy.DecodeMutation(c.Body())
-	if err != nil {
+	if err != nil || m.ExpectedScheduleRevision != "" {
 		return nil, cgi.E(400, "POLICY_REQUEST_INVALID", "Некорректное изменение правила.")
+	}
+	if m.ID == premiumID || m.ID == premiumIPID || strings.EqualFold(m.Name, premiumName) || strings.EqualFold(m.Name, premiumIPName) {
+		return nil, cgi.E(409, "PREMIUM_LIST_MANAGED", "Управляйте списками через раздел Premium.")
 	}
 	if geoMutation(m) {
 		return e.queueGeodata(c)
@@ -40,10 +47,12 @@ func hPolicy(e *engine, c *cgi.Req) (any, error) {
 }
 
 type policyResult struct {
-	State    routepolicy.State `json:"state"`
-	Revision string            `json:"revision"`
-	Busy     bool              `json:"busy"`
-	Pending  bool              `json:"pending"`
+	State           routepolicy.State `json:"state"`
+	Revision        string            `json:"revision"`
+	Busy            bool              `json:"busy"`
+	Pending         bool              `json:"pending"`
+	GeoPending      *geoPendingView   `json:"geoPending,omitempty"`
+	GeoPendingError bool              `json:"geoPendingError,omitempty"`
 }
 
 func (e *engine) policyView(ctx context.Context) (policyResult, error) {
@@ -64,7 +73,9 @@ func (e *engine) policyView(ctx context.Context) (policyResult, error) {
 	if e.queue != nil {
 		_, queued = e.queue.FindLive(geodataAction, "policy")
 	}
-	return policyResult{state, revision, busy || e.d.Lock.Busy() || queued, pending}, nil
+	geoPending, geoPendingErr := e.readPendingGeodata(ctx, revision, state.GeoRevision)
+	return policyResult{State: state, Revision: revision, Busy: busy || e.d.Lock.Busy() || queued,
+		Pending: pending, GeoPending: geoPending, GeoPendingError: geoPendingErr != nil}, nil
 }
 
 func (e *engine) savePolicy(m routepolicy.Mutation) (result any, resultErr error) {
@@ -74,6 +85,11 @@ func (e *engine) savePolicy(m routepolicy.Mutation) (result any, resultErr error
 }
 
 func (e *engine) runPolicy(ctx context.Context, m routepolicy.Mutation, op *compat.Operation) (result any, resultErr error) {
+	if op != nil && op.Source == "SCHEDULER" && m.Operation == "geo-update" {
+		// Older queued jobs may survive an update. The background job may
+		// now prepare geodata, while applying it requires separate authority.
+		m.Operation, m.ID, m.Kind = "geo-check", "geodata", ""
+	}
 	action := "routes:policy"
 	if geoMutation(m) {
 		action = geodataAction
@@ -114,8 +130,15 @@ func (e *engine) runPolicy(ctx context.Context, m routepolicy.Mutation, op *comp
 	if m.ExpectedRevision != baseline.StateRevision {
 		return nil, cgi.E(409, "POLICY_REVISION_CHANGED", "Правила уже изменились. Обновите данные и повторите действие.")
 	}
-	if m.Operation != "geo-update" && nativeOwnID.MatchString(m.ID) {
+	if m.Operation != "geo-update" && m.Operation != "geo-check" && m.Operation != "geo-apply" && nativeOwnID.MatchString(m.ID) {
 		if _, preset := nativeDomainPresetByID(m.ID); !preset {
+			draft, err := readDNSDraft(e.dnsDraftPath(m.ID), m.ID)
+			if err != nil {
+				return nil, err
+			}
+			if draft != nil {
+				return nil, cgi.E(409, "NATIVE_DNS_DRAFT_IN_USE", "Откройте актуальный список в разделе «По доменам и IP».")
+			}
 			record, err := readNativeDomainRecord(nativeDomainRecordPath(e.root, m.ID), m.ID)
 			if err != nil {
 				return nil, err
@@ -140,12 +163,21 @@ func (e *engine) runPolicy(ctx context.Context, m routepolicy.Mutation, op *comp
 		if err := e.checkGeoAutomation(ctx, m, op); err != nil {
 			return nil, err
 		}
-		attempt, err := e.beginGeoAttempt(ctx, string(m.Kind), op)
+	}
+	var checkKinds []string
+	switch m.Operation {
+	case "geo-update", "geo-upsert":
+		checkKinds = []string{string(m.Kind)}
+	case "geo-check":
+		checkKinds = selectedGeodataKinds(policySelection(next))
+	}
+	for _, kind := range checkKinds {
+		attempt, err := e.beginGeoAttempt(ctx, kind, op)
 		if err != nil {
 			return nil, err
 		}
 		defer func() {
-			if err := e.finishGeoAttempt(ctx, string(m.Kind), attempt, resultErr); err != nil {
+			if err := e.finishGeoAttempt(ctx, kind, attempt, resultErr); err != nil {
 				resultErr = errors.Join(resultErr, err)
 			}
 		}()
@@ -161,8 +193,13 @@ func (e *engine) runPolicy(ctx context.Context, m routepolicy.Mutation, op *comp
 	var geoCandidate *geodata.Candidate
 	journalOwnsCandidate := false
 	if geoMutation(m) {
-		op.Phase("fetching")
-		geoStore, geoCandidate, err = e.preparePolicyGeodata(ctx, &next, snapshot, m)
+		if m.Operation == "geo-apply" {
+			geoStore, geoCandidate, err = e.reopenPolicyGeodata(ctx, &next, m)
+			journalOwnsCandidate = true // the durable receipt owns this generation
+		} else {
+			op.Phase("fetching")
+			geoStore, geoCandidate, err = e.preparePolicyGeodata(ctx, &next, snapshot, m)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -179,6 +216,25 @@ func (e *engine) runPolicy(ctx context.Context, m routepolicy.Mutation, op *comp
 			}
 			geoStore.Close()
 		}()
+		if m.Operation == "geo-check" && geoCandidate != nil {
+			ready, err := geoStore.StagePending(ctx, geoCandidate, baseline.StateRevision, e.geoTime())
+			journalOwnsCandidate = ready != nil || errors.Is(err, geodata.ErrCommitUncertain)
+			if err != nil {
+				return nil, err
+			}
+			return policyResult{State: state, Revision: baseline.StateRevision, GeoPending: pendingGeoView(ready)}, nil
+		}
+		if m.Operation == "geo-check" {
+			check, err := geodata.Open(filepath.Join(e.d.Root.Runtime(), geodata.AssetDirectory))
+			if err != nil {
+				return nil, err
+			}
+			err = check.InvalidatePending(ctx, baseline.StateRevision, baseline.GeoRevision)
+			check.Close()
+			if err != nil {
+				return nil, err
+			}
+		}
 		if geoCandidate != nil {
 			snapshot = geoCandidate.Snapshot()
 		}
@@ -203,15 +259,38 @@ func (e *engine) runPolicy(ctx context.Context, m routepolicy.Mutation, op *comp
 		return nil, err
 	}
 	op.Phase("checking")
-	cfg, err := e.d.Svc.PreviewActiveConfig(ctx)
-	if err != nil {
-		return nil, err
+	var cfg []byte
+	// A refresh with no changed geodata in use must leave the live config
+	// exactly as found. The checked journal still binds its current bytes.
+	refreshGeodata := m.Operation == "geo-update" || m.Operation == "geo-check" || m.Operation == "geo-apply"
+	if !refreshGeodata || (geoCandidate != nil && next.NeedsGeodata()) {
+		cfg, err = e.d.Svc.PreviewActiveConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if cfg != nil && baseline.ConfigSHA256 == "" {
 		return nil, errors.New("active config missing; restore active connection before changing policy")
 	}
 	configHash := sha256.Sum256(cfg)
 	needsApply := cfg != nil && hex.EncodeToString(configHash[:]) != baseline.ConfigSHA256
+	if m.Operation == "geo-apply" && op.Source == "SCHEDULER" {
+		if e.queue == nil || e.queue.Paused() {
+			return nil, cgi.E(409, "GEODATA_AUTOMATION_PAUSED", "Автоматические операции приостановлены.")
+		}
+		if err := routepolicy.ClaimGeoApply(ctx, e.root, m.ExpectedScheduleRevision, m.ApplyDayUTC, e.geoTime()); err != nil {
+			return nil, geoScheduleError(err)
+		}
+	}
+	var probeLease io.Closer
+	if m.Operation == "geo-apply" && needsApply {
+		cfg, probeLease = e.d.Svc.PreparePolicyVPN(ctx, cfg)
+		defer func() {
+			if probeLease != nil {
+				_ = probeLease.Close()
+			}
+		}()
+	}
 	if err := j.BeginChecked(ctx, next, cfg, snapshot.Revision, baseline); err != nil {
 		pending, readErr := routepolicy.RecoveryPending(ctx, e.d.Root)
 		if pending || readErr != nil || errors.Is(err, routepolicy.ErrJournalUncertain) {
@@ -225,10 +304,27 @@ func (e *engine) runPolicy(ctx context.Context, m routepolicy.Mutation, op *comp
 	if geoCandidate != nil {
 		_, err = geoStore.Commit(ctx, geoCandidate, baseline.GeoRevision)
 	}
+	if err == nil && probeLease != nil {
+		err = probeLease.Close()
+		probeLease = nil
+	}
 	applyAttempted := false
+	geoApplyVPN := compat.VPNUnconfirmed
 	if err == nil && needsApply {
 		applyAttempted = true
+		if m.Operation == "geo-apply" {
+			op.RecordGeoApplyStart()
+		}
 		err = e.d.Svc.ApplyXrayConfig(ctx, cfg)
+		if m.Operation == "geo-apply" {
+			if err == nil {
+				geoApplyVPN = e.d.Svc.ProbePolicyVPN(ctx, cfg)
+			}
+			op.RecordGeoVPNCheck(geoApplyVPN)
+			if geoApplyVPN == compat.VPNFailed {
+				err = errors.New("GEODATA_VPN_CHECK_FAILED")
+			}
+		}
 	}
 	if err == nil {
 		err = j.InstallState(ctx)
@@ -237,6 +333,7 @@ func (e *engine) runPolicy(ctx context.Context, m routepolicy.Mutation, op *comp
 		op.Phase("recovering")
 		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 		defer cancel()
+		var restoredConfig []byte
 		restore := func(ctx context.Context, old []byte, exists bool) error {
 			if !applyAttempted {
 				return nil
@@ -244,10 +341,18 @@ func (e *engine) runPolicy(ctx context.Context, m routepolicy.Mutation, op *comp
 			if !exists {
 				return errors.New("active config predecessor missing")
 			}
+			restoredConfig = old
 			return e.d.Svc.ApplyXrayConfig(ctx, old)
 		}
 		if rollbackErr := j.Rollback(recovery, restore); rollbackErr != nil {
+			op.RecordRollback(false, false)
 			return nil, e.policyUncertain(errors.Join(err, rollbackErr))
+		}
+		restoredVPN := m.Operation == "geo-apply" && restoredConfig != nil &&
+			e.d.Svc.ProbePolicyVPN(recovery, restoredConfig) == compat.VPNVerified
+		op.RecordRollback(true, restoredVPN)
+		if geoApplyVPN == compat.VPNFailed {
+			return nil, cgi.E(500, "GEODATA_VPN_CHECK_FAILED", "Проверка VPN после применения геоданных завершилась ошибкой. Предыдущая конфигурация восстановлена.")
 		}
 		return nil, cgi.E(500, "POLICY_APPLY_FAILED", "Изменение не применено. Предыдущие настройки восстановлены.")
 	}
@@ -255,6 +360,13 @@ func (e *engine) runPolicy(ctx context.Context, m routepolicy.Mutation, op *comp
 	// Keep the fence for guarded readback/recovery; never blindly roll it back.
 	if err := j.Confirm(ctx); err != nil {
 		return nil, e.policyUncertain(err)
+	}
+	if m.Operation == "geo-apply" {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if err := geoStore.ClearAppliedPending(cleanup, snapshot.Revision); err != nil {
+			e.log.Printf("routes: confirmed geodata update receipt cleanup failed: %v", err)
+		}
 	}
 	return policyResult{State: next, Revision: revision}, nil
 }

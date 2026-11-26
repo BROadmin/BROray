@@ -18,9 +18,10 @@ import (
 )
 
 type policyBackup struct {
-	State      routepolicy.State `json:"state"`
-	AutoUpdate bool              `json:"autoUpdate"`
-	Geodata    json.RawMessage   `json:"geodata"`
+	State          routepolicy.State `json:"state"`
+	AutoUpdate     bool              `json:"autoUpdate"`
+	Geodata        json.RawMessage   `json:"geodata"`
+	AutoApplyAtUTC string            `json:"autoApplyAtUTC,omitempty"`
 }
 
 func (e *engine) backupPolicy(ctx context.Context) (*policyBackup, error) {
@@ -39,7 +40,11 @@ func (e *engine) backupPolicy(ctx context.Context) (*policyBackup, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &policyBackup{State: state, AutoUpdate: schedule.Enabled, Geodata: json.RawMessage("null")}
+	applySchedule, err := routepolicy.ReadGeoApplySchedule(ctx, e.root)
+	if err != nil {
+		return nil, err
+	}
+	out := &policyBackup{State: state, AutoUpdate: schedule.Enabled, Geodata: json.RawMessage("null"), AutoApplyAtUTC: applySchedule.AtUTC}
 	store, err := geodata.Open(filepath.Join(e.d.Root.Runtime(), geodata.AssetDirectory))
 	if errors.Is(err, os.ErrNotExist) && state.GeoRevision == "" {
 		if err = checkBackupPolicy(state, geodata.Snapshot{}); err != nil {
@@ -128,7 +133,7 @@ func decodePolicyBackup(raw []byte) (*policyBackup, error) {
 			return nil, err
 		}
 		name, ok := key.(string)
-		if !ok || fields[name] != nil || name != "state" && name != "autoUpdate" && name != "geodata" {
+		if !ok || fields[name] != nil || name != "state" && name != "autoUpdate" && name != "geodata" && name != "autoApplyAtUTC" {
 			return nil, backupInvalid("неоднозначные поля правил маршрутизации")
 		}
 		var value json.RawMessage
@@ -137,7 +142,7 @@ func decodePolicyBackup(raw []byte) (*policyBackup, error) {
 		}
 		fields[name] = value
 	}
-	if end, err := d.Token(); err != nil || end != json.Delim('}') || len(fields) != 3 {
+	if end, err := d.Token(); err != nil || end != json.Delim('}') || fields["state"] == nil || fields["autoUpdate"] == nil || fields["geodata"] == nil {
 		return nil, backupInvalid("неполные правила маршрутизации")
 	}
 	if _, err = d.Token(); err != io.EOF {
@@ -151,7 +156,13 @@ func decodePolicyBackup(raw []byte) (*policyBackup, error) {
 	if !bytes.Equal(enabled, []byte("true")) && !bytes.Equal(enabled, []byte("false")) {
 		return nil, backupInvalid("автообновление геоданных повреждено")
 	}
-	return &policyBackup{State: state, AutoUpdate: bytes.Equal(enabled, []byte("true")), Geodata: fields["geodata"]}, nil
+	var applyAtUTC string
+	if value := fields["autoApplyAtUTC"]; value != nil {
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) || json.Unmarshal(value, &applyAtUTC) != nil || !routepolicy.ValidGeoApplyTime(applyAtUTC) {
+			return nil, backupInvalid("время применения геоданных повреждено")
+		}
+	}
+	return &policyBackup{State: state, AutoUpdate: bytes.Equal(enabled, []byte("true")), Geodata: fields["geodata"], AutoApplyAtUTC: applyAtUTC}, nil
 }
 
 func checkBackupPolicy(state routepolicy.State, snapshot geodata.Snapshot) error {
@@ -211,6 +222,12 @@ func (e *engine) stageBackupPolicy(ctx context.Context, in *policyBackup, st *co
 	}
 	if err = st.Take(compat.DataRel("routes", routepolicy.GeoScheduleFile)); err != nil {
 		return err
+	}
+	applyTimeChanged := current.AutoApplyAtUTC != in.AutoApplyAtUTC
+	if applyTimeChanged {
+		if err = st.Take(compat.DataRel("routes", routepolicy.GeoApplyScheduleFile)); err != nil {
+			return err
+		}
 	}
 	if err = platform.MkdirAllDurable(st.St.Root.Routes(), 0700); err != nil {
 		return err
@@ -337,6 +354,15 @@ func (e *engine) stageBackupPolicy(ctx context.Context, in *policyBackup, st *co
 	}
 	if _, err = routepolicy.SaveGeoSchedule(ctx, st.St.Root.Routes(), routepolicy.GeoScheduleRevision(schedule), in.AutoUpdate); err != nil {
 		return err
+	}
+	if applyTimeChanged {
+		settings, err := routepolicy.ReadGeoApplySchedule(ctx, st.St.Root.Routes())
+		if err != nil {
+			return err
+		}
+		if _, err = routepolicy.SaveGeoApplySchedule(ctx, st.St.Root.Routes(), settings.Revision, in.AutoApplyAtUTC); err != nil {
+			return err
+		}
 	}
 	if stagedStore != nil {
 		// Later config checks must not invalidate PrepareArchive's earlier proof.

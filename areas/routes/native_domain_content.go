@@ -59,6 +59,18 @@ func (e *engine) nativeOwnPreview(ctx context.Context, id string) (nativeDomainP
 	if err != nil {
 		return result, false, err
 	}
+	draft, err := readDNSDraft(e.dnsDraftPath(id), id)
+	if err != nil {
+		return result, false, err
+	}
+	if draft != nil {
+		for _, rule := range state.Rules {
+			if rule.ID == id {
+				return *draft, rule.Enabled, nil
+			}
+		}
+		return *draft, false, nil
+	}
 	for _, rule := range state.Rules {
 		if rule.ID != id || len(rule.Domains) == 0 || len(rule.CountryCodes) != 0 || len(rule.GeoSiteTags) != 0 {
 			continue

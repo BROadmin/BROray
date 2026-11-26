@@ -23,6 +23,7 @@ type Sample struct {
 	ServerID, Fingerprint, Identity, Verdict string // healthy, unhealthy or unknown
 	StartedAt, FinishedAt                    time.Time
 	Verified                                 bool // owned proxy traffic or confirmed owned exit; lifecycle authority checked externally
+	WANUnavailable                           bool // corroborated outage during a verified active probe
 }
 type Intent struct {
 	Token                                         uint64

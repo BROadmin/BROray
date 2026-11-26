@@ -230,13 +230,16 @@
         return value === 0 ? " · время < 1 с" : " · время ≈ " + (value / 1000) + " с";
     }
     function testPresentation(server) {
-        if (!server.test) return {text:"Не проверен", className:"status-neutral"};
+        if (!server.test) return {text:"Не проверен", className:"status-unknown"};
         if (server.test.ok === false && server.test.status === "failed") {
             var stage = server.test.dnsStatus === "failed" ? "DNS" : server.test.tlsStatus === "failed" ? "TLS" : server.test.tcpStatus === "failed" ? "TCP" : "DoT";
             return {text:stage + ": " + (server.test.errorCode === "DOT_PROBE_TIMEOUT" ? "тайм-аут" : "ошибка") + (testTimeFresh(server.test) ? "" : " · последняя проверка"), className:"status-error"};
         }
         if (!testTimeFresh(server.test)) return {text:status && status.autoCheck && status.autoCheck.enabled ? "Ожидает перепроверки" : "Проверка устарела", className:status && status.autoCheck && status.autoCheck.enabled ? "status-neutral" : "status-warning"};
-        if (server.test.ok === true) return {text:(server.test.dnsStatus === "ok" ? "DoT: OK" : "TLS: OK · DNS не проверен") + testDuration(server.test), className:"status-success"};
+        if (server.test.ok === true) {
+            var full = server.test.dnsStatus === "ok";
+            return {text:(full ? "DoT: OK" : "TLS: OK · DNS не проверен") + testDuration(server.test), className:full ? "status-success" : "status-warning"};
+        }
         if (server.test.status === "unavailable") return {text:"Проверка DoT недоступна", className:"status-warning"};
         return {text:"DoT: ошибка", className:"status-error"};
     }

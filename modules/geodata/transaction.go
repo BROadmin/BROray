@@ -211,15 +211,8 @@ func (s *Store) Commit(ctx context.Context, candidate *Candidate, expectedRevisi
 	if current.Revision != expectedRevision || current.Revision != candidate.base {
 		return Snapshot{}, ErrStale
 	}
-	dir, err := platform.OpenDirAtNoFollow(s.dir, candidate.next.Generation)
-	if err != nil {
+	if err := s.verifyCandidateDirectory(candidate); err != nil {
 		return Snapshot{}, err
-	}
-	a, aErr := candidate.dir.Stat()
-	b, bErr := dir.Stat()
-	dir.Close()
-	if aErr != nil || bErr != nil || !os.SameFile(a, b) {
-		return Snapshot{}, errors.New("candidate directory replaced")
 	}
 	if err := s.verify(ctx, candidate.next); err != nil {
 		return Snapshot{}, err
@@ -253,7 +246,22 @@ func (s *Store) Commit(ctx context.Context, candidate *Candidate, expectedRevisi
 	if err := s.dir.Sync(); err != nil {
 		return Snapshot{}, fmt.Errorf("%w: %v", ErrCommitUncertain, err)
 	}
+	s.shareCommittedAssets(ctx, current, candidate.next)
 	return cloneSnapshot(candidate.next), nil
+}
+
+func (s *Store) verifyCandidateDirectory(candidate *Candidate) error {
+	dir, err := platform.OpenDirAtNoFollow(s.dir, candidate.next.Generation)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	a, aErr := candidate.dir.Stat()
+	b, bErr := dir.Stat()
+	if aErr != nil || bErr != nil || !os.SameFile(a, b) {
+		return errors.New("candidate directory replaced")
+	}
+	return nil
 }
 
 // Abort removes only an owned, never-committed candidate. Old working

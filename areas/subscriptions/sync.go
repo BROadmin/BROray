@@ -363,5 +363,5 @@ func (s *svc) syncCatalog(ctx context.Context, subID string, stagedRecs []server
 	if err := s.syncMarkers(); err != nil {
 		return nil, err
 	}
-	return s.syncCatalogCommit(ctx, subID, stage, enabled, policy)
+	return s.syncCatalogCommit(ctx, subID, stage, enabled, policy, nil, nil)
 }

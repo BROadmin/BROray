@@ -118,7 +118,7 @@ func TestSourceRefreshPreparesOldReserveBinding(t *testing.T) {
 	}
 }
 func TestSourceRefreshSameIDPreservesIntent(t *testing.T) {
-	for _, kind := range []string{"live", "stopped", "rename", "rejected", "foreign", "unfenced", "wrong-description"} {
+	for _, kind := range []string{"live", "stopped", "rename", "name-only", "name-only drift", "name-only stopped", "rejected", "foreign", "unfenced", "wrong-description"} {
 		t.Run(kind, func(t *testing.T) {
 			f, description := reserveDisableFixture(t)
 			owner, ok := any(f.e.d.Svc).(refreshReapplyOwner)
@@ -129,7 +129,8 @@ func TestSourceRefreshSameIDPreservesIntent(t *testing.T) {
 				t.Fatal(err)
 			}
 			id := f.plan.node.ID
-			if kind == "stopped" {
+			nameOnly := kind == "name-only" || kind == "name-only drift" || kind == "name-only stopped"
+			if kind == "stopped" || kind == "name-only stopped" {
 				if err := f.process.Stop(f.ctx); err != nil {
 					t.Fatal(err)
 				}
@@ -138,10 +139,18 @@ func TestSourceRefreshSameIDPreservesIntent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if kind == "name-only drift" {
+				previous = append(previous, '\n')
+				if err := os.WriteFile(f.e.d.Root.XrayConfig(), previous, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			before := f.process.RuntimeSnapshot()
 			raw := refreshFixtureRecord(t, f.e.d, id, func(rec Record) {
-				rec["address"] = "127.0.0.2"
-				if kind == "rename" {
+				if !nameOnly {
+					rec["address"] = "127.0.0.2"
+				}
+				if kind == "rename" || nameOnly {
 					rec["name"] = "Renamed"
 				}
 				if kind != "foreign" {
@@ -183,7 +192,11 @@ func TestSourceRefreshSameIDPreservesIntent(t *testing.T) {
 			if kind == "wrong-description" {
 				oldName = "Wrong"
 			}
-			chosen, err := owner.ReapplySourceRefresh(ctx, "refresh-source", id, oldName)
+			apply := owner.ReapplySourceRefresh
+			if nameOnly {
+				apply = f.e.s.RenameSourceRefresh
+			}
+			chosen, err := apply(ctx, "refresh-source", id, oldName)
 			failed := kind == "rejected" || kind == "foreign" || kind == "unfenced" || kind == "wrong-description"
 			if (err != nil) != failed {
 				t.Fatal("same-ID result", kind, chosen, err)
@@ -199,6 +212,11 @@ func TestSourceRefreshSameIDPreservesIntent(t *testing.T) {
 			if failed {
 				if after != before || !bytes.Equal(cfg, previous) {
 					t.Fatal("refusal changed runtime/config")
+				}
+			} else if nameOnly {
+				if chosen != id || !bytes.Equal(cfg, previous) || after != before || *description != "BROray - Renamed" {
+					t.Fatalf("name-only refresh changed runtime or failed to synchronize display: generation=%d->%d, intent=%d->%d, bytes unchanged=%t, description=%q",
+						before.Generation, after.Generation, before.Intent, after.Intent, bytes.Equal(cfg, previous), *description)
 				}
 			} else {
 				if chosen != id || bytes.Equal(cfg, previous) || after.Intent != before.Intent+1 {
@@ -241,5 +259,70 @@ func TestSourceRefreshLifecycleProvidersUnavailable(t *testing.T) {
 	}
 	if id, err := services.ReapplySourceRefresh(context.Background(), "source", "id", "name"); id != "" || !errors.Is(err, compat.ErrServiceUnavailable) {
 		t.Fatal(id, err)
+	}
+}
+
+func TestSourceRefreshRenamePreservesEnabledReserve(t *testing.T) {
+	for _, kind := range []string{"live", "stopped", "foreign", "changed connection", "lost interface", "unfenced"} {
+		t.Run(kind, func(t *testing.T) {
+			f, description := reserveDisableFixture(t)
+			if kind == "stopped" {
+				if err := f.process.Stop(f.ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			id := f.plan.node.ID
+			raw := refreshFixtureRecord(t, f.e.d, id, func(rec Record) {
+				rec["name"] = "Renamed"
+				source := "refresh-source"
+				if kind == "foreign" {
+					source = "another-source"
+				}
+				rec["source"] = map[string]any{"type": "subscription", "subscriptionId": source}
+				if kind == "changed connection" {
+					rec["address"] = "127.0.0.2"
+				}
+			})
+			before := f.process.RuntimeSnapshot()
+			prefs, err := readReservePreferencesBytes(reservePreferencesFile(f.e.d))
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.e.d.Svc.KeeneticVerifyInterfaceConfiguration = f.e.d.Svc.KeeneticVerifyInterfaceTarget
+			f.e.d.Svc.KeeneticPreviewOrdinaryDescription = func(name string) (string, error) { return "BROray - " + name, nil }
+			if kind == "lost interface" {
+				f.e.d.Svc.KeeneticVerifyInterfaceTarget = func(context.Context, string) (compat.OwnedInterfaceTarget, error) {
+					return compat.OwnedInterfaceTarget{}, errors.New("no owned interface")
+				}
+			}
+			f.e.d.Svc.KeeneticSyncOwnedDescription = func(context.Context) error {
+				t.Fatal("reserve catalog rename attempted an interface write")
+				return nil
+			}
+			ctx := f.ctx
+			if kind == "unfenced" {
+				ctx = context.Background()
+			}
+			got, err := f.e.s.RenameSourceRefresh(ctx, "refresh-source", id, "A")
+			valid := kind == "live" || kind == "stopped"
+			if valid && (err != nil || got != id) || !valid && (err == nil || got != "") {
+				t.Fatalf("retained reserve outcome: selected=%q err=%v", got, err)
+			}
+			nextPrefs, err := readReservePreferencesBytes(reservePreferencesFile(f.e.d))
+			if err != nil || !bytes.Equal(prefs, nextPrefs) || f.process.RuntimeSnapshot() != before || ActiveID(f.e.d) != id || *description != "BROray - mix-auto" {
+				t.Fatal("catalog rename changed reserve runtime, roster, selection or interface", err)
+			}
+			rendered, err := os.ReadFile(f.e.d.Root.XrayConfig())
+			if err != nil || !bytes.Equal(rendered, f.plan.config) {
+				t.Fatal("catalog rename changed the active configuration", err)
+			}
+			after, err := os.ReadFile(RecordPath(f.e.d, id))
+			if err != nil || !bytes.Equal(after, raw) {
+				t.Fatal("runtime confirmation rewrote the catalog", err)
+			}
+			if pending, err := reserve.TransactionPending(f.ctx, f.e.d.Root); err != nil || pending {
+				t.Fatal("retained reserve recognition created a runtime journal", err)
+			}
+		})
 	}
 }

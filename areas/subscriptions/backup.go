@@ -45,6 +45,11 @@ func registerBackup(s *svc) {
 	})
 }
 
+func stripProfileGenerations(rec map[string]any) {
+	delete(rec, pendingSourceRevisionField)
+	delete(rec, profileApplyScheduleRevisionField)
+}
+
 func (s *svc) backupExport() any {
 	records := []any{}
 	catalogs := map[string]any{}
@@ -54,6 +59,7 @@ func (s *svc) backupExport() any {
 		if validID(id) != nil {
 			continue
 		}
+		stripProfileGenerations(rec)
 		records = append(records, rec)
 		l, d := []any{}, []any{}
 		for _, f := range filterBelongs(live, id) {
@@ -115,6 +121,8 @@ func (s *svc) backupStage(ctx context.Context, raw json.RawMessage, st *compat.B
 			return plan, backupInvalid("подписка %s указана дважды", id)
 		}
 		seen[id] = true
+		// Older exports can include these local queue authority markers.
+		stripProfileGenerations(rec)
 		if rec["lastUpdateStatus"] == "running" {
 			// the refresh that was running when the backup was made did not finish here
 			rec["lastUpdateStatus"] = "error"
@@ -168,16 +176,30 @@ func (s *svc) backupStage(ctx context.Context, raw json.RawMessage, st *compat.B
 	changedAny := false
 	for _, it := range items {
 		id := it.rec["id"].(string)
+		pending, err := stageSvc.pendingProfileImage(id)
+		if err != nil {
+			return plan, fmt.Errorf("BACKUP_STAGE_FAILED: не удалось проверить ожидающие параметры подписки %s: %w", id, err)
+		}
 		cur, _, err := s.readRecord(id)
+		stripProfileGenerations(cur)
 		switch {
 		case err != nil:
 			plan.Add("subscription", id, subName(it.rec), "add", "")
+			changedAny = true
+		case pending.info != nil:
+			plan.Add("subscription", id, subName(it.rec), "replace", "Ожидающие параметры VPN будут сброшены.")
 			changedAny = true
 		case canonicalEqual(cur, it.rec):
 			plan.Add("subscription", id, subName(it.rec), "unchanged", "")
 		default:
 			plan.Add("subscription", id, subName(it.rec), "replace", "")
 			changedAny = true
+		}
+		if err := discardPendingProfile(pending); err != nil {
+			return plan, fmt.Errorf("BACKUP_STAGE_FAILED: не удалось сбросить ожидающие параметры подписки %s: %w", id, err)
+		}
+		if at, _ := it.rec[profileApplyTimeField].(string); at != "" {
+			it.rec[profileApplyScheduleRevisionField] = compat.RandHex(16)
 		}
 		if err := stageSvc.writeRecord(it.rec); err != nil {
 			return plan, fmt.Errorf("BACKUP_STAGE_FAILED: подписка %s не записана", id)

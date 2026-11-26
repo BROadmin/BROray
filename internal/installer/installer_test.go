@@ -172,6 +172,82 @@ func TestCopyFileRejectsExistingSymlink(t *testing.T) {
 	}
 }
 
+func TestInstallRespectsHeldInstallerLock(t *testing.T) {
+	opt := filepath.Join(t.TempDir(), "opt")
+	old := Opt
+	Opt = opt
+	t.Cleanup(func() { Opt = old })
+	if err := os.MkdirAll(filepath.Dir(InitScript()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	root := platform.Root{Dir: filepath.Join(opt, "broray")}
+	if err := os.MkdirAll(root.Run(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	guard, err := platform.TryLock(root.InstallerLock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer guard.Release()
+	if _, err := Install(root, "3.5.0-test", false); !errors.Is(err, platform.ErrLocked) {
+		t.Fatalf("direct install ignored the competing installer owner: %v", err)
+	}
+	if _, err := os.Lstat(root.Current()); !os.IsNotExist(err) {
+		t.Fatalf("blocked install modified deployment: %v", err)
+	}
+}
+
+func TestInstallFirstRefusesAnyVersion(t *testing.T) {
+	old := Opt
+	Opt = filepath.Join(t.TempDir(), "opt")
+	t.Cleanup(func() { Opt = old })
+	if err := os.MkdirAll(filepath.Dir(InitScript()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	root := platform.Root{Dir: filepath.Join(Opt, "broray")}
+	const deployed = "3.5.0-test1"
+	if _, err := InstallFirst(root, deployed, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{deployed, "3.5.0-test0", "3.5.0-test2"} {
+		if _, err := InstallFirst(root, target, false); err == nil || !strings.Contains(err.Error(), "INSTALL_ALREADY_PRESENT") {
+			t.Fatalf("initial installer accepted established branch for %s: %v", target, err)
+		}
+	}
+	if target, err := os.Readlink(root.Current()); err != nil || target != filepath.Join("versions", deployed) {
+		t.Fatalf("active version changed after refusal: %s %v", target, err)
+	}
+}
+
+func TestInstallRejectsUnownedInstallerLock(t *testing.T) {
+	old := Opt
+	Opt = filepath.Join(t.TempDir(), "opt")
+	t.Cleanup(func() { Opt = old })
+	if err := os.MkdirAll(filepath.Dir(InitScript()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	root := platform.Root{Dir: filepath.Join(Opt, "broray")}
+	if err := os.MkdirAll(root.Run(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(Opt, "foreign")
+	if err := os.WriteFile(foreign, []byte("unowned"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(foreign, root.InstallerLock()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallFirst(root, "3.5.0-test", false); err == nil || !strings.Contains(err.Error(), "INSTALL_LOCK_UNAVAILABLE") {
+		t.Fatalf("installer accepted foreign lock: %v", err)
+	}
+	if value, err := os.ReadFile(foreign); err != nil || string(value) != "unowned" {
+		t.Fatalf("foreign inode changed: %v", err)
+	}
+	if _, err := os.Lstat(root.Current()); !os.IsNotExist(err) {
+		t.Fatalf("blocked install wrote current: %v", err)
+	}
+}
+
 func TestInstallCleanThenAdvanceVersion(t *testing.T) {
 	opt := filepath.Join(t.TempDir(), "opt")
 	old := Opt

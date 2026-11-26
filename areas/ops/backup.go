@@ -680,7 +680,13 @@ func (a *area) swapWithCopy(ctx context.Context, stageRoot string, paths []strin
 	if err := compat.WriteJSON(filepath.Join(dir, "manifest.json"), m); err != nil {
 		return id, out, fmt.Errorf("BACKUP_APPLIED_MANIFEST_INCOMPLETE: настройки применены, но не удалось завершить запись копии %s (%w); повторно не применяйте резервную копию", id, err)
 	}
-	a.pruneCopies(prefix)
+	if prefix == "settings-before-import" {
+		for _, copy := range a.preImportCleanup(id) {
+			_ = a.removeCleanup(copy)
+		}
+	} else {
+		a.pruneCopies(prefix)
+	}
 	return id, out, nil
 }
 

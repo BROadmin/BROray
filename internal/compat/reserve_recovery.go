@@ -13,11 +13,13 @@ import (
 
 const ReserveModeAction = "servers:reserve-mode"
 const ReserveSwitchAction = "servers:reserve-switch"
+const ReserveSelectAction = "servers:reserve-select"
 const DPIProfileAction = "servers:dpi-profile"
 
 // Source removal shares the durable selection journal and its recovery owner.
 const SourceRemovalAction = "subscriptions:remove-source"
 const SourceRefreshAction = "subscriptions:refresh"
+const SourceProfileApplyAction = "subscriptions:apply-profile"
 const ReserveOperationTarget = "reserve"
 
 func daemonReserveHolder(h *Holder) bool {
@@ -29,30 +31,36 @@ func daemonReserveHolder(h *Holder) bool {
 // ReconcileDaemonReserve retains the old fence throughout recovery, before any
 // area or child starts. The callback must not call GlobalLock methods.
 func (g *GlobalLock) ReconcileDaemonReserve(root platform.Root, guard *platform.Lock, pending bool, recoverReserve func() error) error {
-	return g.reconcileDaemonReserve(root, guard, pending, false, recoverReserve)
+	return g.reconcileDaemonReserve(root, guard, pending, false, false, recoverReserve)
 }
 
 // ReconcileDaemonDPI uses the same retained owner protocol, but only a DPI
 // operation may authorize a profile recovery. Its callback must not call
 // GlobalLock methods, start the main child, or recover a selection journal.
 func (g *GlobalLock) ReconcileDaemonDPI(root platform.Root, guard *platform.Lock, pending bool, recoverProfile func() error) error {
-	return g.reconcileDaemonReserve(root, guard, pending, true, recoverProfile)
+	return g.reconcileDaemonReserve(root, guard, pending, true, false, recoverProfile)
 }
 
-func (g *GlobalLock) reconcileDaemonReserve(root platform.Root, guard *platform.Lock, pending, profile bool, recoverReserve func() error) error {
+// ReconcileDaemonSourceProfile permits only the exact protected profile-apply
+// owner to resolve an explicit catalog recovery workspace.
+func (g *GlobalLock) ReconcileDaemonSourceProfile(root platform.Root, guard *platform.Lock, recoverSource func() error) error {
+	return g.reconcileDaemonReserve(root, guard, true, false, true, recoverSource)
+}
+
+func (g *GlobalLock) reconcileDaemonReserve(root platform.Root, guard *platform.Lock, pending, profile, sourceProfile bool, recoverReserve func() error) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	fail := errors.New("reserve recovery ownership not confirmed")
 	if !guard.Owns(root.DaemonLock()) || filepath.Clean(g.file) != filepath.Join(root.Run(), "global-operation.json") {
 		return fail
 	}
-	if err := CheckSourceSyncWorkspaces(root); err != nil {
+	if err := CheckSourceSyncWorkspaces(root); err != nil && !sourceProfile {
 		return err
 	}
 	g.daemonOwned = true
 	st, data, err := readGlobalLockRecord(g.file)
 	if errors.Is(err, os.ErrNotExist) {
-		if g.ambiguous || g.cur != nil {
+		if sourceProfile || g.ambiguous || g.cur != nil {
 			return fail
 		}
 		if !pending {
@@ -103,6 +111,9 @@ func (g *GlobalLock) reconcileDaemonReserve(root platform.Root, guard *platform.
 		}
 	}
 	if !h.DaemonOwnedReserve || !daemonReserveHolder(&h) || (h.Action == DPIProfileAction) != profile || h.StartedAt.IsZero() || h.UpdatedAt.IsZero() {
+		return fail
+	}
+	if sourceProfile && h.Action != SourceProfileApplyAction {
 		return fail
 	}
 	if g.cur != nil {

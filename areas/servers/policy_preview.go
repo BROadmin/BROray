@@ -11,6 +11,7 @@ import (
 
 	"github.com/BROadmin/broray/internal/compat"
 	"github.com/BROadmin/broray/internal/platform"
+	"github.com/BROadmin/broray/modules/reserve"
 	"golang.org/x/sys/unix"
 )
 
@@ -42,6 +43,24 @@ func (s *svc) PreviewActiveConfig(ctx context.Context) ([]byte, error) {
 	cfg, err = s.d.Svc.ConfigureRouting(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("ROUTING_POLICY_INVALID: %w", err)
+	}
+	prefs, err := readReservePreferences(s.d)
+	if err != nil {
+		return nil, err
+	}
+	if prefs.Enabled {
+		current, err := reserveRuntimeFile(s.d.Root.XrayConfig(), 2<<20)
+		if err != nil {
+			return nil, err
+		}
+		endpoint, ok := reserve.DiagnosticEndpoint(current)
+		if !ok {
+			return nil, errors.New("RESERVE_RUNTIME_UNCONFIRMED: Сначала восстановите резервирование VPN на странице «Серверы».")
+		}
+		cfg, err = reserve.AttachHealthInbound(cfg, endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("RESERVE_HEALTH_CONFIG_UNCONFIRMED: %w", err)
+		}
 	}
 	if err := s.testBytes(ctx, cfg); err != nil {
 		return nil, errors.New("XRAY_CONFIG_REJECTED: Xray отклонил конфигурацию сервера")

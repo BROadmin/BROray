@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/BROadmin/broray/internal/installstats"
 	"github.com/BROadmin/broray/internal/keenetic"
 	"github.com/BROadmin/broray/internal/platform"
 	"github.com/BROadmin/broray/internal/update"
@@ -273,9 +274,50 @@ func renderInitScript(root platform.Root) string {
 // the daemon. An existing target version is left for the updater's
 // journalled reinstall path; an installer invocation only stages a new one.
 func Install(root platform.Root, version string, start bool) (Report, error) {
+	return install(root, version, start, false)
+}
+
+// InstallFirst is the native entry point used by the clean-install command.
+func InstallFirst(root platform.Root, version string, start bool) (Report, error) {
+	return install(root, version, start, true)
+}
+
+func requireFirstInstall(root platform.Root) error {
+	for _, path := range []string{root.Current(), BinLink(), InitScript()} {
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("INSTALL_ALREADY_PRESENT: %s", path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func install(root platform.Root, version string, start, firstOnly bool) (Report, error) {
 	rep, err := Preflight(root, version)
 	if err != nil {
 		return rep, err
+	}
+	if firstOnly {
+		if err := requireFirstInstall(root); err != nil {
+			return rep, err
+		}
+	}
+	if err := os.MkdirAll(root.Run(), 0700); err != nil {
+		return rep, err
+	}
+	guard, err := platform.TryLockNoFollow(root.InstallerLock())
+	if err != nil {
+		return rep, fmt.Errorf("INSTALL_LOCK_UNAVAILABLE: %w", err)
+	}
+	defer guard.Release()
+	if rep, err = Preflight(root, version); err != nil {
+		return rep, err
+	}
+	if firstOnly {
+		if err := requireFirstInstall(root); err != nil {
+			return rep, err
+		}
 	}
 	self, err := os.Executable()
 	if err != nil {
@@ -283,6 +325,9 @@ func Install(root platform.Root, version string, start bool) (Report, error) {
 	}
 	if err := preflightInstallPaths(root, version); err != nil {
 		return rep, err
+	}
+	if !guard.Owns(root.InstallerLock()) {
+		return rep, errors.New("INSTALL_LOCK_UNAVAILABLE: installer lock path changed")
 	}
 	_, currentErr := os.Lstat(root.Current())
 	freshInstall := errors.Is(currentErr, os.ErrNotExist)
@@ -350,6 +395,12 @@ func Install(root platform.Root, version string, start bool) (Report, error) {
 			return rep, fmt.Errorf("INSTALL_START_FAILED: %v: %s", err, strings.TrimSpace(string(out)))
 		}
 		rep.step("daemon: %s", strings.TrimSpace(string(out)))
+		if freshInstall {
+			if digest, err := installstats.ExecutableDigest(bin); err == nil {
+				// Statistics availability does not change a successful install.
+				_ = installstats.NewQueue(root).ArmFirstInstall(version, digest, time.Now())
+			}
+		}
 	}
 	if freshInstall && newConfig {
 		if start {

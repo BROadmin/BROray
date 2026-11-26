@@ -156,6 +156,10 @@ func (s *svc) sourceRemovalStep(t *compat.Task) error {
 	if err := s.syncMarkers(); err != nil {
 		return refuse(err)
 	}
+	pending, err := s.pendingProfileImage(id)
+	if err != nil {
+		return refuse(err)
+	}
 	active, err := readDeletionImage(servers.ActiveFile(s.d), true)
 	if err != nil {
 		return refuse(err)
@@ -173,7 +177,7 @@ func (s *svc) sourceRemovalStep(t *compat.Task) error {
 		return refuse(err)
 	}
 	catalogCurrent := func() bool {
-		if !source.unchanged() {
+		if !source.unchanged() || !pending.unchanged() {
 			return false
 		}
 		for _, m := range members {
@@ -219,7 +223,7 @@ func (s *svc) sourceRemovalStep(t *compat.Task) error {
 		return refuse(errPersistence)
 	}
 	guard := func() bool {
-		return t.Ctx.Err() == nil && compat.FenceHeld(t.Ctx) && source.unchanged() && after.unchanged()
+		return t.Ctx.Err() == nil && compat.FenceHeld(t.Ctx) && source.unchanged() && after.unchanged() && pending.unchanged()
 	}
 	if _, err := s.removeServers(id, guard); err != nil {
 		return refuse(err)
@@ -227,7 +231,7 @@ func (s *svc) sourceRemovalStep(t *compat.Task) error {
 	if !guard() {
 		return refuse(errPersistence)
 	}
-	if err := s.finishSourceRemoval(id, source, after); err != nil {
+	if err := s.finishSourceRemoval(id, source, after, pending); err != nil {
 		return refuse(err)
 	}
 	s.logf("subscription=" + id + " action=delete-queued")
@@ -237,7 +241,7 @@ func (s *svc) sourceRemovalStep(t *compat.Task) error {
 
 // A final rescan is necessary: checking only pre-existing record images cannot
 // detect a newly added source member. Never unlink the subscription first.
-func (s *svc) finishSourceRemoval(id string, source, active deletionImage) error {
+func (s *svc) finishSourceRemoval(id string, source, active, pending deletionImage) error {
 	if source.path != s.recPath(id) || active.path != servers.ActiveFile(s.d) || !source.unchanged() || !active.unchanged() {
 		return errPersistence
 	}
@@ -247,6 +251,12 @@ func (s *svc) finishSourceRemoval(id string, source, active deletionImage) error
 	remaining, err := s.deletionMembers(id)
 	if err != nil || len(remaining) != 0 {
 		return fail("SERVER_SOURCE_REMOVE_FAILED", "Не все записи источника удалены. Подписка сохранена.")
+	}
+	if !source.unchanged() || !active.unchanged() {
+		return errPersistence
+	}
+	if err := discardPendingProfile(pending); err != nil {
+		return fail("PERSISTENCE_ERROR", "Удаление ожидающих параметров подписки не подтверждено.")
 	}
 	if !source.unchanged() || !active.unchanged() {
 		return errPersistence
@@ -272,16 +282,20 @@ func (s *svc) removeLegacySource(id string) (any, error) {
 	if exists(s.d.RunPath("subscriptions", id+".lock")) {
 		return nil, fail("UPDATE_ALREADY_RUNNING", "Состояние прежней операции подписки требует восстановления.")
 	}
+	pending, err := s.pendingProfileImage(id)
+	if err != nil {
+		return nil, errPersistence
+	}
 	active, err := readDeletionImage(servers.ActiveFile(s.d), true)
 	if err != nil {
 		return nil, errPersistence
 	}
-	guard := func() bool { return source.unchanged() && active.unchanged() }
+	guard := func() bool { return source.unchanged() && active.unchanged() && pending.unchanged() }
 	removed, err := s.removeServers(id, guard)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.finishSourceRemoval(id, source, active); err != nil {
+	if err := s.finishSourceRemoval(id, source, active, pending); err != nil {
 		return nil, err
 	}
 	s.logf("subscription=" + id + " action=delete")

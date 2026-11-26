@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/BROadmin/broray/internal/platform"
-	"github.com/BROadmin/broray/internal/strictjson"
+	"github.com/BROadmin/broray/modules/health"
 )
 
 type ProbeTarget struct {
@@ -30,6 +30,7 @@ type ProbeTarget struct {
 type ProbeOutcome struct {
 	Verdict, Identity, ErrorCode string
 	StartedAt, FinishedAt        time.Time
+	Controls                     []health.ControlObservation
 }
 
 // Probe checks fixed HTTPS control URLs through an already owned Xray input.
@@ -70,14 +71,14 @@ func probeConfigBytes(target ProbeTarget) ([]byte, error) {
 // Extra route conditions, a redirecting outbound or an altered input are not
 // accepted as the diagnostic path emitted by AttachHealthInbound.
 func validProbeConfig(data []byte, endpoint netip.AddrPort) bool {
-	v, err := strictjson.Decode(data)
-	if err != nil {
-		return false
+	cfg := decodeHotConfig(data)
+	if api, _ := cfg["api"].(map[string]any); api["tag"] == hotControlTag {
+		return validHotProbeConfig(cfg, endpoint)
 	}
-	cfg, ok := v.(map[string]any)
-	if !ok {
-		return false
-	}
+	return validSingleProbeConfig(cfg, endpoint)
+}
+
+func validSingleProbeConfig(cfg map[string]any, endpoint netip.AddrPort) bool {
 	original, err := json.Marshal(cfg)
 	if err != nil {
 		return false
@@ -161,20 +162,22 @@ func probeWithRoots(ctx context.Context, target ProbeTarget, roots *x509.CertPoo
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: DefaultPolicy().URLTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	healthy := false
-	for _, targetURL := range []string{"https://cp.cloudflare.com/generate_204", "https://www.gstatic.com/generate_204"} {
+	for _, target := range health.ActiveControls() {
 		if ctx.Err() != nil {
 			break
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.URL, nil)
 		if err != nil {
 			return
 		}
 		response, err := client.Do(req)
 		if err != nil {
+			result.Controls = append(result.Controls, target.Observe(0, err))
 			continue
 		}
 		_, readErr := io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 		closeErr := response.Body.Close()
+		result.Controls = append(result.Controls, target.Observe(response.StatusCode, errors.Join(readErr, closeErr)))
 		if response.StatusCode == http.StatusNoContent && readErr == nil && closeErr == nil {
 			healthy = true
 			break

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -19,6 +20,49 @@ type reserveModeContextKey struct{}
 func (s *svc) defineReserveActions() {
 	s.d.Queue.Define(compat.ActionSpec{Name: compat.ReserveModeAction, Type: "server_operation", Priority: map[string]int{"*": 1}, Stages: []compat.Stage{{Name: "mode", Phase: "switching", Global: true, Protected: true, Run: s.reserveModeStep}}})
 	s.d.Queue.Define(compat.ActionSpec{Name: compat.ReserveSwitchAction, Type: "server_operation", Priority: map[string]int{"*": 1}, Stages: []compat.Stage{{Name: "monitor", Phase: "checking", Global: true, Protected: true, Run: s.reserveMonitorStep}}})
+	s.d.Queue.Define(compat.ActionSpec{Name: compat.ReserveSelectAction, Type: "server_operation", Priority: map[string]int{"USER": 1}, Stages: []compat.Stage{{Name: "activate", Phase: "switching", Global: true, Protected: true, Run: s.reserveSelectStep}}})
+}
+
+func reserveOutsideRosterError() *cgi.APIError {
+	return cgi.E(409, "RESERVE_SERVER_OUTSIDE_ROSTER", "Сервер вне состава резервирования VPN. Выберите действие в карточке резервирования.")
+}
+
+func (s *svc) reserveSelectStep(t *compat.Task) error {
+	parts := strings.Split(t.Context, ":")
+	if len(parts) != 2 && len(parts) != 4 {
+		return stepError(t, "INVALID_REQUEST", "Некорректное действие резервирования.")
+	}
+	request := reserveSelection{server: t.Target}
+	if len(parts) == 4 {
+		request.mode, request.remove = parts[2], parts[3]
+	}
+	prefs, err := readReservePreferences(s.d)
+	if err != nil || !prefs.Enabled || prefs.Revision != parts[0] {
+		return stepError(t, "SETTINGS_CHANGED", "Состав или режим резервирования изменился. Обновите состояние.")
+	}
+	if _, problem := proposedReserveSelection(prefs, request); problem != nil {
+		return stepError(t, problem.Code, problem.Message)
+	}
+	hash, err := fileSHA256(RecordPath(s.d, t.Target))
+	if err != nil || hash != parts[1] {
+		return changed(t)
+	}
+	if err := s.applyReserveSelection(t.Ctx, prefs.Revision, request); err != nil {
+		if errors.Is(err, errReserveNoReachable) {
+			return stepError(t, "RESERVE_NO_REACHABLE_SERVER", "Выбранный сервер не подтвердил соединение. Текущий сервер сохранён.")
+		}
+		return s.reserveQueueError(t, err)
+	}
+	s.resetReserveMonitor()
+	switch request.mode {
+	case "promote":
+		t.Result("Основной сервер изменён и подключён.", "")
+	case "ordinary":
+		t.Result("Резервирование выключено. Сервер подключён в обычном режиме.", "")
+	default:
+		t.Result("Сервер из состава резервирования подключён.", "")
+	}
+	return nil
 }
 
 func (s *svc) handleReserveMode(c *cgi.Req) {
@@ -111,6 +155,9 @@ func (s *svc) reserveModeStep(t *compat.Task) error {
 		}
 	}
 	if err != nil {
+		if errors.Is(err, errReserveNoReachable) {
+			return stepError(t, "RESERVE_NO_REACHABLE_SERVER", "Ни один сервер состава не подтвердил соединение. Текущий сервер сохранён.")
+		}
 		return s.reserveQueueError(t, err)
 	}
 	s.resetReserveMonitor()
@@ -136,6 +183,12 @@ func (s *svc) resetReserveMonitor() {
 }
 
 func (s *svc) reserveQueueError(t *compat.Task, err error) error {
+	switch {
+	case errors.Is(err, errReserveModeRolledBack), errors.Is(err, errReserveSwitchRolledBack):
+		t.Op.RecordRollback(true, errors.Is(err, errReserveRollbackVPNVerified))
+	case errors.Is(err, errReserveRollbackUnconfirmed):
+		t.Op.RecordRollback(false, false)
+	}
 	if errors.Is(err, errReserveProbeCleanup) || errors.Is(err, reserve.ErrProbeWorkspaceUnconfirmed) {
 		return errors.Join(errReserveTransactionPending, err)
 	}
@@ -233,9 +286,12 @@ func (s *svc) reserveStatus() (any, error) {
 			repairRequired = !present
 		}
 	}
+	status := map[string]any{"settings": prefs, "activeServerId": active, "paused": s.d.Queue.Paused(),
+		"recoveryRequired": s.d.Lock.Ambiguous(), "runtimeRepairRequired": repairRequired,
+		"autoSwitchEnabled": s.reserveStatusAutoSwitch(), "checking": true, "state": nil}
 	m := s.reserveMon
 	if !m.mu.TryLock() {
-		return map[string]any{"settings": prefs, "activeServerId": active, "paused": s.d.Queue.Paused(), "recoveryRequired": s.d.Lock.Ambiguous(), "runtimeRepairRequired": repairRequired, "checking": true, "state": nil}, nil
+		return status, nil
 	}
 	state, err := json.Marshal(m.state)
 	blocked := m.blocked
@@ -243,5 +299,30 @@ func (s *svc) reserveStatus() (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"settings": prefs, "activeServerId": active, "paused": s.d.Queue.Paused(), "recoveryRequired": blocked || s.d.Lock.Ambiguous(), "runtimeRepairRequired": repairRequired, "checking": false, "state": json.RawMessage(state)}, nil
+	status["recoveryRequired"] = blocked || s.d.Lock.Ambiguous()
+	status["checking"], status["state"] = false, json.RawMessage(state)
+	return status, nil
+}
+
+func (s *svc) reserveStatusAutoSwitch() any {
+	raw, err := reserveRuntimeFile(autoSwitchFile(s.d), 1<<20)
+	if errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	if err != nil {
+		return nil
+	}
+	value, err := strictjson.Decode(raw)
+	config, ok := value.(map[string]any)
+	if err != nil || !ok {
+		return nil
+	}
+	switch config["enabled"] {
+	case true, "true":
+		return true
+	case false, "false":
+		return false
+	default:
+		return nil
+	}
 }
