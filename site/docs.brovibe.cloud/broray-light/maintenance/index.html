@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site-manifest.json">
 <meta name="theme-color" content="#0d1213">
-<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+<link rel="stylesheet" href="/styles.css?v=20261126-copy-rail">
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
@@ -40,10 +40,14 @@
 </ol>
 <p>Переход с проверенного <code>1.0.0-r1</code> сохраняет пользовательское состояние и установленный Xray. Равная версия — успешная операция без переустановки приложения; downgrade запрещён. При ошибке проверки здоровья обновитель возвращает предыдущий рабочий слот. <code>2.0.0-r1</code> в техническом индексе — внутренний идентификатор релиза <strong>2.0.0</strong>, а не другая пользовательская версия.</p>
 <p>Если WebUI недоступен, после резервного копирования можно запустить тот же подписанный обновитель из Entware shell:</p>
-<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">/opt/libexec/broray-light-updater/broray-light-updater.sh check
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code class="language-sh">/opt/libexec/broray-light-updater/broray-light-updater.sh check
 /opt/libexec/broray-light-updater/broray-light-updater.sh update
 /opt/libexec/broray-light-updater/broray-light-updater.sh status
-</code></pre></div>
+</code></pre>
+  <button class="copy" type="button" aria-label="Копировать команды" title="Копировать команды"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 <p>Не запускайте чистый IPK поверх имеющегося Light. Исторический <code>1.0.0-r2</code> опубликован, но не является текущей рекомендованной базой: проверенный переход этого выпуска начинается с r1. Для иной или вручную изменённой установки сначала запросите диагностику.</p>
 <h3>Xray</h3>
 <ol>
@@ -67,7 +71,8 @@
 
 <h3 id="light-terminal-full-remove">Полное ручное удаление через терминал</h3>
 <p>Пока файлы Light ещё установлены, сначала безопасно удалите два объекта Keenetic по их ownership receipts. Только после этого снимайте пакет и удаляйте оставшиеся product-owned данные.</p>
-<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать полное удаление BROray-Light">Копировать</button><pre><code class="language-sh">(
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code class="language-sh">(
 set -eu
 
 # 1. Удалить публикацию WebUI brolight из KeenDNS.
@@ -89,7 +94,10 @@ fi
 rm -rf /opt/broray-light        /opt/var/lib/broray-light        /opt/var/lib/broray-light-updater
 
 echo 'BROray-Light полностью удалён.'
-)</code></pre></div>
+)</code></pre>
+  <button class="copy" type="button" aria-label="Копировать полное удаление BROray-Light" title="Копировать полное удаление BROray-Light"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 <div class="note warning"><span class="note-title">Перед полным удалением</span>Каталоги <code>/opt/broray-light/config</code>, <code>servers</code>, <code>subscriptions</code> и <code>runtime/xray</code> будут удалены. Если они нужны — сохраните их заранее. Общие пакеты Entware (<code>lighttpd</code>, <code>curl</code>, <code>jq</code> и другие зависимости) этот блок не удаляет.</div>
 
 <h3 id="light-keenetic-after-remove">После удаления обязательно проверьте Keenetic</h3>
@@ -99,8 +107,12 @@ echo 'BROray-Light полностью удалён.'
 <li>Если остался объект, удаляйте только тот ProxyN или WebUI-адрес, который точно принадлежал BROray-Light. Сторонние интерфейсы и публикации не трогайте.</li>
 </ol>
 <p>Если Light уже частично удалён и ownership-aware команда публикации больше недоступна, оставшийся HTTP Proxy с точным именем <code>brolight</code> можно удалить из Entware shell:</p>
-<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать удаление адреса BROray-Light из Keenetic">Копировать</button><pre><code class="language-sh">ndmc -c 'no ip http proxy brolight'
-ndmc -c 'system configuration save'</code></pre></div>
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code class="language-sh">ndmc -c 'no ip http proxy brolight'
+ndmc -c 'system configuration save'</code></pre>
+  <button class="copy" type="button" aria-label="Копировать удаление адреса BROray-Light из Keenetic" title="Копировать удаление адреса BROray-Light из Keenetic"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 <p class="muted">Если после частичного удаления остался ProxyN, удалите его через панель Keenetic только после точной идентификации имени и принадлежности. Не выполняйте <code>no interface Proxy0</code> наугад.</p>
 </section>
 </main></div>
@@ -108,5 +120,5 @@ ndmc -c 'system configuration save'</code></pre></div>
 <span>BROvibe Docs · BROray-Light · Обслуживание</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20261001-recovery"></script>
+<script src="/site.js?v=20261126-copy-rail"></script>
 </body></html>

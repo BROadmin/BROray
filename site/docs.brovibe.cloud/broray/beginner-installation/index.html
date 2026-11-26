@@ -13,7 +13,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site-manifest.json">
 <meta name="theme-color" content="#0d1213">
-<link rel="stylesheet" href="/styles.css?v=20261126-install-copy">
+<link rel="stylesheet" href="/styles.css?v=20261126-copy-rail">
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
@@ -79,7 +79,11 @@
 
 <ol><li>Войдите в основную панель Keenetic или Netcraze учётной записью администратора. Можно использовать её рабочий адрес KeenDNS.</li><li>Откройте «Управление» → «Настройки системы» → «Изменить набор компонентов». Найдите <strong>«Интерфейс командной строки в браузере»</strong>. Если компонент уже установлен, повторно устанавливать его не нужно.</li><li>Если компонента нет, отметьте только его и прочитайте итоговый список изменений перед подтверждением.</li><li>На странице «Менеджер пакетов OPKG» включите <strong>«Доступ»</strong> напротив своей учётной записи администратора, например admin, и сохраните. Entware и его накопитель должны быть уже настроены.</li><li>Нажмите шестерёнку в верхней части панели → <strong>«Интерфейс командной строки»</strong>. Пункт «Консоль RCI» — другой инструмент.</li><li>Если появилась строка <code>(config)&gt;</code>, введите следующую команду один раз:</li></ol>
 
-<div class="code-block"><button class="copy" type="button">Скопировать</button><pre><code>exec sh</code></pre></div>
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code>exec sh</code></pre>
+  <button class="copy" type="button" aria-label="Скопировать команду" title="Скопировать команду"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 
 <p>Должна открыться BusyBox/ash и строка с <code>#</code>. Теперь можно вставлять команды BROray. Если <code>exec sh</code> возвращает в <code>(config)&gt;</code>, проверьте доступ OPKG для своей учётной записи и готовность Entware; установочные команды пока не вводите.</p>
 
@@ -95,18 +99,23 @@
 
 <p>Если curl уже установлен и загрузки HTTPS работают, этот шаг можно пропустить. Иначе один раз выполните блок для установки curl и сертификатов:</p>
 
-<div class="code-block"><button class="copy" type="button">Скопировать</button><pre><code>opkg update &amp;&amp; opkg install ca-bundle ca-certificates curl</code></pre></div>
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code>opkg update &amp;&amp; opkg install ca-bundle ca-certificates curl</code></pre>
+  <button class="copy" type="button" aria-label="Скопировать команду" title="Скопировать команду"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 
 <p>Если opkg завершился ошибкой или не найден, сначала исправьте Entware либо подключение к нему; к следующему шагу пока не переходите.</p>
 
 
 <h2 id="models">4. Установите BROray 3.5.10</h2>
 <p>Запустите обе строки в одном сеансе Entware с правами root. Первая задаёт два источника, вторая проверяет SHA-256 скрипта и запускает его. Установщик проверяет SHA-256 архива. Если Stable недоступен или хеш не совпал, загрузка повторяется с GitHub.</p>
-<div class="install-command" id="install">
-  <button class="copy" type="button">Скопировать команду</button>
+<div class="command-copy-block install-command" id="install">
   <pre tabindex="0" aria-label="Двухстрочная команда установки BROray"><code>export BRORAY_REPOS=&#x27;https://api.brovibe.cloud/releases/broray/channels/stable https://github.com/BROadmin/BROray/releases/download/v3.5.10&#x27;
 (set -f; f=$(mktemp /tmp/broray.XXXXXX) || exit; trap &#x27;rm -f &quot;$f&quot;&#x27; 0; for u in $BRORAY_REPOS; do curl -q -fsSL --proto &#x27;=https&#x27; --proto-redir &#x27;=https&#x27; --connect-timeout 8 -m 25 -o &quot;$f&quot; -- &quot;$u/install-broray-3.5.10-r15.sh&quot; &amp;&amp; echo &quot;af6a88b07e6a4ca673ba2b49f8c5fb4e9b37639063cbd43555d39bbff231c5f7  $f&quot; | sha256sum -c - &amp;&amp; { /opt/bin/ash &quot;$f&quot;; exit $?; }; done; echo &#x27;Нет установщика с верным SHA-256.&#x27; &gt;&amp;2; exit 1)
 </code></pre>
+  <button class="copy" type="button" aria-label="Скопировать команду" title="Скопировать команду"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
 </div>
 
 <span id="install-aarch64"></span><span id="install-mipsel"></span><span id="install-mips"></span><span id="install-armv7"></span>
@@ -129,11 +138,19 @@
 
 <p>Начиная с 3.5.6 при чистой установке адрес broray.… создаётся автоматически, если настроен KeenDNS. Если установщик сообщил предупреждение или адрес ранее был отключён, включите его вручную. Оставьте основную панель роутера открытой и в уже работающем терминале Entware выполните команду <strong>3.5</strong>:</p>
 
-<div class="code-block"><button class="copy" type="button">Скопировать</button><pre><code>/opt/bin/broray ctl post /api/keenetic/web-access-enable.cgi &#x27;{}&#x27;</code></pre></div>
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code>/opt/bin/broray ctl post /api/keenetic/web-access-enable.cgi &#x27;{}&#x27;</code></pre>
+  <button class="copy" type="button" aria-label="Скопировать команду" title="Скопировать команду"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 
 <p>Дождитесь ответа <code>success:true</code>, затем посмотрите адрес и состояние публикации:</p>
 
-<div class="code-block"><button class="copy" type="button">Скопировать</button><pre><code>/opt/bin/broray ctl get /api/keenetic/web-access-status.cgi</code></pre></div>
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code>/opt/bin/broray ctl get /api/keenetic/web-access-status.cgi</code></pre>
+  <button class="copy" type="button" aria-label="Скопировать команду" title="Скопировать команду"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 
 <p>В ответе найдите <code>data.address</code> и откройте этот адрес в браузере. При успешном включении <code>data.state</code> — <code>enabled</code>, а <code>data.enabled</code> и <code>data.consistent</code> — <code>true</code>. Домен роутера подставляется программой. При ошибке остановитесь и разберите её по коду; <a href="https://docs.brovibe.cloud/broray/troubleshooting/#keendns-only">проверка внешнего адреса</a>.</p>
 
@@ -158,5 +175,5 @@
 <span>BROvibe Docs · BROray</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20261108-broray352-docs-fix"></script>
+<script src="/site.js?v=20261126-copy-rail"></script>
 </body></html>

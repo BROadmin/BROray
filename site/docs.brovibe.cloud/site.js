@@ -27,14 +27,41 @@ const DOCS_SEARCH_INDEX = [{"url":"/","title":"Главная документа
   document.querySelectorAll('[data-docs-search]').forEach(btn=>btn.addEventListener('click',()=>{const d=ensureDialog(); d.showModal(); setTimeout(()=>d.querySelector('#docs-search-input').focus(),0);}));
   document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault(); const d=ensureDialog(); if(!d.open)d.showModal(); d.querySelector('#docs-search-input').focus();}});
 
-  document.querySelectorAll('button.copy').forEach(button=>button.addEventListener('click',()=>{
-    const scope=button.closest('.light-code-block') || button.parentElement;
-    const code=scope && scope.querySelector('code');
-    if(!code || !navigator.clipboard) return;
-    navigator.clipboard.writeText(code.textContent).then(()=>{
-      const old=button.textContent;
-      button.textContent='Скопировано';
-      setTimeout(()=>{button.textContent=old;},1200);
+  document.querySelectorAll('button.copy').forEach(button => {
+    const block = button.closest('.command-copy-block');
+    const scope = block || button.closest('.light-code-block') || button.parentElement;
+    const code = scope?.querySelector('code');
+    const status = block?.querySelector('.command-copy-status');
+    if (!code) return;
+    const label = button.textContent;
+    const title = button.title;
+    let reset;
+    button.addEventListener('click', async () => {
+      let state = 'copied';
+      let message = 'Скопировано';
+      try {
+        await navigator.clipboard.writeText(code.textContent);
+      } catch {
+        state = 'failed';
+        message = 'Не удалось скопировать. Выделите текст команды вручную.';
+      }
+      clearTimeout(reset);
+      if (status) {
+        status.textContent = message;
+        button.dataset.copyState = state;
+        button.title = message;
+      } else {
+        button.textContent = message;
+      }
+      reset = setTimeout(() => {
+        if (status) {
+          delete button.dataset.copyState;
+          button.title = title;
+          status.textContent = '';
+        } else {
+          button.textContent = label;
+        }
+      }, 2200);
     });
-  }));
+  });
 })();

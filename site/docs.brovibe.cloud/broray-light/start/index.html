@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site-manifest.json">
 <meta name="theme-color" content="#0d1213">
-<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+<link rel="stylesheet" href="/styles.css?v=20261126-copy-rail">
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
@@ -44,21 +44,30 @@
 <p>Используйте <a href="https://termius.com/">Termius</a>, <a href="https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html">PuTTY</a> или встроенный SSH-клиент.</p>
 <p>В Termius создайте <strong>New Host</strong>, в PuTTY заполните <strong>Host Name</strong>. Укажите LAN-IP роутера, SSH-порт <strong>Entware</strong>, пользователя <code>root</code> и свой пароль Entware. Сверьте ключ сервера при первом подключении. Пароль WebUI Keenetic и пароль root Entware могут различаться.</p>
 <p>Во встроенном терминале:</p>
-<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">ssh root@192.168.1.1
-</code></pre></div>
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code class="language-sh">ssh root@192.168.1.1
+</code></pre>
+  <button class="copy" type="button" aria-label="Копировать команды" title="Копировать команды"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 <p>Для другого SSH-порта: <code>ssh -p НОМЕР_ПОРТА root@IP_РОУТЕРА</code>. Если приглашение выглядит как <code>(config)&gt;</code>, это KeeneticOS CLI, а не Entware. Откройте правильный SSH-порт. При вводе пароля символы могут не отображаться — это нормально.</p>
 <p>Проверьте окружение:</p>
-<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">opkg --version
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code class="language-sh">opkg --version
 opkg print-architecture
 ls -ld /opt
 df -h /opt /tmp
 test -x /opt/bin/ash &amp;&amp; echo &quot;Entware shell: OK&quot;
-</code></pre></div>
+</code></pre>
+  <button class="copy" type="button" aria-label="Копировать команды" title="Копировать команды"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 <p>Архитектура должна включать <code>aarch64-3.10</code>. При ошибке остановитесь и устраните её до следующего шага.</p>
 <h2 id="guide-4">4. Чистая установка 2.0.0</h2>
 <p>Этот путь — <strong>только для отсутствующей установки Light</strong>. Если Light уже установлен, используйте раздел 8.</p>
 <p>Скопируйте весь блок в Entware shell от root. Он устанавливает зависимости, скачивает точный установщик в оперативную память и проверяет его SHA-256 до запуска:</p>
-<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">(
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code class="language-sh">(
 set -eu
 PATH=/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin
 export PATH
@@ -80,14 +89,21 @@ curl -q --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --tlsv1.2 \
   &#39;d7d1a709621f3154c0f5b5892a98bddd3f3f782b57d01eb15025e739abcd44f2&#39; ]
 /opt/bin/ash &quot;$D/install.sh&quot;
 )
-</code></pre></div>
+</code></pre>
+  <button class="copy" type="button" aria-label="Копировать команды" title="Копировать команды"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 <p>Не используйте <code>curl -k</code>, <code>opkg --force-reinstall</code> или ручную распаковку вместо отказавшего установщика. Не запускайте тот же блок бесконечно при ошибке: сохраните сообщение, выясните причину и только затем повторите установку. Если аварийное завершение OPKG оставило файлы, удаляйте только каталог <code>/tmp/broray-light-guide.XXXXXX</code>, созданный этой попыткой, после проверки его точного имени и содержимого; не очищайте весь <code>/tmp</code>.</p>
 <p>Проверка результата:</p>
-<div class="light-code-block"><button class="copy" type="button" aria-label="Копировать команды">Копировать</button><pre><code class="language-sh">/opt/etc/init.d/S23broray-light-updater status &amp;&amp; echo &quot;Updater: OK&quot;
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code class="language-sh">/opt/etc/init.d/S23broray-light-updater status &amp;&amp; echo &quot;Updater: OK&quot;
 /opt/etc/init.d/S24broray-light status &amp;&amp; echo &quot;BROray-Light: OK&quot;
 /opt/broray-light/runtime/xray version
 /opt/bin/broray-light-web-publishctl status
-</code></pre></div>
+</code></pre>
+  <button class="copy" type="button" aria-label="Копировать команды" title="Копировать команды"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 <p>При чистой установке используется Xray <strong>26.9.9</strong>. Это предварительный выпуск самого Xray, отдельно проверенный в рамках Light; слово Stable относится к релизу приложения, а не меняет статус upstream-ядра. Пока сервер не выбран, Xray может быть остановлен — добавьте и активируйте рабочий VLESS-сервер.</p>
 <h2 id="guide-5">5. Откройте WebUI и войдите</h2>
 <p>Локально: <code>http://LAN-IP-РОУТЕРА:8080/</code>.</p>
@@ -100,5 +116,5 @@ curl -q --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --tlsv1.2 \
 <span>BROvibe Docs · BROray-Light · Установка</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20261001-recovery"></script>
+<script src="/site.js?v=20261126-copy-rail"></script>
 </body></html>
