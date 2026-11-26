@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site-manifest.json">
 <meta name="theme-color" content="#0d1213">
-<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+<link rel="stylesheet" href="/styles.css?v=20261126-install-copy">
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
@@ -100,12 +100,13 @@
 
 
 <h2 id="models">4. Установите BROray 3.5.10</h2>
-<span id="install"></span>
 <p>Запустите обе строки в одном сеансе Entware с правами root. Первая задаёт два источника, вторая проверяет SHA-256 скрипта и запускает его. Установщик проверяет SHA-256 архива. Если Stable недоступен или хеш не совпал, загрузка повторяется с GitHub.</p>
-<p>Скопируйте обе строки и вставьте их в терминал Entware.</p>
-<pre><button class="copy" type="button" aria-label="Скопировать команды установки BROray">Скопировать</button><code>export BRORAY_REPOS=&#x27;https://api.brovibe.cloud/releases/broray/channels/stable https://github.com/BROadmin/BROray/releases/download/v3.5.10&#x27;
+<div class="install-command" id="install">
+  <button class="copy" type="button">Скопировать команду</button>
+  <pre tabindex="0" aria-label="Двухстрочная команда установки BROray"><code>export BRORAY_REPOS=&#x27;https://api.brovibe.cloud/releases/broray/channels/stable https://github.com/BROadmin/BROray/releases/download/v3.5.10&#x27;
 (set -f; f=$(mktemp /tmp/broray.XXXXXX) || exit; trap &#x27;rm -f &quot;$f&quot;&#x27; 0; for u in $BRORAY_REPOS; do curl -q -fsSL --proto &#x27;=https&#x27; --proto-redir &#x27;=https&#x27; --connect-timeout 8 -m 25 -o &quot;$f&quot; -- &quot;$u/install-broray-3.5.10-r15.sh&quot; &amp;&amp; echo &quot;af6a88b07e6a4ca673ba2b49f8c5fb4e9b37639063cbd43555d39bbff231c5f7  $f&quot; | sha256sum -c - &amp;&amp; { /opt/bin/ash &quot;$f&quot;; exit $?; }; done; echo &#x27;Нет установщика с верным SHA-256.&#x27; &gt;&amp;2; exit 1)
 </code></pre>
+</div>
 
 <span id="install-aarch64"></span><span id="install-mipsel"></span><span id="install-mips"></span><span id="install-armv7"></span>
 <h3 id="other-models">Как проверить архитектуру Entware</h3>

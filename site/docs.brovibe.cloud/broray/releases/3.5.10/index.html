@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site-manifest.json">
 <meta name="theme-color" content="#0d1213">
-<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+<link rel="stylesheet" href="/styles.css?v=20261126-install-copy">
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
@@ -35,7 +35,7 @@
   </section>
   <nav class="link-list" aria-label="На этой странице">
     <a href="#update">Обновление</a>
-    <a href="#install">Первая установка</a>
+    <a href="#installation-steps">Первая установка</a>
     <a href="#setup">Быстрая настройка</a>
     <a href="#premium">Проверка домена и IP</a>
     <a href="#diagnostics">Диагностика</a>
@@ -48,7 +48,7 @@
       <li>Войдите снова. На странице <strong>BROray</strong> проверьте версию 3.5.10 и ревизию r15. На странице <strong>Серверы</strong> проверьте активное подключение и резервирование.</li>
     </ol>
   </section>
-  <section id="install">
+  <section id="installation-steps">
     <h2>Первая установка</h2>
     <p>Понадобится Keenetic или Netcraze с Entware, компонентом KeeneticOS «Клиент прокси» и минимум 60 МиБ свободного места в <code>/opt</code>. Поддерживаются ARM64, ARMv7, MIPS и MIPSEL.</p>
     <ol class="steps">
@@ -56,10 +56,12 @@
       <li>Выполните две строки в одном сеансе Entware. Первая задаёт Stable и GitHub, вторая скачивает скрипт, сверяет его SHA-256 и запускает. Установщик выбирает архив по архитектуре и сверяет SHA-256. При сбое загрузки или несовпадении хеша Stable используется GitHub.</li>
       <li>Откройте WebUI по локальному адресу роутера с портом 8080, например <code>http://192.168.1.1:8080/</code>. Войдите как администратор Keenetic.</li>
     </ol>
-    <p>Скопируйте обе строки и вставьте их в терминал Entware.</p>
-<pre><button class="copy" type="button" aria-label="Скопировать команды установки BROray">Скопировать</button><code>export BRORAY_REPOS=&#x27;https://api.brovibe.cloud/releases/broray/channels/stable https://github.com/BROadmin/BROray/releases/download/v3.5.10&#x27;
+<div class="install-command" id="install">
+  <button class="copy" type="button">Скопировать команду</button>
+  <pre tabindex="0" aria-label="Двухстрочная команда установки BROray"><code>export BRORAY_REPOS=&#x27;https://api.brovibe.cloud/releases/broray/channels/stable https://github.com/BROadmin/BROray/releases/download/v3.5.10&#x27;
 (set -f; f=$(mktemp /tmp/broray.XXXXXX) || exit; trap &#x27;rm -f &quot;$f&quot;&#x27; 0; for u in $BRORAY_REPOS; do curl -q -fsSL --proto &#x27;=https&#x27; --proto-redir &#x27;=https&#x27; --connect-timeout 8 -m 25 -o &quot;$f&quot; -- &quot;$u/install-broray-3.5.10-r15.sh&quot; &amp;&amp; echo &quot;af6a88b07e6a4ca673ba2b49f8c5fb4e9b37639063cbd43555d39bbff231c5f7  $f&quot; | sha256sum -c - &amp;&amp; { /opt/bin/ash &quot;$f&quot;; exit $?; }; done; echo &#x27;Нет установщика с верным SHA-256.&#x27; &gt;&amp;2; exit 1)
 </code></pre>
+</div>
     <p><a href="/broray/start/">Подготовка роутера и Entware</a></p>
   </section>
   <section id="setup">
