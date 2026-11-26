@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BROray 3.5.10 — установка и что нового</title>
+<meta name="description" content="Что нового в BROray 3.5.10 и как установить, обновить и настроить VPN на Keenetic или Netcraze.">
+<link rel="canonical" href="https://docs.brovibe.cloud/broray/releases/3.5.10/">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site-manifest.json">
+<meta name="theme-color" content="#0d1213">
+<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+</head>
+<body>
+<a class="skip-link" href="#content">Перейти к содержанию</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/"><span>BRO</span>vibe Docs</a>
+    <nav class="nav" aria-label="Основная навигация">
+      <a href="/">Главная</a>
+      <a href="/broray/" aria-current="page">BROray</a>
+      <a href="/broray-light/">BROray-Light</a>
+      <a class="nav-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <button class="search-trigger" type="button" data-docs-search>Поиск</button>
+    </nav>
+  </div>
+</header>
+<div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray/">Обзор</a><a href="/broray/start/">Установка</a><a href="/broray/update/">Обновление</a><a href="/broray/webui/">WebUI</a><a href="/broray/scenarios/">Сценарии</a><a href="/broray/maintenance/">Обслуживание</a><a href="/broray/faq/">FAQ</a><a href="/broray/troubleshooting/">Решение проблем</a><a href="/broray/releases/">История версий</a><a href="/broray/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
+<main class="content" id="content">
+  <section class="page-hero">
+    <div><h1>BROray 3.5.10</h1><p class="lead">Настройте VPN с помощью мастера, проверьте доступность сайтов и IP-адресов и выберите время применения обновлений.</p></div>
+  </section>
+  <nav class="link-list" aria-label="На этой странице">
+    <a href="#update">Обновление</a>
+    <a href="#install">Первая установка</a>
+    <a href="#setup">Быстрая настройка</a>
+    <a href="#premium">Проверка домена и IP</a>
+    <a href="#diagnostics">Диагностика</a>
+  </nav>
+  <section id="update">
+    <h2>Обновление с 3.5.9</h2>
+    <ol class="steps">
+      <li>Откройте WebUI, перейдите на страницу <strong>BROray</strong> и скачайте резервную копию настроек.</li>
+      <li>Нажмите <strong>Проверить обновление</strong>. Если предлагается 3.5.10, нажмите <strong>Установить обновление</strong>.</li>
+      <li>Войдите снова. На странице <strong>BROray</strong> проверьте версию 3.5.10 и ревизию r15. На странице <strong>Серверы</strong> проверьте активное подключение и резервирование.</li>
+    </ol>
+  </section>
+  <section id="install">
+    <h2>Первая установка</h2>
+    <p>Понадобится Keenetic или Netcraze с Entware, компонентом KeeneticOS «Клиент прокси» и минимум 60 МиБ свободного места в <code>/opt</code>. Поддерживаются ARM64, ARMv7, MIPS и MIPSEL.</p>
+    <ol class="steps">
+      <li>Откройте оболочку Entware с правами root. В веб-терминале KeeneticOS сначала выполните <code>exec sh</code>.</li>
+      <li>Выполните две строки команды 3.5.10 по порядку. Первая загружает скрипт, вторая проверяет его SHA-256 и запускает. Скрипт сам подбирает архив по архитектуре и проверяет его.</li>
+      <li>Откройте WebUI по локальному адресу роутера с портом 8080, например <code>http://192.168.1.1:8080/</code>. Войдите как администратор Keenetic.</li>
+    </ol>
+    <p>Скопируйте обе строки и вставьте их в терминал Entware.</p>
+<pre><button class="copy" type="button" aria-label="Скопировать команды установки BROray">Скопировать</button><code>broray_install_dir=; broray_install_dir=$(mktemp -d /tmp/broray-script.XXXXXXXX) &amp;&amp; curl -q -fL --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --connect-timeout 15 --max-time 120 -o &#34;$broray_install_dir/install-broray.sh&#34; &#39;https://github.com/BROadmin/BROray/releases/download/v3.5.10/install-broray.sh&#39; || { if [ -n &#34;$broray_install_dir&#34; ]; then rm -f &#34;$broray_install_dir/install-broray.sh&#34;; rmdir &#34;$broray_install_dir&#34;; fi; unset broray_install_dir; (exit 1); }
+( set -eu; : &#34;${broray_install_dir:?Сначала скачайте скрипт первой строкой}&#34;; trap &#39;rm -f &#34;$broray_install_dir/install-broray.sh&#34;; rmdir &#34;$broray_install_dir&#34;&#39; 0; actual=$(sha256sum &#34;$broray_install_dir/install-broray.sh&#34;); [ &#34;${actual%% *}&#34; = &#39;5d12705dc637ecc52b71d40e4efe451f03758491034ab5ba4917865a689f91ae&#39; ] || { printf &#39;%s\n&#39; &#39;SHA-256 скрипта не совпал.&#39; &gt;&amp;2; exit 1; }; /opt/bin/ash &#34;$broray_install_dir/install-broray.sh&#34; )
+</code></pre>
+    <p><a href="/broray/start/">Подготовка роутера и Entware</a></p>
+  </section>
+  <section id="setup">
+    <h2>Быстрая настройка</h2>
+    <p>Откройте <strong>Быстрая настройка</strong> на главной странице или на странице <strong>BROray</strong>. Используйте текущий VPN либо добавьте ключ сервера или ссылку на подписку. Проверьте сервер, подключитесь и выберите первый набор маршрутов. Установку набора можно пропустить.</p>
+  </section>
+  <section id="premium">
+    <h2>Проверка домена и IP</h2>
+    <ol class="steps">
+      <li>В меню <strong>Premium</strong> выберите <strong>Проверка домена</strong> или <strong>Проверка IP</strong>. Введите домен, публичный IPv4 или IPv6 и нажмите <strong>Проверить</strong>.</li>
+      <li>Сравните результаты <strong>Напрямую</strong> и <strong>Через VPN</strong>. Для домена проверяется HTTPS, для IP — TCP-порт 443. Если доступа нет, смотрите пояснение рядом со статусом.</li>
+      <li>Когда напрямую доступа нет, а через VPN он подтверждён, BROray может предложить добавление. При первом подтверждении создаётся список «Premium домены» или «Premium IP». Следующие подтверждённые записи добавляются туда же.</li>
+    </ol>
+    <p>Чтобы добавить запись вручную, откройте <strong>Маршруты → По доменам и IP</strong>. Один DNS-список Keenetic может содержать домены, IPv4 и IPv6.</p>
+  </section>
+  <section id="connection">
+    <h2>Серверы и фоновые обновления</h2>
+    <ul class="check-list">
+      <li>В карточке «Автовыбор и резервирование» можно настроить основной и запасные серверы. При подтверждённом отказе WAN BROray временно приостанавливает переключения и после восстановления перепроверяет текущий VPN.</li>
+      <li>Список серверов сортируется по имени, доступности или задержке. Можно вернуться к текущему порядку.</li>
+      <li>GeoIP, GeoSite и каталог подписки проверяются в фоне. Если используемые данные Geo не менялись, Xray продолжает работу. Изменения обеих баз применяются вместе за один перезапуск.</li>
+      <li>Изменившиеся параметры рабочего профиля подписки можно применить вручную или по расписанию. Они также применяются при штатном запуске Xray. Применение может кратковременно прервать VPN.</li>
+    </ul>
+  </section>
+  <section id="diagnostics">
+    <h2>Диагностика</h2>
+    <p>На странице <strong>BROray</strong> в карточке <strong>Журнал BROray</strong> нажмите <strong>Показать журнал</strong>. Затем выберите <strong>Скопировать диагностику</strong> или <strong>Скачать диагностический отчёт</strong>. В отчёте есть модель и прошивка роутера, версия и ревизия BROray и сведения об ошибках операций.</p>
+    <p>В карточке безопасной очистки <strong>Размер выбранных данных</strong> показывает объём выбранных объектов. После очистки BROray показывает фактическое изменение свободного места.</p>
+  </section>
+  <section id="statistics">
+    <h2>Статистика установок и обновлений</h2>
+    <p>После успешной операции BROray в фоне отправляет тип и идентификатор события, версию, ревизию и архитектуру. Если доступны, добавляются модель и устойчивый псевдоним роутера. Событие обновления содержит также предыдущую версию и ревизию.</p>
+    <p>Псевдоним вычисляется на роутере из серийного номера. Сам номер, MAC, IP, настройки, ключи, ссылки подписок и идентификатор Telegram в событие не входят. Скачивания архивов считаются отдельно.</p>
+  </section>
+  <p><a href="https://github.com/BROadmin/BROray/releases/tag/v3.5.10">Архивы и контрольные суммы на GitHub</a> · <a href="/broray/releases/">История версий</a></p>
+</main></div>
+<footer class="site-footer"><div class="footer-inner">
+<span>BROvibe Docs · BROray · 3.5.10</span>
+<div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
+</div></footer>
+<script src="/site.js?v=20261108-broray352-docs-fix"></script>
+</body></html>
