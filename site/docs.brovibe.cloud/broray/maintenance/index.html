@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site-manifest.json">
 <meta name="theme-color" content="#0d1213">
-<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+<link rel="stylesheet" href="/styles.css?v=20261126-copy-rail">
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
@@ -54,9 +54,13 @@
 
 <p>Сначала прочитайте состояние операции и журнал. Не отправляйте вторую установку и не удаляйте файлы журнала вручную. BROray использует журнал для восстановления и отката. При доступном терминале начните с безопасных команд просмотра:</p>
 
-<div class="code-block"><button class="copy" type="button">Скопировать</button><pre><code>/opt/bin/broray version
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code>/opt/bin/broray version
 /opt/bin/broray ctl ping
-/opt/bin/broray installer status</code></pre></div>
+/opt/bin/broray installer status</code></pre>
+  <button class="copy" type="button" aria-label="Скопировать команду" title="Скопировать команду"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 
 <p>Встроенное восстановление вызывается командой <code>/opt/bin/broray ctl recover</code>; вариант <code>--restart</code> применяют только понимая причину остановки и имея способ вернуться к роутеру. Не используйте инструкции с каталогами updater-v5 от 3.2 для 3.5.</p>
 
@@ -69,7 +73,11 @@
 
 <p>Если нужно сохранить данные для последующей установки, выберите соответствующий режим. Через WebUI удаление доступно по локальному IPv4-адресу; внешний адрес KeenDNS для него заблокирован. Через терминал Entware предусмотрена команда:</p>
 
-<div class="code-block"><button class="copy" type="button">Скопировать</button><pre><code>/opt/bin/broray installer uninstall --keep-data</code></pre></div>
+<div class="command-copy-block">
+  <pre tabindex="0" aria-label="Команда в терминале"><code>/opt/bin/broray installer uninstall --keep-data</code></pre>
+  <button class="copy" type="button" aria-label="Скопировать команду" title="Скопировать команду"><span class="copy-mark" aria-hidden="true"></span></button>
+  <span class="command-copy-status" role="status"></span>
+</div>
 
 <p>Удаление может остановить VPN и затронуть связанные маршруты. Заранее сохраните данные и обеспечьте доступ к панели роутера. Полное удаление данных — отдельный режим с явным подтверждением; оно не нужно для обычного обновления 3.5. Не удаляйте Entware, чужие настройки и каталоги вручную.</p>
 
@@ -78,5 +86,5 @@
 <span>BROvibe Docs · BROray · Обслуживание</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20261108-broray352-docs-fix"></script>
+<script src="/site.js?v=20261126-copy-rail"></script>
 </body></html>
