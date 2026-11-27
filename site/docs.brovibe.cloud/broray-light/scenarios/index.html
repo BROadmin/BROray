@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Сценарии BROray-Light</title>
-<meta name="description" content="Основные сценарии BROray-Light: VLESS-подписка, отдельный сервер, активация и резервное переключение.">
+<title>Сценарии BROray-Light 3.5.10</title>
+<meta name="description" content="Как добавить сервер или подписку, настроить резерв и удалить неактивные записи BROray-Light.">
 <link rel="canonical" href="https://docs.brovibe.cloud/broray-light/scenarios/">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site-manifest.json">
 <meta name="theme-color" content="#0d1213">
-<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+<link rel="stylesheet" href="/styles.css?v=20261126-copy-rail">
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
@@ -30,43 +30,20 @@
 </header>
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray-light/">Обзор</a><a href="/broray-light/start/">Установка</a><a href="/broray-light/webui/">WebUI</a><a href="/broray-light/scenarios/" aria-current="page">Сценарии</a><a href="/broray-light/maintenance/">Обслуживание</a><a href="/broray-light/troubleshooting/">Решение проблем</a><a href="/broray-light/releases/">История версий</a><a href="/broray-light/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
 <main class="content" id="content">
-<section class="page-hero"><div><p class="eyebrow">Обычные действия</p><h1>Основные сценарии</h1><p class="lead">Добавьте VLESS, активируйте подключение и настройте резервный порядок.</p></div></section><h2 id="guide-6">6. Добавьте подписку или сервер</h2>
-<h3>Подписка</h3>
-<ol>
-<li>Откройте <strong>Подписки</strong>.</li>
-<li>В поле <strong>Название</strong> введите, например, <code>Основная</code>.</li>
-<li>Вставьте HTTPS-ссылку провайдера в поле <strong>Ссылка подписки</strong>.</li>
-<li>Нажмите <strong>Добавить подписку</strong> и дождитесь результата.</li>
-<li>Откройте <strong>Серверы</strong>: импортируются только VLESS-записи.</li>
-</ol>
-<p>Ссылка подписки — секрет: не отправляйте её в Issues и скриншотах. Она не отображается в списке. Название подписки задаётся отдельно от имён серверов.</p>
-<p>Кнопка <strong>Обновить</strong> синхронизирует подписку сейчас. Для расписания включите <strong>Включить автообновление</strong>, задайте интервал от 5 до 10080 минут и нажмите <strong>Сохранить автообновление</strong>. Проверьте время следующего обновления. Автообновление подписок не является плановым измерением качества серверов.</p>
-<p><strong>Удалить</strong> запрашивает подтверждение и удаляет подписку вместе с относящимися к ней незащищёнными записями. Если подписка содержит активный сервер, сначала активируйте узел вне неё. Отказ защиты не следует обходить ручным удалением файлов.</p>
-<h3>Одна VLESS-ссылка</h3>
-<ol>
-<li>Откройте <strong>Серверы</strong>.</li>
-<li>Вставьте полную ссылку <code>vless://…</code> в поле добавления.</li>
-<li>Нажмите <strong>Добавить сервер</strong>.</li>
-</ol>
-<p>Название берётся из подписи ссылки после <code>#</code>. Одинаковые нормализованные параметры VLESS не должны создавать отдельные серверы при пересечении подписок и ручного импорта.</p>
-<h2 id="guide-7">7. Активируйте соединение и настройте резерв</h2>
-<ol>
-<li>Нажмите <strong>Проверить</strong> у нужного сервера. Дождитесь результата: успешная проверка одного узла не означает работоспособность всех узлов подписки.</li>
-<li>Нажмите <strong>Активировать</strong> у рабочего сервера.</li>
-<li>Откройте <strong>Главную</strong> и нажмите <strong>Обновить статус</strong>.</li>
-<li>Убедитесь, что указано имя сервера, Xray запущен, соединение работает, а карточка Keenetic показывает интерфейс и состояние <strong>Активен</strong>.</li>
-<li>Если требуется настройка, используйте <strong>Настроить</strong> или <strong>Исправить</strong>. На исправном управляемом интерфейсе эти действия недоступны намеренно.</li>
-<li>При необходимости выберите этот интерфейс в политике доступа Keenetic для нужных устройств. Light не устанавливает наборы Routes; правила распределения устройств остаются настройками Keenetic.</li>
-</ol>
-<p>Для резервного переключения на странице <strong>Серверы</strong> задайте порядок стрелками <strong>↑/↓</strong>, исключите ненужные узлы флажком <strong>Не использовать в автопереключении</strong>, настройте порог ошибок и паузу, включите автопереключение и нажмите <strong>Сохранить настройки</strong>. Изменение порядка без сохранения ещё не меняет конфигурацию.</p>
-<p><strong>Выключено</strong> означает отсутствие автоматических проверок. <strong>Ожидание первой проверки</strong> означает, что настройки уже сохранены, но цикл ещё не завершался. <strong>Нет доступной замены</strong> означает, что после порога ошибок не найден рабочий резерв. Это не рейтинг: Light использует заданный порядок, без истории качества.</p>
-<p>Активный сервер защищён от удаления. Чтобы удалить его, сначала выберите другой рабочий сервер. В диалоге удаления можно отменить действие без изменений.</p>
+<section class="page-hero"><div><p class="eyebrow">Сценарии</p><h1>Настройте соединение</h1><p class="lead">Добавьте сервер, настройте переключение и обновляйте список из подписки.</p></div></section>
 
-<section class="what-next"><div><p class="eyebrow">Обновление и Xray</p><h2>Обслуживание вынесено отдельно</h2><p>Так настройки подключения не смешиваются с обновлением приложения.</p></div><a class="primary-action" href="/broray-light/maintenance/">Открыть обслуживание →</a></section>
+<section id="guide-6"><h2>Один сервер</h2><ol><li>На странице <strong>Серверы</strong> вставьте ссылку VLESS, VMess, Trojan, Shadowsocks или Hysteria2 и нажмите <strong>Добавить сервер</strong>.</li>
+<li>Откройте параметры, нажмите <strong>Проверить</strong>, затем <strong>Активировать</strong>. Проверьте, что на Главной отображается рабочее соединение.</li>
+<li>Если нужно подключить устройства или трафик через Light, включите управление интерфейсом в карточке <strong>Keenetic</strong>, затем назначьте интерфейс подходящей политике в Keenetic.</li></ol></section>
+<section id="guide-7"><h2>Подписка и резерв</h2><ol><li>На вкладке <strong>Подписки</strong> укажите имя и HTTPS-ссылку, нажмите <strong>Добавить подписку</strong>, затем <strong>Обновить</strong>.</li>
+<li>На вкладке <strong>Серверы</strong> проверьте профили, выберите активный, задайте порядок и исключите неподходящие записи из резерва.</li>
+<li>На Главной в настройках резерва включите автопереключение, укажите число ошибок и минимальную паузу, затем сохраните.</li></ol>
+<p>При подтверждённом исчезновении активного профиля подписки Light проверяет следующие записи, а после конца списка возвращается к его началу. Исключённые записи и серверы с неудачной проверкой пропускаются. Если замена отсутствует, соединение останавливается.</p></section>
+<section id="bulk"><h2>Оставить только активный сервер</h2><p>На странице <strong>Серверы</strong> нажмите <strong>Удалить все, кроме активного</strong> и прочитайте подтверждение. Отмена сохраняет весь список. Подтверждение удаляет остальные записи, сохраняет активную и не прерывает её соединение.</p><p>Если нужно прекратить получение серверов из конкретного источника, удалите подписку на её странице. Ручные записи и серверы других подписок сохранятся.</p></section>
 </main></div>
 <footer class="site-footer"><div class="footer-inner">
 <span>BROvibe Docs · BROray-Light · Сценарии</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20261001-recovery"></script>
+<script src="/site.js?v=20261127-light-3.5.10"></script>
 </body></html>

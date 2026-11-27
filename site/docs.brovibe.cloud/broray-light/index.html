@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BROray-Light 2.0.0 — документация</title>
-<meta name="description" content="Пользовательская документация BROray-Light 2.0.0: установка, три страницы WebUI, VLESS, обслуживание, решение проблем и история версий.">
+<title>BROray-Light 3.5.10 — документация</title>
+<meta name="description" content="Установка и обслуживание BROray-Light 3.5.10 для Keenetic и Netcraze. Серверы, подписки и переход со старого Light.">
 <link rel="canonical" href="https://docs.brovibe.cloud/broray-light/">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site-manifest.json">
 <meta name="theme-color" content="#0d1213">
-<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+<link rel="stylesheet" href="/styles.css?v=20261126-copy-rail">
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
@@ -30,23 +30,25 @@
 </header>
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray-light/" aria-current="page">Обзор</a><a href="/broray-light/start/">Установка</a><a href="/broray-light/webui/">WebUI</a><a href="/broray-light/scenarios/">Сценарии</a><a href="/broray-light/maintenance/">Обслуживание</a><a href="/broray-light/troubleshooting/">Решение проблем</a><a href="/broray-light/releases/">История версий</a><a href="/broray-light/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
 <main class="content" id="content">
-<section class="page-hero"><div><p class="eyebrow">BROray-Light · Keenetic · VLESS</p><h1>BROray-Light 2.0.0</h1><p class="lead">Минимальная VLESS-only редакция: три страницы WebUI, подписки, резервные серверы и управление Xray.</p></div><div class="release-state"><span class="status-dot" aria-hidden="true"></span>Stable · 11 сентября 2026</div></section>
-<section class="task-entry"><h2>Что вы хотите сделать?</h2><div class="task-grid">
-<a class="task-card task-card-primary" href="/broray-light/start/"><span>01</span><strong>Установить впервые</strong><p>Совместимость, Entware, терминал и чистая установка.</p></a>
-<a class="task-card" href="/broray-light/scenarios/"><span>02</span><strong>Настроить VLESS</strong><p>Подписка или сервер, активация и резервное переключение.</p></a>
-<a class="task-card" href="/broray-light/maintenance/"><span>03</span><strong>Обновить Light или Xray</strong><p>Штатное обновление и безопасное обслуживание.</p></a>
-<a class="task-card task-card-problem" href="/broray-light/troubleshooting/"><span>!</span><strong>Что-то не работает</strong><p>Выберите симптом и начните с безопасной проверки.</p></a>
+<section class="page-hero"><div><p class="eyebrow">BROray-Light · Keenetic</p><h1>BROray-Light 3.5.10</h1><p class="lead">Лёгкий клиент на Go. Один бинарник, три страницы WebUI, серверы, подписки и управление Xray.</p></div><div class="release-state"><span class="status-dot" aria-hidden="true"></span>Stable 3.5.10</div></section>
+
+<section class="task-entry"><h2>С чего начать</h2><div class="task-grid">
+<a class="task-card task-card-primary" href="/broray-light/start/"><strong>Установить впервые</strong><p>Выберите архив Entware и проверьте SHA-256.</p></a>
+<a class="task-card" href="/broray-light/start/#migration"><strong>Перейти со старого Light</strong><p>Сохраните ссылки и перенесите настройки вручную.</p></a>
+<a class="task-card" href="/broray-light/scenarios/"><strong>Добавить сервер или подписку</strong><p>Импортируйте профили и настройте резерв.</p></a>
+<a class="task-card task-card-problem" href="/broray-light/troubleshooting/"><strong>Решить проблему</strong><p>Проверьте доступ, Xray, обновление или подписку.</p></a>
 </div></section>
-<section><h2>Что отличает Light</h2><div class="feature-grid">
-<article class="feature"><h3>Только VLESS</h3><p>Другие протоколы не импортируются и не поддерживаются этой редакцией.</p></article>
-<article class="feature"><h3>Три страницы</h3><p>Главная, Серверы и Подписки — без отдельных Routes и DNS-over-TLS.</p></article>
-<article class="feature"><h3>Резервные серверы</h3><p>Детерминированное переключение по заданному порядку без рейтингов и истории качества.</p></article>
-<article class="feature"><h3>Управление Xray</h3><p>Выбор официальной версии, совместимость, переустановка и отдельные предупреждения.</p></article>
+<section><h2>Что входит в Light</h2><div class="feature-grid">
+<article class="feature"><h3>Три страницы</h3><p>Главная, Серверы и Подписки. На Главной находятся Keenetic, Xray и обновление приложения.</p></article>
+<article class="feature"><h3>Импорт профилей</h3><p>VLESS, VMess, Trojan, Shadowsocks и Hysteria2. Подписки объединяют совпадающие профили.</p></article>
+<article class="feature"><h3>Переключение по порядку</h3><p>Сервер можно исключить из резерва. Когда подписка убирает активный профиль, Light ищет рабочую замену.</p></article>
+<article class="feature"><h3>Вход Keenetic</h3><p>WebUI открывается по LAN на порту 8080. Зарегистрированный KeenDNS или CrazeDNS позволяет открыть HTTPS-адрес с поддоменом <code>brolight</code>.</p></article>
 </div></section>
+<p><a class="card-link" href="https://github.com/BROadmin/BROray-Light/releases/tag/v3.5.10">Скачать релиз на GitHub →</a> · <a href="/broray-light/releases/#release-3-5-10">Изменения и результаты проверок</a></p>
 </main></div>
 <footer class="site-footer"><div class="footer-inner">
-<span>BROvibe Docs · BROray-Light 2.0.0</span>
+<span>BROvibe Docs · BROray-Light 3.5.10</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20261001-recovery"></script>
+<script src="/site.js?v=20261127-light-3.5.10"></script>
 </body></html>
