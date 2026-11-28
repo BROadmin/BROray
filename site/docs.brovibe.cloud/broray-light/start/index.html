@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Установка BROray-Light 2.0.0</title>
-<meta name="description" content="Пошаговая установка BROray-Light 2.0.0: совместимость, Entware, терминал, чистая установка и вход в WebUI.">
+<title>Установка BROray-Light 3.5.10 по шагам</title>
+<meta name="description" content="Как открыть Entware на Keenetic, установить BROray-Light готовой командой и подключить первый сервер.">
 <link rel="canonical" href="https://docs.brovibe.cloud/broray-light/start/">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -30,91 +30,175 @@
 </header>
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray-light/">Обзор</a><a href="/broray-light/start/" aria-current="page">Установка</a><a href="/broray-light/webui/">WebUI</a><a href="/broray-light/scenarios/">Сценарии</a><a href="/broray-light/maintenance/">Обслуживание</a><a href="/broray-light/troubleshooting/">Решение проблем</a><a href="/broray-light/releases/">История версий</a><a href="/broray-light/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
 <main class="content" id="content">
-<section class="page-hero"><div><p class="eyebrow">Начало работы</p><h1>Установка BROray-Light</h1><p class="lead">Пошаговый путь для первой установки Light. Если Entware и терминал уже настроены, соответствующие этапы можно пропустить.</p></div><div class="release-state"><span class="status-dot" aria-hidden="true"></span>Stable 2.0.0</div></section><section id="compatibility"><h2>1. Проверьте совместимость</h2><ul class="check-list"><li>Keenetic с Entware <code>aarch64-3.10</code>;</li><li>накопитель подключён как <code>/opt</code>;</li><li>есть root-доступ к Entware shell;</li><li>на роутере корректны время, DNS и HTTPS.</li></ul><p>Если эти условия выполнены, переходите к Entware и установке. Точные требования к месту, временным каталогам и владению компонентами вынесены в технический справочник.</p><a class="card-link" href="/broray-light/reference/">Подробные требования →</a></section><h2 id="guide-2">2. Установите Entware, если его ещё нет</h2>
+<style>.content [id]{scroll-margin-top:6rem}@media(max-width:760px){.content [id]{scroll-margin-top:13rem}}</style>
+<section class="page-hero">
+  <div>
+    <p class="eyebrow">BROray-Light · 3.5.10 · Stable</p>
+    <h1>Установка BROray-Light 3.5.10 по шагам</h1>
+    <p class="lead">Откройте терминал Entware на роутере, вставьте готовый блок команд и войдите в BROray-Light.</p>
+  </div>
+</section>
+
+<section id="choose-path"><h2>С чего начать</h2>
+<ul>
+<li><strong>Ставите впервые</strong> — начните с <a href="#prepare">подготовки роутера</a>. Если Entware уже работает, <a href="#guide-2">откройте его терминал</a>.</li>
+<li><strong>Стоит Light 1.x или 2.0</strong> — сначала <a href="#migration">сохраните настройки и подготовьте переход</a>.</li>
+<li><strong>Стоит Light на Go</strong> — откройте <a href="/broray-light/maintenance/#guide-8">инструкцию по обновлению</a>.</li>
+</ul>
+</section>
+
+<section id="prepare"><h2>1. Подготовьте роутер</h2>
 <ol>
-<li>Откройте веб-интерфейс Keenetic по LAN-адресу своего роутера, обычно <code>http://192.168.1.1/</code>.</li>
-<li>Проверьте раздел приложений: если OPKG/Entware уже работает и выбран накопитель, переустанавливать Entware не нужно.</li>
-<li>Если Entware отсутствует, сохраните нужные файлы с выделенного накопителя. <strong>Форматирование удаляет его содержимое.</strong></li>
-<li>Подготовьте накопитель и компоненты «Поддержка открытых пакетов»/OPKG согласно инструкции для своей модели и версии KeeneticOS. Названия пунктов могут различаться.</li>
-<li>Установите именно Entware <code>aarch64-3.10</code> по <a href="https://forum.keenetic.ru/topic/4299-entware/">инструкции Keenetic Community</a>.</li>
-<li>Дождитесь завершения установки и убедитесь, что OPKG работает, а <code>/opt</code> доступен на запись.</li>
+<li>Войдите в основную панель Keenetic или Netcraze и убедитесь, что на роутере работает интернет. Проще начать из домашней сети. Если у вас только облачный адрес панели, откройте веб-терминал на шаге 2.</li>
+<li>В «Управление» → «Настройки системы» → «Изменить набор компонентов» проверьте <strong>«Поддержка открытых пакетов»</strong> (<code>opkg</code>). Если хотите направлять трафик устройств через Light, нужен также <strong>«Клиент прокси»</strong> (<code>proxy</code>). Для внешнего адреса WebUI нужен настроенный KeenDNS или CrazeDNS.</li>
+<li>Если Entware ещё не установлен, настройте его по <a href="https://support.keenetic.com/hero/kn-1012/en/20980-installing-the-entware-repository-on-a-usb-drive.html">инструкции Keenetic</a> или <a href="https://support.netcraze.ru/giga/nc-1012/ru/20980-installing-the-entware-repository-on-a-usb-drive.html">руководству Netcraze на русском</a>. При установке на USB с ext4 нужна поддержка Ext. Работающий Entware можно использовать как есть.</li>
 </ol>
-<p>Не переносите команды форматирования с другой модели и не выполняйте установку Light в командной строке KeeneticOS.</p>
-<h2 id="guide-3">3. Подключитесь к терминалу Entware</h2>
-<p>Используйте <a href="https://termius.com/">Termius</a>, <a href="https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html">PuTTY</a> или встроенный SSH-клиент.</p>
-<p>В Termius создайте <strong>New Host</strong>, в PuTTY заполните <strong>Host Name</strong>. Укажите LAN-IP роутера, SSH-порт <strong>Entware</strong>, пользователя <code>root</code> и свой пароль Entware. Сверьте ключ сервера при первом подключении. Пароль WebUI Keenetic и пароль root Entware могут различаться.</p>
-<p>Во встроенном терминале:</p>
+<p>Установите только недостающие компоненты. Панель может временно отключиться, если KeeneticOS обновится и роутер перезагрузится.</p>
+</section>
+
+<section id="guide-2"><h2>2. Откройте терминал Entware</h2>
+<p>Выберите любой из двух способов. Команды ниже выполняются в терминале роутера, где приглашение обычно заканчивается символом <code>#</code>.</p>
+
+<h3 id="web-terminal">Вариант А. В браузере</h3>
+<ol>
+<li>Войдите в основную панель роутера как администратор. При удалённой установке подойдёт уже настроенный облачный адрес панели.</li>
+<li>В настройках компонентов проверьте наличие <strong>«Интерфейс командной строки в браузере»</strong>.</li>
+<li>На странице <strong>«Менеджер пакетов OPKG»</strong> включите <strong>«Доступ»</strong> для своей учётной записи администратора и сохраните изменения.</li>
+<li>В верхней части панели нажмите шестерёнку и выберите <strong>«Интерфейс командной строки»</strong>. Если видите <code>(config)&gt;</code>, введите:</li>
+</ol>
 <div class="command-copy-block">
-  <pre tabindex="0" aria-label="Команда в терминале"><code class="language-sh">ssh root@192.168.1.1
-</code></pre>
-  <button class="copy" type="button" aria-label="Копировать команды" title="Копировать команды"><span class="copy-mark" aria-hidden="true"></span></button>
+  <pre tabindex="0" aria-label="Команда для входа в Entware"><code>exec sh</code></pre>
+  <button class="copy" type="button" aria-label="Скопировать команду входа в Entware" title="Скопировать команду входа в Entware"><span class="copy-mark" aria-hidden="true"></span></button>
   <span class="command-copy-status" role="status"></span>
 </div>
-<p>Для другого SSH-порта: <code>ssh -p НОМЕР_ПОРТА root@IP_РОУТЕРА</code>. Если приглашение выглядит как <code>(config)&gt;</code>, это KeeneticOS CLI, а не Entware. Откройте правильный SSH-порт. При вводе пароля символы могут не отображаться — это нормально.</p>
-<p>Проверьте окружение:</p>
+<p>Когда появится строка с <code>#</code>, переходите к шагу 3. Если по-прежнему видите <code>(config)&gt;</code>, проверьте, что Entware установлен и для вашей учётной записи разрешён доступ к OPKG.</p>
+
+<h3 id="ssh-entware">Вариант Б. По SSH из домашней сети</h3>
+<ol>
+<li>В PuTTY, Termius или другом SSH-клиенте укажите локальный адрес роутера, например <code>192.168.1.1</code>.</li>
+<li>Укажите порт Entware. Обычно это <code>222</code>, если встроенная служба SSH роутера занимает <code>22</code>. Если настроен другой порт, используйте его.</li>
+<li>Войдите как <strong>root</strong> с паролем Entware. В терминале символы пароля обычно не отображаются. Если вы попали в <code>(config)&gt;</code>, используйте <code>exec sh</code> при включённом доступе к OPKG.</li>
+</ol>
+<p>Облачный адрес панели может работать без доступа по SSH. Тогда используйте вариант А.</p>
+</section>
+
+<section id="guide-3"><h2>3. Установите curl и сертификаты</h2>
+<p>Если <code>curl</code> уже скачивает файлы по HTTPS, переходите к шагу 4. Иначе скопируйте команду, вставьте в терминал роутера, нажмите Enter и дождитесь окончания:</p>
 <div class="command-copy-block">
-  <pre tabindex="0" aria-label="Команда в терминале"><code class="language-sh">opkg --version
-opkg print-architecture
-ls -ld /opt
-df -h /opt /tmp
-test -x /opt/bin/ash &amp;&amp; echo &quot;Entware shell: OK&quot;
-</code></pre>
-  <button class="copy" type="button" aria-label="Копировать команды" title="Копировать команды"><span class="copy-mark" aria-hidden="true"></span></button>
+  <pre tabindex="0" aria-label="Команда установки curl и сертификатов"><code>opkg update &amp;&amp; opkg install ca-bundle ca-certificates curl</code></pre>
+  <button class="copy" type="button" aria-label="Скопировать команду установки curl" title="Скопировать команду установки curl"><span class="copy-mark" aria-hidden="true"></span></button>
   <span class="command-copy-status" role="status"></span>
 </div>
-<p>Архитектура должна включать <code>aarch64-3.10</code>. При ошибке остановитесь и устраните её до следующего шага.</p>
-<h2 id="guide-4">4. Чистая установка 2.0.0</h2>
-<p>Этот путь — <strong>только для отсутствующей установки Light</strong>. Если Light уже установлен, используйте раздел 8.</p>
-<p>Скопируйте весь блок в Entware shell от root. Он устанавливает зависимости, скачивает точный установщик в оперативную память и проверяет его SHA-256 до запуска:</p>
-<div class="command-copy-block">
-  <pre tabindex="0" aria-label="Команда в терминале"><code class="language-sh">(
-set -eu
-PATH=/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin
-export PATH
-[ &quot;$(id -u)&quot; = 0 ]
-[ -d /tmp ] &amp;&amp; [ ! -L /tmp ]
-awk &#39;$2==&quot;/tmp&quot; &amp;&amp; ($3==&quot;tmpfs&quot; || $3==&quot;ramfs&quot;) {ok=1} END {exit !ok}&#39; /proc/mounts
-umask 077
-D=&quot;$(mktemp -d /tmp/broray-light-guide.XXXXXX)&quot;
-trap &#39;rm -f &quot;$D/install.sh&quot;; rmdir &quot;$D/opkg&quot; 2&gt;/dev/null || :; rmdir &quot;$D&quot; 2&gt;/dev/null || :&#39; EXIT
-mkdir &quot;$D/opkg&quot;
-TMPDIR=&quot;$D/opkg&quot; opkg --tmp-dir &quot;$D/opkg&quot; update
-TMPDIR=&quot;$D/opkg&quot; opkg --tmp-dir &quot;$D/opkg&quot; install ca-bundle ca-certificates curl coreutils-stat
-curl -q --proto &#39;=https&#39; --proto-redir &#39;=https&#39; --tlsv1.2 \
-  --connect-timeout 15 --max-time 600 -fsSL \
-  -H &#39;Cache-Control: no-cache, no-store&#39; -H &#39;Accept-Encoding: identity&#39; \
-  &#39;https://github.com/BROadmin/BROray-Light/releases/download/v2.0.0/broray-light-install-2.0.0.sh&#39; \
-  -o &quot;$D/install.sh&quot;
-[ &quot;$(sha256sum &quot;$D/install.sh&quot; | awk &#39;NR==1{print $1}&#39;)&quot; = \
-  &#39;d7d1a709621f3154c0f5b5892a98bddd3f3f782b57d01eb15025e739abcd44f2&#39; ]
-/opt/bin/ash &quot;$D/install.sh&quot;
+<p>Если <code>opkg</code> не найден или установка пакетов завершилась ошибкой, вернитесь к шагам 1 и 2.</p>
+</section>
+
+<section id="guide-4"><h2>4. Установите BROray-Light</h2>
+<p>Нажмите кнопку копирования рядом с блоком. Вставьте весь блок в терминал роутера и нажмите Enter. Он сам определит архитектуру Entware, скачает архив с GitHub, сверит контрольные суммы и запустит установщик. В блоке ничего подставлять не нужно.</p>
+<div id="install" class="command-copy-block install-command">
+  <pre tabindex="0" aria-label="Команды установки BROray-Light"><code class="language-sh">(
+  set -eu
+  fail() { printf &apos;%s\n&apos; &quot;$*&quot; &gt;&amp;2; exit 1; }
+  [ &quot;$(id -u)&quot; = 0 ] || fail &apos;Откройте терминал Entware с правами root.&apos;
+  command -v opkg &gt;/dev/null || fail &apos;Команда opkg не найдена. Проверьте, что открыт терминал Entware.&apos;
+  command -v curl &gt;/dev/null || fail &apos;Сначала выполните шаг «Установите curl и сертификаты».&apos;
+
+  arches=$(opkg print-architecture) || fail &apos;Не удалось узнать архитектуру Entware.&apos;
+  arch=$(printf &apos;%s\n&apos; &quot;$arches&quot; | awk &apos;$1 == &quot;arch&quot; &amp;&amp; $2 != &quot;&quot; &amp;&amp; $2 != &quot;all&quot; &amp;&amp; $2 != &quot;noarch&quot; &amp;&amp; !seen[$2]++ { print $2 }&apos;)
+  case &quot;$arch&quot; in
+    aarch64-3.10)
+      target=arm64
+      archive_sha=ecbe29a5779fad84b96114cdd24e184c4236bfdc0980ca159f48c6e69c8f508d
+      binary_sha=60c23462d7cd2bb6b2a8087f2722517c2189ec8b1ad01f080046f9841c57f5c8 ;;
+    armv7-3.2)
+      target=armv7
+      archive_sha=ab1c39eeee02938ea97008eab88383975677c6e2b997621cddbec04f04f7fe3f
+      binary_sha=942147ec1e18c09548bea71ab1a302987e05acde0bd578e75937597b674fbccd ;;
+    mipsel-3.4)
+      target=mipsel
+      archive_sha=e39d6a04ce8887293d44c401fc11f5a48f3076c9aea089b77a04eec13f975846
+      binary_sha=e3311365f78c4ade55e872192bfa9ffe3656dd8e064c98576ae20d512f145b6d ;;
+    mips-3.4)
+      target=mips
+      archive_sha=f4b1572cd383b826aa6d1216c270affd06d13dd1ee44c93de4a3e2756e136ff6
+      binary_sha=86fd3fa300da1a850011f83c90c1ece8ffd240c20ba02889570098c3e6ac217b ;;
+    *) fail &apos;Не удалось выбрать архив. Выполните opkg print-architecture и сверьтесь с таблицей совместимости.&apos; ;;
+  esac
+
+  work=$(mktemp -d /tmp/broray-light-install.XXXXXX) || fail &apos;Не удалось создать временный каталог в /tmp.&apos;
+  trap &apos;rm -f &quot;$work/release.tar.gz&quot; &quot;$work/broray-light&quot;; rmdir &quot;$work&quot;&apos; 0
+  trap &apos;exit 1&apos; HUP INT TERM
+  base=https://github.com/BROadmin/BROray-Light/releases/download/v3.5.10
+  printf &apos;Скачиваем BROray-Light 3.5.10 для %s…\n&apos; &quot;$target&quot;
+  curl -q -fsSL --proto &apos;=https&apos; --proto-redir &apos;=https&apos; --connect-timeout 10 --max-time 120 \
+    -o &quot;$work/release.tar.gz&quot; &quot;$base/broray-light-3.5.10-linux-$target.tar.gz&quot; ||
+    fail &apos;Не удалось скачать архив. Проверьте интернет и время на роутере.&apos;
+  printf &apos;%s  %s\n&apos; &quot;$archive_sha&quot; &quot;$work/release.tar.gz&quot; | sha256sum -c - ||
+    fail &apos;Контрольная сумма архива не совпала. Скачанный файл удалён.&apos;
+  tar -xzf &quot;$work/release.tar.gz&quot; -C &quot;$work&quot; broray-light ||
+    fail &apos;Не удалось извлечь установщик. Проверьте свободное место в /tmp.&apos;
+  printf &apos;%s  %s\n&apos; &quot;$binary_sha&quot; &quot;$work/broray-light&quot; | sha256sum -c - ||
+    fail &apos;Контрольная сумма установщика не совпала.&apos;
+  &quot;$work/broray-light&quot; install --sha256 &quot;$binary_sha&quot; ||
+    fail &apos;Установщик завершился с ошибкой. Посмотрите сообщение выше.&apos;
+  printf &apos;%s\n&apos; &apos;BROray-Light 3.5.10 установлен. Откройте интерфейс на порту 8080.&apos;
 )
 </code></pre>
-  <button class="copy" type="button" aria-label="Копировать команды" title="Копировать команды"><span class="copy-mark" aria-hidden="true"></span></button>
+  <button class="copy" type="button" aria-label="Скопировать команды установки BROray-Light" title="Скопировать команды установки BROray-Light"><span class="copy-mark" aria-hidden="true"></span></button>
   <span class="command-copy-status" role="status"></span>
 </div>
-<p>Не используйте <code>curl -k</code>, <code>opkg --force-reinstall</code> или ручную распаковку вместо отказавшего установщика. Не запускайте тот же блок бесконечно при ошибке: сохраните сообщение, выясните причину и только затем повторите установку. Если аварийное завершение OPKG оставило файлы, удаляйте только каталог <code>/tmp/broray-light-guide.XXXXXX</code>, созданный этой попыткой, после проверки его точного имени и содержимого; не очищайте весь <code>/tmp</code>.</p>
-<p>Проверка результата:</p>
-<div class="command-copy-block">
-  <pre tabindex="0" aria-label="Команда в терминале"><code class="language-sh">/opt/etc/init.d/S23broray-light-updater status &amp;&amp; echo &quot;Updater: OK&quot;
-/opt/etc/init.d/S24broray-light status &amp;&amp; echo &quot;BROray-Light: OK&quot;
-/opt/broray-light/runtime/xray version
-/opt/bin/broray-light-web-publishctl status
-</code></pre>
-  <button class="copy" type="button" aria-label="Копировать команды" title="Копировать команды"><span class="copy-mark" aria-hidden="true"></span></button>
-  <span class="command-copy-status" role="status"></span>
-</div>
-<p>При чистой установке используется Xray <strong>26.9.9</strong>. Это предварительный выпуск самого Xray, отдельно проверенный в рамках Light; слово Stable относится к релизу приложения, а не меняет статус upstream-ядра. Пока сервер не выбран, Xray может быть остановлен — добавьте и активируйте рабочий VLESS-сервер.</p>
-<h2 id="guide-5">5. Откройте WebUI и войдите</h2>
-<p>Локально: <code>http://LAN-IP-РОУТЕРА:8080/</code>.</p>
-<p>При настроенном KeenDNS: <code>https://brolight.ВАШ-ДОМЕН-KEENDNS/</code>. Например, для <code>myrouter.keenetic.link</code> адрес будет <code>https://brolight.myrouter.keenetic.link/</code>. Порт <code>8080</code> в этом HTTPS-адресе не добавляется. Внешний доступ зависит от настроек KeenDNS и подтверждённого владения публикацией.</p>
-<p>Введите <strong>логин и пароль пользователя Keenetic</strong>, не пароль root Entware. Пароль проверяется KeeneticOS и не сохраняется Light. Не открывайте порт 8080 напрямую в интернет, не отключайте авторизацию и защиту сессии.</p>
+<p>Для установленного shell Light сначала выполните <a href="#migration">переход с прежней версии</a>. Если на роутере уже есть полный BROray, установщик Light остановится.</p>
+</section>
 
-<section class="what-next"><div><p class="eyebrow">Следующий шаг</p><h2>Добавьте VLESS</h2><p>После успешной установки переходите к подписке или отдельному серверу через WebUI.</p></div><a class="primary-action" href="/broray-light/scenarios/">Настроить Light →</a></section>
+<section id="result"><h2>5. Дождитесь результата</h2>
+<p>Оставьте терминал открытым. При успехе вы увидите <strong>«BROray-Light 3.5.10 установлен»</strong>. После этого можно открыть WebUI.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Что появилось</th><th scope="col">Что сделать</th></tr></thead><tbody>
+<tr><td><code>opkg</code> не найден или виден <code>(config)&gt;</code></td><td>Снова <a href="#guide-2">откройте терминал Entware</a>.</td></tr>
+<tr><td>Архив не скачался или не совпала контрольная сумма</td><td>Проверьте интернет и дату на роутере, затем <a href="#guide-3">обновите сертификаты</a> и повторите установку.</td></tr>
+<tr><td>Не удалось выбрать архив</td><td>Введите <code>opkg print-architecture</code> и сверьте результат с <a href="#compatibility">таблицей архитектур</a>.</td></tr>
+<tr><td><code>unsafe directory /opt/etc/init.d</code></td><td>Для установки нужен накопитель Entware, где каталог службы принадлежит root и доступен для записи только владельцу. <a href="/broray-light/troubleshooting/#light-webui">Подробнее о проверке</a>.</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="guide-5"><h2>6. Откройте WebUI и подключите сервер</h2>
+<h3 id="local-webui">Из домашней сети</h3>
+<p>Добавьте <code>:8080</code> к локальному IP-адресу роутера. Если панель находится на <code>192.168.1.1</code>, введите в браузере <strong>http://192.168.1.1:8080/</strong>.</p>
+
+<h3 id="remote-webui">По KeenDNS или CrazeDNS</h3>
+<p>Если у роутера уже есть облачный домен, добавьте к нему спереди <code>brolight.</code> и откройте адрес по HTTPS. После установки Light настраивает публикацию автоматически. Если адрес ещё не открывается, проверьте <a href="/broray-light/troubleshooting/#light-webui">настройки внешнего доступа</a> или откройте порт 8080 из домашней сети.</p>
+
+<h3 id="first-login">Вход и первое подключение</h3>
+<ol>
+<li>Войдите с логином и паролем <strong>администратора роутера</strong>, как в основной панели. У <strong>root</strong> свой пароль Entware для SSH.</li>
+<li>На странице <strong>«Главная»</strong> в разделе <strong>«Xray»</strong> нажмите <strong>«Проверить обновление»</strong>, затем <strong>«Установить»</strong> и подтвердите установку ядра.</li>
+<li>Если у вас ссылка на сервер, откройте <strong>«Серверы»</strong>, вставьте её и нажмите <strong>«Добавить сервер»</strong>. Для ссылки на подписку откройте <strong>«Подписки»</strong>, нажмите <strong>«Добавить подписку»</strong> после заполнения формы и <strong>«Обновить»</strong> в добавленной подписке.</li>
+<li>На странице <strong>«Серверы»</strong> нажмите <strong>«Проверить»</strong> рядом с нужным сервером, затем <strong>«Активировать»</strong>. Имя выбранного сервера появится на Главной.</li>
+</ol>
+<p>Если хотите направить трафик устройств через сервер, <a href="/broray-light/webui/#light-home">включите управление интерфейсом Keenetic</a> и выберите созданный интерфейс в политике подключений роутера.</p>
+</section>
+
+<section id="migration"><h2>Переход с shell Light 1.x и 2.0</h2>
+<ol>
+<li>Сохраните ссылки на серверы и подписки, их порядок, исключения и имя активного сервера. Скопируйте на компьютер каталоги <code>/opt/broray-light/config</code>, <code>/opt/broray-light/servers</code> и <code>/opt/broray-light/subscriptions</code>. Храните резервную копию в закрытом месте.</li>
+<li>Удалите прежний Light по <a href="https://github.com/BROadmin/BROray-Light/blob/v2.0.0/docs/beginner-installation.md">руководству shell-версии</a>. Если удаление остановилось из-за используемого интерфейса, проверьте его в настройках Keenetic и завершите штатную очистку.</li>
+<li><a href="#guide-4">Установите 3.5.10</a>, заново добавьте серверы и подписки и восстановите нужный порядок.</li>
+</ol>
+</section>
+
+<section id="compatibility"><h2>Архитектуры и ручная установка</h2>
+<p>Готовый блок проверяет архитектуру сам. Таблица нужна, если вы скачиваете файлы вручную или выясняете причину ошибки. Название архитектуры можно посмотреть командой <code>opkg print-architecture</code>.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Архитектура пакетов Entware</th><th scope="col">Архив</th></tr></thead><tbody>
+<tr><td><code>aarch64-3.10</code></td><td><a href="https://github.com/BROadmin/BROray-Light/releases/download/v3.5.10/broray-light-3.5.10-linux-arm64.tar.gz">ARM64</a></td></tr>
+<tr><td><code>armv7-3.2</code></td><td><a href="https://github.com/BROadmin/BROray-Light/releases/download/v3.5.10/broray-light-3.5.10-linux-armv7.tar.gz">ARMv7</a></td></tr>
+<tr><td><code>mipsel-3.4</code></td><td><a href="https://github.com/BROadmin/BROray-Light/releases/download/v3.5.10/broray-light-3.5.10-linux-mipsel.tar.gz">MIPSEL</a></td></tr>
+<tr><td><code>mips-3.4</code></td><td><a href="https://github.com/BROadmin/BROray-Light/releases/download/v3.5.10/broray-light-3.5.10-linux-mips.tar.gz">MIPS</a></td></tr>
+</tbody></table></div>
+<p>Аппаратная приёмка ARM64 выполнена для исходной сборки 3.5.10. Обновлённая сборка проверена в Linux и браузере. ARMv7 требует VFPv3. Для MIPS и MIPSEL проверьте <a href="/broray-light/reference/#xray">совместимость Xray</a>.</p>
+<p><a href="https://github.com/BROadmin/BROray-Light/blob/main/docs/INSTALL-GO.md#ручное-скачивание-и-совместимость">Ручная установка на GitHub</a> · <a href="https://github.com/BROadmin/BROray-Light/releases/download/v3.5.10/SHA256SUMS">Контрольные суммы архивов</a> · <a href="https://github.com/BROadmin/BROray-Light/releases/download/v3.5.10/SHA256SUMS.binaries">Контрольные суммы бинарников</a></p>
+</section>
 </main></div>
 <footer class="site-footer"><div class="footer-inner">
 <span>BROvibe Docs · BROray-Light · Установка</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20261126-copy-rail"></script>
+<script src="/site.js?v=20261127-light-install"></script>
 </body></html>

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>История версий BROray-Light</title>
-<meta name="description" content="История релизов BROray-Light: 2.0.0, 1.0.0-r2, 1.0.0-r1 и невыпущенные работы.">
+<meta name="description" content="Stable 3.5.10 на Go и исторические выпуски BROray-Light.">
 <link rel="canonical" href="https://docs.brovibe.cloud/broray-light/releases/">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site-manifest.json">
 <meta name="theme-color" content="#0d1213">
-<link rel="stylesheet" href="/styles.css?v=20260920-docs-r2">
+<link rel="stylesheet" href="/styles.css?v=20261126-copy-rail">
 </head>
 <body>
 <a class="skip-link" href="#content">Перейти к содержанию</a>
@@ -30,15 +30,22 @@
 </header>
 <div class="layout"><aside class="sidebar product-sidebar" aria-label="Разделы документации"><p class="sidebar-title">Документация</p><a href="/broray-light/">Обзор</a><a href="/broray-light/start/">Установка</a><a href="/broray-light/webui/">WebUI</a><a href="/broray-light/scenarios/">Сценарии</a><a href="/broray-light/maintenance/">Обслуживание</a><a href="/broray-light/troubleshooting/">Решение проблем</a><a href="/broray-light/releases/" aria-current="page">История версий</a><a href="/broray-light/reference/">Справочник</a><a class="sidebar-channel" href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe ↗</a></aside>
 <main class="content" id="content">
-<section class="page-hero"><div><p class="eyebrow">Релизы</p><h1>История версий BROray-Light</h1><p class="lead">Публичные Stable-релизы отделены от невыпущенной инженерной истории.</p></div></section><h2 id="guide-11">История версий и поддержка</h2>
+<section class="page-hero"><div><p class="eyebrow">Релизы</p><h1>История версий BROray-Light</h1><p class="lead">Текущий Stable и предыдущие выпуски.</p></div></section>
+
+<section id="release-3-5-10"><h2>3.5.10 Stable</h2>
 <ul>
-<li><a href="https://github.com/BROadmin/BROray-Light/blob/main/CHANGELOG.md">История версий</a>.</li>
-<li><a href="https://github.com/BROadmin/BROray-Light/blob/main/docs/RELEASE-2.0.0.md">Состав и границы проверки 2.0.0</a>.</li>
-<li><a href="https://docs.brovibe.cloud/broray-light/">Отдельный раздел сайта</a>.</li>
-<li><a href="https://t.me/myBROvibe">Обсуждение</a>, <a href="https://github.com/BROadmin/BROray-Light/issues">Issues</a>, <a href="https://pay.cloudtips.ru/p/09b23d0a">поддержать проект</a>.</li>
+<li>Переход на один статический Go-бинарник со встроенным WebUI. Четыре сборки Linux для Entware.</li>
+<li>Порт 8080 и автоматический HTTPS через зарегистрированный KeenDNS или CrazeDNS. Сохранены три страницы и нативный вход Keenetic.</li>
+<li>Проверка ссылок VLESS, VMess, Trojan, Shadowsocks и Hysteria2. При удалении активного сервера подписки Light проверяет замену по пользовательскому порядку. Добавлено массовое удаление с сохранением активной записи.</li>
+<li>На Главной появился блок «Проект и поддержка» со ссылками на документацию, GitHub, Telegram и CloudTips.</li>
+<li>Отдельный подписанный канал обновления Go, откат при недоступном соединении, проверка архивов и готовности Xray.</li>
+<li>Установки и обновления учитываются в статистике после подтверждения. <a href="/broray-light/maintenance/#statistics">Какие данные отправляются</a>.</li>
 </ul>
-<p>Light не содержит Routes, управления DNS-over-TLS, рейтингов, истории качества и поддержки протоколов кроме VLESS. Лицензия приложения — GPL-3.0; Xray-core распространяется отдельно под MPL-2.0, остальные компоненты сохраняют собственные лицензии.</p>
-<h2 id="guide-12">История версий BROray-Light</h2>
+<p>Проверенный исходный коммит приложения <a href="https://github.com/BROadmin/BROray-Light/commit/5a4f32ded35b4ecbd57a59dda7e64d4646fc654d"><code>5a4f32ded35b</code></a>. Исходник донора BROray <a href="https://github.com/BROadmin/BROray/commit/92dc010ebad5fd21dff9e625925e9847b3714640"><code>92dc010ebad5</code></a>. Сборки воспроизведены побайтно. Обновлённая сборка прошла Linux-тесты с race detector, браузерную проверку и тест живого VLESS-трафика. Аппаратная приёмка ARM64 выполнена для исходной сборки 3.5.10.</p>
+<p>Если у вас уже установлен Go-выпуск 3.5.10, повторите <a href="/broray-light/start/#install">ручную установку из Entware</a>, чтобы получить блок «Проект и поддержка».</p>
+<p><a href="https://github.com/BROadmin/BROray-Light/releases/tag/v3.5.10">Релиз и файлы на GitHub</a> · <a href="/broray-light/start/">Установка и переход со старой версии</a> · <a href="/broray-light/reference/#xray">Ограничения Xray</a></p></section>
+<h2 id="guide-11">Поддержка</h2><p><a href="https://github.com/BROadmin/BROray-Light/issues">Сообщить о проблеме на GitHub</a> · <a href="https://t.me/myBROvibe">Обсуждение</a></p>
+<h2 id="guide-12">Предыдущие выпуски</h2>
 <h2 id="guide-13">2.0.0 — 11 сентября 2026 г.</h2>
 <p>Публичная версия и версия пакета — <code>2.0.0</code>, технический releaseId — <code>2.0.0-r1</code>. <a href="https://github.com/BROadmin/BROray-Light/releases/tag/v2.0.0">Релиз v2.0.0</a>.</p>
 <ul>
@@ -57,11 +64,10 @@
 <p>Первый проверенный публичный Light: три страницы WebUI, VLESS-серверы и подписки, имена подписок, автообновление, дедупликация, защита активного сервера, детерминированное автопереключение, интерфейс Keenetic, Xray 26.7.28 и подписанный обновитель 5-light1 с откатом. <a href="https://github.com/BROadmin/BROray-Light/releases/tag/v1.0.0-r1">Релиз</a>.</p>
 <h2 id="guide-16">Невыпущенные работы</h2>
 <p>Тег <code>v1.0.0-r3</code> относится к отклонённой подготовке и не является публичным Stable-релизом. Незавершённые работы над <code>1.0.0-r4</code> сохранены как инженерная история и не используются автоматически в 2.0.0.</p>
-
 </main></div>
 <footer class="site-footer"><div class="footer-inner">
 <span>BROvibe Docs · BROray-Light · История версий</span>
 <div class="link-list footer-links"><a href="https://t.me/myBROvibe" target="_blank" rel="noopener noreferrer">Telegram @myBROvibe</a><a href="#content">Наверх ↑</a></div>
 </div></footer>
-<script src="/site.js?v=20261001-recovery"></script>
+<script src="/site.js?v=20261127-light-3.5.10"></script>
 </body></html>
